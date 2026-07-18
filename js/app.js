@@ -173,30 +173,60 @@ function loadSheetWithRetry(gid, attemptsLeft = SHEET_LOAD_MAX_ATTEMPTS, attempt
 }
 
 // -------------------------------------------------------------------------
-// LOCAL CACHE (localStorage) — instant paint + timeout/offline fallback
+// LOCAL CACHE (IndexedDB) — instant paint + timeout/offline fallback
 // -------------------------------------------------------------------------
-const CACHE_KEY = "perfDashboard.cache.v1";
+// Switched from localStorage to IndexedDB: localStorage caps out around
+// 5-10MB per origin, and this dashboard's sheet snapshot is bigger than
+// that, so every save was silently failing with a quota error. IndexedDB's
+// limit is tied to available disk space, effectively large enough for this.
+const IDB_NAME = "perfDashboardDB";
+const IDB_STORE = "cache";
+const IDB_KEY = "snapshot";
 
-function saveDataToCache(snapshot) {
+function openCacheDB() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) { reject(new Error("IndexedDB not available")); return; }
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+        req.result.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+  });
+}
+
+async function saveDataToCache(snapshot) {
   try {
-    const payload = { savedAt: Date.now(), data: snapshot };
-    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    const db = await openCacheDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put({ savedAt: Date.now(), data: snapshot }, IDB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   } catch (e) {
-    // Quota exceeded or storage blocked (private browsing, etc.) — not
-    // fatal, the app just falls back to always fetching fresh.
-    console.warn("Cache save failed:", e.message);
+    // Not fatal — the app just falls back to always fetching fresh next time.
+    console.warn("Cache save failed:", e.message || e);
   }
 }
 
-function loadDataFromCache() {
+async function loadDataFromCache() {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.data || !Array.isArray(parsed.data.allParsedRows)) return null;
-    return parsed;
+    const db = await openCacheDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (!result || !result.data || !Array.isArray(result.data.allParsedRows)) { resolve(null); return; }
+        resolve(result);
+      };
+      req.onerror = () => reject(req.error);
+    });
   } catch (e) {
-    console.warn("Cache read failed:", e.message);
+    console.warn("Cache read failed:", e.message || e);
     return null;
   }
 }
@@ -215,7 +245,7 @@ function formatCacheTimestamp(ts) {
 // Paste the deployment URL below. Leave it empty ("") to disable this
 // completely — nothing else in the app depends on it.
 // -------------------------------------------------------------------------
-const DRIVE_BACKUP_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxN2rCqUtVV9JRcJdS-er__az_fDhYW8r1YwNgyuc3Kj2Yqrs2FJO2UpiCOq61tmVtM8A/exec"; // e.g. "https://script.google.com/macros/s/AKfycb.../exec"
+const DRIVE_BACKUP_WEBHOOK_URL = ""; // e.g. "https://script.google.com/macros/s/AKfycb.../exec"
 
 function backupSnapshotToDrive(snapshot) {
   if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
@@ -1233,7 +1263,7 @@ function renderCurrentState() {
 //    of wiping the screen with an error.
 async function loadData(isManualRefresh = false) {
   const loadingEl = $("loadingState"); const errorEl = $("errorState"); const errorMsg = $("errorMsgText");
-  const cache = loadDataFromCache();
+  const cache = await loadDataFromCache();
   let paintedFromCache = false;
 
   if (cache && !isManualRefresh) {
