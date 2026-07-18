@@ -245,7 +245,7 @@ function formatCacheTimestamp(ts) {
 // Paste the deployment URL below. Leave it empty ("") to disable this
 // completely — nothing else in the app depends on it.
 // -------------------------------------------------------------------------
-const DRIVE_BACKUP_WEBHOOK_URL = ""; // e.g. "https://script.google.com/macros/s/AKfycb.../exec"
+const DRIVE_BACKUP_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxN2rCqUtVV9JRcJdS-er__az_fDhYW8r1YwNgyuc3Kj2Yqrs2FJO2UpiCOq61tmVtM8A/exec";
 
 function backupSnapshotToDrive(snapshot) {
   if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
