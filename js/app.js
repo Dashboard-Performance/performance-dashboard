@@ -129,18 +129,89 @@ if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 
+// -------------------------------------------------------------------------
+// SHEET LOADING — JSONP + timeout
+// -------------------------------------------------------------------------
+// SHEET_LOAD_TIMEOUT_MS: how long we wait for a single GID before giving up
+// on that attempt. Raised from the original 15s because with 7 sheets
+// fetched in parallel, transient Google-side latency on one GID (usually
+// the big MAIN sheet) was enough to blow the old, tight timeout.
+const SHEET_LOAD_TIMEOUT_MS = 25000;
+// How many attempts (including the first) we make per GID before we
+// actually give up on that sheet.
+const SHEET_LOAD_MAX_ATTEMPTS = 3;
+// Base backoff between retries (grows a bit each retry).
+const SHEET_LOAD_RETRY_BASE_MS = 1200;
+
 function loadSheetViaJsonp(gid) {
   return new Promise((resolve, reject) => {
     const callbackName = `__sheetCb${Date.now()}_${jsonpCounter++}`;
     const script = document.createElement("script");
     let settled = false;
     const cleanup = () => { if(window[callbackName]) delete window[callbackName]; if(script.parentNode) script.remove(); clearTimeout(timer); };
-    const timer = setTimeout(() => { if (settled) return; settled = true; cleanup(); reject(new Error(`Timeout on GID: ${gid}`)); }, 15000);
+    const timer = setTimeout(() => { if (settled) return; settled = true; cleanup(); reject(new Error(`Timeout on GID: ${gid}`)); }, SHEET_LOAD_TIMEOUT_MS);
     window[callbackName] = (payload) => { if (settled) return; settled = true; cleanup(); if (payload?.status === 'error') { reject(new Error(payload.errors[0]?.message)); return; } resolve(payload); };
     script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${gid}&tqx=out:json;responseHandler:${callbackName}`;
     script.onerror = () => { if (settled) return; settled = true; cleanup(); reject(new Error(`Connection failed`)); };
     document.head.appendChild(script);
   });
+}
+
+// Wraps loadSheetViaJsonp with retries + backoff. A single slow/blocked
+// request no longer kills the whole load — this is what actually fixes the
+// recurring "Timeout on GID: ..." error, because most timeouts are
+// transient (one bad round-trip), not permanent failures.
+function loadSheetWithRetry(gid, attemptsLeft = SHEET_LOAD_MAX_ATTEMPTS, attemptNumber = 1) {
+  return loadSheetViaJsonp(gid).catch((err) => {
+    if (attemptsLeft <= 1) throw err;
+    const delay = SHEET_LOAD_RETRY_BASE_MS * attemptNumber;
+    console.warn(`GID ${gid} failed (attempt ${attemptNumber}): ${err.message}. Retrying in ${delay}ms...`);
+    return new Promise((resolve) => setTimeout(resolve, delay)).then(() =>
+      loadSheetWithRetry(gid, attemptsLeft - 1, attemptNumber + 1)
+    );
+  });
+}
+
+// -------------------------------------------------------------------------
+// LOCAL CACHE (localStorage) — instant paint + timeout/offline fallback
+// -------------------------------------------------------------------------
+const CACHE_KEY = "perfDashboard.cache.v1";
+
+function saveDataToCache(snapshot) {
+  try {
+    const payload = { savedAt: Date.now(), data: snapshot };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // Quota exceeded or storage blocked (private browsing, etc.) — not
+    // fatal, the app just falls back to always fetching fresh.
+    console.warn("Cache save failed:", e.message);
+  }
+}
+
+function loadDataFromCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.data || !Array.isArray(parsed.data.allParsedRows)) return null;
+    return parsed;
+  } catch (e) {
+    console.warn("Cache read failed:", e.message);
+    return null;
+  }
+}
+
+function formatCacheTimestamp(ts) {
+  try {
+    return new Date(ts).toLocaleString("en-GB", { hour12: false });
+  } catch (e) {
+    return "";
+  }
+}
+
+function setSyncStatus(text) {
+  const el = $("sidebarUpdated");
+  if (el) el.textContent = text;
 }
 
 function cellNumber(cell) {
@@ -1088,32 +1159,104 @@ function analystWireControlsOnce() {
   if($("nextPageAnalyst")) { $("nextPageAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(analystState.filtered.length / PAGE_SIZE)); if (analystState.page < totalPages - 1) { analystState.page += 1; renderPaginatedCm3AnalystTable(); } }); }
 }
 
-async function loadData() {
+// Fetches all 7 sheets (main sheet is mandatory, the rest are best-effort)
+// and returns a plain snapshot object — does NOT touch global state, so it
+// is safe to call in the background while old data is still on screen.
+async function fetchAllSheetsSnapshot() {
+  const [mainPayload, targetsPayload, segPayload, acmTargetsPayload, invPayload, prodPayload, catTargetsPayload] = await Promise.all([
+    loadSheetWithRetry(MAIN_GID),
+    TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(() => null) : Promise.resolve(null),
+    SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(() => null) : Promise.resolve(null),
+    TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetWithRetry(TARGETS_ACM_GID).catch(() => null) : Promise.resolve(null),
+    INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(() => null) : Promise.resolve(null),
+    PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(() => null) : Promise.resolve(null),
+    CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null)
+  ]);
+  const allParsedRows = parseMainSheet(mainPayload);
+  if (allParsedRows.length === 0) { throw new Error("No data streams detected."); }
+  return {
+    allParsedRows,
+    merchantTargets: targetsPayload ? parseTargetsSheet(targetsPayload) : state.merchantTargets,
+    merchantSegmentsMap: segPayload ? parseSegmentationSheet(segPayload) : state.merchantSegmentsMap,
+    acmTargets: acmTargetsPayload ? parseAcmTargetsSheet(acmTargetsPayload) : state.acmTargets,
+    inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
+    productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
+    categoryTargets: catTargetsPayload ? parseCategoryTargetsSheet(catTargetsPayload) : state.categoryTargets
+  };
+}
+
+function applySnapshotToState(snapshot) {
+  state.allParsedRows = snapshot.allParsedRows;
+  state.merchantTargets = snapshot.merchantTargets;
+  state.merchantSegmentsMap = snapshot.merchantSegmentsMap;
+  state.acmTargets = snapshot.acmTargets;
+  state.inventoryMap = snapshot.inventoryMap;
+  state.productsMap = snapshot.productsMap;
+  state.categoryTargets = snapshot.categoryTargets;
+}
+
+function renderCurrentState() {
+  populateFilters(state.allParsedRows);
+  applyFilters();
+}
+
+// loadData(isManualRefresh):
+//  - Page load (isManualRefresh=false): if a cache exists, paint it INSTANTLY
+//    (no spinner, no waiting on Google), then silently sync fresh data in the
+//    background. If the background sync fails (timeout etc.), the cached
+//    data just stays on screen with a small status note — the page never
+//    goes blank/broken because of a slow sheet.
+//  - Manual refresh (button, isManualRefresh=true): always attempts a fresh
+//    fetch. If it fails, falls back to whatever cache is available instead
+//    of wiping the screen with an error.
+async function loadData(isManualRefresh = false) {
   const loadingEl = $("loadingState"); const errorEl = $("errorState"); const errorMsg = $("errorMsgText");
-  if(loadingEl) loadingEl.classList.remove("hidden"); if(errorEl) errorEl.classList.add("hidden");
+  const cache = loadDataFromCache();
+  let paintedFromCache = false;
+
+  if (cache && !isManualRefresh) {
+    applySnapshotToState(cache.data);
+    renderCurrentState();
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (errorEl) errorEl.classList.add("hidden");
+    setSyncStatus(`Cached — ${formatCacheTimestamp(cache.savedAt)} — syncing…`);
+    paintedFromCache = true;
+  } else {
+    if (loadingEl) loadingEl.classList.remove("hidden");
+    if (errorEl) errorEl.classList.add("hidden");
+  }
+
   try {
-    const [mainPayload, targetsPayload, segPayload, acmTargetsPayload, invPayload, prodPayload, catTargetsPayload] = await Promise.all([
-      loadSheetViaJsonp(MAIN_GID),
-      TARGETS_GID && TARGETS_GID !== " " ? loadSheetViaJsonp(TARGETS_GID).catch(() => null) : Promise.resolve(null),
-      SEGMENTATION_GID ? loadSheetViaJsonp(SEGMENTATION_GID).catch(() => null) : Promise.resolve(null),
-      TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetViaJsonp(TARGETS_ACM_GID).catch(() => null) : Promise.resolve(null),
-      INVENTORY_GID ? loadSheetViaJsonp(INVENTORY_GID).catch(() => null) : Promise.resolve(null),
-      PRODUCTS_GID ? loadSheetViaJsonp(PRODUCTS_GID).catch(() => null) : Promise.resolve(null),
-      CAT_TARGETS_GID ? loadSheetViaJsonp(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null)
-    ]);
-    state.allParsedRows = parseMainSheet(mainPayload);
-    if (targetsPayload) state.merchantTargets = parseTargetsSheet(targetsPayload);
-    if (segPayload) state.merchantSegmentsMap = parseSegmentationSheet(segPayload);
-    if (acmTargetsPayload) state.acmTargets = parseAcmTargetsSheet(acmTargetsPayload);
-    if (invPayload) state.inventoryMap = parseInventorySheet(invPayload);
-    if (prodPayload) state.productsMap = parseProductsSheet(prodPayload);
-    if (catTargetsPayload) state.categoryTargets = parseCategoryTargetsSheet(catTargetsPayload);
-    if (state.allParsedRows.length === 0) { throw new Error("No data streams detected."); }
-    populateFilters(state.allParsedRows); applyFilters();
-    if(loadingEl) loadingEl.classList.add("hidden"); showToast();
+    const snapshot = await fetchAllSheetsSnapshot();
+    applySnapshotToState(snapshot);
+    renderCurrentState();
+    saveDataToCache(snapshot);
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (errorEl) errorEl.classList.add("hidden");
+    setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())}`);
+    showToast();
   } catch (error) {
     console.error("System Sync Error:", error);
-    if(loadingEl) loadingEl.classList.add("hidden"); if(errorEl) errorEl.classList.remove("hidden"); if(errorMsg) errorMsg.textContent = error.message;
+    if (paintedFromCache) {
+      // Already showing cached data — just report the failed sync quietly.
+      setSyncStatus(`Sync failed — showing cache from ${formatCacheTimestamp(cache.savedAt)}`);
+      return;
+    }
+    if (cache) {
+      // Fresh fetch failed (e.g. manual refresh during an outage) but we do
+      // have a cache — fall back to it instead of a dead error screen.
+      applySnapshotToState(cache.data);
+      renderCurrentState();
+      if (loadingEl) loadingEl.classList.add("hidden");
+      if (errorEl) errorEl.classList.add("hidden");
+      setSyncStatus(`Sync failed — showing cache from ${formatCacheTimestamp(cache.savedAt)}`);
+      return;
+    }
+    // No cache at all and the fetch failed — nothing to fall back to.
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (errorEl) errorEl.classList.remove("hidden");
+    if (errorMsg) errorMsg.textContent = error.message;
+    setSyncStatus("Sync failed");
   }
 }
 
@@ -1139,8 +1282,8 @@ document.querySelectorAll("#inventoryTable thead th").forEach((th) => { if (th.d
 
 if($("monthSelect")) $("monthSelect").addEventListener("change", applyFilters);
 if($("acmSelect")) $("acmSelect").addEventListener("change", applyFilters);
-if($("refreshBtn")) $("refreshBtn").addEventListener("click", loadData);
-if($("retryBtn")) $("retryBtn").addEventListener("click", loadData);
+if($("refreshBtn")) $("refreshBtn").addEventListener("click", () => loadData(true));
+if($("retryBtn")) $("retryBtn").addEventListener("click", () => loadData(true));
 
 // ==========================================
 // DOWNLOAD CSV MODAL LOGIC
@@ -1251,4 +1394,4 @@ function downloadTableAsCsv(tableEl, fileName) {
 }
 
 setupTicker();
-loadData();
+loadData(false);
