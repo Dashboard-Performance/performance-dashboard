@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Performance Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar hover-glow">
+      <div class="sidebar-brand">
+        <div class="brand-title">Performance Analytics</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a class="nav-item active" id="navOverview"><span class="nav-icon"></span>Over View</a>
+        <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navAcmToggle">
+            <span class="nav-icon"></span>Account Manager
+            <span class="nav-caret" id="navAcmCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="acmSubmenu">
+            <a class="nav-item-sub" id="navAcmPerf">Performance ACM</a>
+            <a class="nav-item-sub" id="navMerchantPerf">Performance Merchant's</a>
+          </div>
+        </div>
+        <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navCommercialToggle">
+            <span class="nav-icon"></span>Commercial
+            <span class="nav-caret" id="navCommercialCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="commercialSubmenu">
+          </div>
+        </div>
+        <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navMarketplaceToggle">
+            <span class="nav-icon"></span>Marketplace
+            <span class="nav-caret" id="navMarketplaceCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="marketplaceSubmenu">
+            <a class="nav-item-sub" id="navInventory">Inventory</a>
+            <a class="nav-item-sub" id="navCm3Target">CM3 Target</a>
+            <a class="nav-item-sub" id="navCm3Analyst">CM3 Analyst</a>
+          </div>
+        </div>
+        <a class="nav-item"><span class="nav-icon"></span>SalaryHub<span class="nav-caret">▼</span></a>
+        <a class="nav-item"><span class="nav-icon"></span>Admin Panel<span class="nav-caret">▼</span></a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="sidebarStatus">Live System Sync</div>
+        <div id="sidebarUpdated"></div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>Command Center</h1>
+          <p>Demand, pipeline & real-time metrics</p>
+        </div>
+        <div class="ticker">
+          <div class="ticker-track" id="tickerTrack"></div>
+        </div>
+        <div class="topbar-actions">
+          <div class="filter-group">
+            <select id="monthSelect"><option value="">All Months</option></select>
+          </div>
+          <div class="filter-group">
+            <select id="acmSelect"><option value="All">All ACMs</option></select>
+          </div>
+          <button id="downloadBtn" class="btn btn-primary">Download CSV</button>
+          <button id="refreshBtn" class="btn btn-outline">Refresh</button>
+        </div>
+      </header>
+      <main class="content">
+        <!-- OVERVIEW SECTION -->
+        <div id="viewOverview" class="view-section active-view">
+          <div class="metrics-grid">
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Confirmed Orders <span class="icon-cart"></span></div>
+              <div class="metric-value" id="confirmedOrdersVal">0</div>
+              <div class="metric-sub text-red">Based on filter</div>
+            </div>
+            <div class="metric-card hover-glow highlight-card">
+              <div class="metric-title text-orange">Net Delivery Rate (NDR) <span class="icon-trend"></span></div>
+              <div class="metric-value" id="ndrVal">0%</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Delivered GMV <span class="icon-dollar text-green"></span></div>
+              <div class="metric-value text-green" id="deliveredGmvVal">EGP 0</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Confirmed GMV <span class="icon-dollar text-blue"></span></div>
+              <div class="metric-value text-blue" id="confirmedGmvVal">EGP 0</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Confirmation Rate (CR) <span class="icon-check"></span></div>
+              <div class="metric-value" id="crVal">0%</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Delivery Rate (DR) <span class="icon-truck"></span></div>
+              <div class="metric-value" id="drVal">0%</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Active SKUs <span class="icon-box"></span></div>
+              <div class="metric-value" id="activeSkusVal">0</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Active Merchants <span class="icon-users"></span></div>
+              <div class="metric-value" id="activeMerchantsVal">0</div>
+            </div>
+          </div>
+          <section class="charts-grid">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Category Demand Breakdown</h2>
+                  <p>Total demand by product category (Confirmed)</p>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="categoryChart"></canvas>
+              </div>
+            </div>
+            <div class="panel leaderboard-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>NDR Leaderboard</h2>
+                  <p>ACMs ranked by Net Delivery Rate</p>
+                </div>
+              </div>
+              <div style="max-height: 300px; overflow-y: auto; padding-right: 5px;">
+                <ul id="leaderboardList" class="leaderboard-list"></ul>
+              </div>
+            </div>
+          </section>
+          <section class="leaderboard-section">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Pipeline Velocity</h2>
+                  <p>Confirmed (bars) vs Placed (line) per day tracks daily performance</p>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="pipelineChart"></canvas>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- INVENTORY SECTION -->
+        <div id="viewInventory" class="view-section hidden">
+          <section class="table-section">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Inventory & Products Performance</h2>
+                  <p>Comprehensive SKU metrics: Stock, Profit, Conversion, & Demand Projections</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchInventoryInput" type="search" placeholder="Search SKU or Name..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="inventoryTable">
+                  <thead>
+                    <tr>
+                      <th data-ikey="index">#</th>
+                      <th data-ikey="skuId">SKU ID</th>
+                      <th data-ikey="skuName" style="min-width: 180px;">SKU Name</th>
+                      <th data-ikey="stock" class="num text-blue">Stock</th>
+                      <th data-ikey="doh" class="num">DOH</th>
+                      <th data-ikey="category">Category</th>
+                      <th data-ikey="availability">Availability</th>
+                      <th data-ikey="price" class="num">Price</th>
+                      <th data-ikey="profit" class="num text-green">Profit</th>
+                      <th data-ikey="cr" class="num">CR%</th>
+                      <th data-ikey="dr" class="num">DR%</th>
+                      <th data-ikey="ndr" class="num">NDR%</th>
+                      <th data-ikey="cm3" class="num">Total CM3</th>
+                      <th data-ikey="avgPlacedDaily" class="num">Avg Placed/Day</th>
+                      <th data-ikey="placedYday" class="num text-dim">Placed YDay</th>
+                      <th data-ikey="confYday" class="num">Conf YDay</th>
+                      <th data-ikey="avg3d" class="num text-orange">Avg Conf 3D</th>
+                      <th data-ikey="avg15d" class="num text-purple">Avg Conf 15D</th>
+                      <th data-ikey="trend">Trend</th>
+                      <th data-ikey="topMerch">Top Merch (5D)</th>
+                      <th data-ikey="contr5d" class="num">Contr% (5D)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inventoryTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountInventory">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPageInventory" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorInventory">Page 1 of 1</span>
+                  <button id="nextPageInventory" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- ACCOUNT MANAGER PERFORMANCE SECTION -->
+        <div id="viewAcmPerformance" class="view-section hidden">
+          <section class="mb-4">
+            <div class="summary-panel hover-glow">
+              <div class="summary-info">
+                <h2>Overall ACM Targets Attainment</h2>
+                <p>Tracking the collective performance against predefined Account Manager targets (GMV).</p>
+              </div>
+              <div class="summary-metrics">
+                <div class="sm-box">
+                  <div class="sm-label">Total Target GMV</div>
+                  <div class="sm-value" id="overallAcmTargetGmv">EGP 0</div>
+                </div>
+                <div class="sm-box">
+                  <div class="sm-label">Total Delivered GMV</div>
+                  <div class="sm-value text-green" id="overallAcmDeliveredGmv">EGP 0</div>
+                </div>
+                <div class="sm-box">
+                  <div class="sm-label">Projected EOM (Run Rate)</div>
+                  <div class="sm-value text-blue" id="overallAcmRunRateGmv">EGP 0</div>
+                </div>
+              </div>
+              <div class="summary-progress-wrapper">
+                <div class="sp-header">
+                  <span>Overall GMV Achievement</span>
+                  <span id="overallAcmAchievedPct" class="font-bold">0%</span>
+                </div>
+                <div class="progress-bar lg">
+                  <div id="overallAcmProgressBar" class="progress-fill blue" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Account Manager Comprehensive Performance</h2>
+                  <p><span class="icon-calendar"></span> <span id="tableDateRange">All Time</span> | Targets vs Actuals & Final KPIs Weight</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchInput" type="search" placeholder="Search ACM..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="acmTable">
+                  <thead>
+                    <tr>
+                      <th data-key="index">#</th>
+                      <th data-key="name">Account Manager</th>
+                      <th data-key="finalScorePct" class="num" style="min-width: 120px; color: var(--blue);">Final Weight %</th>
+                      <th data-key="targetGmv" class="num text-dim">Target GMV</th>
+                      <th data-key="deliveredGmv" class="num">Delivered GMV</th>
+                      <th data-key="achievedPct" class="num" style="min-width: 110px;">GMV Achieved %</th>
+                      <th data-key="runRate" class="num text-blue">Run Rate (EOM)</th>
+                      <th data-key="targetNdr" class="num text-dim">Target NDR%</th>
+                      <th data-key="ndr" class="num">Actual NDR%</th>
+                      <th data-key="targetCm3" class="num text-dim">Target CM3%</th>
+                      <th data-key="cm3Pct" class="num">Actual CM3%</th>
+                      <th data-key="placed" class="num text-dim">Placed</th>
+                      <th data-key="confirmed" class="num">Confirmed</th>
+                      <th data-key="delivered" class="num text-dim">Delivered</th>
+                    </tr>
+                  </thead>
+                  <tbody id="acmTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCount">0 ACMs</span>
+                <div class="pager">
+                  <button id="prevPage" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicator">Page 1 of 1</span>
+                  <button id="nextPage" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Week-over-Week Trend</h2>
+                  <p>Compares this week (days 0-6) vs last week (days 7-13) confirmed orders</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Account Manager</th>
+                      <th class="num">This Week</th>
+                      <th class="num">Last Week</th>
+                      <th class="num">Change</th>
+                      <th>Status</th>
+                      <th class="center">Spark</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wowTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Month-over-Month Average</h2>
+                  <p>Compares average daily confirmed orders: current vs last month</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Account Manager</th>
+                      <th class="num">Current (Avg/Day)</th>
+                      <th class="num">Last (Avg/Day)</th>
+                      <th class="num">Change</th>
+                      <th>Status</th>
+                      <th class="center">Spark</th>
+                    </tr>
+                  </thead>
+                  <tbody id="avgDailyTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- MERCHANT PERFORMANCE SECTION -->
+        <div id="viewMerchantPerformance" class="view-section hidden">
+          <section class="table-section">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Top 10 Merchants</h2>
+                  <p>Ranked by Delivered GMV</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>ID</th>
+                      <th>Merchant Name</th>
+                      <th>ACM</th>
+                      <th class="num">Confirmed</th>
+                      <th class="num">Placed</th>
+                      <th class="num">Delivered</th>
+                      <th class="num">CR%</th>
+                      <th class="num">DR%</th>
+                      <th class="num">NDR%</th>
+                      <th class="num">Delivered GMV</th>
+                      <th class="num">Confirmed GMV</th>
+                      <th class="num">SKUs</th>
+                    </tr>
+                  </thead>
+                  <tbody id="top10MerchantBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          
+          <section class="mt-4">
+            <div class="summary-panel hover-glow">
+              <div class="summary-info">
+                <h2>Overall Targets Attainment</h2>
+                <p>Tracking the collective performance against predefined merchant GMV targets.</p>
+              </div>
+              <div class="summary-metrics">
+                <div class="sm-box">
+                  <div class="sm-label">Total Target GMV</div>
+                  <div class="sm-value" id="overallTargetGmv">EGP 0</div>
+                </div>
+                <div class="sm-box">
+                  <div class="sm-label">Total Delivered GMV</div>
+                  <div class="sm-value text-green" id="overallDeliveredGmv">EGP 0</div>
+                </div>
+                <div class="sm-box">
+                  <div class="sm-label">Projected EOM (Run Rate)</div>
+                  <div class="sm-value text-blue" id="overallRunRateGmv">EGP 0</div>
+                </div>
+              </div>
+              <div class="summary-progress-wrapper">
+                <div class="sp-header">
+                  <span>Overall Achievement</span>
+                  <span id="overallAchievedPct" class="font-bold">0%</span>
+                </div>
+                <div class="progress-bar lg">
+                  <div id="overallProgressBar" class="progress-fill blue" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Overall Merchant Performance (With Targets)</h2>
+                  <p>Detailed performance for all merchants (Targets, Run Rate, CM3, etc.)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMerchantInput" type="search" placeholder="Search Merchant or ACM..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="merchantTable">
+                  <thead>
+                    <tr>
+                      <th data-mkey="index">#</th>
+                      <th data-mkey="id">ID</th>
+                      <th data-mkey="name">Merchant Name</th>
+                      <th data-mkey="acm">ACM</th>
+                      <th data-mkey="targetPlaced" class="num">Target Placed</th>
+                      <th data-mkey="targetGmv" class="num">Target GMV</th>
+                      <th data-mkey="deliveredGmv" class="num">Delivered GMV</th>
+                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;">Achieved %</th>
+                      <th data-mkey="runRate" class="num">Run Rate (EOM)</th>
+                      <th data-mkey="placed" class="num">Placed</th>
+                      <th data-mkey="confirmed" class="num">Confirmed</th>
+                      <th data-mkey="delivered" class="num">Delivered</th>
+                      <th data-mkey="cm3" class="num">Total CM3</th>
+                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 / Delivered GMV">CM3 / GMV %</th>
+                      <th data-mkey="ndr" class="num">NDR%</th>
+                      <th data-mkey="cm3Pct" class="num">CM3 %</th>
+                    </tr>
+                  </thead>
+                  <tbody id="merchantTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMerchant">0 Merchants</span>
+                <div class="pager">
+                  <button id="prevPageMerchant" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMerchant">Page 1 of 1</span>
+                  <button id="nextPageMerchant" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>Merchant Segmentation & Projections</h2>
+                  <p>Current segment vs projected EOM segment based on Confirmed Orders Run Rate</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchSegInput" type="search" placeholder="Search Merchant..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="segTable">
+                  <thead>
+                    <tr>
+                      <th data-skey="index">#</th>
+                      <th data-skey="id">ID</th>
+                      <th data-skey="name">Merchant Name</th>
+                      <th data-skey="acm">ACM</th>
+                      <th data-skey="currentSegment">Current Segment</th>
+                      <th data-skey="confirmed" class="num">Confirmed Orders</th>
+                      <th data-skey="rrConfirmed" class="num">RR Confirmed (EOM)</th>
+                      <th data-skey="projectedSegment">Projected Segment</th>
+                    </tr>
+                  </thead>
+                  <tbody id="segTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountSeg">0 Merchants</span>
+                <div class="pager">
+                  <button id="prevPageSeg" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorSeg">Page 1 of 1</span>
+                  <button id="nextPageSeg" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- CM3 TARGET SECTION -->
+        <div id="viewCm3Target" class="view-section hidden">
+          <section class="cm3-toolbar hover-glow">
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Grouping</span>
+              <div class="segmented" id="cm3ScopeToggle">
+                <button type="button" class="segmented-btn active" data-scope="overall">Overall</button>
+                <button type="button" class="segmented-btn" data-scope="category">Category</button>
+                <button type="button" class="segmented-btn" data-scope="product">Products</button>
+                <button type="button" class="segmented-btn" data-scope="match">Matches / Merchant</button>
+              </div>
+            </div>
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Period</span>
+              <div class="segmented" id="cm3PeriodToggle">
+                <button type="button" class="segmented-btn active" data-period="weekly">Weekly (5D)</button>
+                <button type="button" class="segmented-btn" data-period="daily">Daily</button>
+                <button type="button" class="segmented-btn" data-period="monthly">Monthly</button>
+              </div>
+            </div>
+            <div class="cm3-toolbar-group cm3-toolbar-range">
+              <span class="icon-calendar"></span> <span id="cm3RangeLabel"> </span>
+            </div>
+          </section>
+          
+          <section class="metrics-grid cm3-metrics-grid">
+            <div class="metric-card hover-glow">
+              <div class="metric-title">Total CM3 (Range) <span class="icon-dollar"></span></div>
+              <div class="metric-value" id="cm3TotalVal">EGP 0</div>
+              <div class="metric-sub text-dim" id="cm3TotalSub">Positive + Negative</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title text-green">Positive CM3 <span class="icon-trend"></span></div>
+              <div class="metric-value text-green" id="cm3PositiveVal">EGP 0</div>
+            </div>
+            <div class="metric-card hover-glow">
+              <div class="metric-title text-red">Negative CM3 <span class="icon-trend"></span></div>
+              <div class="metric-value text-red" id="cm3NegativeVal">EGP 0</div>
+            </div>
+            <div class="metric-card hover-glow highlight-card" id="cm3ContrCard">
+              <div class="metric-title text-orange">CONTR% -VE (Target 15%) <span class="icon-trend"></span></div>
+              <div class="metric-value" id="cm3ContrVal">0%</div>
+              <div class="progress-bar lg">
+                <div id="cm3ContrBar" class="progress-fill orange" style="width:0%"></div>
+              </div>
+            </div>
+          </section>
+          
+          <section class="charts-grid">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>CM3 Positive vs Negative</h2>
+                  <p>Total qualifying CM3 per period (Placed Pieces >= 10)</p>
+                </div>
+              </div>
+              <div class="chart-container" style="height:240px;">
+                <canvas id="cm3PosNegChart"></canvas>
+              </div>
+            </div>
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>CONTR% -VE Trend</h2>
+                  <p>Negative contribution vs the 15% target line</p>
+                </div>
+              </div>
+              <div class="chart-container" style="height:240px;">
+                <canvas id="cm3ContrChart"></canvas>
+              </div>
+            </div>
+          </section>
+          
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2 id="cm3TableTitle">CM3 Target Overall Performance</h2>
+                  <p id="cm3TableSub">Period-over-period status transitions rows with Placed Pieces &lt; 10 are excluded</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="cm3TargetTable">
+                  <thead>
+                    <tr id="cm3TargetTableHead"></tr>
+                  </thead>
+                  <tbody id="cm3TargetTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- CM3 ANALYST SECTION -->
+        <div id="viewCm3Analyst" class="view-section hidden">
+          <section class="cm3-toolbar hover-glow">
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Analysis Scope</span>
+              <div class="segmented" id="analystScopeToggle">
+                <button type="button" class="segmented-btn active" data-scope="merchant">Merchant</button>
+                <button type="button" class="segmented-btn" data-scope="category">Category</button>
+                <button type="button" class="segmented-btn" data-scope="match">Match (Merchant x Product)</button>
+              </div>
+            </div>
+          </section>
+          
+          <section class="metrics-grid cm3-metrics-grid">
+             <div class="metric-card hover-glow highlight-card">
+               <div class="metric-title text-purple">Overall CM3% <span class="icon-trend"></span></div>
+               <div class="metric-value text-purple" id="analystOverallCm3Pct">0%</div>
+               <div class="metric-sub text-dim">Total CM3 / Delivered GMV</div>
+             </div>
+             <div class="metric-card hover-glow">
+               <div class="metric-title">Total Delivered GMV <span class="icon-dollar"></span></div>
+               <div class="metric-value text-green" id="analystTotalGmv">EGP 0</div>
+             </div>
+             <div class="metric-card hover-glow">
+               <div class="metric-title">Total CM3 <span class="icon-dollar"></span></div>
+               <div class="metric-value text-blue" id="analystTotalCm3">EGP 0</div>
+             </div>
+             <div class="metric-card hover-glow">
+               <div class="metric-title">Top Performer (CM3) <span class="icon-star"></span></div>
+               <div class="metric-value text-orange" id="analystTopEntity" style="font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 5px;">-</div>
+             </div>
+          </section>
+          
+          <section class="table-section mt-4">
+             <div class="panel table-panel hover-glow">
+               <div class="panel-head-modern">
+                 <div class="panel-title-wrapper border-purple">
+                   <h2>Deep Dive CM3 Analysis & Targets</h2>
+                   <p>Detailed performance and profitability status mapped with category targets.</p>
+                 </div>
+                 <div class="table-controls">
+                   <input id="searchAnalystInput" type="search" placeholder="Search Entity, SKU, or Category..." />
+                 </div>
+               </div>
+               <div class="table-responsive">
+                 <table class="data-table" id="analystTable">
+                   <thead id="analystTableHead">
+                   </thead>
+                   <tbody id="analystTableBody"></tbody>
+                 </table>
+               </div>
+               <div class="table-footer">
+                 <span id="rowCountAnalyst">0 Entities</span>
+                 <div class="pager">
+                   <button id="prevPageAnalyst" class="btn btn-outline small">Prev</button>
+                   <span id="pageIndicatorAnalyst">Page 1 of 1</span>
+                   <button id="nextPageAnalyst" class="btn btn-outline small">Next</button>
+                 </div>
+               </div>
+             </div>
+          </section>
+        </div>
+      </main>
+      <div id="loadingState" class="loading-state">
+        <div class="spinner"></div>
+        <p>Syncing Data Streams...</p>
+      </div>
+      <div id="errorState" class="error-state hidden">
+        <p id="errorMsgText">Could not load data. Please verify core connection.</p>
+        <button id="retryBtn" class="btn btn-outline">Retry Connection</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- DOWNLOAD CSV MODAL -->
+  <div id="downloadModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Select Table to Download</h3>
+      <div id="downloadOptions"></div>
+      <div class="modal-actions">
+        <button id="cancelDownload" class="btn btn-outline">Cancel</button>
+        <button id="confirmDownload" class="btn btn-primary">Download</button>
+      </div>
+    </div>
+  </div>
+  
+  <div id="toast" class="toast hidden">Core Systems Synchronized!</div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
