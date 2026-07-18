@@ -209,6 +209,28 @@ function formatCacheTimestamp(ts) {
   }
 }
 
+// -------------------------------------------------------------------------
+// OPTIONAL DRIVE BACKUP — sends a copy of the fresh snapshot to a Google
+// Apps Script Web App you deploy yourself (see APPS_SCRIPT_SETUP.md).
+// Paste the deployment URL below. Leave it empty ("") to disable this
+// completely — nothing else in the app depends on it.
+// -------------------------------------------------------------------------
+const DRIVE_BACKUP_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxN2rCqUtVV9JRcJdS-er__az_fDhYW8r1YwNgyuc3Kj2Yqrs2FJO2UpiCOq61tmVtM8A/exec"; // e.g. "https://script.google.com/macros/s/AKfycb.../exec"
+
+function backupSnapshotToDrive(snapshot) {
+  if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
+  try {
+    fetch(DRIVE_BACKUP_WEBHOOK_URL, {
+      method: "POST",
+      mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+      body: JSON.stringify({ savedAt: Date.now(), data: snapshot })
+    }).catch((e) => console.warn("Drive backup failed (non-fatal):", e.message));
+  } catch (e) {
+    console.warn("Drive backup failed (non-fatal):", e.message);
+  }
+}
+
 function setSyncStatus(text) {
   const el = $("sidebarUpdated");
   if (el) el.textContent = text;
@@ -1231,6 +1253,7 @@ async function loadData(isManualRefresh = false) {
     applySnapshotToState(snapshot);
     renderCurrentState();
     saveDataToCache(snapshot);
+    backupSnapshotToDrive(snapshot);
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())}`);
