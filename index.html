@@ -26,6 +26,7 @@
           <div class="nav-submenu hidden" id="acmSubmenu">
             <a class="nav-item-sub" id="navAcmPerf">Performance ACM</a>
             <a class="nav-item-sub" id="navMerchantPerf">Performance Merchant's</a>
+            <a class="nav-item-sub" id="navMpSalesPlan">Sales Plan-ACM</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -643,6 +644,66 @@
                  </div>
                </div>
              </div>
+          </section>
+        </div>
+        <!-- MARKETPLACE SALES PLAN SECTION -->
+        <div id="viewMpSalesPlan" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Plan SKUs <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpSpTotalSkus">0</div>
+                <div class="metric-sub text-dim">Active Products in Plan</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-green">On Track (Achieved MTD) <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="mpSpAchieved">0</div>
+                <div class="metric-sub text-dim">SKUs hitting target</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Missed Target MTD <span class="icon-trend"></span></div>
+                <div class="metric-value text-red" id="mpSpMissed">0</div>
+                <div class="metric-sub text-dim">Needs attention</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Overall MTD Achievement <span class="icon-calendar"></span></div>
+                <div class="metric-value text-blue" id="mpSpOverallMtdActual">0</div>
+                <div class="metric-sub text-dim">Target MTD: <span id="mpSpOverallMtdTarget">0</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>ACM Sales Plan Tracking</h2>
+                  <p>Target MTD, Run Rate &amp; Week-over-Week performance based on Confirmed Pieces</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMpSalesPlanInput" type="search" placeholder="Search Merchant or SKU..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="mpSalesPlanTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortMpSalesPlan('singleId')" style="cursor:pointer;">SKU_ID ⇅</th>
+                      <th onclick="sortMpSalesPlan('singleName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product Name ⇅</th>
+                      <th onclick="sortMpSalesPlan('fullName')" style="cursor:pointer;">ACM Name ⇅</th>
+                      <th onclick="sortMpSalesPlan('dailyTarget')" class="num text-dim" style="cursor:pointer;">Daily Target ⇅</th>
+                      <th onclick="sortMpSalesPlan('mtdTarget')" class="num text-orange" style="cursor:pointer;">Target MTD ⇅</th>
+                      <th onclick="sortMpSalesPlan('mtdActual')" class="num text-blue" style="cursor:pointer;">Actual Confirmed ⇅</th>
+                      <th onclick="sortMpSalesPlan('mtdAchievedPct')" class="num text-purple" style="cursor:pointer;">% of MTD ⇅</th>
+                      <th onclick="sortMpSalesPlan('gap')" class="num text-red" style="cursor:pointer;">MTD Gap ⇅</th>
+                      <th onclick="sortMpSalesPlan('runRate')" class="num" style="cursor:pointer;">Run Rate ⇅</th>
+                      <th onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;">WoW Status ⇅</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mpSalesPlanTableBody"></tbody>
+                </table>
+              </div>
+            </div>
           </section>
         </div>
       </main>

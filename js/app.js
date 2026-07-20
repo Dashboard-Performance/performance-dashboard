@@ -22,11 +22,20 @@ const TARGETS_ACM_GID = "2042936628";
 const INVENTORY_GID = "1780730573";
 const PRODUCTS_GID = "1779314157";
 const CAT_TARGETS_GID = "1656655269";
+const ACM_SALES_PLAN_GID = "892918900"; // شيت التارجت اليومي الخاص بالـ Sales Plan (SINGLE_ID / TAGER_ID / Daily Target)
+const SALES_PLAN_PERF_GID = "1857010960"; // شيت البرفورمانس الخاص بالـ Sales Plan - معمول على Single SKU Demand (نفس مستوى البلان)
 
 let PAGE_SIZE = 10;
 const CM3_PLACED_PIECES_COL = 15;
 const CM3_MIN_PLACED_PIECES = 10;
 const CM3_NEGATIVE_CONTRIBUTION_TARGET = 15;
+
+// أي حساب في السورس كود بيسحب قيمة CM3 من شيت البرفورمانس الـ Main العادي (MAIN_GID)
+// لازم يرجع بـ 4 أيام لورا ويقرأ الـ CM3 على أساس التاريخ ده، لأن قيمة الـ CM3 بتاخد وقت
+// عشان تتقفل (Confirmed/Delivered/Returns...) وآخر 4 أيام بيكونوا لسه مش نهائيين.
+// ده بيتطبق فقط على الحسابات اللي مصدرها MAIN_GID — شيت الـ Sales Plan الجديد (SALES_PLAN_PERF_GID)
+// مش داخل في القاعدة دي.
+const CM3_LAG_DAYS = 4;
 
 const TICKER_MESSAGES = [
   "Core Systems Optimal",
@@ -38,7 +47,12 @@ const TICKER_MESSAGES = [
 const SEGMENT_RANKS = { "in active": 0, "low value": 1, "occasional": 2, "promising": 3, "potential loyalist": 4, "loyal merchants": 5, "champions": 6 };
 
 const state = {
+  mpSalesPlanDataPrepared: [],
+  mpSalesPlanSortKey: "mtdActual",
+  mpSalesPlanSortDir: "desc",
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {},
+  acmSalesPlanData: [],
+  salesPlanPerfRows: [], // صفوف شيت البرفورمانس الجديد الخاص بالـ Sales Plan (SALES_PLAN_PERF_GID)
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
   acmTableData: [], filteredAcmData: [], sortKey: "finalScorePct", sortDir: "desc", page: 0,
@@ -79,6 +93,7 @@ const marketplaceSubmenu = $("marketplaceSubmenu");
 const navMarketplaceCaret = $("navMarketplaceCaret");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
+const navMpSalesPlan = $("navMpSalesPlan");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
@@ -107,6 +122,7 @@ function switchView(viewName) {
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
+  if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); } 
@@ -115,6 +131,7 @@ function switchView(viewName) {
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
+  else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   
   if (activeSection) {
     activeSection.classList.remove("hidden");
@@ -128,6 +145,10 @@ if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerform
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
+if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
+
+const searchMpSalesPlanInput = $("searchMpSalesPlanInput");
+if (searchMpSalesPlanInput) searchMpSalesPlanInput.addEventListener("input", applyMpSalesPlanFilterAndSort);
 
 // -------------------------------------------------------------------------
 // SHEET LOADING — JSONP + timeout
@@ -279,6 +300,26 @@ function cellText(cell) {
 }
 const normalizeName = (name) => name ? name.toString().trim().toLowerCase() : "";
 
+// -------------------------------------------------------------------------
+// CM3 LAG (4 أيام) — يُطبَّق فقط على بيانات مصدرها MAIN_GID (شيت البرفورمانس Main).
+// بياخد أحدث تاريخ موجود في الصفوف الممرَّرة، ويرجع بـ CM3_LAG_DAYS أيام لورا،
+// فأي صف بعد الـ cutoff ده (يعني آخر 4 أيام) بيتجاهل من حساب الـ CM3 (باقي المقاييس
+// زي Placed/Confirmed/Delivered/GMV بتفضل زي ما هي، من غير أي تأخير).
+// -------------------------------------------------------------------------
+function getCm3LagCutoffTimestamp(rows) {
+  let latestTs = 0;
+  rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  if (!latestTs) return 0;
+  const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
+  return latestDate.getTime() - (CM3_LAG_DAYS * 86400000);
+}
+function isCm3RowEligible(row, cutoffTs) {
+  if (!cutoffTs) return false;
+  if (!row.timestamp) return false;
+  const rd = new Date(row.timestamp); rd.setHours(0, 0, 0, 0);
+  return rd.getTime() <= cutoffTs;
+}
+
 function parseMainSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const rows = [];
@@ -424,6 +465,94 @@ function parseCategoryTargetsSheet(payload) {
   return map;
 }
 
+function parseAcmSalesPlanSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const plan = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const singleId = cellText(c[0]);
+    // تخطي صف العناوين
+    if (singleId && singleId !== "SINGLE_ID") {
+      plan.push({
+        singleId: singleId,
+        singleName: cellText(c[1]),
+        tagerId: cellText(c[2]),
+        fullName: cellText(c[3]),
+        dailyTarget: cellText(c[4]) // <-- قراءة العمود E (الخامس) كهدف يومي مباشر
+      });
+    }
+  }
+  return plan;
+}
+
+// شيت البرفورمانس الجديد الخاص بالـ Sales Plan (SALES_PLAN_PERF_GID / gid=1857010960).
+// معمول على مستوى Single SKU Demand بالظبط زي البلان (ACM_SALES_PLAN_GID)، فمفيش داعي
+// لمطابقة يدوية مع شيت الـ Main الكبير — الصف هنا أصلاً TAGER_ID + PRODUCT_ID + PERIOD_FILTER.
+// ترتيب الأعمدة (0-based) زي ما وصلت بالظبط:
+// 0 PERIOD_FILTER, 1 TAGER_ID, 2 TAGER_NAME, 3 PRODUCT_ID, 4 PRODUCT_NAME, 5 CATEGORY,
+// 6 SUB_CATEGORY, 7 ITEM_TYPE, 8 ACTIVE_DAYS, 9 PLACED_ORDERS, 10 CONFIRMED_ORDERS,
+// 11 DELIVERED_ORDERS, 12 CR_ORDERS, 13 DR_ORDERS, 14 NDR_ORDERS, 15 PLACED_PIECES,
+// 16 CONFIRMED_PIECES, 17 DELIVERED_PIECES, 18 CR_PCS, 19 DR_PCS, 20 NDR_PCS,
+// 21 PLACED_GMV, 22 DELIVERED_GMV, 23 PLACED_ASP, 24 DELIVERED_ASP, 25 MERCH_MARGIN,
+// 26 MERCH_MARGIN_PIECE, 27 DELIVERED_PPM, 28 CM3, 29 PPM_PER_PIECE, 30 CM3_PER_PIECE, 31 ACM
+function parseSalesPlanPerformanceSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const tagerId = cellText(c[1]);
+    const productId = cellText(c[3]);
+    // تخطي أي صف فاضي أو صف عناوين
+    if (!tagerId && !productId) continue;
+    if (tagerId === "TAGER_ID" || productId === "PRODUCT_ID") continue;
+
+    const periodStr = cellText(c[0]);
+    const d = new Date(periodStr);
+    const hasValidDate = !isNaN(d.getTime());
+    const monthYear = hasValidDate ? d.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : "Unknown Month";
+
+    rows.push({
+      periodFilter: periodStr,
+      monthYear: monthYear,
+      timestamp: hasValidDate ? d.getTime() : 0,
+      tagerId: tagerId,
+      tagerName: cellText(c[2]),
+      productId: productId,
+      productName: cellText(c[4]),
+      category: cellText(c[5]) || "Uncategorized",
+      subCategory: cellText(c[6]),
+      itemType: cellText(c[7]),
+      activeDays: cellNumber(c[8]),
+      placedOrders: cellNumber(c[9]),
+      confirmedOrders: cellNumber(c[10]),
+      deliveredOrders: cellNumber(c[11]),
+      crOrders: cellNumber(c[12]),
+      drOrders: cellNumber(c[13]),
+      ndrOrders: cellNumber(c[14]),
+      placedPieces: cellNumber(c[15]),
+      confirmedPieces: cellNumber(c[16]),
+      deliveredPieces: cellNumber(c[17]),
+      crPcs: cellNumber(c[18]),
+      drPcs: cellNumber(c[19]),
+      ndrPcs: cellNumber(c[20]),
+      placedGmv: cellNumber(c[21]),
+      deliveredGmv: cellNumber(c[22]),
+      placedAsp: cellNumber(c[23]),
+      deliveredAsp: cellNumber(c[24]),
+      merchMargin: cellNumber(c[25]),
+      merchMarginPiece: cellNumber(c[26]),
+      deliveredPpm: cellNumber(c[27]),
+      cm3: cellNumber(c[28]),
+      ppmPerPiece: cellNumber(c[29]),
+      cm3PerPiece: cellNumber(c[30]),
+      acm: cellText(c[31]) || "Unassigned"
+    });
+  }
+  return rows;
+}
+
 function getSegmentLogic(orders) {
   if (orders === 0) return "In active";
   if (orders < 5) return "Low Value";
@@ -504,7 +633,7 @@ function updateDashboard(rows) {
   }
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
   renderPipelineChart(rows); renderCategoryChart(rows);
-  prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareInventoryTableData(rows);
+  prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
   renderOverallAcmTargetsSummary();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
@@ -555,6 +684,7 @@ function prepareInventoryTableData(rows) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0,0,0,0); const todayMs = today.getTime();
   const ydayMs = todayMs - 86400000; const d3Ms = todayMs - (3 * 86400000); const d5Ms = todayMs - (5 * 86400000); const d15Ms = todayMs - (15 * 86400000);
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   const map = new Map();
   for (let sku in state.inventoryMap) {
     const inv = state.inventoryMap[sku]; const prod = state.productsMap[sku] || { price: 0, profit: 0 };
@@ -567,7 +697,10 @@ function prepareInventoryTableData(rows) {
       map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: 0, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set() });
     }
     const entry = map.get(sku);
-    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.cm3 += r.cm3; entry.deliveredGmv += r.deliveredGmv;
+    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
+    // deliveredGmv هنا مستخدم فقط لحساب نسبة الـ CM3%، فلازم يبقى بنفس الكات أوف بتاع الـ CM3 بالظبط
+    // (متكونش الـ CM3 واقفة عند يوم والـ GMV ماشية لحد آخر يوم في الداتا)
+    if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.deliveredGmv += r.deliveredGmv; }
     const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0); const rTime = rDate.getTime();
     if(r.placedOrders > 0) entry.totalActiveDays.add(rTime);
     if (rTime === ydayMs) { entry.placedYday += r.placedOrders; entry.confYday += r.confirmedOrders; }
@@ -636,10 +769,15 @@ function renderPaginatedInventoryTable() {
 
 function prepareAcmTableData(rows) {
   const map = new Map();
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
-    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, actualRetention: 0 }); }
-    const entry = map.get(r.acmName); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv; entry.cm3 += r.cm3;
+    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, actualRetention: 0 }); }
+    const entry = map.get(r.acmName); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
+    // cm3DeliveredGmv: نفس الـ deliveredGmv بس بكات أوف الـ CM3 بالظبط — ده اللي بيتحسب بيه cm3Pct
+    // عشان مايبقاش عندنا CM3 واقفة عند يوم و GMV ماشية لحد آخر يوم موجود في الداتا (بيبوظ النسبة).
+    // deliveredGmv العادي فاضل من غير لاج زي ما هو، مستخدم لأهداف الـ GMV والـ Run Rate بتاعت الـ ACM.
+    if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.cm3DeliveredGmv += r.deliveredGmv; }
   });
   state.merchantTableData.forEach(merch => {
     if (merch.acm && map.has(merch.acm)) {
@@ -651,7 +789,7 @@ function prepareAcmTableData(rows) {
   const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
   state.acmTableData = Array.from(map.values()).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = (dr * cr) * 100; const cm3Pct = m.deliveredGmv ? (m.cm3 / m.deliveredGmv) * 100 : 0;
+    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = (dr * cr) * 100; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) * 100 : 0;
     const targetData = normalizedTargets[normalizeName(m.name)] || { targetGmv: 0, targetNdr: 0, targetCm3: 0, targetRetention: 0 };
     const targetGmv = targetData.targetGmv; const targetNdr = targetData.targetNdr; const targetCm3 = targetData.targetCm3; const targetRetention = targetData.targetRetention;
     const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
@@ -765,16 +903,19 @@ function renderTrendTables(allRows, selectedAcm) {
 
 function prepareMerchantTableData(rows) {
   const map = new Map();
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   rows.forEach(r => {
     if (!r.merchantId || r.merchantId === "Unassigned") return;
-    if (!map.has(r.merchantId)) { map.set(r.merchantId, { id: r.merchantId, name: r.merchantName, acm: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, skus: new Set() }); }
-    const entry = map.get(r.merchantId); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedGmv += r.placedGmv; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv; entry.cm3 += r.cm3;
+    if (!map.has(r.merchantId)) { map.set(r.merchantId, { id: r.merchantId, name: r.merchantName, acm: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, skus: new Set() }); }
+    const entry = map.get(r.merchantId); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedGmv += r.placedGmv; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
+    // cm3DeliveredGmv بكات أوف الـ CM3 بالظبط — نفس المنطق: مايبقاش الـ CM3 لحد يوم والـ GMV لحد يوم تاني
+    if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.cm3DeliveredGmv += r.deliveredGmv; }
     if(r.sku && r.placedOrders > 0) entry.skus.add(r.sku);
   });
   const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
   state.merchantTableData = Array.from(map.values()).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; const cm3Pct = m.deliveredGmv ? (m.cm3 / m.deliveredGmv) : 0;
+    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) : 0;
     const targetData = state.merchantTargets[m.id] || { gmv: 0, placed: 0 }; const targetGmv = targetData.gmv; const targetPlaced = targetData.placed;
     const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
     const currentSegment = state.merchantSegmentsMap[m.id] || "In active"; const rrConfirmed = (m.confirmed / elapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
@@ -914,6 +1055,7 @@ function cm3BuildCombos(rows, periodMode) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return null;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   const comboMap = new Map();
   rows.forEach(r => {
     if (!r.timestamp || !r.merchantId || !r.sku) return;
@@ -921,7 +1063,8 @@ function cm3BuildCombos(rows, periodMode) {
     const period = cm3PeriodLabel(rd, periodMode); const periodSort = cm3PeriodSortKey(rd, periodMode);
     const key = `${r.merchantId}||${r.sku}||${period}`;
     if (!comboMap.has(key)) { comboMap.set(key, { merchantId: r.merchantId, merchantName: r.merchantName, sku: r.sku, category: r.category, period, periodSort, placedPieces: 0, cm3: 0 }); }
-    const e = comboMap.get(key); e.placedPieces += r.placedPieces; e.cm3 += r.cm3;
+    const e = comboMap.get(key); e.placedPieces += r.placedPieces;
+    if (isCm3RowEligible(r, cm3Cutoff)) e.cm3 += r.cm3;
   });
   const qualifying = Array.from(comboMap.values()).filter(c => c.placedPieces >= CM3_MIN_PLACED_PIECES);
   const periodSortMap = new Map();
@@ -1120,9 +1263,15 @@ function renderCm3AnalystHeaders() {
   });
 }
 
+// الصفحة دي (CM3 Analyst) كلها أصلاً مخصصة لتحليل الـ CM3، فكل رقم فيها (Placed / Confirmed /
+// Delivered / Delivered GMV / CM3) لازم يتحسب من نفس الفترة المقطوعة (بعد استبعاد آخر
+// CM3_LAG_DAYS أيام) — مش الـ CM3 لوحدها بتاخد كات أوف والباقي ماشي لحد آخر يوم في الداتا.
+// ده بالظبط زي لو حد فلتر التاريخ يدوي في الشيت وشال آخر 4 أيام قبل ما يعمل SUM.
 function prepareCm3AnalystData(rows) {
   const map = new Map(); let totalGmv = 0; let totalCm3 = 0;
-  rows.forEach(r => {
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
+  const eligibleRows = rows.filter(r => isCm3RowEligible(r, cm3Cutoff));
+  eligibleRows.forEach(r => {
     let key = "";
     if (analystState.scope === "merchant") key = r.merchantId; else if (analystState.scope === "category") key = r.category; else if (analystState.scope === "match") key = r.merchantId + "||" + r.sku;
     if (!key || key === "Unassigned") return;
@@ -1201,7 +1350,16 @@ function renderPaginatedCm3AnalystTable() {
   document.querySelectorAll("#analystTableHead th").forEach((th) => { if(th.dataset.akey) th.classList.toggle("sorted", th.dataset.akey === analystState.sortKey); });
 }
 
-function renderCm3AnalystView() { prepareCm3AnalystData(state.allParsedRows); analystWireControlsOnce(); }
+// الجدول ده لازم يحترم فلتر الشهر/الـ ACM اللي فوق الصفحة زي أي قسم تاني — فبنفلتر
+// state.allParsedRows هنا بنفس منطق applyFilters() قبل ما نبني منها التحليل، عشان
+// لو غيرت الشهر فوق (أو الـ ACM) الأرقام (ACTUAL CM3 / CM3 PER PIECE / CM3 %) تتغير معاه.
+function renderCm3AnalystView() {
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const filteredRows = state.allParsedRows.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  prepareCm3AnalystData(filteredRows);
+  analystWireControlsOnce();
+}
 
 function analystWireControlsOnce() {
   if (analystState.wired) return; analystState.wired = true;
@@ -1210,22 +1368,175 @@ function analystWireControlsOnce() {
   if($("prevPageAnalyst")) { $("prevPageAnalyst").addEventListener("click", () => { if (analystState.page > 0) { analystState.page -= 1; renderPaginatedCm3AnalystTable(); } }); }
   if($("nextPageAnalyst")) { $("nextPageAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(analystState.filtered.length / PAGE_SIZE)); if (analystState.page < totalPages - 1) { analystState.page += 1; renderPaginatedCm3AnalystTable(); } }); }
 }
+// -------------------------------------------------------------------------
+// MARKETPLACE SALES PLAN — نفس منطق ونفس مصدري بيانات "Sales Plan-ACM" بالظبط
+// (ACM_SALES_PLAN_GID لهدف اليومي/SKU + SALES_PLAN_PERF_GID لأداء الـ Single SKU
+// gid=1857010960)، الفرق الوحيد إن "ACTUAL CONFIRMED" هنا بيتقرا من عمود
+// CONFIRMED_PIECES (العمود Q / index 16) مش من CONFIRMED_ORDERS، لأن قسم
+// الـ Marketplace بيتابع الأداء على مستوى القطع (Pieces) مش الأوردرات.
+// التارجت الشهري (Target MTD) = Daily Target × عدد الأيام من أول الشهر لحد امبارح،
+// وبيتفلتر بفلتر الشهر/الـ ACM بره فوق زي أي قسم تاني في الداشبورد.
+// -------------------------------------------------------------------------
+function prepareMpSalesPlanData() {
+    if (!state.acmSalesPlanData || state.acmSalesPlanData.length === 0) return;
 
+    const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+    const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+    const perfRowsAll = state.salesPlanPerfRows || [];
+    const perfRows = perfRowsAll.filter(r => {
+        return (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acm === selectedAcm);
+    });
+
+    let latestTs = 0; perfRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+    const today = new Date(latestTs); today.setHours(0,0,0,0);
+    const currentMonthDays = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const elapsedDays = today.getDate() || 1;
+    const daysUntilYesterday = Math.max(1, elapsedDays - 1);
+
+    const startThisWeek = today.getTime() - (7 * 86400000);
+    const startLastWeek = today.getTime() - (14 * 86400000);
+
+    let totalSkus = 0; let achievedCount = 0; let missedCount = 0;
+    let totalMtdTarget = 0; let totalMtdActual = 0;
+
+    const mergedData = state.acmSalesPlanData.map(plan => {
+        let metrics = { confirmed: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0 };
+
+        perfRows.forEach(r => {
+            if (r.productId === plan.singleId && r.tagerId === plan.tagerId) {
+                // ACTUAL CONFIRMED بيتحسب من CONFIRMED_PIECES (عمود Q) مش من CONFIRMED_ORDERS
+                metrics.confirmed += r.confirmedPieces;
+                const rTime = new Date(r.timestamp).setHours(0,0,0,0);
+                if (rTime >= startThisWeek) metrics.thisWeekConfirmed += r.confirmedPieces;
+                else if (rTime >= startLastWeek && rTime < startThisWeek) metrics.lastWeekConfirmed += r.confirmedPieces;
+            }
+        });
+
+        // قراءة التارجت اليومي من العمود E مباشرة بدون أي عمليات
+        const dailyTarget = plan.dailyTarget;
+
+        // حساب التارجت لحد امبارح (نضرب اليومي في عدد الأيام اللي فاتت)
+        const mtdTarget = dailyTarget * daysUntilYesterday;
+        const mtdActual = metrics.confirmed;
+
+        const gap = mtdTarget - mtdActual;
+        const runRate = (mtdActual / elapsedDays) * currentMonthDays;
+        const mtdAchievedPct = mtdTarget > 0 ? (mtdActual / mtdTarget) * 100 : 0;
+
+        const wowDiff = metrics.thisWeekConfirmed - metrics.lastWeekConfirmed;
+        let wowPct = 0;
+        if (metrics.lastWeekConfirmed > 0) wowPct = (wowDiff / metrics.lastWeekConfirmed) * 100;
+        else if (metrics.thisWeekConfirmed > 0) wowPct = 100;
+
+        let wowStatus = 'Stable'; let wowClass = 'stable'; let wowIcon = '➖';
+        if (wowPct > 10) { wowStatus = 'Spike'; wowClass = 'spike'; wowIcon = '📈'; }
+        else if (wowPct < -10) { wowStatus = 'Decline'; wowClass = 'decline'; wowIcon = '📉'; }
+
+        totalSkus++;
+        if (mtdActual >= mtdTarget) achievedCount++; else missedCount++;
+        totalMtdTarget += mtdTarget; totalMtdActual += mtdActual;
+
+        return {
+            ...plan, ...metrics, gap, runRate, dailyTarget, mtdTarget, mtdActual, mtdAchievedPct,
+            wowDiff, wowPct, wowStatus, wowClass, wowIcon
+        };
+    });
+
+    if($("mpSpTotalSkus")) $("mpSpTotalSkus").textContent = fmtInt.format(totalSkus);
+    if($("mpSpAchieved")) $("mpSpAchieved").textContent = fmtInt.format(achievedCount);
+    if($("mpSpMissed")) $("mpSpMissed").textContent = fmtInt.format(missedCount);
+    if($("mpSpOverallMtdTarget")) $("mpSpOverallMtdTarget").textContent = fmtInt.format(Math.round(totalMtdTarget));
+    if($("mpSpOverallMtdActual")) $("mpSpOverallMtdActual").textContent = fmtInt.format(totalMtdActual);
+
+    state.mpSalesPlanDataPrepared = mergedData;
+    applyMpSalesPlanFilterAndSort();
+}
+
+// دالة ترتيب الأعمدة
+function sortMpSalesPlan(key) {
+    if (state.mpSalesPlanSortKey === key) {
+        state.mpSalesPlanSortDir = state.mpSalesPlanSortDir === "asc" ? "desc" : "asc";
+    } else {
+        state.mpSalesPlanSortKey = key;
+        state.mpSalesPlanSortDir = "desc";
+    }
+    applyMpSalesPlanFilterAndSort();
+}
+
+// دالة الفلترة (Search) والترتيب
+function applyMpSalesPlanFilterAndSort() {
+    if (!state.mpSalesPlanDataPrepared) return;
+    let data = [...state.mpSalesPlanDataPrepared];
+
+    const searchInput = $("searchMpSalesPlanInput");
+    const q = searchInput ? searchInput.value.toLowerCase() : "";
+    if (q) {
+        data = data.filter(d =>
+            d.singleId.toLowerCase().includes(q) ||
+            d.singleName.toLowerCase().includes(q) ||
+            d.fullName.toLowerCase().includes(q)
+        );
+    }
+
+    const key = state.mpSalesPlanSortKey;
+    const dir = state.mpSalesPlanSortDir === "asc" ? 1 : -1;
+
+    data.sort((a, b) => {
+        let valA = a[key];
+        let valB = b[key];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        if (valA < valB) return -1 * dir;
+        if (valA > valB) return 1 * dir;
+        return 0;
+    });
+
+    renderMpSalesPlanTable(data);
+}
+
+// دالة الرسم
+function renderMpSalesPlanTable(data) {
+    const tbody = $("mpSalesPlanTableBody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    data.forEach(m => {
+        const tr = document.createElement("tr");
+        const mtdColor = m.mtdActual >= m.mtdTarget ? 'green' : 'red';
+        tr.innerHTML = `
+            <td class="font-mono text-dim">${m.singleId}</td>
+            <td class="font-bold" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${m.singleName}">${m.singleName}</td>
+            <td class="font-bold">${m.fullName}</td>
+            <td class="num text-dim font-bold">${Number(m.dailyTarget).toFixed(1)}</td>
+            <td class="num text-orange font-bold">${fmtInt.format(Math.round(m.mtdTarget))}</td>
+            <td class="num text-blue font-bold">${fmtInt.format(m.mtdActual)}</td>
+            <td class="num"><span class="badge-outline ${mtdColor}">${fmtPct(m.mtdAchievedPct)}</span></td>
+            <td class="num text-red font-bold">${fmtInt.format(m.gap > 0 ? Math.round(m.gap) : 0)}</td>
+            <td class="num text-blue">${fmtInt.format(Math.round(m.runRate))}</td>
+            <td class="center"><span class="badge-status ${m.wowClass}">${m.wowIcon} ${m.wowStatus} ${m.wowPct > 0 ? '+' : ''}${m.wowPct.toFixed(1)}% (${m.wowDiff > 0 ? '+' : ''}${m.wowDiff})</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
 // Fetches all 7 sheets (main sheet is mandatory, the rest are best-effort)
 // and returns a plain snapshot object — does NOT touch global state, so it
 // is safe to call in the background while old data is still on screen.
 async function fetchAllSheetsSnapshot() {
-  const [mainPayload, targetsPayload, segPayload, acmTargetsPayload, invPayload, prodPayload, catTargetsPayload] = await Promise.all([
+  const [mainPayload, targetsPayload, segPayload, acmTargetsPayload, invPayload, prodPayload, catTargetsPayload, planPayload, salesPlanPerfPayload] = await Promise.all([
     loadSheetWithRetry(MAIN_GID),
     TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(() => null) : Promise.resolve(null),
     SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(() => null) : Promise.resolve(null),
     TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetWithRetry(TARGETS_ACM_GID).catch(() => null) : Promise.resolve(null),
     INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(() => null) : Promise.resolve(null),
     PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(() => null) : Promise.resolve(null),
-    CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null)
+    CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null),
+    ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(() => null) : Promise.resolve(null), // <-- شيت التارجت اليومي
+    SALES_PLAN_PERF_GID ? loadSheetWithRetry(SALES_PLAN_PERF_GID).catch(() => null) : Promise.resolve(null) // <-- شيت برفورمانس الـ Sales Plan الجديد
   ]);
+
   const allParsedRows = parseMainSheet(mainPayload);
   if (allParsedRows.length === 0) { throw new Error("No data streams detected."); }
+
   return {
     allParsedRows,
     merchantTargets: targetsPayload ? parseTargetsSheet(targetsPayload) : state.merchantTargets,
@@ -1233,7 +1544,9 @@ async function fetchAllSheetsSnapshot() {
     acmTargets: acmTargetsPayload ? parseAcmTargetsSheet(acmTargetsPayload) : state.acmTargets,
     inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
-    categoryTargets: catTargetsPayload ? parseCategoryTargetsSheet(catTargetsPayload) : state.categoryTargets
+    categoryTargets: catTargetsPayload ? parseCategoryTargetsSheet(catTargetsPayload) : state.categoryTargets,
+    acmSalesPlanData: planPayload ? parseAcmSalesPlanSheet(planPayload) : state.acmSalesPlanData, // <-- إضافة البيانات
+    salesPlanPerfRows: salesPlanPerfPayload ? parseSalesPlanPerformanceSheet(salesPlanPerfPayload) : state.salesPlanPerfRows // <-- برفورمانس الـ Sales Plan
   };
 }
 
@@ -1245,8 +1558,9 @@ function applySnapshotToState(snapshot) {
   state.inventoryMap = snapshot.inventoryMap;
   state.productsMap = snapshot.productsMap;
   state.categoryTargets = snapshot.categoryTargets;
+  state.acmSalesPlanData = snapshot.acmSalesPlanData; 
+  state.salesPlanPerfRows = snapshot.salesPlanPerfRows;
 }
-
 function renderCurrentState() {
   populateFilters(state.allParsedRows);
   applyFilters();
