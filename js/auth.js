@@ -28,7 +28,7 @@
   const CONFIG = {
     // Paste the "Web app URL" you get after deploying backend/Code.gs
     // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone)
-    API_URL: "PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE",
+    API_URL: "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec",
 
     // Only emails ending with this domain are allowed to sign up
     ALLOWED_DOMAIN: "taager.com",
@@ -99,7 +99,7 @@
   }
 
   function callApi(payload) {
-    if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec") === 0) {
+    if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
       return Promise.reject(
         new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
       );
@@ -154,12 +154,20 @@
     .auth-submit:hover{box-shadow:0 0 18px rgba(59,130,246,0.5);transform:translateY(-1px);}
     .auth-submit:disabled{opacity:0.6;cursor:not-allowed;transform:none;}
     .auth-footnote{text-align:center;margin-top:20px;font-size:11px;color:#52525b;letter-spacing:0.2px;}
-    .auth-user-badge{display:flex;align-items:center;gap:8px;font-size:11px;color:#a1a1aa;
-      font-family:'JetBrains Mono',monospace;}
-    .auth-user-badge b{color:#fff;}
-    .auth-logout-btn{font-family:inherit;font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;
-      border:1px solid #3f3f46;background:transparent;color:#fafafa;cursor:pointer;transition:all .2s;}
-    .auth-logout-btn:hover{background:rgba(255,255,255,0.05);border-color:#ef4444;color:#ef4444;}
+    .auth-profile{display:flex;align-items:center;gap:10px;padding-bottom:14px;margin-bottom:14px;
+      border-bottom:1px solid #27272a;}
+    .auth-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;
+      font-family:"Inter",sans-serif;flex-shrink:0;letter-spacing:0;text-transform:uppercase;}
+    .auth-profile-info{flex:1;min-width:0;}
+    .auth-profile-name{font-size:12px;font-weight:700;color:#fff;font-family:"Inter",sans-serif;
+      text-transform:none;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .auth-profile-role{font-size:10px;color:#a1a1aa;font-family:'JetBrains Mono',monospace;
+      text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;}
+    .auth-logout-icon{background:transparent;border:1px solid #3f3f46;color:#a1a1aa;border-radius:6px;
+      width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+      flex-shrink:0;transition:all .2s;font-size:13px;line-height:1;}
+    .auth-logout-icon:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,0.08);}
     `;
     const styleEl = document.createElement("style");
     styleEl.id = "authOverlayStyles";
@@ -365,29 +373,39 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  4) Small "logged in as ... / Logout" control in the top bar
+   *  4) Profile card + Logout, injected at the top of the sidebar
+   *     footer (right above "Live System Sync")
    * ------------------------------------------------------------------ */
   function injectUserBadge(user) {
     if (document.getElementById("authUserBadge")) return; // already injected
-    const actions = document.querySelector(".topbar-actions");
-    if (!actions) return;
+    const footer = document.querySelector(".sidebar-footer");
+    if (!footer) return;
 
     const wrap = document.createElement("div");
     wrap.id = "authUserBadge";
-    wrap.className = "auth-user-badge";
-    wrap.innerHTML = `<span>Signed in as <b>${escapeHtml(user.name)}</b> (${escapeHtml(user.role)})</span>`;
+    wrap.className = "auth-profile";
+    wrap.innerHTML = `
+      <div class="auth-avatar">${escapeHtml(getInitials(user.name))}</div>
+      <div class="auth-profile-info">
+        <div class="auth-profile-name">${escapeHtml(user.name)}</div>
+        <div class="auth-profile-role">${escapeHtml(user.role)}</div>
+      </div>
+      <button type="button" class="auth-logout-icon" title="Logout">⏻</button>
+    `;
 
-    const logoutBtn = document.createElement("button");
-    logoutBtn.type = "button";
-    logoutBtn.className = "auth-logout-btn";
-    logoutBtn.textContent = "Logout";
-    logoutBtn.addEventListener("click", () => {
+    wrap.querySelector(".auth-logout-icon").addEventListener("click", () => {
       clearSession();
       window.location.reload();
     });
 
-    actions.prepend(logoutBtn);
-    actions.prepend(wrap);
+    footer.prepend(wrap);
+  }
+
+  function getInitials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    if (parts.length === 1) return parts[0].slice(0, 2);
+    return parts[0].charAt(0) + parts[parts.length - 1].charAt(0);
   }
 
   function escapeHtml(str) {
