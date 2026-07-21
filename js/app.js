@@ -37,6 +37,13 @@ const CM3_NEGATIVE_CONTRIBUTION_TARGET = 15;
 // مش داخل في القاعدة دي.
 const CM3_LAG_DAYS = 4;
 
+// -------------------------------------------------------------------------
+// ملحوظة: سكشن Performance-Matches بقى بيقرأ من شيت الـ Main (MAIN_GID) زي أي
+// سكشن تاني، فبيستخدم نفس قاعدة الـ CM3_LAG_DAYS اللي فوق ومفيش لاج خاص بيه.
+// شيت الـ Sales Plan Performance (SALES_PLAN_PERF_GID / الـ "Single") بقى
+// مستخدم فقط في سكشن Sales Plan-ACM.
+// -------------------------------------------------------------------------
+
 const TICKER_MESSAGES = [
   "Core Systems Optimal",
   "Data Streams Encrypted",
@@ -62,6 +69,9 @@ const state = {
 };
 const analystState = {
   scope: "merchant", data: [], filtered: [], sortKey: "cm3Pct", sortDir: "desc", page: 0, wired: false
+};
+const mpMatchesState = {
+  data: [], filtered: [], sortKey: "cm3", sortDir: "desc", page: 0
 };
 let pipelineChartInst = null;
 let categoryChartInst = null;
@@ -94,6 +104,7 @@ const navMarketplaceCaret = $("navMarketplaceCaret");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navMpSalesPlan = $("navMpSalesPlan");
+const navMpMatches = $("navMpMatches");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
@@ -123,6 +134,7 @@ function switchView(viewName) {
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
+  if(navMpMatches) navMpMatches.classList.remove("active");
   
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); } 
@@ -132,6 +144,7 @@ function switchView(viewName) {
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
+  else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
   
   if (activeSection) {
     activeSection.classList.remove("hidden");
@@ -146,9 +159,15 @@ if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
+if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 
 const searchMpSalesPlanInput = $("searchMpSalesPlanInput");
 if (searchMpSalesPlanInput) searchMpSalesPlanInput.addEventListener("input", applyMpSalesPlanFilterAndSort);
+
+const searchMpMatchesInput = $("searchMpMatchesInput");
+if (searchMpMatchesInput) searchMpMatchesInput.addEventListener("input", applyMpMatchesSearchAndSort);
+if($("prevPageMpMatches")) $("prevPageMpMatches").addEventListener("click", () => { if (mpMatchesState.page > 0) { mpMatchesState.page -= 1; renderPaginatedMpMatchesTable(); } });
+if($("nextPageMpMatches")) $("nextPageMpMatches").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(mpMatchesState.filtered.length / PAGE_SIZE)); if (mpMatchesState.page < totalPages - 1) { mpMatchesState.page += 1; renderPaginatedMpMatchesTable(); } });
 
 // -------------------------------------------------------------------------
 // SHEET LOADING — JSONP + timeout
@@ -341,10 +360,29 @@ function parseMainSheet(payload) {
       placedOrders: placedOrders, confirmedOrders: confirmedOrders, deliveredOrders: cellNumber(c[11]),
       placedGmv: placedGmv, deliveredGmv: cellNumber(c[22]), cm3: cellNumber(c[28]),
       acmName: cellText(c[31]) || "Unassigned", confirmedGmv: confirmedGmv,
-      placedPieces: cellNumber(c[CM3_PLACED_PIECES_COL])
+      placedPieces: cellNumber(c[CM3_PLACED_PIECES_COL]),
+      confirmedPieces: cellNumber(c[16]), deliveredPieces: cellNumber(c[17])
     });
   }
   return rows;
+}
+
+// -------------------------------------------------------------------------
+// خريطة Merchant ID -> { acmName, merchantName } مبنية من شيت الـ Main
+// (MAIN_GID) عشان أي سكشن تاني (زي Performance-Matches أو Sales Plan-ACM)
+// يقدر ياخد الـ ACM الصحيح من عمود AF في شيت الـ Main بدل ما يعتمد على
+// عمود ACM الخاص بشيته هو لو كان فاضي/مش موثوق فيه.
+// -------------------------------------------------------------------------
+function buildMerchantInfoMap(mainRows) {
+  const map = new Map();
+  (mainRows || []).forEach(r => {
+    if (!r.merchantId) return;
+    const existing = map.get(r.merchantId) || {};
+    const acmName = (r.acmName && r.acmName !== "Unassigned") ? r.acmName : existing.acmName;
+    const merchantName = r.merchantName || existing.merchantName;
+    map.set(r.merchantId, { acmName: acmName || "Unassigned", merchantName: merchantName || "" });
+  });
+  return map;
 }
 
 function parseTargetsSheet(payload) {
@@ -637,6 +675,7 @@ function updateDashboard(rows) {
   renderOverallAcmTargetsSummary();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
+  if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
@@ -1246,11 +1285,11 @@ function renderCm3AnalystHeaders() {
   const thead = $("analystTableHead"); if(!thead) return;
   let html = "<tr>";
   if(analystState.scope === "merchant") {
-    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name">Merchant Name</th><th data-akey="cr" class="num">CR%</th><th data-akey="dr" class="num">DR%</th><th data-akey="ndr" class="num">NDR%</th><th data-akey="deliveredGmv" class="num">Delivered GMV</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
+    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name">Merchant Name</th><th data-akey="placedPieces" class="num">Total Placed</th><th data-akey="confirmedPieces" class="num">Total Confirmed</th><th data-akey="deliveredPieces" class="num">Total Delivered</th><th data-akey="cr" class="num">CR%</th><th data-akey="dr" class="num">DR%</th><th data-akey="ndr" class="num">NDR%</th><th data-akey="deliveredGmv" class="num">Delivered GMV</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
   } else if(analystState.scope === "category") {
     html += `<th data-akey="index">#</th><th data-akey="category">Category</th><th data-akey="targetCm3" class="num text-dim">Target CM3</th><th data-akey="cm3" class="num">Actual CM3</th><th data-akey="targetCm3PerPiece" class="num text-dim">Target CM3/Pc</th><th data-akey="cm3PerPiece" class="num">Actual CM3/Pc</th><th data-akey="targetCm3Pct" class="num text-dim">Target CM3 %</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">Actual CM3 %</th><th class="center">Status</th>`;
   } else if(analystState.scope === "match") {
-    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name">Merchant Name</th><th data-akey="sku">Product ID</th><th data-akey="skuName" style="max-width:200px; white-space:normal;">Product Name</th><th data-akey="category" class="text-dim">Category</th><th data-akey="placedPieces" class="num">Total Placed</th><th data-akey="confirmed" class="num">Total Confirmed</th><th data-akey="delivered" class="num">Total Delivered</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3PerPiece" class="num">CM3 / Pc</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
+    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name" class="truncate-cell">Merchant Name</th><th data-akey="sku">Product ID</th><th data-akey="skuName" class="truncate-cell">Product Name</th><th data-akey="category" class="text-dim">Category</th><th data-akey="placedPieces" class="num">Total Placed</th><th data-akey="confirmed" class="num">Total Confirmed</th><th data-akey="delivered" class="num">Total Delivered</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3PerPiece" class="num">CM3 / Pc</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
   }
   html += "</tr>";
   thead.innerHTML = html;
@@ -1275,9 +1314,9 @@ function prepareCm3AnalystData(rows) {
     let key = "";
     if (analystState.scope === "merchant") key = r.merchantId; else if (analystState.scope === "category") key = r.category; else if (analystState.scope === "match") key = r.merchantId + "||" + r.sku;
     if (!key || key === "Unassigned") return;
-    if (!map.has(key)) { map.set(key, { id: r.merchantId, name: r.merchantName || r.merchantId, sku: r.sku, skuName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown"), category: r.category, placed: 0, confirmed: 0, delivered: 0, placedPieces: 0, deliveredGmv: 0, cm3: 0 }); }
+    if (!map.has(key)) { map.set(key, { id: r.merchantId, name: r.merchantName || r.merchantId, sku: r.sku, skuName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown"), category: r.category, placed: 0, confirmed: 0, delivered: 0, placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, deliveredGmv: 0, cm3: 0 }); }
     const entry = map.get(key);
-    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedPieces += (r.placedPieces || r.placedOrders); entry.deliveredGmv += r.deliveredGmv; entry.cm3 += r.cm3;
+    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedPieces += (r.placedPieces || r.placedOrders); entry.confirmedPieces += (r.confirmedPieces || r.confirmedOrders); entry.deliveredPieces += (r.deliveredPieces || r.deliveredOrders); entry.deliveredGmv += r.deliveredGmv; entry.cm3 += r.cm3;
     totalGmv += r.deliveredGmv; totalCm3 += r.cm3;
   });
   analystState.data = Array.from(map.values()).map(m => {
@@ -1324,7 +1363,7 @@ function renderPaginatedCm3AnalystTable() {
     let barWidth = Math.min(Math.abs(m.cm3Pct), 100); const tr = document.createElement("tr");
     
     if(analystState.scope === "merchant") {
-      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light">${m.name}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPct(m.cr)}</span></td><td class="num text-dim">${fmtPct(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td><td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light">${m.name}</td><td class="num font-bold">${fmtInt.format(m.placedPieces)}</td><td class="num text-blue">${fmtInt.format(m.confirmedPieces)}</td><td class="num text-green">${fmtInt.format(m.deliveredPieces)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPct(m.cr)}</span></td><td class="num text-dim">${fmtPct(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td><td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
     } else if(analystState.scope === "category") {
       tr.innerHTML = `
         <td class="text-dim">#${start + idx + 1}</td>
@@ -1338,7 +1377,7 @@ function renderPaginatedCm3AnalystTable() {
         <td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>
       `;
     } else if(analystState.scope === "match") {
-      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light">${m.name}</td><td class="font-mono text-dim">${m.sku}</td><td class="text-dim" style="max-width:200px; white-space:normal; line-height: 1.3;">${m.skuName}</td><td class="text-dim">${m.category}</td><td class="num font-bold">${fmtInt.format(m.placedPieces)}</td><td class="num text-blue">${fmtInt.format(m.confirmed)}</td><td class="num text-green">${fmtInt.format(m.delivered)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num font-bold">${fmtMoneyCompact(m.cm3PerPiece)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td><td class="font-mono text-dim">${m.sku}</td><td class="text-dim truncate-cell" title="${m.skuName}">${m.skuName}</td><td class="text-dim">${m.category}</td><td class="num font-bold">${fmtInt.format(m.placedPieces)}</td><td class="num text-blue">${fmtInt.format(m.confirmed)}</td><td class="num text-green">${fmtInt.format(m.delivered)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num font-bold">${fmtMoneyCompact(m.cm3PerPiece)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
     }
     tbody.appendChild(tr);
   });
@@ -1400,12 +1439,13 @@ function prepareMpSalesPlanData() {
     let totalMtdTarget = 0; let totalMtdActual = 0;
 
     const mergedData = state.acmSalesPlanData.map(plan => {
-        let metrics = { confirmed: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0 };
+        let metrics = { confirmed: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0, deliveredGmv: 0 };
 
         perfRows.forEach(r => {
             if (r.productId === plan.singleId && r.tagerId === plan.tagerId) {
                 // ACTUAL CONFIRMED بيتحسب من CONFIRMED_PIECES (عمود Q) مش من CONFIRMED_ORDERS
                 metrics.confirmed += r.confirmedPieces;
+                metrics.deliveredGmv += r.deliveredGmv;
                 const rTime = new Date(r.timestamp).setHours(0,0,0,0);
                 if (rTime >= startThisWeek) metrics.thisWeekConfirmed += r.confirmedPieces;
                 else if (rTime >= startLastWeek && rTime < startThisWeek) metrics.lastWeekConfirmed += r.confirmedPieces;
@@ -1436,8 +1476,11 @@ function prepareMpSalesPlanData() {
         if (mtdActual >= mtdTarget) achievedCount++; else missedCount++;
         totalMtdTarget += mtdTarget; totalMtdActual += mtdActual;
 
+        // Merchant Name بييجي من شيت الـ Main عن طريق الـ Merchant ID (TAGER_ID)
+        const merchantName = ((state.merchantInfoMap || new Map()).get(plan.tagerId) || {}).merchantName || plan.tagerId;
+
         return {
-            ...plan, ...metrics, gap, runRate, dailyTarget, mtdTarget, mtdActual, mtdAchievedPct,
+            ...plan, ...metrics, merchantName, gap, runRate, dailyTarget, mtdTarget, mtdActual, mtdAchievedPct,
             wowDiff, wowPct, wowStatus, wowClass, wowIcon
         };
     });
@@ -1474,7 +1517,9 @@ function applyMpSalesPlanFilterAndSort() {
         data = data.filter(d =>
             d.singleId.toLowerCase().includes(q) ||
             d.singleName.toLowerCase().includes(q) ||
-            d.fullName.toLowerCase().includes(q)
+            d.fullName.toLowerCase().includes(q) ||
+            (d.tagerId && d.tagerId.toLowerCase().includes(q)) ||
+            (d.merchantName && d.merchantName.toLowerCase().includes(q))
         );
     }
 
@@ -1506,10 +1551,13 @@ function renderMpSalesPlanTable(data) {
         tr.innerHTML = `
             <td class="font-mono text-dim">${m.singleId}</td>
             <td class="font-bold" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${m.singleName}">${m.singleName}</td>
+            <td class="font-mono text-dim">${m.tagerId}</td>
+            <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
             <td class="font-bold">${m.fullName}</td>
             <td class="num text-dim font-bold">${Number(m.dailyTarget).toFixed(1)}</td>
             <td class="num text-orange font-bold">${fmtInt.format(Math.round(m.mtdTarget))}</td>
             <td class="num text-blue font-bold">${fmtInt.format(m.mtdActual)}</td>
+            <td class="num text-green font-bold">${fmtMoneyCompact(m.deliveredGmv)}</td>
             <td class="num"><span class="badge-outline ${mtdColor}">${fmtPct(m.mtdAchievedPct)}</span></td>
             <td class="num text-red font-bold">${fmtInt.format(m.gap > 0 ? Math.round(m.gap) : 0)}</td>
             <td class="num text-blue">${fmtInt.format(Math.round(m.runRate))}</td>
@@ -1518,6 +1566,119 @@ function renderMpSalesPlanTable(data) {
         tbody.appendChild(tr);
     });
 }
+// -------------------------------------------------------------------------
+// PERFORMANCE-MATCHES (Marketplace) — بيبني صف لكل Match (ميرشنت x برودكت) من
+// شيت الـ Main (MAIN_GID) زي أي سكشن تاني في الداشبورد، وبيحترم فلتر الشهر/الـ
+// ACM اللي فوق الصفحة. شيت الـ Sales Plan Performance (الـ "Single") مستخدم
+// فقط في سكشن Sales Plan-ACM ومش بيتلمس هنا خالص.
+// CM3/CM3% بياخدوا نفس الـ CM3_LAG_DAYS المطبقة على أي حساب مصدره MAIN_GID.
+// باقي الأرقام (Total Placed/Confirmed/Delivered, CR%, DR%, Delivered GMV,
+// Placed ASP, CONTR%) بتتحسب من كل البيانات المتاحة من غير أي Lag.
+// -------------------------------------------------------------------------
+function prepareMpMatchesData() {
+  const mainRowsAll = state.allParsedRows || [];
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const mainRows = mainRowsAll.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+
+  const cm3Cutoff = getCm3LagCutoffTimestamp(mainRows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع CM3_LAG_DAYS أيام
+
+  const map = new Map();
+  const productConfirmedTotals = new Map();
+
+  mainRows.forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    const key = r.merchantId + "||" + r.sku;
+    if (!map.has(key)) {
+      map.set(key, {
+        productId: r.sku, productName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown") || "Unknown", merchantId: r.merchantId, merchantName: r.merchantName || r.merchantId, acm: r.acmName || "Unassigned",
+        totalPlaced: 0, totalConfirmed: 0, totalDelivered: 0, placedGmv: 0, deliveredGmv: 0,
+        crConfirmed: 0, crPlaced: 0, drDelivered: 0, drConfirmed: 0, cm3: 0, cm3Gmv: 0
+      });
+    }
+    const e = map.get(key);
+    e.totalPlaced += r.placedPieces; e.totalConfirmed += r.confirmedPieces; e.totalDelivered += r.deliveredPieces;
+    e.placedGmv += r.placedGmv; e.deliveredGmv += r.deliveredGmv;
+    e.crConfirmed += r.confirmedPieces; e.crPlaced += r.placedPieces;
+    e.drDelivered += r.deliveredPieces; e.drConfirmed += r.confirmedPieces;
+    if (isCm3RowEligible(r, cm3Cutoff)) { e.cm3 += r.cm3; e.cm3Gmv += r.deliveredGmv; }
+    productConfirmedTotals.set(r.sku, (productConfirmedTotals.get(r.sku) || 0) + r.confirmedPieces);
+  });
+
+  let totalGmv = 0, totalCm3 = 0;
+  mpMatchesState.data = Array.from(map.values()).map(e => {
+    const crPct = e.crPlaced ? (e.crConfirmed / e.crPlaced) * 100 : 0;
+    const drPct = e.drConfirmed ? (e.drDelivered / e.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const productTotalConfirmed = productConfirmedTotals.get(e.productId) || 0;
+    const contrPct = productTotalConfirmed ? (e.totalConfirmed / productTotalConfirmed) * 100 : 0;
+    const placedAsp = e.totalPlaced ? (e.placedGmv / e.totalPlaced) : 0;
+    const cm3PerPiece = e.totalDelivered ? (e.cm3 / e.totalDelivered) : 0;
+    const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
+    totalGmv += e.deliveredGmv; totalCm3 += e.cm3;
+    return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, cm3PerPiece, cm3Pct };
+  });
+
+  if($("mpMatchesTotal")) $("mpMatchesTotal").textContent = fmtInt.format(mpMatchesState.data.length);
+  if($("mpMatchesTotalGmv")) $("mpMatchesTotalGmv").textContent = fmtMoneyCompact(totalGmv);
+  if($("mpMatchesTotalCm3")) $("mpMatchesTotalCm3").textContent = fmtMoneyCompact(totalCm3);
+
+  applyMpMatchesSearchAndSort();
+}
+
+function sortMpMatches(key) {
+  if (mpMatchesState.sortKey === key) { mpMatchesState.sortDir = mpMatchesState.sortDir === "asc" ? "desc" : "asc"; } else { mpMatchesState.sortKey = key; mpMatchesState.sortDir = "desc"; }
+  applyMpMatchesSearchAndSort();
+}
+
+function applyMpMatchesSearchAndSort() {
+  const term = $("searchMpMatchesInput") ? $("searchMpMatchesInput").value.trim().toLowerCase() : "";
+  mpMatchesState.filtered = mpMatchesState.data.filter(m => {
+    if (!term) return true;
+    return (m.productName && m.productName.toLowerCase().includes(term)) || (m.productId && String(m.productId).toLowerCase().includes(term)) ||
+      (m.merchantName && m.merchantName.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
+      (m.acm && m.acm.toLowerCase().includes(term));
+  });
+  const { sortKey, sortDir } = mpMatchesState; const dir = sortDir === "asc" ? 1 : -1;
+  mpMatchesState.filtered.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  mpMatchesState.page = 0;
+  renderPaginatedMpMatchesTable();
+}
+
+function renderPaginatedMpMatchesTable() {
+  const tbody = $("mpMatchesTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = mpMatchesState.page * PAGE_SIZE;
+  const pageRows = mpMatchesState.filtered.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.productId}</td>
+      <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
+      <td class="font-mono text-dim">${m.merchantId}</td>
+      <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
+      <td class="text-dim truncate-cell" style="max-width:120px;" title="${m.acm}">${m.acm}</td>
+      <td class="num font-bold">${fmtInt.format(m.totalPlaced)}</td>
+      <td class="num text-blue">${fmtInt.format(m.totalConfirmed)}</td>
+      <td class="num text-green">${fmtInt.format(m.totalDelivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPct(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPct(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPct(m.ndrPct)}</span></td>
+      <td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td>
+      <td class="num">${fmtPct(m.contrPct)}</td>
+      <td class="num text-dim">${fmtMoneyCompact(m.placedAsp)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td>
+      <td class="num font-bold">${fmtMoneyCompact(m.cm3PerPiece)}</td>
+      <td class="num text-purple">${fmtPct(m.cm3Pct)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(mpMatchesState.filtered.length / PAGE_SIZE));
+  if ($("rowCountMpMatches")) $("rowCountMpMatches").textContent = `${fmtInt.format(mpMatchesState.filtered.length)} Matches`;
+  if ($("pageIndicatorMpMatches")) $("pageIndicatorMpMatches").textContent = `Page ${mpMatchesState.page + 1} of ${totalPages}`;
+  if ($("prevPageMpMatches")) $("prevPageMpMatches").disabled = mpMatchesState.page === 0;
+  if ($("nextPageMpMatches")) $("nextPageMpMatches").disabled = mpMatchesState.page >= totalPages - 1;
+}
+
 // Fetches all 7 sheets (main sheet is mandatory, the rest are best-effort)
 // and returns a plain snapshot object — does NOT touch global state, so it
 // is safe to call in the background while old data is still on screen.
@@ -1552,6 +1713,7 @@ async function fetchAllSheetsSnapshot() {
 
 function applySnapshotToState(snapshot) {
   state.allParsedRows = snapshot.allParsedRows;
+  state.merchantInfoMap = buildMerchantInfoMap(snapshot.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
   state.merchantTargets = snapshot.merchantTargets;
   state.merchantSegmentsMap = snapshot.merchantSegmentsMap;
   state.acmTargets = snapshot.acmTargets;

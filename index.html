@@ -46,9 +46,9 @@
             <a class="nav-item-sub" id="navInventory">Inventory</a>
             <a class="nav-item-sub" id="navCm3Target">CM3 Target</a>
             <a class="nav-item-sub" id="navCm3Analyst">CM3 Analyst</a>
+            <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
           </div>
         </div>
-        <a class="nav-item"><span class="nav-icon"></span>SalaryHub<span class="nav-caret">▼</span></a>
         <a class="nav-item"><span class="nav-icon"></span>Admin Panel<span class="nav-caret">▼</span></a>
       </nav>
       <div class="sidebar-footer">
@@ -688,12 +688,15 @@
                 <table class="data-table" id="mpSalesPlanTable">
                   <thead>
                     <tr>
-                      <th onclick="sortMpSalesPlan('singleId')" style="cursor:pointer;">SKU_ID ⇅</th>
-                      <th onclick="sortMpSalesPlan('singleName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product Name ⇅</th>
-                      <th onclick="sortMpSalesPlan('fullName')" style="cursor:pointer;">ACM Name ⇅</th>
+                      <th onclick="sortMpSalesPlan('singleId')" style="cursor:pointer;">SKU ID ⇅</th>
+                      <th onclick="sortMpSalesPlan('singleName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">SKU NAME ⇅</th>
+                      <th onclick="sortMpSalesPlan('tagerId')" style="cursor:pointer;">Merchant ID ⇅</th>
+                      <th onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;">Merchant Name ⇅</th>
+                      <th onclick="sortMpSalesPlan('fullName')" style="cursor:pointer;">ACM ⇅</th>
                       <th onclick="sortMpSalesPlan('dailyTarget')" class="num text-dim" style="cursor:pointer;">Daily Target ⇅</th>
                       <th onclick="sortMpSalesPlan('mtdTarget')" class="num text-orange" style="cursor:pointer;">Target MTD ⇅</th>
                       <th onclick="sortMpSalesPlan('mtdActual')" class="num text-blue" style="cursor:pointer;">Actual Confirmed ⇅</th>
+                      <th onclick="sortMpSalesPlan('deliveredGmv')" class="num text-green" style="cursor:pointer;">Delivered GMV ⇅</th>
                       <th onclick="sortMpSalesPlan('mtdAchievedPct')" class="num text-purple" style="cursor:pointer;">% of MTD ⇅</th>
                       <th onclick="sortMpSalesPlan('gap')" class="num text-red" style="cursor:pointer;">MTD Gap ⇅</th>
                       <th onclick="sortMpSalesPlan('runRate')" class="num" style="cursor:pointer;">Run Rate ⇅</th>
@@ -702,6 +705,74 @@
                   </thead>
                   <tbody id="mpSalesPlanTableBody"></tbody>
                 </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- MARKETPLACE PERFORMANCE MATCHES SECTION -->
+        <div id="viewMpMatches" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Matches <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpMatchesTotal">0</div>
+                <div class="metric-sub text-dim">Merchant x Product combinations</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Total Delivered GMV <span class="icon-dollar"></span></div>
+                <div class="metric-value text-green" id="mpMatchesTotalGmv">EGP 0</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total CM3 <span class="icon-dollar"></span></div>
+                <div class="metric-value text-blue" id="mpMatchesTotalCm3">EGP 0</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Performance-Matches</h2>
+                  <p>All Merchant x Product matches — from Main sheet. CM3 &amp; CM3% (4D lag), rest unlagged</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMpMatchesInput" type="search" placeholder="Search Product, Merchant, or ACM..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="mpMatchesTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortMpMatches('productId')" class="font-mono" style="cursor:pointer;">Product ID ⇅</th>
+                      <th onclick="sortMpMatches('productName')" class="truncate-cell" style="cursor:pointer;">Product Name ⇅</th>
+                      <th onclick="sortMpMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID ⇅</th>
+                      <th onclick="sortMpMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name ⇅</th>
+                      <th onclick="sortMpMatches('acm')" style="cursor:pointer; max-width:120px;">ACM ⇅</th>
+                      <th onclick="sortMpMatches('totalPlaced')" class="num" style="cursor:pointer;">Total Placed ⇅</th>
+                      <th onclick="sortMpMatches('totalConfirmed')" class="num text-blue" style="cursor:pointer;">Total Confirmed ⇅</th>
+                      <th onclick="sortMpMatches('totalDelivered')" class="num text-green" style="cursor:pointer;">Total Delivered ⇅</th>
+                      <th onclick="sortMpMatches('crPct')" class="num" style="cursor:pointer;">CR% ⇅</th>
+                      <th onclick="sortMpMatches('drPct')" class="num" style="cursor:pointer;">DR% ⇅</th>
+                      <th onclick="sortMpMatches('ndrPct')" class="num" style="cursor:pointer;">NDR% ⇅</th>
+                      <th onclick="sortMpMatches('deliveredGmv')" class="num" style="cursor:pointer;">Delivered GMV ⇅</th>
+                      <th onclick="sortMpMatches('contrPct')" class="num" style="cursor:pointer;">CONTR% ⇅</th>
+                      <th onclick="sortMpMatches('placedAsp')" class="num text-dim" style="cursor:pointer;">Placed ASP ⇅</th>
+                      <th onclick="sortMpMatches('cm3')" class="num" style="cursor:pointer;">CM3 ⇅</th>
+                      <th onclick="sortMpMatches('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Per Piece ⇅</th>
+                      <th onclick="sortMpMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;">CM3% ⇅</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mpMatchesTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMpMatches">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPageMpMatches" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMpMatches">Page 1 of 1</span>
+                  <button id="nextPageMpMatches" class="btn btn-outline small">Next</button>
+                </div>
               </div>
             </div>
           </section>
