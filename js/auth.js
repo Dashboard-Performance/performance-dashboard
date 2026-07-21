@@ -205,7 +205,7 @@
 
         <form id="authSignupForm" class="auth-form" autocomplete="off">
           <label>Full Name</label>
-          <input type="text" id="authSignupName" placeholder="e.g. Ahmed Mostafa" required />
+          <input type="text" id="authSignupName" placeholder="e.g. Name" required />
           <label>Email</label>
           <input type="email" id="authSignupEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" required />
           <label>Role</label>
