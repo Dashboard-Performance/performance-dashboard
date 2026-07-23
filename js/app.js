@@ -24,6 +24,24 @@ const PRODUCTS_GID = "1779314157";
 const CAT_TARGETS_GID = "1656655269";
 const ACM_SALES_PLAN_GID = "892918900"; // شيت التارجت اليومي الخاص بالـ Sales Plan (SINGLE_ID / TAGER_ID / Daily Target)
 const SALES_PLAN_PERF_GID = "1857010960"; // شيت البرفورمانس الخاص بالـ Sales Plan - معمول على Single SKU Demand (نفس مستوى البلان)
+const NEW_SEGMENTATION_GID = "683046998"; // شيت "New segmentation #6864" الخام (الداتا اللي بتتحسب منها بنية الـ Segmentation Panel)
+const INBOUND_GID = "565878313";
+// المصادر التلاتة بتاعت البانل ده بقوا بيتقروا من نفس السبريدشيت (SHEET_ID) بدل
+// ما كانوا بيتجابوا من روابط Metabase العامة (اللينكات دي كانت بتقف/متسحبش أحياناً).
+// الشيتات دي لازم تكون جوه نفس السبريدشيت ومشاركة "Anyone with the link – Viewer".
+const BEGIN_INV_GID = "22283311";        // شيت "EGY Beginning Inventory #4132"
+const PRODUCTS_INFO_GID = "531154071";   // شيت "Porducts_infor #4259"
+const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate needed data #2941"
+// -------------------------------------------------------------------------
+// SEGMENTATION PANEL (Admin Panel) — نفس الحسبة اللي في شيت EGY بالظبط
+// (Target/Actual/Achievement% لشهر يوليو)، بس بتتقرأ لايف من شيت
+// "New segmentation #6864" (NEW_SEGMENTATION_GID) بدل ما تبقى أرقام ثابتة.
+// -------------------------------------------------------------------------
+const ADMIN_PANEL_PASSWORD = "admin1";
+const SEG_PANEL_COUNTRY = "EGY";
+const SEG_PANEL_MONTH = new Date(2026, 6, 1);       // يوليو 2026 — الشهر اللي بنحسب أداءه
+const SEG_PANEL_PREV_MONTH = new Date(2026, 5, 1);  // يونيو 2026 — "الشهر اللي فات" (EOMONTH(month,-2)+1 في شيت الإكسيل)
+const SEG_PANEL_APRIL_REF = new Date(2026, 3, 1);   // أبريل 2026 — مرجع ثابت بيستخدمه شيت الإكسيل الأصلي (خلية $I$78) لحساب % من إجمالي الميرشانتس بتاعت الـ LVM
 
 let PAGE_SIZE = 10;
 const CM3_PLACED_PIECES_COL = 15;
@@ -57,7 +75,7 @@ const state = {
   mpSalesPlanDataPrepared: [],
   mpSalesPlanSortKey: "mtdActual",
   mpSalesPlanSortDir: "desc",
-  allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {},
+  allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
   acmSalesPlanData: [],
   salesPlanPerfRows: [], // صفوف شيت البرفورمانس الجديد الخاص بالـ Sales Plan (SALES_PLAN_PERF_GID)
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
@@ -65,7 +83,20 @@ const state = {
   acmTableData: [], filteredAcmData: [], sortKey: "finalScorePct", sortDir: "desc", page: 0,
   merchantTableData: [], filteredMerchantData: [], sortKeyMerchant: "deliveredGmv", sortDirMerchant: "desc", pageMerchant: 0,
   filteredSegData: [], sortKeySeg: "rrConfirmed", sortDirSeg: "desc", pageSeg: 0,
-  inventoryTableData: [], filteredInventoryData: [], sortKeyInventory: "conf3d", sortDirInventory: "desc", pageInventory: 0
+  inventoryTableData: [], filteredInventoryData: [], sortKeyInventory: "conf3d", sortDirInventory: "desc", pageInventory: 0,
+  inboundRows: [],
+  metabaseProductsInfo: [],
+  metabaseBeginningInventory: [],
+  metabaseSellthroughNeeded: [],
+  sellthroughDataPrepared: [],
+  filteredSellthroughData: [],
+  sellthroughSortKey: "stRate",
+  sellthroughSortDir: "desc",
+  sellthroughPage: 0,
+  // فلاتر شهور لوحة الـ Sellthrough: begInv (شهر المخزون الافتتاحي/المشتريات),
+  // startSale/endSale (مدى شهور المبيعات) — بالظبط زي Summary!D1 و H1/H2 في الشيت الأصلي.
+  stFilters: { begInv: null, startSale: null, endSale: null },
+  sellthroughMonthOptions: []
 };
 const analystState = {
   scope: "merchant", data: [], filtered: [], sortKey: "cm3Pct", sortDir: "desc", page: 0, wired: false
@@ -105,6 +136,11 @@ const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navMpMatches = $("navMpMatches");
+const navAdminToggle = $("navAdminToggle");
+const adminSubmenu = $("adminSubmenu");
+const navAdminCaret = $("navAdminCaret");
+const navSegmentationPanel = $("navSegmentationPanel");
+const navSellthroughPanel = $("navSellthroughPanel");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
@@ -124,6 +160,12 @@ if (navCommercialToggle) {
     if(navCommercialCaret) navCommercialCaret.classList.toggle("rotate");
   });
 }
+if (navAdminToggle) {
+  navAdminToggle.addEventListener("click", () => {
+    adminSubmenu.classList.toggle("hidden");
+    if(navAdminCaret) navAdminCaret.classList.toggle("rotate");
+  });
+}
 
 function switchView(viewName) {
   document.querySelectorAll('.view-section').forEach(el => { el.classList.remove('active-view'); el.classList.add('hidden'); });
@@ -135,7 +177,9 @@ function switchView(viewName) {
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
-  
+  if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
+  if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
+
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); } 
   else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); } 
@@ -145,7 +189,13 @@ function switchView(viewName) {
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
-  
+  else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); renderSegmentationPanel(); }
+  else if (viewName === "sellthrough") {      
+      activeSection = $("viewSellthroughPanel");      
+      if(navSellthroughPanel) navSellthroughPanel.classList.add("active");            
+      simulateSellthroughProgress(); 
+  }
+
   if (activeSection) {
     activeSection.classList.remove("hidden");
     setTimeout(() => activeSection.classList.add("active-view"), 10);
@@ -160,6 +210,157 @@ if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Tar
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
+if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
+if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
+
+// -------------------------------------------------------------------------
+// ADMIN PANEL — بوابة الباسورد (admin1). لو اتفتحت مرة في نفس الجلسة (tab)
+// مبيطلبش الباسورد تاني لحد ما التاب يتقفل (sessionStorage).
+// -------------------------------------------------------------------------
+const ADMIN_UNLOCK_KEY = "adminPanelUnlocked";
+function isAdminUnlocked() {
+  try { return sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1"; } catch (e) { return false; }
+}
+function setAdminUnlocked() {
+  try { sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1"); } catch (e) { /* ignore */ }
+}
+let pendingAdminView = null;
+function requestAdminAccess(viewName) {
+  if (isAdminUnlocked()) { switchView(viewName); return; }
+  pendingAdminView = viewName;
+  const modal = $("adminPasswordModal");
+  const input = $("adminPasswordInput");
+  const errorEl = $("adminPasswordError");
+  if (errorEl) errorEl.classList.add("hidden");
+  if (input) { input.value = ""; }
+  if (modal) { modal.classList.remove("hidden"); setTimeout(() => input && input.focus(), 50); }
+}
+function closeAdminPasswordModal() {
+  const modal = $("adminPasswordModal");
+  if (modal) modal.classList.add("hidden");
+  pendingAdminView = null;
+}
+function submitAdminPassword() {
+  const input = $("adminPasswordInput");
+  const errorEl = $("adminPasswordError");
+  const value = input ? input.value : "";
+  if (value === ADMIN_PANEL_PASSWORD) {
+    setAdminUnlocked();
+    const modal = $("adminPasswordModal");
+    if (modal) modal.classList.add("hidden");
+    const target = pendingAdminView || "segmentation";
+    pendingAdminView = null;
+    switchView(target);
+  } else {
+    if (errorEl) errorEl.classList.remove("hidden");
+    if (input) { input.value = ""; input.focus(); }
+  }
+}
+if ($("adminPasswordSubmit")) $("adminPasswordSubmit").addEventListener("click", submitAdminPassword);
+if ($("adminPasswordCancel")) $("adminPasswordCancel").addEventListener("click", closeAdminPasswordModal);
+if ($("adminPasswordInput")) $("adminPasswordInput").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAdminPassword(); });
+
+// -------------------------------------------------------------------------
+// SEGMENTATION PANEL — render (الجدول + كروت الـ KPI بتاعة يوليو)
+// -------------------------------------------------------------------------
+function segAchColor(ratio) {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "text-dim";
+  if (ratio >= 1) return "text-green";
+  if (ratio >= 0.8) return "text-orange";
+  return "text-red";
+}
+function fmtSegValue(unit, value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  if (unit === "money") return fmtMoneyCompact(value);
+  if (unit === "percent") return fmtPct(value * 100);
+  return fmtInt.format(Math.round(value));
+}
+function fmtSegAch(ach) {
+  if (!ach || ach.kind === "dash") return `<span class="text-dim">-</span>`;
+  if (ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
+  return `<span class="font-bold ${segAchColor(ach.ratio)}">${fmtPct(ach.ratio * 100)}</span>`;
+}
+function renderSegmentationPanel() {
+  const grid = $("segSectionsGrid");
+  const totalWrap = $("segTotalSectionWrap");
+  if (!grid || !totalWrap) return;
+
+  if (!state.newSegRows || state.newSegRows.length === 0) {
+    const reason = state.newSegLoadError ? ` (${state.newSegLoadError})` : "";
+    grid.innerHTML = `<div class="text-dim" style="padding:20px;">No data yet — could not load "New segmentation #6864" (GID ${NEW_SEGMENTATION_GID})${reason}. Check that this GID belongs to the same spreadsheet (${SHEET_ID}) and that the sheet is shared as "Anyone with the link – Viewer".</div>`;
+    totalWrap.innerHTML = "";
+    return;
+  }
+  const rows = computeSegmentationPerformance();
+
+  // كروت الـ KPI الإجمالية (Total merchants / confirmed orders / GMV / delivered GMV)
+  const kpiIds = ["r113", "r114", "r115", "r118"];
+  const kpiGrid = $("segKpiGrid");
+  if (kpiGrid) {
+    kpiGrid.innerHTML = kpiIds.map((id) => {
+      const r = rows.find(x => x.id === id);
+      if (!r) return "";
+      return `
+        <div class="metric-card hover-glow">
+          <div class="metric-title">${r.label} <span class="text-dim" style="font-weight:400;font-size:11px;">July</span></div>
+          <div class="metric-value">${fmtSegValue(r.unit, r.actual)}</div>
+          <div class="metric-sub text-dim">Target: ${fmtSegValue(r.unit, r.target)} · ${fmtSegAch(r.ach)}</div>
+        </div>`;
+    }).join("");
+  }
+
+  function rowsHtml(list) {
+    return list.map((r) => {
+      const labelClass = r.top ? "font-bold text-light" : (r.sub ? "text-dim" : "");
+      const indent = r.sub ? "padding-left:22px;" : "";
+      return `
+        <tr>
+          <td class="${labelClass}" style="${indent}">${r.label}</td>
+          <td class="num text-dim">${fmtSegValue(r.unit, r.target)}</td>
+          <td class="num font-bold">${fmtSegValue(r.unit, r.actual)}</td>
+          <td class="num">${fmtSegAch(r.ach)}</td>
+        </tr>`;
+    }).join("");
+  }
+
+  function sectionCard(sectionName, list) {
+    return `
+      <div class="panel table-panel hover-glow seg-section-card">
+        <div class="panel-head-modern">
+          <div class="panel-title-wrapper border-purple"><h3>${sectionName}</h3></div>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr><th>Metric</th><th class="num">Target</th><th class="num">Actual</th><th class="num">Ach%</th></tr>
+            </thead>
+            <tbody>${rowsHtml(list)}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  // 4 سكاشن الشرائح، كل واحد لوحده في كارت صغير — 2 فوق و 2 تحت
+  const sectionNames = ["HVM (Champions)", "Loyal MVM", "Potential Loyal MVM", "LVM"];
+  grid.innerHTML = sectionNames.map((name) => sectionCard(name, rows.filter(r => r.section === name))).join("");
+
+  // سكشن الـ Total لوحده تحت الكل، عرض كامل
+  const totalRows = rows.filter(r => r.section === "Total");
+  totalWrap.innerHTML = `
+    <div class="panel table-panel hover-glow seg-total-card">
+      <div class="panel-head-modern">
+        <div class="panel-title-wrapper border-purple"><h3>Total</h3></div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr><th>Metric</th><th class="num">July TARGET</th><th class="num">Actuals</th><th class="num">Achievement%</th></tr>
+          </thead>
+          <tbody>${rowsHtml(totalRows)}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
 
 const searchMpSalesPlanInput = $("searchMpSalesPlanInput");
 if (searchMpSalesPlanInput) searchMpSalesPlanInput.addEventListener("input", applyMpSalesPlanFilterAndSort);
@@ -591,6 +792,166 @@ function parseSalesPlanPerformanceSheet(payload) {
   return rows;
 }
 
+// -------------------------------------------------------------------------
+// شيت "New segmentation #6864" الخام (NEW_SEGMENTATION_GID). أعمدته (0-based):
+// 0 COUNTRY, 1 MONTH, 2 SEGMENT (HVM/MVM/LVM), 3 SUB_SEGMENT (Champions/Loyal/
+// Potential Loyal/Low Value/Occasional/Promising), 4 STATUS (Retained/Churned
+// from.../Demoted from.../promoted from.../Re-activated/New merchant),
+// 5 FINAL_STATUS (New merchant/Re-activated/Retained/Promoted/Churned/Demoted),
+// 6 ORDER_PER_MONTH, 7 CNF_GMV_PER_MONTH, 8 DLV_ORDER_PER_MONTH,
+// 9 DLV_GMV_PER_MONTH, 10 COUNT_OF_MERCHANTS.
+// -------------------------------------------------------------------------
+function parseNewSegmentationSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const country = cellText(c[0]).trim();
+    if (!country || country === "COUNTRY") continue; // تخطي صف العناوين
+    const dateStr = cellText(c[1]).trim();
+    let monthDate = null;
+    const isoMatch = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); // "2026-01-01" نص عادي
+    if (isoMatch) {
+      monthDate = new Date(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10) - 1, 1);
+    } else {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) monthDate = new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    rows.push({
+      country: country,
+      month: monthDate,
+      segment: cellText(c[2]).trim(),
+      subSegment: cellText(c[3]).trim(),
+      status: cellText(c[4]).trim(),
+      finalStatus: cellText(c[5]).trim(),
+      orders: cellNumber(c[6]),
+      cnfGmv: cellNumber(c[7]),
+      dlvOrders: cellNumber(c[8]),
+      dlvGmv: cellNumber(c[9]),
+      count: cellNumber(c[10])
+    });
+  }
+  console.info(`[Segmentation Panel] Loaded ${rows.length} rows from GID ${NEW_SEGMENTATION_GID}. Countries found:`, [...new Set(rows.map(r => r.country))]);
+  return rows;
+}
+
+// شيت "Inbound" (GID 565878313). ترتيب الأعمدة (0-based) زي الشيت الأصلي بالظبط:
+// 0 Date (تاريخ الاستلام), 1 Odoo_NO, 2 SKU, 3 RCV_QTY, 4 Des (اسم المنتج),
+// 5 Category, 6 Receiving Month (أول يوم في شهر الاستلام),
+// 7 First buy month (أقدم Receiving Month ظهر فيه الـ SKU ده).
+function parseInboundSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const sku = cellText(c[2]);
+    if (!sku || sku === "SKU") continue; // تخطي صف العناوين لو موجود
+
+    const rcvDateText = cellText(c[0]);
+    const rcvDate = new Date(rcvDateText);
+
+    rows.push({
+      sku,
+      name: cellText(c[4]),
+      cat: cellText(c[5]),
+      rcvDateText,
+      rcvTs: isNaN(rcvDate.getTime()) ? 0 : rcvDate.getTime(),
+      rcvQty: cellNumber(c[3]),
+      receivingMonthKey: stMonthKeyFromValue(cellText(c[6])),
+      firstBuyMonthKey: stMonthKeyFromValue(cellText(c[7]))
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
+// شيت "EGY Beginning Inventory #4132" (BEGIN_INV_GID)
+// أعمدة بالترتيب: PRODUCT_ID | QTY | MONTH | PRODUCT_NAME | CATEGORY_L1
+// -------------------------------------------------------------------------
+function parseBeginningInventorySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]);
+    if (!productId || productId === "PRODUCT_ID") continue;
+    rows.push({
+      PRODUCT_ID: productId,
+      QTY: cellNumber(c[1]),
+      MONTH: cellText(c[2]),
+      PRODUCT_NAME: cellText(c[3]),
+      CATEGORY_L1: cellText(c[4])
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
+// شيت "Porducts_infor #4259" (PRODUCTS_INFO_GID)
+// أعمدة بالترتيب: COUNTRY | PRODUCT_ID | BUNDLE_NAME | CATEGORY_L1 | CATEGORY_L2 |
+//                 CATEGORY_L3 | PRICE | PROFIT | WAVG | PPM | IS_BUNDLE | QTY | IMAGE
+// بيتفلتر على COUNTRY = "EGY" بس (زي باقي البانل).
+// -------------------------------------------------------------------------
+function parseProductsInfoSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const country = cellText(c[0]);
+    if (!country || country === "COUNTRY") continue;
+    if (country.trim().toUpperCase() !== "EGY") continue;
+    const productId = cellText(c[1]);
+    if (!productId) continue;
+    rows.push({
+      COUNTRY: country,
+      PRODUCT_ID: productId,
+      BUNDLE_NAME: cellText(c[2]),
+      CATEGORY_L1: cellText(c[3]),
+      CATEGORY_L2: cellText(c[4]),
+      CATEGORY_L3: cellText(c[5]),
+      PRICE: cellNumber(c[6]),
+      PROFIT: cellNumber(c[7]),
+      WAVG: cellNumber(c[8]),
+      PPM: cellNumber(c[9]),
+      IS_BUNDLE: cellText(c[10]),
+      QTY: cellNumber(c[11]),
+      IMAGE: cellText(c[12])
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
+// شيت "EGY Sell-through rate needed data #2941" (SELLTHROUGH_NEEDED_GID)
+// أعمدة بالترتيب: PRODUCT_ID | PRODUCT_NAME | CATEGORY_L1 | PLC_QTY | CNF_QTY |
+//                 DLV_QTY | RTO_QTY | MONTH
+// -------------------------------------------------------------------------
+function parseSellthroughNeededSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]);
+    if (!productId || productId === "PRODUCT_ID") continue;
+    rows.push({
+      PRODUCT_ID: productId,
+      PRODUCT_NAME: cellText(c[1]),
+      CATEGORY_L1: cellText(c[2]),
+      PLC_QTY: cellNumber(c[3]),
+      CNF_QTY: cellNumber(c[4]),
+      DLV_QTY: cellNumber(c[5]),
+      RTO_QTY: cellNumber(c[6]),
+      MONTH: cellText(c[7])
+    });
+  }
+  return rows;
+}
+
 function getSegmentLogic(orders) {
   if (orders === 0) return "In active";
   if (orders < 5) return "Low Value";
@@ -877,6 +1238,8 @@ function renderPaginatedAcmTable() {
       <td class="num"><span class="badge-outline ${m.ndr >= m.targetNdr && m.targetNdr > 0 ? 'green' : 'red'}">${fmtPct(m.ndr)}</span></td>
       <td class="num text-dim">${m.targetCm3 > 0 ? m.targetCm3 + '%' : '-'}</td>
       <td class="num"><span class="badge-outline ${m.cm3Pct >= m.targetCm3 && m.targetCm3 > 0 ? 'green' : 'red'}">${fmtPct(m.cm3Pct)}</span></td>
+      <td class="num text-dim font-bold">${m.targetRetention > 0 ? fmtInt.format(m.targetRetention) : '-'}</td>
+      <td class="num"><span class="badge-outline ${m.actualRetention >= m.targetRetention && m.targetRetention > 0 ? 'green' : 'red'}">${fmtInt.format(m.actualRetention)}</span></td>
       <td class="num text-dim">${fmtInt.format(m.placed)}</td>
       <td class="num text-blue font-bold">${fmtInt.format(m.confirmed)}</td>
       <td class="num text-dim">${fmtInt.format(m.delivered)}</td>
@@ -1626,6 +1989,569 @@ function prepareMpMatchesData() {
   applyMpMatchesSearchAndSort();
 }
 
+// -------------------------------------------------------------------------
+// SELLTHROUGH PANEL — نفس حسبة شيت "Copy of New sellthrough & Inbound" بالظبط.
+// ============================================================================
+// المصادر الخام (زي ما هي في شيت الإكسل الأصلي):
+//   1) metabaseSellthroughNeeded  <- شيت "EGY Sell-through rate needed da"
+//      أعمدة: PRODUCT_ID, PRODUCT_NAME, CATEGORY_L1, PLC_QTY, CNF_QTY,
+//              DLV_QTY, RTO_QTY, MONTH   (صف واحد لكل SKU لكل شهر)
+//   2) metabaseBeginningInventory <- شيت "EGY Beginning Inventory #4132"
+//      أعمدة: PRODUCT_ID, QTY, MONTH, PRODUCT_NAME, CATEGORY_L1
+//   3) metabaseProductsInfo       <- شيت "Porducts_infor #4259"
+//      أعمدة: PRODUCT_ID, BUNDLE_NAME, ..., CATEGORY_L1, ...
+//   4) inboundRows                <- شيت "Inbound" (GID 565878313)
+//      أعمدة: Date, Odoo_NO, SKU, RCV_QTY, Des, Category,
+//              Receiving Month, First buy month
+//
+// المعادلات (زي أعمدة D..Q في "Copy of New sellthrough" بالظبط):
+//   Beginning_Inventory (G) = SUMIFS(QTY WHERE PRODUCT_ID=sku, MONTH = begInvMonth)
+//   CNF_QTY / DLV_QTY (E/F) = SUM(.. WHERE MONTH بين Start..End Sale Month)
+//   BEGINNING_SALES (H)      = MIN(DLV_QTY, Beginning_Inventory)
+//   Remaining from beginning (I) = DLV_QTY - BEGINNING_SALES
+//   RTOS (J)                 = SUM(RTO_QTY WHERE MONTH = begInvMonth)
+//   RETURN_SALES (K)         = MIN(I, RTOS)
+//   Remaining from purchase sales (L) = DLV_QTY - (BEGINNING_SALES + RETURN_SALES)
+//   TOTAL_PURCHASES (M)       = SUM(RCV_QTY WHERE Receiving Month = begInvMonth)
+//   PURCHASES_SALES (N)       = MIN(L, TOTAL_PURCHASES)
+//   SELLTHROUGH_RATE (O)      = DLV_QTY / (Beginning_Inventory + TOTAL_PURCHASES + RTOS)
+//   SOLD_FROM_INBOUND (P)     = PURCHASES_SALES / TOTAL_PURCHASES
+//   First buy? (Q)            = (First buy month للـ SKU في Inbound) == begInvMonth
+//   Last receiving date (D)   = أحدث تاريخ استلام (Inbound) للـ SKU (كل الأزمنة)
+//   مجموعة الـ SKU الأساسية = اتحاد SKUs الموجودة في الثلاث مصادر عند begInvMonth
+//     بالظبط زي عمود A في الشيت الأصلي.
+// ============================================================================
+
+// شهر بصيغة "July 2026" — بنفس أسلوب الفلاتر التانية في الداشبورد (populateFilters).
+function stMonthLabel(d) {
+  return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+// يحول أي قيمة تاريخ/نص جاية من Metabase أو الشيت لمفتاح شهر "July 2026".
+function stMonthKeyFromValue(v) {
+  if (!v && v !== 0) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return stMonthLabel(new Date(d.getFullYear(), d.getMonth(), 1));
+}
+// كل الشهور بين شهرين (شامل الطرفين)، بأي ترتيب.
+function stMonthKeysBetween(startKey, endKey) {
+  if (!startKey || !endKey) return [];
+  const sd = new Date(startKey), ed = new Date(endKey);
+  if (isNaN(sd.getTime()) || isNaN(ed.getTime())) return [];
+  let a = sd.getFullYear() * 12 + sd.getMonth();
+  let b = ed.getFullYear() * 12 + ed.getMonth();
+  if (a > b) { const t = a; a = b; b = t; }
+  const out = [];
+  for (let k = a; k <= b; k++) {
+    out.push(stMonthLabel(new Date(Math.floor(k / 12), k % 12, 1)));
+  }
+  return out;
+}
+
+// تجميع كل الشهور الموجودة فعلياً في الداتا (من الثلاث مصادر) عشان نملي الفلاتر بيها.
+function computeSellthroughMonthOptions() {
+  const map = new Map(); // label -> Date (لغرض الترتيب)
+  (state.metabaseSellthroughNeeded || []).forEach(row => {
+    const key = stMonthKeyFromValue(row.MONTH);
+    if (key) map.set(key, new Date(key));
+  });
+  (state.metabaseBeginningInventory || []).forEach(row => {
+    const key = stMonthKeyFromValue(row.MONTH);
+    if (key) map.set(key, new Date(key));
+  });
+  (state.inboundRows || []).forEach(row => {
+    if (row.receivingMonthKey) map.set(row.receivingMonthKey, new Date(row.receivingMonthKey));
+  });
+  return Array.from(map.entries())
+    .map(([key, date]) => ({ key, date }))
+    .sort((a, b) => b.date - a.date); // الأحدث أولاً
+}
+
+// بتملى الأربع selects بتوع الفلاتر، وبتحافظ على أي اختيار سابق للمستخدم،
+// وبتحط افتراضياً "أحدث شهر موجود في الداتا" لو مفيش اختيار محفوظ.
+function populateSellthroughFilters() {
+  const options = computeSellthroughMonthOptions();
+  state.sellthroughMonthOptions = options;
+  if (!options.length) return;
+
+  const latestKey = options[0].key;
+  const optionsHtml = options.map(o => `<option value="${o.key}">${o.key}</option>`).join("");
+
+  const quickSelect = $("stMonthSelect");
+  if (quickSelect) {
+    const prevVal = quickSelect.value;
+    quickSelect.innerHTML = `<option value="">All Months</option>${optionsHtml}`;
+    quickSelect.value = options.some(o => o.key === prevVal) ? prevVal : "";
+  }
+
+  [
+    { id: "stBegInvSelect", key: "begInv", placeholder: "Beginning Inventory" },
+    { id: "stStartSaleMonthSelect", key: "startSale", placeholder: "Start Sale Month" },
+    { id: "stEndSaleMonthSelect", key: "endSale", placeholder: "End Sale Month" }
+  ].forEach(({ id, key, placeholder }) => {
+    const el = $(id);
+    if (!el) return;
+    el.innerHTML = `<option value="">${placeholder}</option>${optionsHtml}`;
+    const savedVal = state.stFilters[key];
+    const finalVal = savedVal && options.some(o => o.key === savedVal) ? savedVal : "";
+    el.value = finalVal;
+    state.stFilters[key] = finalVal;
+  });
+}
+
+// بيبني صفوف الـ Sellthrough (نفس معادلات الشيت) على حسب الفلاتر الحالية،
+// من غير ما يعيد بناء الـ selects — ده اللي بيتنادى كل ما اليوزر يغيّر شهر.
+// ---------------------------------------------------------------------
+// كاش الفهارس (Indices) الخاصة بلوحة الـ Sellthrough. بيتبني مرة واحدة
+// من الداتا الخام، وبيتعاد بناؤه بس لو الداتا الخام اتغيرت (بعد ريفريش
+// من الشيت) — مش في كل مرة اليوزر يغيّر فلتر شهر. ده اللي بيخلي تغيير
+// الفلاتر فوري وبيلغي الهنج اللي كان بيحصل قبل كده.
+let _stIndexCache = null;
+
+function getSellthroughIndices() {
+  const src = {
+    inbound: state.inboundRows,
+    begInv: state.metabaseBeginningInventory,
+    need: state.metabaseSellthroughNeeded,
+    prodInfo: state.metabaseProductsInfo
+  };
+
+  // لو نفس مراجع (references) الأراييز الخام زي المرة اللي فاتت، استخدم الكاش
+  if (
+    _stIndexCache &&
+    _stIndexCache._src.inbound === src.inbound &&
+    _stIndexCache._src.begInv === src.begInv &&
+    _stIndexCache._src.need === src.need &&
+    _stIndexCache._src.prodInfo === src.prodInfo
+  ) {
+    return _stIndexCache;
+  }
+
+  // 1) بيانات المنتج (الاسم/الكاتيجوري) — ثابتة مش بتتفلتر بالشهر
+  const productInfo = new Map();
+  (src.prodInfo || []).forEach(row => {
+    const sku = row.PRODUCT_ID || row.SKU || row.sku;
+    if (!sku || productInfo.has(sku)) return;
+    productInfo.set(sku, {
+      name: row.BUNDLE_NAME || row.PRODUCT_NAME || row.NAME || row.name,
+      cat: row.CATEGORY_L1 || row.CAT || row.category
+    });
+  });
+
+  // 2) Inbound: التجميع بالشهر (Receiving Month) + أول شهر شراء + آخر تاريخ استلام
+  //    + فهرس شهر -> مجموعة SKUs (عشان بناء skuSet يبقى O(1) بدل O(n) في كل فلتر)
+  const inboundBySkuMonth = new Map();     // "sku|monthKey" -> إجمالي RCV_QTY
+  const inboundFirstBuyMonth = new Map();  // sku -> أول شهر ظهر فيه SKU
+  const inboundLastRec = new Map();        // sku -> {ts, text}
+  const inboundNameCat = new Map();
+  const skuByMonthInbound = new Map();     // monthKey -> Set(sku)
+  (src.inbound || []).forEach(row => {
+    if (!row.sku) return;
+    if (row.rcvTs) {
+      const cur = inboundLastRec.get(row.sku);
+      if (!cur || row.rcvTs > cur.ts) inboundLastRec.set(row.sku, { ts: row.rcvTs, text: row.rcvDateText });
+    }
+    if (row.receivingMonthKey) {
+      const k = row.sku + "|" + row.receivingMonthKey;
+      inboundBySkuMonth.set(k, (inboundBySkuMonth.get(k) || 0) + (row.rcvQty || 0));
+      let set = skuByMonthInbound.get(row.receivingMonthKey);
+      if (!set) { set = new Set(); skuByMonthInbound.set(row.receivingMonthKey, set); }
+      set.add(row.sku);
+    }
+    if (row.firstBuyMonthKey) {
+      const curFirst = inboundFirstBuyMonth.get(row.sku);
+      if (!curFirst || new Date(row.firstBuyMonthKey) < new Date(curFirst)) {
+        inboundFirstBuyMonth.set(row.sku, row.firstBuyMonthKey);
+      }
+    }
+    if (!inboundNameCat.has(row.sku)) inboundNameCat.set(row.sku, { name: row.name, cat: row.cat });
+  });
+
+  // 3) Beginning Inventory: التجميع بالشهر + فهرس شهر -> Set(sku)
+  const beginInvBySkuMonth = new Map();
+  const beginInvNameCat = new Map();
+  const skuByMonthBegInv = new Map();
+  (src.begInv || []).forEach(row => {
+    const sku = row.PRODUCT_ID || row.SKU || row.sku;
+    const mk = stMonthKeyFromValue(row.MONTH);
+    if (!sku || !mk) return;
+    const k = sku + "|" + mk;
+    beginInvBySkuMonth.set(k, (beginInvBySkuMonth.get(k) || 0) + Number(row.QTY ?? row.Beginning_Inventory ?? row.inventory ?? 0));
+    if (!beginInvNameCat.has(sku)) beginInvNameCat.set(sku, { name: row.PRODUCT_NAME, cat: row.CATEGORY_L1 });
+    let set = skuByMonthBegInv.get(mk);
+    if (!set) { set = new Set(); skuByMonthBegInv.set(mk, set); }
+    set.add(sku);
+  });
+
+  // 4) Sellthrough Needed: التجميع بالشهر (CNF/DLV/RTO) + فهرس شهر -> Set(sku)
+  const needBySkuMonth = new Map();
+  const needNameCat = new Map();
+  const skuByMonthNeed = new Map();
+  (src.need || []).forEach(row => {
+    const sku = row.PRODUCT_ID || row.SKU || row.sku;
+    const mk = stMonthKeyFromValue(row.MONTH);
+    if (!sku || !mk) return;
+    const k = sku + "|" + mk;
+    const cur = needBySkuMonth.get(k) || { cnf: 0, dlv: 0, rto: 0 };
+    cur.cnf += Number(row.CNF_QTY || 0);
+    cur.dlv += Number(row.DLV_QTY || 0);
+    cur.rto += Number(row.RTO_QTY ?? row.RTOS ?? 0);
+    needBySkuMonth.set(k, cur);
+    if (!needNameCat.has(sku)) needNameCat.set(sku, { name: row.PRODUCT_NAME, cat: row.CATEGORY_L1 });
+    let set = skuByMonthNeed.get(mk);
+    if (!set) { set = new Set(); skuByMonthNeed.set(mk, set); }
+    set.add(sku);
+  });
+
+  _stIndexCache = {
+    _src: src,
+    productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec, inboundNameCat,
+    beginInvBySkuMonth, beginInvNameCat, needBySkuMonth, needNameCat,
+    skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed
+  };
+  return _stIndexCache;
+}
+
+function recomputeSellthroughRows() {
+  const { begInv: begInvKey, startSale: startKey, endSale: endKey } = state.stFilters;
+  if (!begInvKey || !startKey || !endKey) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
+
+  // ---------------------------------------------------------------------
+  // PERFORMANCE FIX: كل الخطوات اللي بتلف على الداتا الخام (inboundRows,
+  // metabaseBeginningInventory, metabaseSellthroughNeeded, metabaseProductsInfo)
+  // كانت بتتعمل من الصفر في كل مرة اليوزر يغيّر فلتر شهر — وده اللي كان
+  // بيسبب الهنج. دلوقتي بنبنيها مرة واحدة بس (أول ما تفتح اللوحة أو لما
+  // الداتا الخام نفسها تتغيّر بعد ريفريش)، ونخزنها في كاش. تغيير الفلاتر
+  // بعد كده بيستخدم الكاش على طول من غير ما يعيد لف الآلاف من الصفوف.
+  const idx = getSellthroughIndices();
+  const {
+    productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec,
+    inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
+    needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed
+  } = idx;
+
+  // مجموعة الـ SKU الأساسية = اتحاد الموجودين في الثلاث مصادر عند begInvKey
+  // (زي عمود A بالظبط) — دلوقتي بنعمل lookup على set محسوبة مسبقاً بدل ما
+  // نلف على كل الصفوف الخام في كل مرة.
+  const skuSet = new Set();
+  (skuByMonthInbound.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
+  (skuByMonthNeed.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
+  (skuByMonthBegInv.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
+
+  const salesMonthKeys = stMonthKeysBetween(startKey, endKey);
+  const rows = [];
+
+  skuSet.forEach(sku => {
+    let cnfQty = 0, dlvQty = 0;
+    salesMonthKeys.forEach(mk => {
+      const e = needBySkuMonth.get(sku + "|" + mk);
+      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; }
+    });
+
+    const begInv = beginInvBySkuMonth.get(sku + "|" + begInvKey) || 0;
+    const begSales = Math.min(dlvQty, begInv);                 // H = IF(F>=G,G,F)
+    const remBeg = dlvQty - begSales;                          // I = F - H
+    const rtos = (needBySkuMonth.get(sku + "|" + begInvKey) || { rto: 0 }).rto; // J (بشهر begInv بس)
+    const retSales = Math.min(remBeg, rtos);                   // K = IF(I>=J,J,I)
+    const remPurSales = dlvQty - (begSales + retSales);        // L = F-(H+K)
+    const totPur = inboundBySkuMonth.get(sku + "|" + begInvKey) || 0; // M
+    const purSales = Math.min(remPurSales, totPur);            // N = IF(L>=M,M,L)
+    const denom = begInv + totPur + rtos;
+    const stRate = denom > 0 ? (dlvQty / denom) * 100 : 0;     // O
+    const soldInb = totPur > 0 ? (purSales / totPur) * 100 : 0; // P
+    const firstBuy = inboundFirstBuyMonth.get(sku) === begInvKey ? "Yes" : "No"; // Q
+
+    // نفس السلسلة بالظبط لكن ببداية CNF_QTY (زي شيت "Confirmed" بالظبط، تاب E..N بس مبني على الكونفيرمد)
+    const cBegSales = Math.min(cnfQty, begInv);
+    const cRemBeg = cnfQty - cBegSales;
+    const cRetSales = Math.min(cRemBeg, rtos);
+    const cRemPurSales = cnfQty - (cBegSales + cRetSales);
+    const cPurSales = Math.min(cRemPurSales, totPur);
+
+    const lastRec = inboundLastRec.get(sku);
+    const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
+
+    rows.push({
+      sku,
+      name: info.name || "Unknown",
+      cat: info.cat || "Uncategorized",
+      lastRecDate: lastRec ? lastRec.text : "-",
+      cnfQty, dlvQty, begInv, begSales, remBeg,
+      rtos, retSales, remPurSales, totPur, purSales,
+      stRate, soldInb, firstBuy,
+      cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales
+    });
+  });
+
+  state.sellthroughDataPrepared = rows;
+  applySellthroughFiltersAndSort();
+  renderSellthroughSummaries(rows);
+}
+
+// =====================================================================
+// SUMMARY SECTIONS (Confirmed / Delivered) — نفس تاب "Summary" بالظبط.
+// كل قسم بيجمع صفوف الـ SKU (اللي فوق) على مستوى الـ CAT، لخمس كاتيجوريز
+// ثابتة (زي الشيت بالظبط)، وبيحسب SELLTHROUGH% و INBOUND VS SOLD.
+// =====================================================================
+const ST_SUMMARY_CATS = ["Consumables", "Electronics", "Home", "Leisure", "Fashion"];
+
+function computeSellthroughSummary(rows, mode) {
+  // mode: "confirmed" -> pieces=CNF_QTY, begSales/retSales/purSales = c* fields
+  //       "delivered" -> pieces=DLV_QTY, begSales/retSales/purSales = الحقول العادية
+  const buckets = new Map(ST_SUMMARY_CATS.map(c => [c.toLowerCase(), {
+    cat: c, pieces: 0, begInv: 0, begSales: 0, returns: 0, retSales: 0,
+    totPur: 0, purSales: 0, rawPieces: 0
+  }]));
+
+  rows.forEach(r => {
+    const key = (r.cat || "").trim().toLowerCase();
+    const b = buckets.get(key);
+    if (!b) return; // كاتيجوري مش من الخمسة الأساسيين (زي الشيت بالظبط، بيتجاهلها)
+    const begSales = mode === "confirmed" ? r.cBegSales : r.begSales;
+    const retSales = mode === "confirmed" ? r.cRetSales : r.retSales;
+    const purSales = mode === "confirmed" ? r.cPurSales : r.purSales;
+    b.begInv += r.begInv;
+    b.begSales += begSales;
+    b.returns += r.rtos;
+    b.retSales += retSales;
+    b.totPur += r.totPur;
+    b.purSales += purSales;
+    b.rawPieces += mode === "confirmed" ? r.cnfQty : r.dlvQty; // للـ OVERFLOW (زي عمود E أو F في شيت Confirmed/Delivered)
+  });
+
+  const out = [];
+  let grand = { cat: "Grand Total", pieces: 0, begInv: 0, begSales: 0, returns: 0, retSales: 0, totPur: 0, purSales: 0, overflow: 0 };
+  buckets.forEach(b => {
+    const pieces = b.begSales + b.retSales + b.purSales;       // D = F+J+H (أو F+H+J)
+    const overflow = b.rawPieces - pieces;                     // K = SUMIFS(raw) - D
+    const denom = b.begInv + b.totPur + b.returns;
+    const stRate = denom > 0 ? (pieces / denom) * 100 : 0;     // L
+    const inboundVsSold = b.totPur > 0 ? (b.purSales / b.totPur) * 100 : 0; // M
+    const row = { cat: b.cat, pieces, begInv: b.begInv, begSales: b.begSales, returns: b.returns, retSales: b.retSales, totPur: b.totPur, purSales: b.purSales, overflow, stRate, inboundVsSold };
+    out.push(row);
+    grand.pieces += pieces; grand.begInv += b.begInv; grand.begSales += b.begSales;
+    grand.returns += b.returns; grand.retSales += b.retSales; grand.totPur += b.totPur;
+    grand.purSales += b.purSales; grand.overflow += overflow;
+  });
+  const gDenom = grand.begInv + grand.totPur + grand.returns;
+  grand.stRate = gDenom > 0 ? (grand.pieces / gDenom) * 100 : 0;
+  grand.inboundVsSold = grand.totPur > 0 ? (grand.purSales / grand.totPur) * 100 : 0;
+  out.push(grand);
+  return out;
+}
+
+function renderSellthroughSummaryTable(tbodyId, summaryRows) {
+  const tbody = $(tbodyId);
+  if (!tbody) return;
+  tbody.innerHTML = summaryRows.map(r => `
+    <tr${r.cat === "Grand Total" ? ' class="st-grand-total"' : ""}>
+      <td>${r.cat}</td>
+      <td>${fmtInt.format(r.pieces)}</td>
+      <td>${fmtInt.format(r.begInv)}</td>
+      <td>${fmtInt.format(r.begSales)}</td>
+      <td>${fmtInt.format(r.returns)}</td>
+      <td>${fmtInt.format(r.retSales)}</td>
+      <td>${fmtInt.format(r.totPur)}</td>
+      <td>${fmtInt.format(r.purSales)}</td>
+      <td>${fmtInt.format(r.overflow)}</td>
+      <td class="st-rate">${r.stRate.toFixed(1)}%</td>
+      <td class="st-inbound">${r.inboundVsSold.toFixed(1)}%</td>
+    </tr>
+  `).join("");
+}
+
+function renderSellthroughSummaries(rows) {
+  renderSellthroughSummaryTable("stConfirmedSummaryBody", computeSellthroughSummary(rows, "confirmed"));
+  renderSellthroughSummaryTable("stDeliveredSummaryBody", computeSellthroughSummary(rows, "delivered"));
+}
+
+function simulateSellthroughProgress() {
+  const overlay = $("stProgressOverlay");
+  const bar = $("stProgressBar");
+  const text = $("stProgressText");
+
+  if (!overlay || !bar || !text) {
+    prepareSellthroughData();
+    return;
+  }
+
+  // 1. إظهار الشريط وتصفيره فوراً بدون أنيميشن عشان يبدأ من الصفر بجد
+  overlay.classList.remove("hidden");
+  bar.style.transition = "none";
+  bar.style.width = "0%";
+  text.textContent = "0%";
+
+  // 2. تأخير بسيط جداً عشان المتصفح يطبق الصفر قبل ما نبدأ
+  setTimeout(() => {
+    // نرجع الأنيميشن ونسرعه شوية عشان يمشي مع الأرقام
+    bar.style.transition = "width 0.2s linear";
+    
+    let progress = 0;
+    
+    // 3. العداد هيزيد كل 80 ملي ثانية (سرعة مناسبة للعين)
+    const interval = setInterval(() => {
+      progress += Math.floor(Math.random() * 12) + 4; // زيادة عشوائية
+      
+      if (progress >= 100) {
+        progress = 100;
+        clearInterval(interval);
+        bar.style.width = "100%";
+        text.textContent = "100%";
+
+        // 4. هنا السر! هنستنى نص ثانية (500ms) عشان الشريط الأزرق يلحق يوصل للآخر 100%
+        // قبل ما نشغل الداتا التقيلة اللي بتجمد الشاشة
+        setTimeout(() => {
+          prepareSellthroughData();
+          overlay.classList.add("hidden");
+        }, 500);
+        
+      } else {
+        bar.style.width = progress + "%";
+        text.textContent = progress + "%";
+      }
+    }, 80);
+    
+  }, 50);
+}
+
+function prepareSellthroughData() {
+  populateSellthroughFilters();
+  recomputeSellthroughRows();
+}
+
+function sortSellthrough(key) {
+  if (state.sellthroughSortKey === key) {
+    state.sellthroughSortDir = state.sellthroughSortDir === "asc" ? "desc" : "asc";
+  } else {
+    state.sellthroughSortKey = key;
+    state.sellthroughSortDir = "desc";
+  }
+  applySellthroughFiltersAndSort();
+}
+
+function applySellthroughFiltersAndSort() {
+  if (!state.sellthroughDataPrepared) return;
+  
+  let data = [...state.sellthroughDataPrepared];
+  const searchInput = $("searchSellthroughInput");
+  const q = searchInput ? searchInput.value.toLowerCase() : "";
+  
+  if (q) {
+    data = data.filter(d => 
+      String(d.sku).toLowerCase().includes(q) || 
+      String(d.name).toLowerCase().includes(q) ||
+      String(d.cat).toLowerCase().includes(q)
+    );
+  }
+
+  const key = state.sellthroughSortKey;
+  const dir = state.sellthroughSortDir === "asc" ? 1 : -1;
+  
+  data.sort((a, b) => {
+    let valA = a[key];
+    let valB = b[key];
+    if (typeof valA === 'string') valA = valA.toLowerCase();
+    if (typeof valB === 'string') valB = valB.toLowerCase();
+    if (valA < valB) return -1 * dir;
+    if (valA > valB) return 1 * dir;
+    return 0;
+  });
+
+  state.filteredSellthroughData = data;
+  state.sellthroughPage = 0;
+  renderPaginatedSellthroughTable();
+}
+
+function renderPaginatedSellthroughTable() {
+  const tbody = $("sellthroughTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  
+  const PAGE_SIZE = 10;
+  const start = state.sellthroughPage * PAGE_SIZE;
+  const pageRows = state.filteredSellthroughData.slice(start, start + PAGE_SIZE);
+  
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.sku}</td>
+      <td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td>
+      <td class="text-dim">${m.cat}</td>
+      <td class="text-dim">${m.lastRecDate}</td>
+      <td class="num text-blue font-bold">${fmtInt.format(m.cnfQty)}</td>
+      <td class="num text-green font-bold">${fmtInt.format(m.dlvQty)}</td>
+      <td class="num text-light">${fmtInt.format(m.begInv)}</td>
+      <td class="num text-dim">${fmtInt.format(m.begSales)}</td>
+      <td class="num text-orange font-bold">${fmtInt.format(m.remBeg)}</td>
+      <td class="num text-red font-bold">${fmtInt.format(m.rtos)}</td>
+      <td class="num text-red">${fmtInt.format(m.retSales)}</td>
+      <td class="num text-dim">${fmtInt.format(m.remPurSales)}</td>
+      <td class="num text-blue">${fmtInt.format(m.totPur)}</td>
+      <td class="num text-green">${fmtInt.format(m.purSales)}</td>
+      <td class="num text-purple font-bold">${m.stRate.toFixed(1)}%</td>
+      <td class="num font-bold">${m.soldInb.toFixed(1)}%</td>
+      <td class="center"><span class="badge-outline ${m.firstBuy === 'Yes' ? 'green' : 'dim'}">${m.firstBuy}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const totalPages = Math.max(1, Math.ceil(state.filteredSellthroughData.length / PAGE_SIZE));
+  if ($("rowCountSellthrough")) $("rowCountSellthrough").textContent = `${fmtInt.format(state.filteredSellthroughData.length)} Rows`;
+  if ($("pageIndicatorSellthrough")) $("pageIndicatorSellthrough").textContent = `Page ${state.sellthroughPage + 1} of ${totalPages}`;
+  if ($("prevPageSellthrough")) $("prevPageSellthrough").disabled = state.sellthroughPage === 0;
+  if ($("nextPageSellthrough")) $("nextPageSellthrough").disabled = state.sellthroughPage >= totalPages - 1;
+}
+
+// تفعيل أحداث الضغط (Event Listeners) الخاصة بالبحث والتقليب
+document.addEventListener("DOMContentLoaded", () => {
+  if($("searchSellthroughInput")) $("searchSellthroughInput").addEventListener("input", applySellthroughFiltersAndSort);
+
+  // فلتر الشهور السريع: بيحدد نفس الشهر لـ Beginning Inventory + Start/End Sale Month مع بعض.
+  if ($("stMonthSelect")) $("stMonthSelect").addEventListener("change", (e) => {
+    const val = e.target.value;
+    if (val) {
+      state.stFilters.begInv = val;
+      state.stFilters.startSale = val;
+      state.stFilters.endSale = val;
+      if ($("stBegInvSelect")) $("stBegInvSelect").value = val;
+      if ($("stStartSaleMonthSelect")) $("stStartSaleMonthSelect").value = val;
+      if ($("stEndSaleMonthSelect")) $("stEndSaleMonthSelect").value = val;
+      recomputeSellthroughRows();
+    }
+  });
+
+  // الفلاتر التفصيلية الثلاثة (بتحدث الحسبة على طول من غير ما تعيد بناء الـ selects)
+  [
+    { id: "stBegInvSelect", key: "begInv" },
+    { id: "stStartSaleMonthSelect", key: "startSale" },
+    { id: "stEndSaleMonthSelect", key: "endSale" }
+  ].forEach(({ id, key }) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("change", (e) => {
+      if (!e.target.value) return; // متسمحش يفضى، لازم شهر محدد عشان الحسبة تشتغل
+      state.stFilters[key] = e.target.value;
+      recomputeSellthroughRows();
+    });
+  });
+
+  if($("prevPageSellthrough")) $("prevPageSellthrough").addEventListener("click", () => {
+    if (state.sellthroughPage > 0) { state.sellthroughPage -= 1; renderPaginatedSellthroughTable(); }
+  });
+  
+  if($("nextPageSellthrough")) $("nextPageSellthrough").addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(state.filteredSellthroughData.length / 10));
+    if (state.sellthroughPage < totalPages - 1) { state.sellthroughPage += 1; renderPaginatedSellthroughTable(); }
+  });
+
+  // تفعيل الترتيب عند الضغط على رؤوس الأعمدة
+  document.querySelectorAll("#sellthroughTable thead th").forEach((th) => {
+    if (th.dataset.stkey) {
+      th.addEventListener("click", () => sortSellthrough(th.dataset.stkey));
+    }
+  });
+});
+
 function sortMpMatches(key) {
   if (mpMatchesState.sortKey === key) { mpMatchesState.sortDir = mpMatchesState.sortDir === "asc" ? "desc" : "asc"; } else { mpMatchesState.sortKey = key; mpMatchesState.sortDir = "desc"; }
   applyMpMatchesSearchAndSort();
@@ -1679,11 +2605,431 @@ function renderPaginatedMpMatchesTable() {
   if ($("nextPageMpMatches")) $("nextPageMpMatches").disabled = mpMatchesState.page >= totalPages - 1;
 }
 
+// =========================================================================
+// SEGMENTATION PANEL ENGINE — نفس حسبة شيت "EGY" بالظبط (يوليو TARGET/
+// Actuals/Achievement%)، لكن الـ Actual بيتقرا لايف من شيت
+// "New segmentation #6864" (NEW_SEGMENTATION_GID) بدل ما يبقى نسخة مجمدة.
+//
+// كل صف من الصفوف اللي كانت في شيت EGY (من صف 3 لحد صف 118) اتحول هنا لكائن
+// { target, actual, ach } بنفس المعادلة اللي كانت مكتوبة بالظبط في العمود
+// بتاع يوليو، بما فيها التفاصيل الغريبة (زي إن بعض صفوف الـ Achievement% بتقلب
+// القسمة Target/Actual بدل Actual/Target، أو بتبقى قيمة ثابتة مكتوبة يدوي).
+//
+// ملحوظتين عدّلتهم عمدًا (موضّحين في رسالة التسليم):
+// 1) صف "Churned -" في قسم الـ HVM (وبس هو) كانت صيغته في الشيت الأصلي بتتأكد
+//    من عمود الشهر (B) مقابل خلية العنوان النصية "Actuals" بدل تاريخ الشهر
+//    الفعلي — ده بيرجّع صفر دايمًا. استخدمت هنا شهر يوليو الفعلي زي باقي
+//    الصفوف المطابقة، عشان الرقم يبقى حقيقي.
+// 2) 6 صفوف (Loyal +New/+Promoted وفروعها، Potential Loyal +Re-activated/+New)
+//    كان فيها رقم Actual مكتوب يدوي بدل معادلة SUMIFS حية — استبدلتهم بنفس
+//    نمط SUMIFS المستخدم في كل صف مشابه، عشان الداشبورد يفضل بيقرأ لايف.
+// =========================================================================
+
+function segSumBy(data, field, filters, monthDate) {
+  const eq = (a, b) => (a || "").toString().trim().toLowerCase() === (b || "").toString().trim().toLowerCase();
+  let total = 0;
+  for (const row of (data || [])) {
+    if (!eq(row.country, SEG_PANEL_COUNTRY)) continue;
+    if (monthDate && (!row.month || row.month.getFullYear() !== monthDate.getFullYear() || row.month.getMonth() !== monthDate.getMonth())) continue;
+    if (filters.subSegment && !eq(row.subSegment, filters.subSegment)) continue;
+    if (filters.status && !eq(row.status, filters.status)) continue;
+    if (filters.segment && !eq(row.segment, filters.segment)) continue;
+    if (filters.finalStatus && !eq(row.finalStatus, filters.finalStatus)) continue;
+    total += row[field] || 0;
+  }
+  return total;
+}
+
+function safeRatio(num, den) {
+  if (!den) return null;
+  return num / den;
+}
+
+const SEG_ROWS_BY_ID = {};
+function segDefRow(cfg) { SEG_ROWS_BY_ID[cfg.id] = cfg; }
+
+// ---- HVM / Champions ------------------------------------------------
+segDefRow({ id: "r3", section: "HVM (Champions)", label: "Last month merchants", unit: "count", top: true,
+  target: () => 18,
+  actual: (ctx) => ctx.sum("count", { subSegment: "Champions" }, SEG_PANEL_PREV_MONTH),
+  ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r4", section: "HVM (Champions)", label: "Churned -", unit: "count",
+  target: () => 0,
+  actual: (ctx) => ctx.sum("count", { status: "Churned from champions" }, SEG_PANEL_MONTH),
+  ach: () => ({ kind: "literal", ratio: 1 }) });
+segDefRow({ id: "r5", section: "HVM (Champions)", label: "Demoted -", unit: "count",
+  target: (ctx) => ctx.T("r6") + ctx.T("r7") + ctx.T("r8"),
+  actual: (ctx) => ctx.A("r6") + ctx.A("r7") + ctx.A("r8"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r5"), ctx.A("r5")) }) });
+segDefRow({ id: "r6", section: "HVM (Champions)", label: "Demoted to loyal MVM", unit: "count", sub: true,
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r7", section: "HVM (Champions)", label: "Demoted to potential loyal MVM", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r8", section: "HVM (Champions)", label: "Demoted to LVM", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r9", section: "HVM (Champions)", label: "Retained", unit: "count",
+  target: () => 17, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r9"), ctx.T("r9")) }) });
+segDefRow({ id: "r10", section: "HVM (Champions)", label: "Re-activated +", unit: "count",
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r10"), ctx.T("r10")) }) });
+segDefRow({ id: "r11", section: "HVM (Champions)", label: "New +", unit: "count",
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r11"), ctx.T("r11")) }) });
+segDefRow({ id: "r12", section: "HVM (Champions)", label: "Promoted +", unit: "count",
+  target: (ctx) => ctx.T("r13") + ctx.T("r14") + ctx.T("r15"),
+  actual: (ctx) => ctx.A("r13") + ctx.A("r14") + ctx.A("r15"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r12"), ctx.T("r12")) }) });
+segDefRow({ id: "r13", section: "HVM (Champions)", label: "Promoted from loyal MVM", unit: "count", sub: true,
+  target: () => 4, actual: (ctx) => ctx.sum("count", { status: "promoted from loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r14", section: "HVM (Champions)", label: "Promoted from potential loyal MVM", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "promoted from potential loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r15", section: "HVM (Champions)", label: "Promoted from LVM", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "promoted from LVM to Champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r16", section: "HVM (Champions)", label: "Total merchants", unit: "count", top: true,
+  target: (ctx) => ctx.T("r3") + ctx.T("r10") + ctx.T("r11") + ctx.T("r12") - ctx.T("r4") - ctx.T("r5"),
+  actual: (ctx) => ctx.sum("count", { subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r16"), ctx.T("r16")) }) });
+segDefRow({ id: "r18", section: "HVM (Champions)", label: "Total confirmed orders", unit: "count",
+  target: (ctx) => ctx.T("r19") * ctx.T("r16"), actual: (ctx) => ctx.sum("orders", { subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r18"), ctx.T("r18")) }) });
+segDefRow({ id: "r19", section: "HVM (Champions)", label: "Confirmed orders per merchant", unit: "count",
+  target: () => 3600, actual: (ctx) => safeRatio(ctx.A("r18"), ctx.A("r16")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r19"), ctx.T("r19")) }) });
+segDefRow({ id: "r20", section: "HVM (Champions)", label: "Confirmed GMV", unit: "money",
+  target: (ctx) => ctx.T("r18") * ctx.T("r21"), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r20"), ctx.T("r20")) }) });
+segDefRow({ id: "r21", section: "HVM (Champions)", label: "Confirmed AOV", unit: "money",
+  target: () => 1020, actual: (ctx) => safeRatio(ctx.A("r20"), ctx.A("r18")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r21"), ctx.T("r21")) }) });
+segDefRow({ id: "r22", section: "HVM (Champions)", label: "Total Delivered orders", unit: "count",
+  target: (ctx) => ctx.T("r18") * ctx.T("r23"), actual: (ctx) => ctx.sum("dlvOrders", { subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r22"), ctx.T("r22")) }) });
+segDefRow({ id: "r23", section: "HVM (Champions)", label: "DR%", unit: "percent",
+  target: () => 0.5, actual: (ctx) => safeRatio(ctx.A("r22"), ctx.A("r18")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r23"), ctx.T("r23")) }) });
+segDefRow({ id: "r24", section: "HVM (Champions)", label: "Delivered GMV", unit: "money",
+  target: (ctx) => ctx.T("r22") * ctx.T("r25"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Champions" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r24"), ctx.T("r24")) }) });
+segDefRow({ id: "r25", section: "HVM (Champions)", label: "Delivered AOV", unit: "money",
+  target: () => 995, actual: (ctx) => safeRatio(ctx.A("r24"), ctx.A("r22")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r25"), ctx.T("r25")) }) });
+
+// ---- Loyal MVM --------------------------------------------------------
+segDefRow({ id: "r28", section: "Loyal MVM", label: "Last month merchants", unit: "count", top: true,
+  target: (ctx) => ctx.A("r41", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("count", { subSegment: "Loyal" }, SEG_PANEL_PREV_MONTH),
+  ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r29", section: "Loyal MVM", label: "Churned -", unit: "count",
+  target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Churned from loyals" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r29"), ctx.A("r29")) }) });
+segDefRow({ id: "r30", section: "Loyal MVM", label: "Demoted -", unit: "count",
+  target: (ctx) => ctx.T("r31") + ctx.T("r32") + ctx.T("r33"), actual: (ctx) => ctx.A("r31") + ctx.A("r32"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r30"), ctx.A("r30")) }) });
+segDefRow({ id: "r31", section: "Loyal MVM", label: "Demoted to potential loyal MVM", unit: "count", sub: true,
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Demoted from loyals to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r32", section: "Loyal MVM", label: "Demoted to LVM", unit: "count", sub: true,
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Demoted from loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r33", section: "Loyal MVM", label: "Promoted to Champions -", unit: "count",
+  target: () => 4, actual: (ctx) => ctx.A("r13"), ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r33"), ctx.T("r33")) }) });
+segDefRow({ id: "r34", section: "Loyal MVM", label: "Retained", unit: "count",
+  target: () => 18, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r34"), ctx.T("r34")) }) });
+segDefRow({ id: "r35", section: "Loyal MVM", label: "Demoted from Champions +", unit: "count",
+  target: () => 1, actual: (ctx) => ctx.A("r6"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r36", section: "Loyal MVM", label: "Re-activated +", unit: "count",
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r36"), ctx.T("r36")) }) });
+segDefRow({ id: "r37", section: "Loyal MVM", label: "New +", unit: "count",
+  target: () => 8, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r37"), ctx.T("r37")) }) });
+segDefRow({ id: "r38", section: "Loyal MVM", label: "Promoted +", unit: "count",
+  target: (ctx) => ctx.T("r39") + ctx.T("r40"), actual: (ctx) => ctx.A("r39") + ctx.A("r40"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r38"), ctx.T("r38")) }) });
+segDefRow({ id: "r39", section: "Loyal MVM", label: "Promoted from potential loyal MVM", unit: "count", sub: true,
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "promoted from potential loyals to loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r40", section: "Loyal MVM", label: "Promoted from LVM", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "promoted from LVM to loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r41", section: "Loyal MVM", label: "Total merchants", unit: "count", top: true,
+  target: (ctx) => ctx.T("r28") + ctx.T("r35") + ctx.T("r36") + ctx.T("r37") + ctx.T("r38") - ctx.T("r29") - ctx.T("r30") - ctx.T("r33"),
+  actual: (ctx, m) => ctx.sum("count", { subSegment: "Loyal" }, m || SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r41"), ctx.T("r41")) }) });
+segDefRow({ id: "r43", section: "Loyal MVM", label: "Total confirmed orders", unit: "count",
+  target: (ctx) => ctx.T("r41") * 606, actual: (ctx) => ctx.sum("orders", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r43"), ctx.T("r43")) }) });
+segDefRow({ id: "r44", section: "Loyal MVM", label: "Confirmed orders per merchant", unit: "count",
+  target: () => 600, actual: (ctx) => safeRatio(ctx.A("r43"), ctx.A("r41")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r44"), ctx.T("r44")) }) });
+segDefRow({ id: "r45", section: "Loyal MVM", label: "Confirmed GMV", unit: "money",
+  target: (ctx) => ctx.T("r43") * ctx.T("r46"), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r45"), ctx.T("r45")) }) });
+segDefRow({ id: "r46", section: "Loyal MVM", label: "Confirmed AOV", unit: "money",
+  target: () => 850, actual: (ctx) => safeRatio(ctx.A("r45"), ctx.A("r43")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r46"), ctx.T("r46")) }) });
+segDefRow({ id: "r47", section: "Loyal MVM", label: "Total Delivered orders", unit: "count",
+  target: (ctx) => ctx.T("r43") * ctx.T("r48"), actual: (ctx) => ctx.sum("dlvOrders", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r47"), ctx.T("r47")) }) });
+segDefRow({ id: "r48", section: "Loyal MVM", label: "DR%", unit: "percent",
+  target: () => 0.5, actual: (ctx) => safeRatio(ctx.A("r47"), ctx.A("r43")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r48"), ctx.T("r48")) }) });
+segDefRow({ id: "r49", section: "Loyal MVM", label: "Delivered GMV", unit: "money",
+  target: (ctx) => ctx.T("r47") * ctx.T("r50"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r49"), ctx.T("r49")) }) });
+segDefRow({ id: "r50", section: "Loyal MVM", label: "Delivered AOV", unit: "money",
+  target: () => 840, actual: (ctx) => safeRatio(ctx.A("r49"), ctx.A("r47")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r50"), ctx.T("r50")) }) });
+
+// ---- Potential Loyal MVM ------------------------------------------------
+segDefRow({ id: "r53", section: "Potential Loyal MVM", label: "Last month merchants", unit: "count", top: true,
+  target: (ctx) => ctx.A("r66", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("count", { subSegment: "Potential Loyal" }, SEG_PANEL_PREV_MONTH),
+  ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r54", section: "Potential Loyal MVM", label: "Churned -", unit: "count",
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Churned from potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
+segDefRow({ id: "r55", section: "Potential Loyal MVM", label: "Demoted -", unit: "count",
+  target: () => 5, actual: (ctx) => ctx.sum("count", { status: "Demoted from potential loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
+segDefRow({ id: "r56", section: "Potential Loyal MVM", label: "Promoted to higher segments -", unit: "count",
+  target: (ctx) => ctx.T("r57") + ctx.T("r58"), actual: (ctx) => ctx.A("r57") + ctx.A("r58"), ach: () => ({ kind: "literal", ratio: 0 }) });
+segDefRow({ id: "r57", section: "Potential Loyal MVM", label: "Promoted to Champions", unit: "count", sub: true,
+  target: () => 0, actual: (ctx) => ctx.A("r14"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r58", section: "Potential Loyal MVM", label: "Promoted to Loyal MVM", unit: "count", sub: true,
+  target: () => 1, actual: (ctx) => ctx.A("r39"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r59", section: "Potential Loyal MVM", label: "Retained", unit: "count",
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r59"), ctx.T("r59")) }) });
+segDefRow({ id: "r60", section: "Potential Loyal MVM", label: "Demoted from higher segments +", unit: "count",
+  target: () => 3, actual: (ctx) => ctx.A("r61") + ctx.A("r62"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r61", section: "Potential Loyal MVM", label: "Demoted from Champions", unit: "count", sub: true,
+  target: (ctx) => ctx.T("r7"), actual: (ctx) => ctx.A("r7"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r62", section: "Potential Loyal MVM", label: "Demoted from Loyal MVM", unit: "count", sub: true,
+  target: (ctx) => ctx.T("r31"), actual: (ctx) => ctx.A("r31"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r63", section: "Potential Loyal MVM", label: "Re-activated +", unit: "count",
+  target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
+segDefRow({ id: "r64", section: "Potential Loyal MVM", label: "New +", unit: "count",
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
+segDefRow({ id: "r65", section: "Potential Loyal MVM", label: "Promoted +", unit: "count",
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "promoted from LVM to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
+segDefRow({ id: "r66", section: "Potential Loyal MVM", label: "Total merchants", unit: "count", top: true,
+  target: (ctx) => ctx.T("r53") + ctx.T("r60") + ctx.T("r63") + ctx.T("r64") + ctx.T("r65") - ctx.T("r54") - ctx.T("r55") - ctx.T("r56"),
+  actual: (ctx, m) => ctx.sum("count", { subSegment: "Potential Loyal" }, m || SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r66"), ctx.T("r66")) }) });
+segDefRow({ id: "r68", section: "Potential Loyal MVM", label: "Total confirmed orders", unit: "count",
+  target: (ctx) => ctx.T("r69") * ctx.T("r66"), actual: (ctx) => ctx.sum("orders", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r68"), ctx.T("r68")) }) });
+segDefRow({ id: "r69", section: "Potential Loyal MVM", label: "Confirmed orders per merchant", unit: "count",
+  target: () => 214, actual: (ctx) => safeRatio(ctx.A("r68"), ctx.A("r66")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r69"), ctx.T("r69")) }) });
+segDefRow({ id: "r70", section: "Potential Loyal MVM", label: "Confirmed GMV", unit: "money",
+  target: (ctx) => ctx.T("r68") * ctx.A("r71", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r70"), ctx.T("r70")) }) });
+segDefRow({ id: "r71", section: "Potential Loyal MVM", label: "Confirmed AOV", unit: "money",
+  target: (ctx) => safeRatio(ctx.T("r70"), ctx.T("r68")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r70", m), ctx.A("r68", m)) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r71"), ctx.T("r71")) }) });
+segDefRow({ id: "r72", section: "Potential Loyal MVM", label: "Total Delivered orders", unit: "count",
+  target: (ctx) => ctx.T("r68") * ctx.T("r73"), actual: (ctx) => ctx.sum("dlvOrders", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r72"), ctx.T("r72")) }) });
+segDefRow({ id: "r73", section: "Potential Loyal MVM", label: "DR%", unit: "percent",
+  target: () => 0.48, actual: (ctx) => safeRatio(ctx.A("r72"), ctx.A("r68")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r73"), ctx.T("r73")) }) });
+segDefRow({ id: "r74", section: "Potential Loyal MVM", label: "Delivered GMV", unit: "money",
+  target: (ctx) => ctx.T("r72") * ctx.T("r75"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r74"), ctx.T("r74")) }) });
+segDefRow({ id: "r75", section: "Potential Loyal MVM", label: "Delivered AOV", unit: "money",
+  target: () => 904, actual: (ctx) => safeRatio(ctx.A("r74"), ctx.A("r72")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r75"), ctx.T("r75")) }) });
+
+// ---- LVM (Low Value / Occasional / Promising) --------------------------
+// كل صفوف الـ % هنا (ما عدا الصفوف اللي بتجمّع صفوف تانية) بتتقسم على رقم
+// ثابت واحد (Total merchants بتاع شهر أبريل) — بالظبط زي خلية $I$78 في شيت
+// الإكسيل الأصلي (مرجع ثابت مش بيتغير مع الشهر).
+segDefRow({ id: "r78", section: "LVM", label: "Last month merchants", unit: "count", top: true,
+  target: () => 411, actual: (ctx) => ctx.A("r79") + ctx.A("r80") + ctx.A("r81"), ach: () => ({ kind: "dash" }) });
+segDefRow({ id: "r79", section: "LVM", label: "LVM (Low Value)", unit: "count", sub: true,
+  target: () => 291, actual: (ctx) => ctx.sum("count", { subSegment: "Low Value" }, SEG_PANEL_PREV_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r79"), ctx.lvmBase()) }) });
+segDefRow({ id: "r80", section: "LVM", label: "Occasional", unit: "count", sub: true,
+  target: () => 77, actual: (ctx) => ctx.sum("count", { subSegment: "Occasional" }, SEG_PANEL_PREV_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r80"), ctx.lvmBase()) }) });
+segDefRow({ id: "r81", section: "LVM", label: "Promising", unit: "count", sub: true,
+  target: () => 17, actual: (ctx) => ctx.sum("count", { subSegment: "Promising" }, SEG_PANEL_PREV_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r81"), ctx.lvmBase()) }) });
+segDefRow({ id: "r82", section: "LVM", label: "Churned", unit: "count",
+  target: () => 227, actual: (ctx) => ctx.sum("count", { status: "Churned from LVM" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r82"), ctx.A("r82")) }) });
+segDefRow({ id: "r83", section: "LVM", label: "Retained", unit: "count",
+  target: (ctx) => ctx.T("r84") + ctx.T("r85") + ctx.T("r86") + ctx.T("r87") + ctx.T("r88"),
+  actual: (ctx) => ctx.A("r84") + ctx.A("r85") + ctx.A("r86") + ctx.A("r87") + ctx.A("r88"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r83"), ctx.T("r83")) }) });
+segDefRow({ id: "r84", section: "LVM", label: "Low value", unit: "count", sub: true,
+  target: () => 55, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Low Value" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r84"), ctx.lvmBase()) }) });
+segDefRow({ id: "r85", section: "LVM", label: "Occasional", unit: "count", sub: true,
+  target: () => 22, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Occasional" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r85"), ctx.lvmBase()) }) });
+segDefRow({ id: "r86", section: "LVM", label: "Promising", unit: "count", sub: true,
+  target: () => 10, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Promising" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r86"), ctx.lvmBase()) }) });
+segDefRow({ id: "r87", section: "LVM", label: "Promoted", unit: "count", sub: true,
+  target: () => 16, actual: (ctx) => ctx.sum("count", { segment: "LVM", finalStatus: "Promoted" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r87"), ctx.lvmBase()) }) });
+segDefRow({ id: "r88", section: "LVM", label: "demoted", unit: "count", sub: true,
+  target: () => 41, actual: (ctx) => ctx.sum("count", { segment: "LVM", finalStatus: "Demoted" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r88"), ctx.lvmBase()) }) });
+segDefRow({ id: "r89", section: "LVM", label: "Re-activated", unit: "count",
+  target: (ctx) => ctx.T("r90") + ctx.T("r91") + ctx.T("r92"), actual: (ctx) => ctx.A("r90") + ctx.A("r91") + ctx.A("r92"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r89"), ctx.T("r89")) }) });
+segDefRow({ id: "r90", section: "LVM", label: "Low value", unit: "count", sub: true,
+  target: () => 99, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Low Value" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r90"), ctx.lvmBase()) }) });
+segDefRow({ id: "r91", section: "LVM", label: "Occasional", unit: "count", sub: true,
+  target: () => 15, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Occasional" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r91"), ctx.lvmBase()) }) });
+segDefRow({ id: "r92", section: "LVM", label: "Promising", unit: "count", sub: true,
+  target: () => 10, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Promising" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r92"), ctx.lvmBase()) }) });
+segDefRow({ id: "r93", section: "LVM", label: "New", unit: "count",
+  target: (ctx) => ctx.T("r94") + ctx.T("r95") + ctx.T("r96"), actual: (ctx) => ctx.A("r94") + ctx.A("r95") + ctx.A("r96"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r93"), ctx.T("r93")) }) });
+segDefRow({ id: "r94", section: "LVM", label: "Low value", unit: "count", sub: true,
+  target: () => 200, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Low Value" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r94"), ctx.lvmBase()) }) });
+segDefRow({ id: "r95", section: "LVM", label: "Occasional", unit: "count", sub: true,
+  target: () => 20, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Occasional" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r95"), ctx.lvmBase()) }) });
+segDefRow({ id: "r96", section: "LVM", label: "Promising", unit: "count", sub: true,
+  target: () => 7, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Promising" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r96"), ctx.lvmBase()) }) });
+segDefRow({ id: "r97", section: "LVM", label: "Total merchants", unit: "count", top: true,
+  target: (ctx) => ctx.T("r98") + ctx.T("r99") + ctx.T("r100"),
+  actual: (ctx, m) => ctx.A("r98", m) + ctx.A("r99", m) + ctx.A("r100", m),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r97"), ctx.T("r97")) }) });
+segDefRow({ id: "r98", section: "LVM", label: "Low value", unit: "count", sub: true,
+  target: () => 343, actual: (ctx, m) => ctx.sum("count", { subSegment: "Low Value" }, m || SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r98"), ctx.lvmBase()) }) });
+segDefRow({ id: "r99", section: "LVM", label: "Occasional", unit: "count", sub: true,
+  target: () => 61, actual: (ctx, m) => ctx.sum("count", { subSegment: "Occasional" }, m || SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r99"), ctx.lvmBase()) }) });
+segDefRow({ id: "r100", section: "LVM", label: "Promising", unit: "count", sub: true,
+  target: () => 20, actual: (ctx, m) => ctx.sum("count", { subSegment: "Promising" }, m || SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r100"), ctx.lvmBase()) }) });
+segDefRow({ id: "r102", section: "LVM", label: "Total confirmed orders", unit: "count",
+  target: (ctx) => ctx.T("r103") * ctx.T("r97"), actual: (ctx) => ctx.sum("orders", { segment: "LVM" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r102"), ctx.T("r102")) }) });
+segDefRow({ id: "r103", section: "LVM", label: "Confirmed orders per merchant", unit: "count",
+  target: () => 10, actual: (ctx) => safeRatio(ctx.A("r102"), ctx.A("r97")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r103"), ctx.T("r103")) }) });
+segDefRow({ id: "r104", section: "LVM", label: "Confirmed GMV", unit: "money",
+  target: (ctx) => ctx.T("r102") * ctx.A("r105", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("cnfGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r104"), ctx.T("r104")) }) });
+segDefRow({ id: "r105", section: "LVM", label: "Confirmed AOV", unit: "money",
+  target: (ctx) => safeRatio(ctx.T("r104"), ctx.T("r102")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r104", m), ctx.A("r102", m)) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r105"), ctx.T("r105")) }) });
+segDefRow({ id: "r106", section: "LVM", label: "Total Delivered orders", unit: "count",
+  target: (ctx) => ctx.T("r102") * ctx.T("r107"), actual: (ctx) => ctx.sum("dlvOrders", { segment: "LVM" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r106"), ctx.T("r106")) }) });
+segDefRow({ id: "r107", section: "LVM", label: "DR%", unit: "percent",
+  target: () => 0.48, actual: (ctx) => safeRatio(ctx.A("r106"), ctx.A("r102")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r107"), ctx.T("r107")) }) });
+segDefRow({ id: "r108", section: "LVM", label: "Delivered GMV", unit: "money",
+  target: (ctx) => ctx.T("r106") * ctx.A("r109", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("dlvGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r108"), ctx.T("r108")) }) });
+segDefRow({ id: "r109", section: "LVM", label: "Delivered AOV", unit: "money",
+  target: (ctx) => safeRatio(ctx.T("r108"), ctx.T("r106")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r108", m), ctx.A("r106", m)) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r109"), ctx.T("r109")) }) });
+
+// ---- Total (كل الشرائح مع بعض) -----------------------------------------
+segDefRow({ id: "r113", section: "Total", label: "Total merchants", unit: "count", top: true,
+  target: (ctx) => ctx.T("r16") + ctx.T("r41") + ctx.T("r66") + ctx.T("r97"),
+  actual: (ctx) => ctx.A("r16") + ctx.A("r41") + ctx.A("r66") + ctx.A("r97"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r113"), ctx.T("r113")) }) });
+segDefRow({ id: "r114", section: "Total", label: "Total confirmed orders", unit: "count",
+  target: (ctx) => ctx.T("r18") + ctx.T("r43") + ctx.T("r68") + ctx.T("r102"),
+  actual: (ctx) => ctx.A("r18") + ctx.A("r43") + ctx.A("r68") + ctx.A("r102"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r114"), ctx.T("r114")) }) });
+segDefRow({ id: "r115", section: "Total", label: "Total confirmed GMV", unit: "money",
+  target: (ctx) => ctx.T("r20") + ctx.T("r45") + ctx.T("r70") + ctx.T("r104"),
+  actual: (ctx) => ctx.A("r20") + ctx.A("r45") + ctx.A("r70") + ctx.A("r104"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r115"), ctx.T("r115")) }) });
+segDefRow({ id: "r116", section: "Total", label: "Confirmed AOV", unit: "money",
+  target: (ctx) => safeRatio(ctx.T("r115"), ctx.T("r114")) || 0, actual: (ctx) => safeRatio(ctx.A("r115"), ctx.A("r114")) || 0,
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r116"), ctx.T("r116")) }) });
+segDefRow({ id: "r117", section: "Total", label: "Total delivered orders", unit: "count",
+  target: (ctx) => ctx.T("r22") + ctx.T("r47") + ctx.T("r72") + ctx.T("r106"),
+  actual: (ctx) => ctx.A("r22") + ctx.A("r47") + ctx.A("r72") + ctx.A("r106"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r117"), ctx.T("r117")) }) });
+segDefRow({ id: "r118", section: "Total", label: "Total delivered GMV", unit: "money",
+  target: (ctx) => ctx.T("r24") + ctx.T("r49") + ctx.T("r74") + ctx.T("r108"),
+  actual: (ctx) => ctx.A("r24") + ctx.A("r49") + ctx.A("r74") + ctx.A("r108"),
+  ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r118"), ctx.T("r118")) }) });
+
+const SEG_ROW_ORDER = ["r3","r4","r5","r6","r7","r8","r9","r10","r11","r12","r13","r14","r15","r16",
+  "r18","r19","r20","r21","r22","r23","r24","r25",
+  "r28","r29","r30","r31","r32","r33","r34","r35","r36","r37","r38","r39","r40","r41",
+  "r43","r44","r45","r46","r47","r48","r49","r50",
+  "r53","r54","r55","r56","r57","r58","r59","r60","r61","r62","r63","r64","r65","r66",
+  "r68","r69","r70","r71","r72","r73","r74","r75",
+  "r78","r79","r80","r81","r82","r83","r84","r85","r86","r87","r88","r89","r90","r91","r92","r93","r94","r95","r96","r97",
+  "r102","r103","r104","r105","r106","r107","r108","r109",
+  "r113","r114","r115","r116","r117","r118"];
+
+function buildSegCtx() {
+  const data = state.newSegRows || [];
+  const targetCache = {};
+  const actualCache = {};
+  const monthKey = (m) => (m ? `${m.getFullYear()}-${m.getMonth()}` : "x");
+  let lvmBaseCache = null;
+
+  const ctx = {
+    sum: (field, filters, monthDate) => segSumBy(data, field, filters, monthDate),
+    T(id) {
+      if (targetCache[id] !== undefined) return targetCache[id];
+      targetCache[id] = 0; // guard against accidental self-reference loops
+      const val = SEG_ROWS_BY_ID[id].target(ctx) || 0;
+      targetCache[id] = val;
+      return val;
+    },
+    A(id, monthDate) {
+      const md = monthDate || SEG_PANEL_MONTH;
+      const key = id + "|" + monthKey(md);
+      if (actualCache[key] !== undefined) return actualCache[key];
+      actualCache[key] = 0;
+      const val = SEG_ROWS_BY_ID[id].actual(ctx, md) || 0;
+      actualCache[key] = val;
+      return val;
+    },
+    // مرجع ثابت (زي خلية $I$78 في شيت الإكسيل): إجمالي ميرشانتس الـ LVM
+    // بتاع شهر أبريل 2026 — بيستخدم كقاسم لكل نسب الـ % في قسم LVM.
+    lvmBase() {
+      if (lvmBaseCache !== null) return lvmBaseCache;
+      lvmBaseCache = ctx.A("r97", SEG_PANEL_APRIL_REF);
+      return lvmBaseCache;
+    }
+  };
+  return ctx;
+}
+
+function computeSegmentationPerformance() {
+  const ctx = buildSegCtx();
+  const results = [];
+  SEG_ROW_ORDER.forEach((id) => {
+    const row = SEG_ROWS_BY_ID[id];
+    const target = ctx.T(id);
+    const actual = ctx.A(id);
+    const ach = row.ach(ctx);
+    results.push({ id, section: row.section, label: row.label, unit: row.unit, top: !!row.top, sub: !!row.sub, target, actual, ach });
+  });
+  return results;
+}
+
 // Fetches all 7 sheets (main sheet is mandatory, the rest are best-effort)
 // and returns a plain snapshot object — does NOT touch global state, so it
 // is safe to call in the background while old data is still on screen.
 async function fetchAllSheetsSnapshot() {
-  const [mainPayload, targetsPayload, segPayload, acmTargetsPayload, invPayload, prodPayload, catTargetsPayload, planPayload, salesPlanPerfPayload] = await Promise.all([
+  let newSegLoadError = null;
+  const [
+    mainPayload, targetsPayload, segPayload, acmTargetsPayload, 
+    invPayload, prodPayload, catTargetsPayload, planPayload, 
+    salesPlanPerfPayload, newSegPayload, inboundPayload,
+    prodInfoPayload, begInvPayload, sellthroughNeededPayload
+  ] = await Promise.all([
     loadSheetWithRetry(MAIN_GID),
     TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(() => null) : Promise.resolve(null),
     SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(() => null) : Promise.resolve(null),
@@ -1691,8 +3037,13 @@ async function fetchAllSheetsSnapshot() {
     INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(() => null) : Promise.resolve(null),
     PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(() => null) : Promise.resolve(null),
     CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null),
-    ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(() => null) : Promise.resolve(null), // <-- شيت التارجت اليومي
-    SALES_PLAN_PERF_GID ? loadSheetWithRetry(SALES_PLAN_PERF_GID).catch(() => null) : Promise.resolve(null) // <-- شيت برفورمانس الـ Sales Plan الجديد
+    ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(() => null) : Promise.resolve(null),
+    SALES_PLAN_PERF_GID ? loadSheetWithRetry(SALES_PLAN_PERF_GID).catch(() => null) : Promise.resolve(null),
+    NEW_SEGMENTATION_GID ? loadSheetWithRetry(NEW_SEGMENTATION_GID).catch((err) => { newSegLoadError = err.message || String(err); return null; }) : Promise.resolve(null),
+    INBOUND_GID ? loadSheetWithRetry(INBOUND_GID).catch(() => null) : Promise.resolve(null),
+    loadSheetWithRetry(PRODUCTS_INFO_GID).catch(() => null),
+    loadSheetWithRetry(BEGIN_INV_GID).catch(() => null),
+    loadSheetWithRetry(SELLTHROUGH_NEEDED_GID).catch(() => null)
   ]);
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -1707,7 +3058,13 @@ async function fetchAllSheetsSnapshot() {
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
     categoryTargets: catTargetsPayload ? parseCategoryTargetsSheet(catTargetsPayload) : state.categoryTargets,
     acmSalesPlanData: planPayload ? parseAcmSalesPlanSheet(planPayload) : state.acmSalesPlanData, // <-- إضافة البيانات
-    salesPlanPerfRows: salesPlanPerfPayload ? parseSalesPlanPerformanceSheet(salesPlanPerfPayload) : state.salesPlanPerfRows // <-- برفورمانس الـ Sales Plan
+    salesPlanPerfRows: salesPlanPerfPayload ? parseSalesPlanPerformanceSheet(salesPlanPerfPayload) : state.salesPlanPerfRows, // <-- برفورمانس الـ Sales Plan
+    newSegRows: newSegPayload ? parseNewSegmentationSheet(newSegPayload) : state.newSegRows, // <-- Segmentation Panel (Admin Panel)
+    newSegLoadError: newSegPayload ? null : (newSegLoadError || state.newSegLoadError || "Could not load GID " + NEW_SEGMENTATION_GID + "."),
+    inboundRows: inboundPayload ? parseInboundSheet(inboundPayload) : state.inboundRows,
+    metabaseProductsInfo: prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload) : state.metabaseProductsInfo,
+    metabaseBeginningInventory: begInvPayload ? parseBeginningInventorySheet(begInvPayload) : state.metabaseBeginningInventory,
+    metabaseSellthroughNeeded: sellthroughNeededPayload ? parseSellthroughNeededSheet(sellthroughNeededPayload) : state.metabaseSellthroughNeeded
   };
 }
 
@@ -1722,6 +3079,12 @@ function applySnapshotToState(snapshot) {
   state.categoryTargets = snapshot.categoryTargets;
   state.acmSalesPlanData = snapshot.acmSalesPlanData; 
   state.salesPlanPerfRows = snapshot.salesPlanPerfRows;
+  state.newSegRows = snapshot.newSegRows || [];
+  state.newSegLoadError = snapshot.newSegLoadError || null;
+  state.inboundRows = snapshot.inboundRows || [];
+  state.metabaseProductsInfo = snapshot.metabaseProductsInfo || [];
+  state.metabaseBeginningInventory = snapshot.metabaseBeginningInventory || [];
+  state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
 }
 function renderCurrentState() {
   populateFilters(state.allParsedRows);

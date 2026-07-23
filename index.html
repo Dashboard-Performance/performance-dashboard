@@ -50,7 +50,16 @@
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
           </div>
         </div>
-        <a class="nav-item"><span class="nav-icon"></span>Admin Panel<span class="nav-caret">▼</span></a>
+        <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navAdminToggle">
+            <span class="nav-icon"></span>Admin Panel
+            <span class="nav-caret" id="navAdminCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="adminSubmenu">
+            <a class="nav-item-sub" id="navSegmentationPanel">Segmentation Panel</a>
+            <a class="nav-item-sub" id="navSellthroughPanel">Sellthrough Rate Panel</a>
+          </div>
+        </div>
       </nav>
       <div class="sidebar-footer">
         <div id="sidebarStatus">Live System Sync</div>
@@ -267,6 +276,8 @@
                       <th data-key="ndr" class="num">Actual NDR%</th>
                       <th data-key="targetCm3" class="num text-dim">Target CM3%</th>
                       <th data-key="cm3Pct" class="num">Actual CM3%</th>
+                      <th data-key="targetRetention" class="num text-dim">Target Retention</th>
+                      <th data-key="actualRetention" class="num">Actual Retention</th>
                       <th data-key="placed" class="num text-dim">Placed</th>
                       <th data-key="confirmed" class="num">Confirmed</th>
                       <th data-key="delivered" class="num text-dim">Delivered</th>
@@ -735,7 +746,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Performance-Matches</h2>
-                  <p>All Merchant x Product matches — from Main sheet. CM3 &amp; CM3% (4D lag), rest unlagged</p>
+                  <p>All Merchant x Product matches — CM3 &amp; CM3% (Cutoff D-4)</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchMpMatchesInput" type="search" placeholder="Search Product, Merchant, or ACM..." />
@@ -778,6 +789,169 @@
             </div>
           </section>
         </div>
+        <!-- SEGMENTATION PANEL (Admin Panel) -->
+        <div id="viewSegmentationPanel" class="view-section hidden">
+          <section class="metrics-grid" id="segKpiGrid"></section>
+
+          <section class="table-section mt-4">
+            <div class="panel-title-wrapper border-purple" style="margin-bottom:14px;">
+              <h2>Segmentation Panel — EGY</h2>
+              <p>TARGET / Actuals / Achievement% "</p>
+            </div>
+            <div class="seg-sections-grid" id="segSectionsGrid"></div>
+            <div class="mt-4" id="segTotalSectionWrap"></div>
+          </section>
+        </div>
+        <!-- SELLTHROUGH RATE PANEL -->
+        <div id="viewSellthroughPanel" class="view-section hidden">
+          <!-- شريط التحميل الخاص باللوحة -->
+          <div id="stProgressOverlay" class="st-progress-overlay hidden">
+            <div class="st-progress-box">
+              <h3>Loading Data...</h3>
+              <div class="progress-bar lg">
+                <div id="stProgressBar" class="progress-fill blue" style="width: 0%"></div>
+              </div>
+              <div id="stProgressText" class="st-progress-text">0%</div>
+            </div>
+          </div>
+          <!-- Filters Section -->
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Sellthrough Rate Filters</h2>
+                  <p>Apply filters to update the Sellthrough data</p>
+                </div>
+              </div>
+              <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+                <select id="stMonthSelect" class="st-filter-select">
+                  <option value="">All Months</option>
+                </select>
+                <select id="stBegInvSelect" class="st-filter-select">
+                  <option value="">Beginning Inventory</option>
+                </select>
+                <select id="stStartSaleMonthSelect" class="st-filter-select">
+                  <option value="">Start Sale Month</option>
+                </select>
+                <select id="stEndSaleMonthSelect" class="st-filter-select">
+                  <option value="">End Sale Month</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <!-- Summary Sections (Confirmed / Delivered) — same as "Summary" tab in the sheet -->
+          <section class="mb-4">
+            <div class="st-summary-grid">
+              <div class="panel hover-glow">
+                <div class="panel-head-modern">
+                  <div class="panel-title-wrapper border-blue">
+                    <h2>Confirmed</h2>
+                    <p>Category Breakdown Analysis</p>
+                  </div>
+                </div>
+                <div class="table-responsive">
+                  <table class="st-summary-table" id="stConfirmedSummaryTable">
+                    <thead>
+                      <tr>
+                        <th>CAT</th>
+                        <th>CONFIRMED_PIECES</th>
+                        <th>BEGINNING_INVENTORY</th>
+                        <th>BEGINNING_SALES</th>
+                        <th>RETURNS</th>
+                        <th>RETURN_SALES</th>
+                        <th>TOTAL_PURCHASES</th>
+                        <th>PURCHASES_SALES</th>
+                        <th>OVERFLOW</th>
+                        <th>SELLTHROUGH%</th>
+                        <th>INBOUND VS SOLD</th>
+                      </tr>
+                    </thead>
+                    <tbody id="stConfirmedSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="panel hover-glow">
+                <div class="panel-head-modern">
+                  <div class="panel-title-wrapper border-green">
+                    <h2>Delivered</h2>
+                    <p>Category Breakdown Analysis</p>
+                    <pCBy categorDataMetabase query</p>
+                  </div>
+                </div>
+                <div class="table-responsive">
+                  <table class="st-summary-table" id="stDeliveredSummaryTable">
+                    <thead>
+                      <tr>
+                        <th>CAT</th>
+                        <th>DELIVERED_PIECES</th>
+                        <th>BEGINNING_INVENTORY</th>
+                        <th>BEGINNING_SALES</th>
+                        <th>RETURNS</th>
+                        <th>RETURN_SALES</th>
+                        <th>TOTAL_PURCHASES</th>
+                        <th>PURCHASES_SALES</th>
+                        <th>OVERFLOW</th>
+                        <th>SELLTHROUGH%</th>
+                        <th>INBOUND VS SOLD</th>
+                      </tr>
+                    </thead>
+                    <tbody id="stDeliveredSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Data Table Section -->
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Sellthrough & Inbound</h2>
+                  <p>Tracking Sales Performance and Inbound Inventory</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchSellthroughInput" type="search" placeholder="Search SKU or Name..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="sellthroughTable">
+                  <thead>
+                    <tr>
+                      <th data-stkey="sku">SKU</th>
+                      <th data-stkey="name" style="min-width: 180px;">NAME</th>
+                      <th data-stkey="cat">CAT</th>
+                      <th data-stkey="lastRecDate">Last receiving date</th>
+                      <th data-stkey="cnfQty" class="num text-blue">CNF_QTY</th>
+                      <th data-stkey="dlvQty" class="num text-green">DLV_QTY</th>
+                      <th data-stkey="begInv" class="num">Beginning_Inventory</th>
+                      <th data-stkey="begSales" class="num">BEGINNING_SALES</th>
+                      <th data-stkey="remBeg" class="num text-orange">Remaining from beginning</th>
+                      <th data-stkey="rtos" class="num text-red">RTOS</th>
+                      <th data-stkey="retSales" class="num text-red">RETURN_SALES</th>
+                      <th data-stkey="remPurSales" class="num text-dim">Remaining from purchase sales</th>
+                      <th data-stkey="totPur" class="num text-blue">TOTAL_PURCHASES</th>
+                      <th data-stkey="purSales" class="num text-green">PURCHASES_SALES</th>
+                      <th data-stkey="stRate" class="num text-purple font-bold">SELLTHROUGH_RATE</th>
+                      <th data-stkey="soldInb" class="num font-bold">SOLD_FROM_INBOUND</th>
+                      <th data-stkey="firstBuy" class="center">First buy?</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sellthroughTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountSellthrough">0 Rows</span>
+                <div class="pager">
+                  <button id="prevPageSellthrough" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorSellthrough">Page 1 of 1</span>
+                  <button id="nextPageSellthrough" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
       <div id="loadingState" class="loading-state">
         <div class="spinner"></div>
@@ -789,7 +963,23 @@
       </div>
     </div>
   </div>
+
+
   
+  <!-- ADMIN PANEL PASSWORD MODAL -->
+  <div id="adminPasswordModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>🔒 Admin Panel Access</h3>
+      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">This section is password protected. Enter the admin password to continue.</p>
+      <input type="password" id="adminPasswordInput" class="form-input" placeholder="Password" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;font-family:'JetBrains Mono',monospace;" />
+      <p id="adminPasswordError" class="hidden" style="color:#ef4444;font-size:12px;margin-top:8px;">Incorrect password. Please try again.</p>
+      <div class="modal-actions">
+        <button id="adminPasswordCancel" class="btn btn-outline">Cancel</button>
+        <button id="adminPasswordSubmit" class="btn btn-primary">Unlock</button>
+      </div>
+    </div>
+  </div>
+
   <!-- DOWNLOAD CSV MODAL -->
   <div id="downloadModal" class="modal hidden">
     <div class="modal-content">
