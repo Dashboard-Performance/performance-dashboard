@@ -96,7 +96,11 @@ const state = {
   // فلاتر شهور لوحة الـ Sellthrough: begInv (شهر المخزون الافتتاحي/المشتريات),
   // startSale/endSale (مدى شهور المبيعات) — بالظبط زي Summary!D1 و H1/H2 في الشيت الأصلي.
   stFilters: { begInv: null, startSale: null, endSale: null },
-  sellthroughMonthOptions: []
+  sellthroughMonthOptions: [],
+  // true لما تتجهز الداتا مرة، يبقى فاتح البانل تاني (نفس الجلسة) مايعملش
+  // لودينج ولا يعيد الحساب تاني — إلا لو الداتا الخام اتغيرت (applySnapshotToState
+  // بيرجعها false تاني عشان تتحسب مرة واحدة بس مع أحدث داتا).
+  sellthroughPrepared: false
 };
 const analystState = {
   scope: "merchant", data: [], filtered: [], sortKey: "cm3Pct", sortDir: "desc", page: 0, wired: false
@@ -2093,7 +2097,7 @@ function populateSellthroughFilters() {
     if (!el) return;
     el.innerHTML = `<option value="">${placeholder}</option>${optionsHtml}`;
     const savedVal = state.stFilters[key];
-    const finalVal = savedVal && options.some(o => o.key === savedVal) ? savedVal : "";
+    const finalVal = savedVal && options.some(o => o.key === savedVal) ? savedVal : latestKey;
     el.value = finalVal;
     state.stFilters[key] = finalVal;
   });
@@ -2370,8 +2374,17 @@ function simulateSellthroughProgress() {
   const bar = $("stProgressBar");
   const text = $("stProgressText");
 
+  // ✅ الداتا اتجهزت قبل كده في نفس الجلسة، والمصدر الخام مش اتغيّر (مفيش
+  // ريفريش جديد) — يبقى مفيش داعي نعمل لودينج ولا نعيد الحساب تاني.
+  // البانل هيفضل زي ما هو (الجدول والملخصات لسه في الـ DOM من المرة اللي فاتت).
+  if (state.sellthroughPrepared) {
+    if (overlay) overlay.classList.add("hidden");
+    return;
+  }
+
   if (!overlay || !bar || !text) {
     prepareSellthroughData();
+    state.sellthroughPrepared = true;
     return;
   }
 
@@ -2381,37 +2394,32 @@ function simulateSellthroughProgress() {
   bar.style.width = "0%";
   text.textContent = "0%";
 
-  // 2. تأخير بسيط جداً عشان المتصفح يطبق الصفر قبل ما نبدأ
-  setTimeout(() => {
-    // نرجع الأنيميشن ونسرعه شوية عشان يمشي مع الأرقام
-    bar.style.transition = "width 0.2s linear";
-    
-    let progress = 0;
-    
-    // 3. العداد هيزيد كل 80 ملي ثانية (سرعة مناسبة للعين)
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 12) + 4; // زيادة عشوائية
-      
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        bar.style.width = "100%";
-        text.textContent = "100%";
+  // 2. نستنى المتصفح يرسم الـ 0% فعلاً (فريمين) قبل ما نبدأ أي حاجة
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      bar.style.transition = "width 0.25s ease-out";
+      bar.style.width = "55%";
+      text.textContent = "55%";
 
-        // 4. هنا السر! هنستنى نص ثانية (500ms) عشان الشريط الأزرق يلحق يوصل للآخر 100%
-        // قبل ما نشغل الداتا التقيلة اللي بتجمد الشاشة
+      // 3. نستنى فريم كمان عشان نتأكد إن الـ 55% اتلون فعلاً على الشاشة،
+      // بعدين نبدأ الشغل الحقيقي (build indices + compute rows) — مش تايمر
+      // وهمي منفصل عن الشغل زي قبل كده.
+      requestAnimationFrame(() => {
         setTimeout(() => {
-          prepareSellthroughData();
-          overlay.classList.add("hidden");
-        }, 500);
-        
-      } else {
-        bar.style.width = progress + "%";
-        text.textContent = progress + "%";
-      }
-    }, 80);
-    
-  }, 50);
+          prepareSellthroughData();      // <-- الشغل الحقيقي بيحصل هنا بالظبط
+          state.sellthroughPrepared = true;
+
+          bar.style.transition = "width 0.15s ease-out";
+          bar.style.width = "100%";
+          text.textContent = "100%";
+
+          // 4. دلوقتي 100% بجد معناها الداتا جاهزة وعلى الشاشة، فنقفل
+          // اللودينج على طول من غير ما نستنى تايمر وهمي.
+          requestAnimationFrame(() => overlay.classList.add("hidden"));
+        }, 20);
+      });
+    });
+  });
 }
 
 function prepareSellthroughData() {
@@ -2467,7 +2475,6 @@ function renderPaginatedSellthroughTable() {
   if (!tbody) return;
   tbody.innerHTML = "";
   
-  const PAGE_SIZE = 10;
   const start = state.sellthroughPage * PAGE_SIZE;
   const pageRows = state.filteredSellthroughData.slice(start, start + PAGE_SIZE);
   
@@ -3085,6 +3092,9 @@ function applySnapshotToState(snapshot) {
   state.metabaseProductsInfo = snapshot.metabaseProductsInfo || [];
   state.metabaseBeginningInventory = snapshot.metabaseBeginningInventory || [];
   state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
+  // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — يبقى لازم لوحة الـ Sellthrough
+  // تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها، مش قبل كده.
+  state.sellthroughPrepared = false;
 }
 function renderCurrentState() {
   populateFilters(state.allParsedRows);
@@ -3230,11 +3240,14 @@ confirmDownloadBtn.addEventListener("click", () => {
         merchant: state.pageMerchant,
         seg: state.pageSeg,
         inv: state.pageInventory,
-        analyst: analystState.page
+        analyst: analystState.page,
+        sellthrough: state.sellthroughPage,
+        mpMatches: mpMatchesState.page
     };
     
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
+    state.sellthroughPage = 0; mpMatchesState.page = 0;
     PAGE_SIZE = 999999; 
     
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
@@ -3242,6 +3255,8 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
     if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
+    if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
+    if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
     
     // Wait for DOM to render all rows
     setTimeout(() => {
@@ -3254,12 +3269,16 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.pageSeg = originalPage.seg;
         state.pageInventory = originalPage.inv;
         analystState.page = originalPage.analyst;
+        state.sellthroughPage = originalPage.sellthrough;
+        mpMatchesState.page = originalPage.mpMatches;
         
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
         if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
         if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
         if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
+        if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
+        if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
     }, 150);
 });
 
