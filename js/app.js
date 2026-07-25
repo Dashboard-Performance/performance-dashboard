@@ -32,6 +32,38 @@ const INBOUND_GID = "565878313";
 const BEGIN_INV_GID = "22283311";        // شيت "EGY Beginning Inventory #4132"
 const PRODUCTS_INFO_GID = "531154071";   // شيت "Porducts_infor #4259"
 const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate needed data #2941"
+
+// -------------------------------------------------------------------------
+// COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
+// كل Single SKU عن طريق ضم الديماند اللي جاي من البندلز اللي فيها نفس الـ
+// Single SKU (مضروبة في الكمية بتاعتها جوه البندل) فوق الديماند المباشر بتاعه.
+//   PRODUCTS_DEBUNDLE_MAP_GID: شيت الماب بين PRODUCT_ID (سنجل أو بندل) و SINGLE_ID
+//     الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY
+//   SINGLE_SKU_TARGETS_GID: شيت تارجتس الـ Single SKU (Adjusted Target = تارجت يومي كونفيرمد)
+//     الأعمدة: ID, NAME, Category, Adjusted Target
+// -------------------------------------------------------------------------
+const PRODUCTS_DEBUNDLE_MAP_GID = "1409034448";
+const SINGLE_SKU_TARGETS_GID = "1620722565";
+
+// -------------------------------------------------------------------------
+// DATA API (Apps Script backend) — ONE round trip for all sheets instead of
+// the old ~14 parallel gviz/JSONP calls, which Google was rate-limiting
+// (that's what caused the repeating "Timeout on GID: ..." errors and the
+// dashboard falling back to stale cache on refresh).
+//
+// Paste the SAME Apps Script Web App deployment URL used in js/auth.js
+// (CONFIG.API_URL) — a doGet handler for this was added to backend/Code.gs.
+// After pasting, redeploy the Apps Script ("Manage deployments" > Edit >
+// New version) so the new doGet is live on that same URL.
+//
+// Leave this empty ("") to keep the old per-sheet JSONP path as a fallback
+// — the app works either way, but JSONP is the one that was failing.
+// -------------------------------------------------------------------------
+const DATA_API_URL = "";
+// The backend fetches every GID sequentially (one gviz request at a time,
+// on purpose — see backend/Code.gs), so the total round trip for ~14
+// sheets can take longer than a single sheet used to. 60s gives it room.
+const DATA_API_TIMEOUT_MS = 60000;
 // -------------------------------------------------------------------------
 // SEGMENTATION PANEL (Admin Panel) — نفس الحسبة اللي في شيت EGY بالظبط
 // (Target/Actual/Achievement% لشهر يوليو)، بس بتتقرأ لايف من شيت
@@ -80,6 +112,10 @@ const state = {
   salesPlanPerfRows: [], // صفوف شيت البرفورمانس الجديد الخاص بالـ Sales Plan (SALES_PLAN_PERF_GID)
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
+  commercialTargets: {}, tcCategory: "grand total",
+  debundleMap: [], singleSkuTargets: {}, // Commercial Debundlized (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID)
+  cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
+  cdzFiltered: [], cdzPage: 0,
   acmTableData: [], filteredAcmData: [], sortKey: "finalScorePct", sortDir: "desc", page: 0,
   merchantTableData: [], filteredMerchantData: [], sortKeyMerchant: "deliveredGmv", sortDirMerchant: "desc", pageMerchant: 0,
   filteredSegData: [], sortKeySeg: "rrConfirmed", sortDirSeg: "desc", pageSeg: 0,
@@ -136,6 +172,8 @@ const navCommercialCaret = $("navCommercialCaret");
 const navMarketplaceToggle = $("navMarketplaceToggle");
 const marketplaceSubmenu = $("marketplaceSubmenu");
 const navMarketplaceCaret = $("navMarketplaceCaret");
+const navTargetsCommercial = $("navTargetsCommercial");
+const navCommercialDebundlized = $("navCommercialDebundlized");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navMpSalesPlan = $("navMpSalesPlan");
@@ -177,6 +215,8 @@ function switchView(viewName) {
   if(navInventory) navInventory.classList.remove("active");
   if(navAcmPerf) navAcmPerf.classList.remove("active");
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
+  if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
+  if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
@@ -189,6 +229,8 @@ function switchView(viewName) {
   else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); } 
   else if (viewName === "acmPerformance") { activeSection = $("viewAcmPerformance"); if(navAcmPerf) navAcmPerf.classList.add("active"); } 
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
+  else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
+  else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
@@ -210,6 +252,8 @@ if(navOverview) navOverview.addEventListener("click", () => switchView("overview
 if(navInventory) navInventory.addEventListener("click", () => switchView("inventory"));
 if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerformance"));
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
+if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
+if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
@@ -381,10 +425,10 @@ if($("nextPageMpMatches")) $("nextPageMpMatches").addEventListener("click", () =
 // on that attempt. Raised from the original 15s because with 7 sheets
 // fetched in parallel, transient Google-side latency on one GID (usually
 // the big MAIN sheet) was enough to blow the old, tight timeout.
-const SHEET_LOAD_TIMEOUT_MS = 25000;
+const SHEET_LOAD_TIMEOUT_MS = 40000;
 // How many attempts (including the first) we make per GID before we
 // actually give up on that sheet.
-const SHEET_LOAD_MAX_ATTEMPTS = 3;
+const SHEET_LOAD_MAX_ATTEMPTS = 4;
 // Base backoff between retries (grows a bit each retry).
 const SHEET_LOAD_RETRY_BASE_MS = 1200;
 
@@ -407,7 +451,7 @@ function loadSheetViaJsonp(gid) {
 // recurring "Timeout on GID: ..." error, because most timeouts are
 // transient (one bad round-trip), not permanent failures.
 function loadSheetWithRetry(gid, attemptsLeft = SHEET_LOAD_MAX_ATTEMPTS, attemptNumber = 1) {
-  return loadSheetViaJsonp(gid).catch((err) => {
+  return limitSheetLoad(() => loadSheetViaJsonp(gid)).catch((err) => {
     if (attemptsLeft <= 1) throw err;
     const delay = SHEET_LOAD_RETRY_BASE_MS * attemptNumber;
     console.warn(`GID ${gid} failed (attempt ${attemptNumber}): ${err.message}. Retrying in ${delay}ms...`);
@@ -416,6 +460,28 @@ function loadSheetWithRetry(gid, attemptsLeft = SHEET_LOAD_MAX_ATTEMPTS, attempt
     );
   });
 }
+
+// -------------------------------------------------------------------------
+// CONCURRENCY LIMITER — this is the actual fix for the timeouts.
+// Firing all ~14 GID requests at once (Promise.all) was hitting Google's
+// per-document rate limit on the gviz endpoint, which is why several sheets
+// (especially the big MAIN one) kept timing out. Running only a few at a
+// time — the rest wait in a queue — keeps every individual request fast
+// and reliable, at the cost of the whole load taking a bit longer overall.
+// -------------------------------------------------------------------------
+const SHEET_LOAD_CONCURRENCY = 2;
+function createLoadLimiter(concurrency) {
+  let active = 0;
+  const queue = [];
+  const runNext = () => {
+    if (active >= concurrency || queue.length === 0) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    fn().then(resolve, reject).finally(() => { active--; runNext(); });
+  };
+  return (fn) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); runNext(); });
+}
+const limitSheetLoad = createLoadLimiter(SHEET_LOAD_CONCURRENCY);
 
 // -------------------------------------------------------------------------
 // LOCAL CACHE (IndexedDB) — instant paint + timeout/offline fallback
@@ -447,7 +513,7 @@ async function saveDataToCache(snapshot) {
     const db = await openCacheDB();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).put({ savedAt: Date.now(), data: snapshot }, IDB_KEY);
+      tx.objectStore(IDB_STORE).put({ savedAt: Date.now(), data: snapshot, fingerprint: computeSnapshotFingerprint(snapshot) }, IDB_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -455,6 +521,31 @@ async function saveDataToCache(snapshot) {
     // Not fatal — the app just falls back to always fetching fresh next time.
     console.warn("Cache save failed:", e.message || e);
   }
+}
+
+// -------------------------------------------------------------------------
+// بصمة خفيفة للداتا (بدل ما نقارن الـ JSON كله، اللي هيبقى تقيل وبطيء) —
+// بتجمع عدد الصفوف + مجموع أهم الأرقام (Placed/Confirmed/Delivered/GMV/CM3)
+// + آخر تاريخ، بالإضافة لعدد صفوف باقي الشيتات المهمة. لو البصمتين اتطابقوا
+// يبقى مفيش أي داتا جديدة فعلياً وصلت، فمفيش داعي نعمل toast "Synchronized"
+// ولا نغير حالة الـ sync بشكل مبالغ فيه كل مرة بتفتح فيها الصفحة.
+// -------------------------------------------------------------------------
+function computeSnapshotFingerprint(snapshot) {
+  const rows = snapshot.allParsedRows || [];
+  let sumPlaced = 0, sumConfirmed = 0, sumDelivered = 0, sumGmv = 0, sumCm3 = 0, maxTs = 0;
+  rows.forEach(r => {
+    sumPlaced += r.placedPieces || 0; sumConfirmed += r.confirmedPieces || 0; sumDelivered += r.deliveredPieces || 0;
+    sumGmv += r.deliveredGmv || 0; sumCm3 += r.cm3 || 0;
+    if (r.timestamp > maxTs) maxTs = r.timestamp;
+  });
+  const parts = [
+    rows.length, Math.round(sumPlaced), Math.round(sumConfirmed), Math.round(sumDelivered),
+    Math.round(sumGmv), Math.round(sumCm3), maxTs,
+    (snapshot.acmSalesPlanData || []).length, (snapshot.salesPlanPerfRows || []).length,
+    (snapshot.debundleMap || []).length, Object.keys(snapshot.singleSkuTargets || {}).length,
+    (snapshot.inboundRows || []).length, (snapshot.newSegRows || []).length
+  ];
+  return parts.join("|");
 }
 
 async function loadDataFromCache() {
@@ -489,20 +580,71 @@ function formatCacheTimestamp(ts) {
 // Apps Script Web App you deploy yourself (see APPS_SCRIPT_SETUP.md).
 // Paste the deployment URL below. Leave it empty ("") to disable this
 // completely — nothing else in the app depends on it.
+//
+// The snapshot is gzipped client-side, then split into chunks and sent as
+// a sequence of small POSTs (rather than one big one) — gzip alone wasn't
+// enough here (an 8MB+ gzipped snapshot is still well over what Google's
+// front-end will accept in a single request to an Apps Script Web App, so
+// even compressed we were still hitting "413 Content Too Large"). Chunking
+// keeps every individual request small regardless of how large the sheet
+// grows, so this doesn't need revisiting as the dataset grows further.
 // -------------------------------------------------------------------------
 const DRIVE_BACKUP_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxN2rCqUtVV9JRcJdS-er__az_fDhYW8r1YwNgyuc3Kj2Yqrs2FJO2UpiCOq61tmVtM8A/exec";
 
-function backupSnapshotToDrive(snapshot) {
+const DRIVE_BACKUP_MAX_BYTES = 40 * 1024 * 1024; // sanity ceiling on the gzipped snapshot — chunking handles anything under this
+const DRIVE_BACKUP_CHUNK_CHARS = 2 * 1024 * 1024; // ~2MB of base64 text per request — comfortably under any request-size ceiling
+
+async function gzipToBase64(str) {
+  if (typeof CompressionStream === "undefined") return null; // old browser — skip backup
+  const stream = new Blob([str]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buf = await new Response(stream).arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return { base64: btoa(binary), byteLength: bytes.length };
+}
+
+async function backupSnapshotToDrive(snapshot) {
   if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
   try {
-    fetch(DRIVE_BACKUP_WEBHOOK_URL, {
-      method: "POST",
-      mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
-      body: JSON.stringify({ savedAt: Date.now(), data: snapshot })
-    }).catch((e) => console.warn("Drive backup failed (non-fatal):", e.message));
+    const json = JSON.stringify({ savedAt: Date.now(), data: snapshot });
+    const gz = await gzipToBase64(json);
+    if (!gz) { console.warn("[Drive backup] skipped — browser doesn't support CompressionStream."); return; }
+    if (gz.byteLength > DRIVE_BACKUP_MAX_BYTES) {
+      console.warn(`[Drive backup] skipped (non-fatal): ${(gz.byteLength / 1e6).toFixed(1)}MB gzipped, over the ${(DRIVE_BACKUP_MAX_BYTES / 1e6).toFixed(1)}MB sanity limit.`);
+      return;
+    }
+
+    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const totalChunks = Math.max(1, Math.ceil(gz.base64.length / DRIVE_BACKUP_CHUNK_CHARS));
+    console.log(`[Drive backup] sending ${(gz.byteLength / 1e6).toFixed(1)}MB gzipped as ${totalChunks} chunk(s), uploadId=${uploadId}`);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkData = gz.base64.slice(i * DRIVE_BACKUP_CHUNK_CHARS, (i + 1) * DRIVE_BACKUP_CHUNK_CHARS);
+      // Sequential + awaited on purpose: keeps chunks arriving in order
+      // without needing the server to buffer out-of-order pieces, and
+      // avoids firing 5+ simultaneous large POSTs at once.
+      await fetch(DRIVE_BACKUP_WEBHOOK_URL, {
+        method: "POST",
+        mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+        body: JSON.stringify({ action: "backup_chunk", uploadId, chunkIndex: i, totalChunks, chunkData })
+      });
+    }
+    // NOTE: mode:"no-cors" means the browser gives us an opaque response —
+    // we get here as long as every chunk request was *sent* without a
+    // network-level failure, but we cannot read status codes, so this does
+    // NOT confirm the server actually wrote the file (e.g. a bad Drive
+    // folder ID would still "succeed" from this side). To confirm a backup
+    // really landed, check the Drive backup folder for a new snapshot-*.json
+    // file, or Apps Script's own Executions log (Extensions > Apps Script >
+    // Executions) for the matching backup_chunk run.
+    console.log(`[Drive backup] all ${totalChunks} chunk(s) sent for uploadId=${uploadId}. This confirms the requests went out, not that the server wrote the file — check the Drive folder or Apps Script Executions log to verify.`);
   } catch (e) {
-    console.warn("Drive backup failed (non-fatal):", e.message);
+    console.warn("[Drive backup] failed (non-fatal):", e.message);
   }
 }
 
@@ -566,7 +708,8 @@ function parseMainSheet(payload) {
       placedGmv: placedGmv, deliveredGmv: cellNumber(c[22]), cm3: cellNumber(c[28]),
       acmName: cellText(c[31]) || "Unassigned", confirmedGmv: confirmedGmv,
       placedPieces: cellNumber(c[CM3_PLACED_PIECES_COL]),
-      confirmedPieces: cellNumber(c[16]), deliveredPieces: cellNumber(c[17])
+      confirmedPieces: cellNumber(c[16]), deliveredPieces: cellNumber(c[17]),
+      ppm: cellNumber(c[27]) // DELIVERED_PPM — نفس عمود الـ PPM المستخدم في شيت الـ Sales Plan Performance
     });
   }
   return rows;
@@ -708,6 +851,225 @@ function parseCategoryTargetsSheet(payload) {
   return map;
 }
 
+// -------------------------------------------------------------------------
+// TARGETS COMMERCIAL (Commercial dropdown) — بيقرأ من نفس شيت الـ Category
+// Targets (CAT_TARGETS_GID / gid=1656655269)، بس من البلوك التاني اللي شكله
+// "Metric في عمود A، وكل قسم (Consumables/Electronics/Home/Leisure/Grand Total)
+// في عمود لوحده" — زي بالظبط الجدول اللي اتبعت. القراءة هنا بتتم بمطابقة
+// نص التسمية (Label) مش بمطابقة رقم عمود/صف ثابت، عشان تفضل شغالة حتى لو
+// اتحرك البلوك في الشيت.
+// -------------------------------------------------------------------------
+const TC_CATEGORY_ORDER = ["consumables", "electronics", "home", "leisure", "grand total"];
+const TC_PCT_KEYS = new Set(["targetCr", "targetDr", "targetNdr", "crRevPct", "drRevPct", "ndrRevPct"]);
+const TC_LABEL_MAP = {
+  "placed pieces target": "placedPiecesTarget",
+  "planed cnf pieces": "plannedCnfPieces",
+  "planned cnf pieces": "plannedCnfPieces",
+  "cnf pieces target": "plannedCnfPieces",
+  "dlv pieces target": "dlvPiecesTarget",
+  "delivered pieces target": "dlvPiecesTarget",
+  "target cr%": "targetCr",
+  "target cr %": "targetCr",
+  "target dr": "targetDr",
+  "target dr%": "targetDr",
+  "target ndr": "targetNdr",
+  "target ndr%": "targetNdr",
+  "target placed daily": "targetPlacedDaily",
+  "target cnf daily": "targetCnfDaily",
+  "target confirmed daily": "targetCnfDaily",
+  "target dlv daily": "targetDlvDaily",
+  "target delivered daily": "targetDlvDaily",
+  "cr rev %": "crRevPct",
+  "cr rev%": "crRevPct",
+  "dr rev %": "drRevPct",
+  "dr rev%": "drRevPct",
+  "ndr rev %": "ndrRevPct",
+  "ndr rev%": "ndrRevPct",
+  "target revenue": "targetRevenue",
+  "target gmv": "targetGmv",
+  "target cm3": "targetCm3",
+  "target ppm": "targetPpm",
+  "asp dlv planed": "aspDlvPlanned",
+  "asp dlv planned": "aspDlvPlanned",
+  "asp dlv target": "aspDlvPlanned"
+};
+function tcNormalize(str) {
+  return (str || "").toString().trim().toLowerCase().replace(/[^\w%]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function tcFuzzyMatchLabel(label) {
+  const has = (s) => label.indexOf(s) !== -1;
+  if (has("cnf") && has("piece") && !has("daily")) return "plannedCnfPieces";
+  if (has("dlv") && has("piece") && !has("daily")) return "dlvPiecesTarget";
+  if (has("placed") && has("piece") && !has("daily")) return "placedPiecesTarget";
+  if (has("cr") && has("rev")) return "crRevPct";
+  if (has("dr") && has("rev") && !has("ndr")) return "drRevPct";
+  if (has("ndr") && has("rev")) return "ndrRevPct";
+  if (has("placed") && has("daily")) return "targetPlacedDaily";
+  if ((has("cnf") || has("confirmed")) && has("daily")) return "targetCnfDaily";
+  if ((has("dlv") || has("delivered")) && has("daily")) return "targetDlvDaily";
+  if (has("ndr")) return "targetNdr";
+  if (has("dr") && !has("ndr")) return "targetDr";
+  if (has("cr") && !has("ndr")) return "targetCr";
+  if (has("revenue")) return "targetRevenue";
+  if (has("gmv")) return "targetGmv";
+  if (has("cm3")) return "targetCm3";
+  if (has("ppm")) return "targetPpm";
+  if (has("asp")) return "aspDlvPlanned";
+  return null;
+}
+function parseCommercialTargetsSheet(payload) {
+  const result = {};
+  TC_CATEGORY_ORDER.forEach(cat => { result[cat] = {}; });
+  try {
+    const rawRows = payload?.table?.rows ?? [];
+    const rawCols = payload?.table?.cols ?? [];
+
+    // الخطوة 1: تحديد عمود كل قسم. جوجل شيتس (gviz) غالبًا بيحط صف العناوين
+    // في table.cols (label) مش في table.rows — فده أول مكان نتأكد منه، عشان
+    // ده كان سبب رئيسي في إن الـ fallback الثابت (أعمدة 1..5) كان بيقرأ من
+    // عمود غلط ويطلع نسب Achievement% غريبة (زي 10205%).
+    let colMap = null;
+    const colsTempMap = {}; let colsMatches = 0;
+    rawCols.forEach((col, idx) => {
+      const t = tcNormalize(col && col.label);
+      if (TC_CATEGORY_ORDER.includes(t) && colsTempMap[t] === undefined) { colsTempMap[t] = idx; colsMatches++; }
+    });
+    if (colsMatches >= 3) colMap = colsTempMap;
+
+    // لو مفيش عناوين في table.cols، ندور على صف عناوين جوه table.rows.
+    if (!colMap) {
+      for (const r of rawRows) {
+        const c = r.c || [];
+        const tempMap = {}; let matches = 0;
+        c.forEach((cell, idx) => {
+          const t = tcNormalize(cellText(cell));
+          if (TC_CATEGORY_ORDER.includes(t) && tempMap[t] === undefined) { tempMap[t] = idx; matches++; }
+        });
+        if (matches >= 3) { colMap = tempMap; break; }
+      }
+    }
+
+    // الخطوة 2: كل صف، نقرأ اسم المقياس من عمود A ونطابقه بالـ label map،
+    // وبعدين نقرأ قيم الأقسام. لو مفيش colMap ثابت اتلقى (لا في cols ولا في
+    // rows)، بنقرأ القيم positionally من نفس الصف: أول 5 خلايا فيها رقم بعد
+    // عمود A بالترتيب Consumables -> Electronics -> Home -> Leisure -> Grand Total
+    // (بالظبط زي الترتيب في الجدول اللي اتبعت)، بدل ما نخمن رقم عمود ثابت.
+    rawRows.forEach(r => {
+      const c = r.c || [];
+      if (!c.length) return;
+      const label = tcNormalize(cellText(c[0]));
+      if (!label) return;
+      const key = TC_LABEL_MAP[label] || tcFuzzyMatchLabel(label);
+      if (!key) return;
+
+      if (colMap) {
+        TC_CATEGORY_ORDER.forEach(cat => {
+          const colIdx = colMap[cat];
+          if (colIdx === undefined || !c[colIdx]) return;
+          const rawText = cellText(c[colIdx]);
+          let num = cellNumber(c[colIdx]);
+          if (TC_PCT_KEYS.has(key) && num > 0 && num <= 1 && rawText.indexOf('%') === -1) num *= 100;
+          result[cat][key] = num;
+        });
+      } else {
+        const valueCells = [];
+        for (let i = 1; i < c.length && valueCells.length < TC_CATEGORY_ORDER.length; i++) {
+          if (c[i] && cellText(c[i]) !== "") valueCells.push(c[i]);
+        }
+        TC_CATEGORY_ORDER.forEach((cat, idx) => {
+          const cell = valueCells[idx];
+          if (!cell) return;
+          const rawText = cellText(cell);
+          let num = cellNumber(cell);
+          if (TC_PCT_KEYS.has(key) && num > 0 && num <= 1 && rawText.indexOf('%') === -1) num *= 100;
+          result[cat][key] = num;
+        });
+      }
+    });
+
+    // تارجت CM3% محسوبة (مش موجودة في الشيت): TOTAL CM3 / TOTAL GMV لكل قسم.
+    TC_CATEGORY_ORDER.forEach(cat => {
+      const d = result[cat];
+      d.targetCm3Pct = d.targetGmv ? (d.targetCm3 / d.targetGmv) * 100 : 0;
+    });
+  } catch (e) {
+    console.error("Parse Error in Commercial Targets:", e);
+  }
+  return result;
+}
+
+// بيحسب نفس المقاييس (Actual) من شيت الـ Main (MAIN_GID) لكل قسم، باحترام
+// فلتر الشهر/الـ ACM الحالي.
+// - CR% (Confirmed/Placed): بتاخد كات أوف يومين (CR_LAG_DAYS) وبتاخد الشهر كله.
+// - DR% (Delivered/Confirmed): بتاخد نفس كات أوف الـ 4 أيام بتاع CM3 (CM3_LAG_DAYS) وبتاخد الشهر كله.
+// - NDR% = CR% × DR% (زي ما هما، من غير أي تعديل إضافي).
+// - CM3/PPM: بتحترم نفس كات أوف الـ 4 أيام (CM3_LAG_DAYS) زي أي سكشن تاني مصدره MAIN_GID.
+// - باقي الأرقام (Placed/Confirmed/Delivered Pieces, GMV): من غير أي لاج، الشهر كله كامل.
+const CR_LAG_DAYS = 2;
+function getLagCutoffTimestamp(rows, lagDays) {
+  let latestTs = 0;
+  rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  if (!latestTs) return 0;
+  const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
+  return latestDate.getTime() - (lagDays * 86400000);
+}
+function isRowEligibleForLag(row, cutoffTs) {
+  if (!cutoffTs) return false;
+  if (!row.timestamp) return false;
+  const rd = new Date(row.timestamp); rd.setHours(0, 0, 0, 0);
+  return rd.getTime() <= cutoffTs;
+}
+function tcEmptyBucket() { return { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, dateSet: new Set() }; }
+function tcFinalizeBucket(b) {
+  const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+  const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+  const ndrPct = (crPct * drPct) / 100;
+  const activeDays = b.dateSet.size || 1;
+  const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+  const aspDlv = b.delivered ? (b.deliveredGmv / b.delivered) : 0;
+  return {
+    placed: b.placed, confirmed: b.confirmed, delivered: b.delivered, crPct, drPct, ndrPct,
+    placedDaily: b.placed / activeDays, cnfDaily: b.confirmed / activeDays, dlvDaily: b.delivered / activeDays,
+    revenue: b.deliveredGmv, gmv: b.deliveredGmv, cm3: b.cm3, ppm: b.ppm, aspDlv, cm3Pct
+  };
+}
+function computeCommercialActuals(mainRowsAll) {
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const rows = (mainRowsAll || []).filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // 4 أيام (CM3_LAG_DAYS) — نفس كات أوف الـ CM3 والـ DR
+  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // يومين — خاص بالـ CR بس
+
+  const CATS = ["consumables", "electronics", "home", "leisure"];
+  const buckets = {}; CATS.forEach(c => buckets[c] = tcEmptyBucket());
+
+  rows.forEach(r => {
+    const catNorm = (r.category || "").trim().toLowerCase();
+    if (!buckets[catNorm]) return;
+    const b = buckets[catNorm];
+    b.placed += r.placedPieces; b.confirmed += r.confirmedPieces; b.delivered += r.deliveredPieces;
+    b.deliveredGmv += r.deliveredGmv;
+    if (r.date) b.dateSet.add(r.date);
+    if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
+    if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    if (isCm3RowEligible(r, cm3CutoffTs)) { b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; b.ppm += (r.ppm || 0); }
+  });
+
+  const results = {};
+  const grand = tcEmptyBucket();
+  CATS.forEach(cat => {
+    const b = buckets[cat];
+    results[cat] = tcFinalizeBucket(b);
+    grand.placed += b.placed; grand.confirmed += b.confirmed; grand.delivered += b.delivered;
+    grand.deliveredGmv += b.deliveredGmv; grand.cm3 += b.cm3; grand.cm3Gmv += b.cm3Gmv; grand.ppm += b.ppm;
+    grand.crPlaced += b.crPlaced; grand.crConfirmed += b.crConfirmed;
+    grand.drConfirmed += b.drConfirmed; grand.drDelivered += b.drDelivered;
+    b.dateSet.forEach(d => grand.dateSet.add(d));
+  });
+  results["grand total"] = tcFinalizeBucket(grand);
+  return results;
+}
+
 function parseAcmSalesPlanSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const plan = [];
@@ -727,6 +1089,55 @@ function parseAcmSalesPlanSheet(payload) {
     }
   }
   return plan;
+}
+
+// -------------------------------------------------------------------------
+// شيت الماب بين المنتجات (PRODUCTS_DEBUNDLE_MAP_GID / gid=1409034448).
+// كل صف بيمثل PRODUCT_ID (سنجل أو بندل) وبيقول الـ Single SKU الحقيقي بتاعه
+// (SINGLE_ID) والكمية اللي طالعة منه فيه (PRODUCT_QUANTITY) — للسطور اللي هي
+// أصلاً سنجل-بسنجل، PRODUCT_ID == SINGLE_ID والكمية بتبقى 1.
+// الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY
+// -------------------------------------------------------------------------
+// الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY, STOCK (عمود G)
+function parseDebundleMapSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]).trim();
+    if (!productId || productId === "PRODUCT_ID") continue;
+    const singleId = cellText(c[3]).trim();
+    if (!singleId) continue;
+    rows.push({
+      productId: productId,
+      productName: cellText(c[1]),
+      isBundle: cellText(c[2]),
+      singleId: singleId,
+      singleName: cellText(c[4]),
+      quantity: cellNumber(c[5]) || 1,
+      stock: cellNumber(c[6]) || 0 // العمود G — الاستوك الخاص بالـ SINGLE_ID
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
+// شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
+// Adjusted Target = تارجت يومي على أساس Confirmed.
+// الأعمدة: ID, NAME, Category, Adjusted Target
+// -------------------------------------------------------------------------
+function parseSingleSkuTargetsSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const map = {};
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const id = cellText(c[0]).trim();
+    if (!id || id === "ID") continue;
+    map[id] = { name: cellText(c[1]), category: cellText(c[2]), adjustedTarget: cellNumber(c[3]) };
+  }
+  return map;
 }
 
 // شيت البرفورمانس الجديد الخاص بالـ Sales Plan (SALES_PLAN_PERF_GID / gid=1857010960).
@@ -1013,6 +1424,7 @@ function applyFilters() {
 function updateDashboard(rows) {
   const metrics = computeMetrics(rows);
   const leaderboard = computeLeaderboard(rows);
+  if($("placedOrdersVal")) $("placedOrdersVal").textContent = fmtInt.format(metrics.placedOrders);
   if($("confirmedOrdersVal")) $("confirmedOrdersVal").textContent = fmtInt.format(metrics.confirmedOrders);
   if($("deliveredGmvVal")) $("deliveredGmvVal").textContent = fmtMoneyCompact(metrics.deliveredGmv);
   if($("confirmedGmvVal")) $("confirmedGmvVal").textContent = fmtMoneyCompact(metrics.confirmedGmv);
@@ -1038,6 +1450,8 @@ function updateDashboard(rows) {
   renderPipelineChart(rows); renderCategoryChart(rows);
   prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
   renderOverallAcmTargetsSummary();
+  if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
+  if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
@@ -1056,7 +1470,7 @@ function computeMetrics(rows) {
   });
   const cr = totalPlaced ? (totalConfirmed / totalPlaced) : 0;
   const dr = totalConfirmed ? (totalDelivered / totalConfirmed) : 0;
-  return { confirmedOrders: totalConfirmed, deliveredGmv, confirmedGmv, cr: cr * 100, dr: dr * 100, ndr: (dr * cr) * 100, activeSkus: skus.size, activeMerchants: merchants.size };
+  return { placedOrders: totalPlaced, confirmedOrders: totalConfirmed, deliveredGmv, confirmedGmv, cr: cr * 100, dr: dr * 100, ndr: (dr * cr) * 100, activeSkus: skus.size, activeMerchants: merchants.size };
 }
 
 function computeLeaderboard(rows) {
@@ -1143,7 +1557,7 @@ function renderPaginatedInventoryTable() {
       <td class="font-mono text-dim">${m.skuId}</td>
       <td class="font-bold text-light" style="white-space:normal; min-width: 150px; line-height: 1.4;">${m.skuName}</td>
       <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${m.stock}</span></td>
-      <td class="num font-bold text-dim">${m.doh}</td>
+      <td class="num font-bold text-dim">${fmtInt.format(Math.round(m.doh))}</td>
       <td class="text-dim">${m.category}</td>
       <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
       <td class="num font-bold text-blue">${fmtMoneyCompact(m.price)}</td>
@@ -1631,6 +2045,103 @@ function renderCm3OverallTable(rows) {
   });
 }
 
+// -------------------------------------------------------------------------
+// TARGETS COMMERCIAL — Target (state.commercialTargets, من CAT_TARGETS_GID)
+// مقابل Actual (محسوبة لايف من MAIN_GID عبر computeCommercialActuals).
+// -------------------------------------------------------------------------
+const TC_CATEGORY_LABELS = { consumables: "Consumables", electronics: "Electronics", home: "Home", leisure: "Leisure", "grand total": "Grand Total" };
+const TC_METRIC_ROWS = [
+  { label: "Placed Pieces", t: "placedPiecesTarget", a: "placed", fmt: "int" },
+  { label: "Confirmed (CNF) Pieces", t: "plannedCnfPieces", a: "confirmed", fmt: "int" },
+  { label: "Delivered (DLV) Pieces", t: "dlvPiecesTarget", a: "delivered", fmt: "int" },
+  { label: "CR %", t: "targetCr", a: "crPct", fmt: "pct" },
+  { label: "DR %", t: "targetDr", a: "drPct", fmt: "pct" },
+  { label: "NDR %", t: "targetNdr", a: "ndrPct", fmt: "pct" },
+  { label: "Placed Daily", t: "targetPlacedDaily", a: "placedDaily", fmt: "int" },
+  { label: "Confirmed Daily", t: "targetCnfDaily", a: "cnfDaily", fmt: "int" },
+  { label: "Delivered Daily", t: "targetDlvDaily", a: "dlvDaily", fmt: "int" },
+  { label: "CR Rev %", t: "crRevPct", a: null, fmt: "pct" },
+  { label: "DR Rev %", t: "drRevPct", a: null, fmt: "pct" },
+  { label: "NDR Rev %", t: "ndrRevPct", a: null, fmt: "pct" },
+  { label: "Revenue", t: "targetRevenue", a: "revenue", fmt: "money" },
+  { label: "GMV", t: "targetGmv", a: "gmv", fmt: "money" },
+  { label: "CM3", t: "targetCm3", a: "cm3", fmt: "money" },
+  { label: "PPM", t: "targetPpm", a: "ppm", fmt: "money" },
+  { label: "ASP DLV", t: "aspDlvPlanned", a: "aspDlv", fmt: "money" },
+  { label: "CM3 %", t: "targetCm3Pct", a: "cm3Pct", fmt: "pct" }
+];
+function tcFmtValue(v, fmt) {
+  if (v === null || v === undefined) return "—";
+  if (fmt === "pct") return fmtPct(v);
+  if (fmt === "money") return fmtMoneyCompact(v);
+  return fmtInt.format(Math.round(v));
+}
+function tcAchievementBadge(achPct) {
+  if (achPct === null) return { cls: "orange", text: "N/A" };
+  if (achPct >= 100) return { cls: "green", text: "On Target" };
+  if (achPct >= 85) return { cls: "orange", text: "Near Target" };
+  return { cls: "red", text: "Below Target" };
+}
+function renderTargetsCommercialTable(targetRow, actualRow) {
+  const body = $("tcTableBody"); if (!body) return;
+  body.innerHTML = "";
+  TC_METRIC_ROWS.forEach(row => {
+    const targetVal = targetRow ? (targetRow[row.t] || 0) : 0;
+    const actualVal = (row.a && actualRow) ? (actualRow[row.a] || 0) : null;
+    const achPct = (actualVal !== null && targetVal) ? (actualVal / targetVal) * 100 : null;
+    const badge = tcAchievementBadge(achPct);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-bold text-light">${row.label}</td>
+      <td class="num text-dim">${tcFmtValue(targetVal, row.fmt)}</td>
+      <td class="num font-bold">${tcFmtValue(actualVal, row.fmt)}</td>
+      <td class="num">${achPct === null ? "—" : `<span class="badge-outline ${badge.cls}">${fmtPct(achPct)}</span>`}</td>
+      <td class="center">${achPct === null ? `<span class="badge-status stable">N/A</span>` : `<span class="badge-status ${badge.cls === 'green' ? 'spike' : (badge.cls === 'red' ? 'decline' : 'stable')}">${badge.text}</span>`}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+function tcUpdateKpiCard(prefix, targetPct, actualPct) {
+  if ($(prefix + "Target")) $(prefix + "Target").textContent = `Target ${fmtPct(targetPct || 0)}`;
+  if ($(prefix + "Val")) $(prefix + "Val").textContent = fmtPct(actualPct || 0);
+  const bar = $(prefix + "Bar");
+  if (bar) {
+    const width = targetPct ? Math.min(100, (actualPct / targetPct) * 100) : 0;
+    bar.style.width = `${Math.max(0, width)}%`;
+    bar.className = "progress-fill " + (targetPct && actualPct >= targetPct ? "green" : (targetPct && actualPct >= targetPct * 0.85 ? "orange" : "red"));
+  }
+}
+function renderTargetsCommercialView() {
+  const cat = state.tcCategory || "grand total";
+  const targetRow = state.commercialTargets ? state.commercialTargets[cat] : null;
+  const actuals = computeCommercialActuals(state.allParsedRows || []);
+  const actualRow = actuals[cat];
+
+  if ($("tcTableTitle")) $("tcTableTitle").textContent = `Targets Commercial — ${TC_CATEGORY_LABELS[cat] || cat}`;
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  if ($("tcRangeLabel")) $("tcRangeLabel").textContent = selectedMonth || "All Time";
+
+  tcUpdateKpiCard("tcCr", targetRow ? targetRow.targetCr : 0, actualRow ? actualRow.crPct : 0);
+  tcUpdateKpiCard("tcDr", targetRow ? targetRow.targetDr : 0, actualRow ? actualRow.drPct : 0);
+  tcUpdateKpiCard("tcNdr", targetRow ? targetRow.targetNdr : 0, actualRow ? actualRow.ndrPct : 0);
+  tcUpdateKpiCard("tcCm3Pct", targetRow ? targetRow.targetCm3Pct : 0, actualRow ? actualRow.cm3Pct : 0);
+
+  renderTargetsCommercialTable(targetRow, actualRow);
+  tcWireControlsOnce();
+}
+let tcControlsWired = false;
+function tcWireControlsOnce() {
+  if (tcControlsWired) return; tcControlsWired = true;
+  document.querySelectorAll("#tcCategoryToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#tcCategoryToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.tcCategory = btn.dataset.cat;
+      renderTargetsCommercialView();
+    });
+  });
+}
+
 function renderCm3TargetView() {
   const analysis = computeCm3Analysis(cm3State.period, cm3State.scope);
   if ($("cm3TableTitle")) $("cm3TableTitle").textContent = `CM3 Target - ${SCOPE_TITLES[cm3State.scope]}`;
@@ -1933,6 +2444,240 @@ function renderMpSalesPlanTable(data) {
         tbody.appendChild(tr);
     });
 }
+// -------------------------------------------------------------------------
+// COMMERCIAL DEBUNDLIZED — لكل Single SKU (من PRODUCTS_DEBUNDLE_MAP_GID)،
+// بيجمع الديماند بتاعه من شيت الـ Main (MAIN_GID) على مستوى PRODUCT_ID، سواء
+// كان الـ PRODUCT_ID ده هو نفسه الـ Single SKU أو بندل بيحتويه — في حالة
+// البندل، القيم (Placed/Confirmed/Delivered/GMV/CM3) بتتضرب في PRODUCT_QUANTITY
+// بتاعت الـ Single جوه البندل ده قبل ما تتجمع. أي PRODUCT_ID مش موجود في
+// خريطة الديبندلايز أصلاً بيتجاهل (مش جزء من أي Single/Bundle معروف).
+// CR%/DR%/NDR%/CM3/CM3% بتاخد بالظبط نفس الـ Lag Cut-off المستخدم في أي
+// سكشن تاني مصدره MAIN_GID (CR_LAG_DAYS للـ CR، CM3_LAG_DAYS للـ DR والـ CM3).
+// Target = Adjusted Target (يومي، Confirmed basis) من SINGLE_SKU_TARGETS_GID،
+// و Target (MTD) = Daily Target × عدد الأيام من أول الشهر لحد امبارح.
+// لو الـ Single SKU ملوش تارجت، hasTarget=false وبيتعرض "Not in Plan".
+// -------------------------------------------------------------------------
+function buildDebundleProductMap(debundleRows) {
+  // PRODUCT_ID -> [{ singleId, quantity }, ...]
+  // ملحوظة مهمة: نفس الـ PRODUCT_ID (البندل) بيتكرر على أكتر من صف في الشيت،
+  // صف لكل Single SKU جوه البندل ده (كل صف بمقادير SINGLE_ID/PRODUCT_QUANTITY
+  // مختلفة). فلازم نجمع كل الصفوف دي في array لكل PRODUCT_ID، مش نستخدم
+  // Map.set عادي اللي كان بيدي override وبيسيب آخر صف بس (ده كان الـ bug).
+  const productMap = new Map();
+  const singlesList = new Map();  // SINGLE_ID -> SINGLE_NAME
+  const stockBySingle = new Map(); // SINGLE_ID -> STOCK (عمود G في نفس الشيت)
+  (debundleRows || []).forEach(r => {
+    if (!r.productId || !r.singleId) return;
+    if (!productMap.has(r.productId)) productMap.set(r.productId, []);
+    productMap.get(r.productId).push({ singleId: r.singleId, quantity: r.quantity || 1 });
+    if (!singlesList.has(r.singleId)) singlesList.set(r.singleId, r.singleName || r.singleId);
+    if (r.stock) stockBySingle.set(r.singleId, r.stock);
+  });
+  return { productMap, singlesList, stockBySingle };
+}
+
+function computeCommercialDebundlized() {
+  const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap);
+
+  const mainRowsAll = state.allParsedRows || [];
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const rows = mainRowsAll.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // نفس الـ 4 أيام بتاعة الـ DR والـ CM3
+  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين بتاعة الـ CR
+
+  let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  const today = new Date(latestTs); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const d3Ms = todayMs - (3 * 86400000); // Avg Last 3 Days Confirmed
+  const elapsedDays = today.getDate() || 1;
+  const currentMonthDays = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysUntilYesterday = Math.max(1, elapsedDays - 1);
+
+  const buckets = new Map();
+  function getBucket(id) {
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 });
+    return buckets.get(id);
+  }
+
+  // إجمالي حقيقي غير مكرر لكل صف مرة واحدة بس (مش لكل Single جوه البندل)، عشان
+  // التوتال ده يمثل نفس أرقام الأوفرفيو الحقيقية ومينفعش يبقى أكبر من الكل.
+  let overallDeliveredGmv = 0, overallCm3 = 0;
+
+  rows.forEach(r => {
+    if (!r.sku) return;
+    const mappings = productMap.get(r.sku);
+    if (!mappings || !mappings.length) return; // مش جزء من خريطة الديبندلايز خالص
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
+
+    // التوتال بتاع الفلوس (Delivered GMV / CM3) بتاع الصف/الأوردر ده بيتحسب مرة واحدة بس
+    // هنا (زي أي مكان تاني في الداشبورد)، مش لكل Single جوه البندل — عشان منضاعفهوش.
+    overallDeliveredGmv += r.deliveredGmv;
+    if (isCm3RowEligible(r, cm3CutoffTs)) overallCm3 += r.cm3;
+
+    // بندل ممكن يحتوي على أكتر من Single SKU مختلف — لازم نوزع الديماند (القطع) بتاعه
+    // على كل واحد فيهم (كل واحد بالـ quantity الخاصة بيه)، مش واحد بس.
+    // ملحوظة: الفلوس (GMV/CM3) خاصية للأوردر ككل، مش للقطعة — فمينفعش نضربها في
+    // الـ quantity زي القطع، ده كان سبب تضخم الأرقام (كان بيضاعف GMV/CM3 بعدد
+    // مرات ظهور الـ Single في البندل × الكمية بتاعته).
+    mappings.forEach(mapping => {
+      const qty = mapping.quantity || 1;
+      const b = getBucket(mapping.singleId);
+      b.placed += r.placedPieces * qty; b.confirmed += r.confirmedPieces * qty; b.delivered += r.deliveredPieces * qty;
+      b.deliveredGmv += r.deliveredGmv;
+      if (rTime >= d3Ms) b.conf3d += r.confirmedPieces * qty; // ديماند الـ Single (ديبندلايز) آخر 3 أيام
+      if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces * qty; b.crConfirmed += r.confirmedPieces * qty; }
+      if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces * qty; b.drDelivered += r.deliveredPieces * qty; }
+      if (isCm3RowEligible(r, cm3CutoffTs)) { b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; }
+    });
+  });
+
+  const targets = state.singleSkuTargets || {};
+  const result = [];
+  singlesList.forEach((singleName, singleId) => {
+    const b = buckets.get(singleId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
+    const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+
+    const targetInfo = targets[singleId];
+    // شيت البلان بيكتب 0 لأي حاجة مش في البلان فعلياً — التارجت لازم يكون > 0
+    // عشان نعتبره Single SKU "في البلان"، غير كده بيتعرض Not in Plan.
+    const hasTarget = !!(targetInfo && targetInfo.adjustedTarget > 0);
+    const dailyTarget = hasTarget ? targetInfo.adjustedTarget : null;
+    const mtdTarget = hasTarget ? dailyTarget * daysUntilYesterday : null;
+    const mtdActual = b.confirmed; // نفس أساس الـ Adjusted Target (Confirmed)
+    const mtdAchPct = (hasTarget && mtdTarget) ? (mtdActual / mtdTarget) * 100 : null;
+    // Run Rate: توقع قفل نهاية الشهر بناءً على معدل الأداء الحالي (Confirmed)
+    // - نفس المعادلة المستخدمة في باقي أقسام الداشبورد: (MTD Actual ÷ الأيام اللي فاتت) × إجمالي أيام الشهر.
+    const runRate = Math.round((mtdActual / elapsedDays) * currentMonthDays);
+
+    // Stock: من عمود G في شيت الديبندلايز (1409034448) — الاستوك الخاص بالـ SINGLE_ID.
+    // DOH = Stock ÷ Avg Last 3 Days Confirmed (ديبندلايز، على مستوى الـ Single ككل).
+    const stock = stockBySingle.has(singleId) ? stockBySingle.get(singleId) : (state.inventoryMap[singleId] ? state.inventoryMap[singleId].stock : 0);
+    const avg3dConfirmed = b.conf3d / 3;
+    const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
+
+    result.push({
+      singleId, singleName,
+      category: (targetInfo && targetInfo.category) || (state.inventoryMap[singleId] ? state.inventoryMap[singleId].category : "") || "Uncategorized",
+      stock: Math.round(stock || 0), doh,
+      hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate,
+      totalPlaced: b.placed, totalConfirmed: b.confirmed, totalDelivered: b.delivered,
+      crPct, drPct, ndrPct, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct
+    });
+  });
+  return { rows: result, overallDeliveredGmv, overallCm3 };
+}
+
+function prepareCommercialDebundlizedData() {
+  const computed = computeCommercialDebundlized();
+  state.cdzDataPrepared = computed.rows;
+
+  const totalSkus = state.cdzDataPrepared.length;
+  const inPlan = state.cdzDataPrepared.filter(d => d.hasTarget).length;
+  const achieved = state.cdzDataPrepared.filter(d => d.hasTarget && d.mtdTarget && d.mtdActual >= d.mtdTarget).length;
+  // التوتال هنا بياخد الرقم الحقيقي الغير مكرر (كل أوردر اتحسب مرة واحدة بس)،
+  // مش مجموع القيم لكل Single في الجدول اللي ممكن نفس الأوردر يتكرر فيها أكتر
+  // من مرة لو كان جوه بندل بيحتوي على أكتر من Single.
+  const totalGmv = computed.overallDeliveredGmv;
+  const totalCm3 = computed.overallCm3;
+
+  if ($("cdzTotalSkus")) $("cdzTotalSkus").textContent = fmtInt.format(totalSkus);
+  if ($("cdzInPlan")) $("cdzInPlan").textContent = fmtInt.format(inPlan);
+  if ($("cdzAchieved")) $("cdzAchieved").textContent = fmtInt.format(achieved);
+  if ($("cdzTotalGmv")) $("cdzTotalGmv").textContent = fmtMoneyCompact(totalGmv);
+  if ($("cdzTotalCm3")) $("cdzTotalCm3").textContent = fmtMoneyCompact(totalCm3);
+
+  cdzWireControlsOnce();
+  applyCdzFilterAndSort();
+}
+
+function sortCdz(key) {
+  if (state.cdzSortKey === key) { state.cdzSortDir = state.cdzSortDir === "asc" ? "desc" : "asc"; }
+  else { state.cdzSortKey = key; state.cdzSortDir = "desc"; }
+  applyCdzFilterAndSort();
+}
+
+function applyCdzFilterAndSort() {
+  if (!state.cdzDataPrepared) return;
+  let data = [...state.cdzDataPrepared];
+
+  const q = $("searchCdzInput") ? $("searchCdzInput").value.trim().toLowerCase() : "";
+  if (q) {
+    data = data.filter(d => (d.singleId && d.singleId.toLowerCase().includes(q)) || (d.singleName && d.singleName.toLowerCase().includes(q)) || (d.category && d.category.toLowerCase().includes(q)));
+  }
+
+  const key = state.cdzSortKey; const dir = state.cdzSortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => {
+    let valA = a[key]; let valB = b[key];
+    if (valA === null || valA === undefined) valA = -Infinity;
+    if (valB === null || valB === undefined) valB = -Infinity;
+    if (typeof valA === "string") return valA.localeCompare(valB) * dir;
+    return (valA - valB) * dir;
+  });
+
+  state.cdzFiltered = data;
+  state.cdzPage = 0;
+  renderPaginatedCdzTable();
+}
+
+// بيرندر صفحة واحدة بس (PAGE_SIZE صف) بدل كل السنجل اسكيوهات مرة واحدة —
+// ده اللي كان بيهنج الصفحة لو عدد الـ Single SKUs كبير.
+function renderPaginatedCdzTable() {
+  const tbody = $("cdzTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const start = state.cdzPage * PAGE_SIZE;
+  const pageRows = state.cdzFiltered.slice(start, start + PAGE_SIZE);
+  const frag = document.createDocumentFragment();
+  pageRows.forEach(m => {
+    const targetCell = m.hasTarget ? fmtInt.format(Math.round(m.mtdTarget)) : `<span class="badge-outline orange">Not in Plan</span>`;
+    const dailyCell = m.hasTarget ? Number(m.dailyTarget).toFixed(1) : "—";
+    const achCell = (m.hasTarget && m.mtdAchPct !== null) ? `<span class="badge-outline ${m.mtdAchPct >= 100 ? 'green' : (m.mtdAchPct >= 85 ? 'orange' : 'red')}">${fmtPct(m.mtdAchPct)}</span>` : "—";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim" style="white-space:nowrap;">${m.singleId}</td>
+      <td class="font-bold truncate-cell" title="${m.singleName}">${m.singleName}</td>
+      <td class="text-dim truncate-cell" style="max-width:110px;" title="${m.category}">${m.category}</td>
+      <td class="num font-bold text-dim">${fmtInt.format(m.stock)}</td>
+      <td class="num font-bold text-dim">${fmtInt.format(m.doh)}</td>
+      <td class="num text-orange font-bold">${targetCell}</td>
+      <td class="num text-dim">${dailyCell}</td>
+      <td class="num text-blue font-bold">${fmtInt.format(m.mtdActual)}</td>
+      <td class="num">${achCell}</td>
+      <td class="num font-bold text-green">${fmtInt.format(m.runRate)}</td>
+      <td class="num">${fmtInt.format(m.totalPlaced)}</td>
+      <td class="num">${fmtInt.format(m.totalConfirmed)}</td>
+      <td class="num">${fmtInt.format(m.totalDelivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPct(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPct(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPct(m.ndrPct)}</span></td>
+      <td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td>
+      <td class="num">${fmtPct(m.cm3Pct)}</td>
+    `;
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  const totalPages = Math.max(1, Math.ceil(state.cdzFiltered.length / PAGE_SIZE));
+  if ($("rowCountCdz")) $("rowCountCdz").textContent = `${fmtInt.format(state.cdzFiltered.length)} Single SKUs`;
+  if ($("pageIndicatorCdz")) $("pageIndicatorCdz").textContent = `Page ${state.cdzPage + 1} of ${totalPages}`;
+  if ($("prevPageCdz")) $("prevPageCdz").disabled = state.cdzPage === 0;
+  if ($("nextPageCdz")) $("nextPageCdz").disabled = state.cdzPage >= totalPages - 1;
+}
+
+let cdzControlsWired = false;
+function cdzWireControlsOnce() {
+  if (cdzControlsWired) return; cdzControlsWired = true;
+  if ($("searchCdzInput")) $("searchCdzInput").addEventListener("input", applyCdzFilterAndSort);
+  if ($("prevPageCdz")) $("prevPageCdz").addEventListener("click", () => { if (state.cdzPage > 0) { state.cdzPage -= 1; renderPaginatedCdzTable(); } });
+  if ($("nextPageCdz")) $("nextPageCdz").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.cdzFiltered.length / PAGE_SIZE)); if (state.cdzPage < totalPages - 1) { state.cdzPage += 1; renderPaginatedCdzTable(); } });
+}
+
 // -------------------------------------------------------------------------
 // PERFORMANCE-MATCHES (Marketplace) — بيبني صف لكل Match (ميرشنت x برودكت) من
 // شيت الـ Main (MAIN_GID) زي أي سكشن تاني في الداشبورد، وبيحترم فلتر الشهر/الـ
@@ -3026,32 +3771,122 @@ function computeSegmentationPerformance() {
   return results;
 }
 
-// Fetches all 7 sheets (main sheet is mandatory, the rest are best-effort)
-// and returns a plain snapshot object — does NOT touch global state, so it
-// is safe to call in the background while old data is still on screen.
+// All GIDs the dashboard needs, deduped/filtered — sent as one query string
+// to the backend endpoint so it can read all of them in a single request.
+const ALL_SHEET_GIDS = [
+  MAIN_GID,
+  TARGETS_GID && TARGETS_GID !== " " ? TARGETS_GID : null,
+  SEGMENTATION_GID,
+  TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? TARGETS_ACM_GID : null,
+  INVENTORY_GID, PRODUCTS_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID,
+  SALES_PLAN_PERF_GID, NEW_SEGMENTATION_GID, INBOUND_GID,
+  PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
+  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID
+].filter(Boolean);
+
+// Single round trip to the Apps Script backend (backend/Code.gs doGet).
+// Returns { [gid]: {table:{rows}} | null }, same shape loadSheetViaJsonp
+// used to resolve with, so parse*Sheet() below needs no changes.
+async function fetchAllSheetsViaBackend() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+  try {
+    const url = `${DATA_API_URL}?action=getData&gids=${ALL_SHEET_GIDS.join(",")}`;
+    const res = await fetch(url, { method: "GET", signal: controller.signal });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || "Backend getData failed");
+    return json.sheets;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Human-readable names for the sync-status banner when a specific sheet
+// fails to refresh (so "didn't update" is visible instead of silent).
+const GID_LABELS = {
+  [MAIN_GID]: "Main", [TARGETS_GID]: "Targets", [SEGMENTATION_GID]: "Segmentation",
+  [TARGETS_ACM_GID]: "Targets ACM", [INVENTORY_GID]: "Inventory", [PRODUCTS_GID]: "Products",
+  [CAT_TARGETS_GID]: "Category Targets", [ACM_SALES_PLAN_GID]: "Sales Plan",
+  [SALES_PLAN_PERF_GID]: "Sales Plan Performance", [NEW_SEGMENTATION_GID]: "New Segmentation",
+  [INBOUND_GID]: "Inbound", [PRODUCTS_INFO_GID]: "Products Info",
+  [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
+  [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets"
+};
+
+// Fetches all sheets and returns a plain snapshot object — does NOT touch
+// global state, so it is safe to call in the background while old data is
+// still on screen.
 async function fetchAllSheetsSnapshot() {
   let newSegLoadError = null;
-  const [
-    mainPayload, targetsPayload, segPayload, acmTargetsPayload, 
-    invPayload, prodPayload, catTargetsPayload, planPayload, 
-    salesPlanPerfPayload, newSegPayload, inboundPayload,
-    prodInfoPayload, begInvPayload, sellthroughNeededPayload
-  ] = await Promise.all([
-    loadSheetWithRetry(MAIN_GID),
-    TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(() => null) : Promise.resolve(null),
-    SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(() => null) : Promise.resolve(null),
-    TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetWithRetry(TARGETS_ACM_GID).catch(() => null) : Promise.resolve(null),
-    INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(() => null) : Promise.resolve(null),
-    PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(() => null) : Promise.resolve(null),
-    CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(() => null) : Promise.resolve(null),
-    ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(() => null) : Promise.resolve(null),
-    SALES_PLAN_PERF_GID ? loadSheetWithRetry(SALES_PLAN_PERF_GID).catch(() => null) : Promise.resolve(null),
-    NEW_SEGMENTATION_GID ? loadSheetWithRetry(NEW_SEGMENTATION_GID).catch((err) => { newSegLoadError = err.message || String(err); return null; }) : Promise.resolve(null),
-    INBOUND_GID ? loadSheetWithRetry(INBOUND_GID).catch(() => null) : Promise.resolve(null),
-    loadSheetWithRetry(PRODUCTS_INFO_GID).catch(() => null),
-    loadSheetWithRetry(BEGIN_INV_GID).catch(() => null),
-    loadSheetWithRetry(SELLTHROUGH_NEEDED_GID).catch(() => null)
-  ]);
+  let sheets;
+  const staleGids = []; // GIDs that failed every attempt and fell back to old data
+
+  if (DATA_API_URL) {
+    // Preferred path: ONE request, read server-side via SpreadsheetApp —
+    // no gviz, no rate limiting.
+    sheets = await fetchAllSheetsViaBackend();
+  } else {
+    // Fallback: old per-sheet JSONP path (kept only so the app still works
+    // if the backend endpoint hasn't been deployed/configured yet — this is
+    // the path that was producing the "Timeout on GID: ..." errors).
+    // Every optional sheet now records itself into staleGids on failure —
+    // previously these failures were swallowed silently and the sync
+    // status just said "Live — updated", hiding which sheet was actually
+    // still stale.
+    const track = (gid) => () => { staleGids.push(gid); return null; };
+    const [
+      mainPayload, targetsPayload, segPayload, acmTargetsPayload,
+      invPayload, prodPayload, catTargetsPayload, planPayload,
+      salesPlanPerfPayload, newSegPayload, inboundPayload,
+      prodInfoPayload, begInvPayload, sellthroughNeededPayload,
+      debundleMapPayload, singleSkuTargetsPayload
+    ] = await Promise.all([
+      loadSheetWithRetry(MAIN_GID),
+      TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
+      SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(track(SEGMENTATION_GID)) : Promise.resolve(null),
+      TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetWithRetry(TARGETS_ACM_GID).catch(track(TARGETS_ACM_GID)) : Promise.resolve(null),
+      INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(track(INVENTORY_GID)) : Promise.resolve(null),
+      PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(track(PRODUCTS_GID)) : Promise.resolve(null),
+      CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(track(CAT_TARGETS_GID)) : Promise.resolve(null),
+      ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(track(ACM_SALES_PLAN_GID)) : Promise.resolve(null),
+      SALES_PLAN_PERF_GID ? loadSheetWithRetry(SALES_PLAN_PERF_GID).catch(track(SALES_PLAN_PERF_GID)) : Promise.resolve(null),
+      NEW_SEGMENTATION_GID ? loadSheetWithRetry(NEW_SEGMENTATION_GID).catch((err) => { newSegLoadError = err.message || String(err); staleGids.push(NEW_SEGMENTATION_GID); return null; }) : Promise.resolve(null),
+      INBOUND_GID ? loadSheetWithRetry(INBOUND_GID).catch(track(INBOUND_GID)) : Promise.resolve(null),
+      loadSheetWithRetry(PRODUCTS_INFO_GID).catch(track(PRODUCTS_INFO_GID)),
+      loadSheetWithRetry(BEGIN_INV_GID).catch(track(BEGIN_INV_GID)),
+      loadSheetWithRetry(SELLTHROUGH_NEEDED_GID).catch(track(SELLTHROUGH_NEEDED_GID)),
+      PRODUCTS_DEBUNDLE_MAP_GID ? loadSheetWithRetry(PRODUCTS_DEBUNDLE_MAP_GID).catch(track(PRODUCTS_DEBUNDLE_MAP_GID)) : Promise.resolve(null),
+      SINGLE_SKU_TARGETS_GID ? loadSheetWithRetry(SINGLE_SKU_TARGETS_GID).catch(track(SINGLE_SKU_TARGETS_GID)) : Promise.resolve(null)
+    ]);
+    sheets = {
+      [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
+      [TARGETS_ACM_GID]: acmTargetsPayload, [INVENTORY_GID]: invPayload, [PRODUCTS_GID]: prodPayload,
+      [CAT_TARGETS_GID]: catTargetsPayload, [ACM_SALES_PLAN_GID]: planPayload,
+      [SALES_PLAN_PERF_GID]: salesPlanPerfPayload, [NEW_SEGMENTATION_GID]: newSegPayload,
+      [INBOUND_GID]: inboundPayload, [PRODUCTS_INFO_GID]: prodInfoPayload,
+      [BEGIN_INV_GID]: begInvPayload, [SELLTHROUGH_NEEDED_GID]: sellthroughNeededPayload,
+      [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload
+    };
+    if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
+  }
+
+  const mainPayload = sheets[MAIN_GID];
+  const targetsPayload = sheets[TARGETS_GID];
+  const segPayload = sheets[SEGMENTATION_GID];
+  const acmTargetsPayload = sheets[TARGETS_ACM_GID];
+  const invPayload = sheets[INVENTORY_GID];
+  const prodPayload = sheets[PRODUCTS_GID];
+  const catTargetsPayload = sheets[CAT_TARGETS_GID];
+  const planPayload = sheets[ACM_SALES_PLAN_GID];
+  const salesPlanPerfPayload = sheets[SALES_PLAN_PERF_GID];
+  const newSegPayload = sheets[NEW_SEGMENTATION_GID];
+  const inboundPayload = sheets[INBOUND_GID];
+  const prodInfoPayload = sheets[PRODUCTS_INFO_GID];
+  const begInvPayload = sheets[BEGIN_INV_GID];
+  const sellthroughNeededPayload = sheets[SELLTHROUGH_NEEDED_GID];
+  const debundleMapPayload = sheets[PRODUCTS_DEBUNDLE_MAP_GID];
+  const singleSkuTargetsPayload = sheets[SINGLE_SKU_TARGETS_GID];
+  if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
   if (allParsedRows.length === 0) { throw new Error("No data streams detected."); }
@@ -3064,6 +3899,7 @@ async function fetchAllSheetsSnapshot() {
     inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
     categoryTargets: catTargetsPayload ? parseCategoryTargetsSheet(catTargetsPayload) : state.categoryTargets,
+    commercialTargets: catTargetsPayload ? parseCommercialTargetsSheet(catTargetsPayload) : state.commercialTargets,
     acmSalesPlanData: planPayload ? parseAcmSalesPlanSheet(planPayload) : state.acmSalesPlanData, // <-- إضافة البيانات
     salesPlanPerfRows: salesPlanPerfPayload ? parseSalesPlanPerformanceSheet(salesPlanPerfPayload) : state.salesPlanPerfRows, // <-- برفورمانس الـ Sales Plan
     newSegRows: newSegPayload ? parseNewSegmentationSheet(newSegPayload) : state.newSegRows, // <-- Segmentation Panel (Admin Panel)
@@ -3071,7 +3907,10 @@ async function fetchAllSheetsSnapshot() {
     inboundRows: inboundPayload ? parseInboundSheet(inboundPayload) : state.inboundRows,
     metabaseProductsInfo: prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload) : state.metabaseProductsInfo,
     metabaseBeginningInventory: begInvPayload ? parseBeginningInventorySheet(begInvPayload) : state.metabaseBeginningInventory,
-    metabaseSellthroughNeeded: sellthroughNeededPayload ? parseSellthroughNeededSheet(sellthroughNeededPayload) : state.metabaseSellthroughNeeded
+    metabaseSellthroughNeeded: sellthroughNeededPayload ? parseSellthroughNeededSheet(sellthroughNeededPayload) : state.metabaseSellthroughNeeded,
+    debundleMap: debundleMapPayload ? parseDebundleMapSheet(debundleMapPayload) : state.debundleMap, // <-- Commercial Debundlized
+    singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
+    staleGids // sheets that failed every retry and are still showing old data
   };
 }
 
@@ -3084,6 +3923,7 @@ function applySnapshotToState(snapshot) {
   state.inventoryMap = snapshot.inventoryMap;
   state.productsMap = snapshot.productsMap;
   state.categoryTargets = snapshot.categoryTargets;
+  state.commercialTargets = snapshot.commercialTargets;
   state.acmSalesPlanData = snapshot.acmSalesPlanData; 
   state.salesPlanPerfRows = snapshot.salesPlanPerfRows;
   state.newSegRows = snapshot.newSegRows || [];
@@ -3092,6 +3932,8 @@ function applySnapshotToState(snapshot) {
   state.metabaseProductsInfo = snapshot.metabaseProductsInfo || [];
   state.metabaseBeginningInventory = snapshot.metabaseBeginningInventory || [];
   state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
+  state.debundleMap = snapshot.debundleMap || [];
+  state.singleSkuTargets = snapshot.singleSkuTargets || {};
   // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — يبقى لازم لوحة الـ Sellthrough
   // تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها، مش قبل كده.
   state.sellthroughPrepared = false;
@@ -3120,7 +3962,7 @@ async function loadData(isManualRefresh = false) {
     renderCurrentState();
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
-    setSyncStatus(`Cached — ${formatCacheTimestamp(cache.savedAt)} — syncing…`);
+    setSyncStatus(`Cached — ${formatCacheTimestamp(cache.savedAt)}`);
     paintedFromCache = true;
   } else {
     if (loadingEl) loadingEl.classList.remove("hidden");
@@ -3129,14 +3971,28 @@ async function loadData(isManualRefresh = false) {
 
   try {
     const snapshot = await fetchAllSheetsSnapshot();
+    const freshFingerprint = computeSnapshotFingerprint(snapshot);
+    // لو الداتا اللي جت دلوقتي مطابقة تماماً لنفس الداتا المخزنة (الكاش)، فمفيش
+    // داعي نعمل toast "Synchronized" ولا نغير حالة الـ sync — يفضل الشكل هادي
+    // زي ما هو، ونكتفي بتحديث الكاش بصمت. الـ toast/رسالة "Live — updated"
+    // بيظهروا بس لو فعلاً حصل تغيير في الداتا.
+    const dataChanged = !paintedFromCache || !cache || cache.fingerprint !== freshFingerprint;
     applySnapshotToState(snapshot);
     renderCurrentState();
     saveDataToCache(snapshot);
-    backupSnapshotToDrive(snapshot);
+    backupSnapshotToDrive(snapshot); // fire-and-forget; internally async (gzip), never awaited so it can't block the UI
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
-    setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())}`);
-    showToast();
+    if (snapshot.staleGids && snapshot.staleGids.length > 0) {
+      const names = snapshot.staleGids.map((gid) => GID_LABELS[gid] || gid).join(", ");
+      setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())} — ⚠ didn't refresh: ${names} (showing previous data for those)`);
+      showToast();
+    } else if (dataChanged) {
+      setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())}`);
+      showToast();
+    } else {
+      setSyncStatus(`Up to date — ${formatCacheTimestamp(Date.now())}`);
+    }
   } catch (error) {
     console.error("System Sync Error:", error);
     if (paintedFromCache) {

@@ -36,6 +36,8 @@
             <span class="nav-caret" id="navCommercialCaret">▼</span>
           </a>
           <div class="nav-submenu hidden" id="commercialSubmenu">
+            <a class="nav-item-sub" id="navTargetsCommercial">Targets Commercial</a>
+            <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Debundlized</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -91,6 +93,11 @@
         <div id="viewOverview" class="view-section active-view">
           <div class="metrics-grid">
             <div class="metric-card hover-glow">
+              <div class="metric-title">Total Placed Orders <span class="icon-cart"></span></div>
+              <div class="metric-value" id="placedOrdersVal">0</div>
+              <div class="metric-sub text-dim">Based on filter</div>
+            </div>
+            <div class="metric-card hover-glow">
               <div class="metric-title">Confirmed Orders <span class="icon-cart"></span></div>
               <div class="metric-value" id="confirmedOrdersVal">0</div>
               <div class="metric-sub text-red">Based on filter</div>
@@ -103,10 +110,8 @@
               <div class="metric-title">Delivered GMV <span class="icon-dollar text-green"></span></div>
               <div class="metric-value text-green" id="deliveredGmvVal">EGP 0</div>
             </div>
-            <div class="metric-card hover-glow">
-              <div class="metric-title">Confirmed GMV <span class="icon-dollar text-blue"></span></div>
-              <div class="metric-value text-blue" id="confirmedGmvVal">EGP 0</div>
-            </div>
+          </div>
+          <div class="metrics-grid">
             <div class="metric-card hover-glow">
               <div class="metric-title">Confirmation Rate (CR) <span class="icon-check"></span></div>
               <div class="metric-value" id="crVal">0%</div>
@@ -499,6 +504,149 @@
                   <button id="prevPageSeg" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorSeg">Page 1 of 1</span>
                   <button id="nextPageSeg" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- TARGETS COMMERCIAL SECTION -->
+        <div id="viewTargetsCommercial" class="view-section hidden">
+          <section class="cm3-toolbar hover-glow">
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Category</span>
+              <div class="segmented" id="tcCategoryToggle">
+                <button type="button" class="segmented-btn" data-cat="consumables">Consumables</button>
+                <button type="button" class="segmented-btn" data-cat="electronics">Electronics</button>
+                <button type="button" class="segmented-btn" data-cat="home">Home</button>
+                <button type="button" class="segmented-btn" data-cat="leisure">Leisure</button>
+                <button type="button" class="segmented-btn active" data-cat="grand total">Grand Total</button>
+              </div>
+            </div>
+            <div class="cm3-toolbar-group cm3-toolbar-range">
+              <span class="icon-calendar"></span> <span id="tcRangeLabel">All Time</span>
+            </div>
+          </section>
+
+          <section class="metrics-grid cm3-metrics-grid">
+            <div class="metric-card hover-glow" id="tcCrCard">
+              <div class="metric-title">CR % <span class="text-dim" id="tcCrTarget">Target 0%</span></div>
+              <div class="metric-value" id="tcCrVal">0%</div>
+              <div class="progress-bar"><div id="tcCrBar" class="progress-fill blue" style="width:0%"></div></div>
+            </div>
+            <div class="metric-card hover-glow" id="tcDrCard">
+              <div class="metric-title">DR % <span class="text-dim" id="tcDrTarget">Target 0%</span></div>
+              <div class="metric-value" id="tcDrVal">0%</div>
+              <div class="progress-bar"><div id="tcDrBar" class="progress-fill blue" style="width:0%"></div></div>
+            </div>
+            <div class="metric-card hover-glow" id="tcNdrCard">
+              <div class="metric-title">NDR % <span class="text-dim" id="tcNdrTarget">Target 0%</span></div>
+              <div class="metric-value" id="tcNdrVal">0%</div>
+              <div class="progress-bar"><div id="tcNdrBar" class="progress-fill blue" style="width:0%"></div></div>
+            </div>
+            <div class="metric-card hover-glow highlight-card" id="tcCm3PctCard">
+              <div class="metric-title text-orange">CM3 % <span class="text-dim" id="tcCm3PctTarget">Target 0%</span></div>
+              <div class="metric-value" id="tcCm3PctVal">0%</div>
+              <div class="progress-bar lg"><div id="tcCm3PctBar" class="progress-fill orange" style="width:0%"></div></div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2 id="tcTableTitle">Targets Commercial — Grand Total</h2>
+                  <p>Target (from Category Targets sheet) vs Actual (live from Main sheet, same CM3/rate cut-off rules used across the dashboard)</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="tcTable">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th class="num">Target</th>
+                      <th class="num">Actual</th>
+                      <th class="num">Achievement %</th>
+                      <th class="center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tcTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- COMMERCIAL DEBUNDLIZED SECTION -->
+        <div id="viewCommercialDebundlized" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Single SKUs <span class="icon-box"></span></div>
+                <div class="metric-value" id="cdzTotalSkus">0</div>
+                <div class="metric-sub text-dim">Debundlized demand (single + bundles)</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">In Plan <span class="icon-check"></span></div>
+                <div class="metric-value text-blue" id="cdzInPlan">0</div>
+                <div class="metric-sub text-dim">SKUs with an Adjusted Target</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-green">Achieved MTD <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="cdzAchieved">0</div>
+                <div class="metric-sub text-dim">SKUs hitting Target MTD</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Delivered GMV <span class="icon-dollar"></span></div>
+                <div class="metric-value text-green" id="cdzTotalGmv">EGP 0</div>
+                <div class="metric-sub text-dim">Total CM3: <span id="cdzTotalCm3">EGP 0</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Commercial Debundlized</h2>
+                  <p>Single SKU demand, debundlized from bundle SKUs (quantity-weighted) vs Adjusted Target (Confirmed basis)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchCdzInput" type="search" placeholder="Search Single ID, Name or Category..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="cdzTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Single_ID</th>
+                      <th onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Single_Name</th>
+                      <th onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Click to sort">Category</th>
+                      <th onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Click to sort">Stock</th>
+                      <th onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Click to sort">DOH</th>
+                      <th onclick="sortCdz('mtdTarget')" class="num text-orange" style="cursor:pointer;">Target MTD</th>
+                      <th onclick="sortCdz('dailyTarget')" class="num text-dim" style="cursor:pointer;">Daily Target</th>
+                      <th onclick="sortCdz('mtdActual')" class="num text-blue" style="cursor:pointer;">MTD Actual</th>
+                      <th onclick="sortCdz('mtdAchPct')" class="num text-purple" style="cursor:pointer;">MTD ACH%</th>
+                      <th onclick="sortCdz('runRate')" class="num text-green" style="cursor:pointer;" title="توقع القفل آخر الشهر بناءً على المعدل الحالي">RR Confirmed</th>
+                      <th onclick="sortCdz('totalPlaced')" class="num" style="cursor:pointer;">Total Placed Pieces</th>
+                      <th onclick="sortCdz('totalConfirmed')" class="num" style="cursor:pointer;">Total Confirmed</th>
+                      <th onclick="sortCdz('totalDelivered')" class="num" style="cursor:pointer;">Total Delivered</th>
+                      <th onclick="sortCdz('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th onclick="sortCdz('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortCdz('deliveredGmv')" class="num text-green" style="cursor:pointer;">Total Delivered GMV</th>
+                      <th onclick="sortCdz('cm3')" class="num" style="cursor:pointer;">Total CM3</th>
+                      <th onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cdzTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountCdz">0 Single SKUs</span>
+                <div class="pager">
+                  <button id="prevPageCdz" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorCdz">Page 1 of 1</span>
+                  <button id="nextPageCdz" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>
