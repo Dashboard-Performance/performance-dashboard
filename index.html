@@ -38,6 +38,7 @@
           <div class="nav-submenu hidden" id="commercialSubmenu">
             <a class="nav-item-sub" id="navTargetsCommercial">Targets Commercial</a>
             <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Debundlized</a>
+            <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -552,10 +553,10 @@
 
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
-              <div class="panel-head-modern">
+              <div class="panel-head-modern"> 
                 <div class="panel-title-wrapper border-blue">
                   <h2 id="tcTableTitle">Targets Commercial — Grand Total</h2>
-                  <p>Target (from Category Targets sheet) vs Actual (live from Main sheet, same CM3/rate cut-off rules used across the dashboard)</p>
+                  <p>Targets Category vs Actual (CM3/rate cut-off Rules)</p>
                 </div>
               </div>
               <div class="table-responsive">
@@ -587,7 +588,7 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">In Plan <span class="icon-check"></span></div>
                 <div class="metric-value text-blue" id="cdzInPlan">0</div>
-                <div class="metric-sub text-dim">SKUs with an Adjusted Target</div>
+                <div class="metric-sub text-dim">SKUs With Target Daily</div>
               </div>
               <div class="metric-card hover-glow highlight-card">
                 <div class="metric-title text-green">Achieved MTD <span class="icon-check"></span></div>
@@ -607,7 +608,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Commercial Debundlized</h2>
-                  <p>Single SKU demand, debundlized from bundle SKUs (quantity-weighted) vs Adjusted Target (Confirmed basis)</p>
+                  <p>Single SKU demand, debundlized from bundle SKUs (Quantity-Weighted) vs Target (Confirmed Pieces)</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchCdzInput" type="search" placeholder="Search Single ID, Name or Category..." />
@@ -635,6 +636,9 @@
                       <th onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
                       <th onclick="sortCdz('deliveredGmv')" class="num text-green" style="cursor:pointer;">Total Delivered GMV</th>
                       <th onclick="sortCdz('cm3')" class="num" style="cursor:pointer;">Total CM3</th>
+                      <th onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Piece</th>
+                      <th onclick="sortCdz('ppm')" class="num" style="cursor:pointer;">Total PPM</th>
+                      <th onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
                       <th onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
                     </tr>
                   </thead>
@@ -649,6 +653,138 @@
                   <button id="nextPageCdz" class="btn btn-outline small">Next</button>
                 </div>
               </div>
+            </div>
+          </section>
+        </div>
+        <!-- CM3 ANALYST / PRODUCTS SECTION (under Commercial Debundlized) -->
+        <div id="viewCm3AnalystProducts" class="view-section hidden">
+          <section class="cm3-toolbar hover-glow">
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Period</span>
+              <div class="segmented" id="cm3apPeriodToggle">
+                <button type="button" class="segmented-btn" data-period="daily">Daily</button>
+                <button type="button" class="segmented-btn" data-period="weekly">Weekly (5D)</button>
+                <button type="button" class="segmented-btn active" data-period="overall">Overall</button>
+              </div>
+            </div>
+            <div class="cm3-toolbar-group">
+              <span class="cm3-toolbar-label">Category</span>
+              <select id="cm3apCategorySelect" class="cm3ap-select"><option value="All">All Categories</option></select>
+            </div>
+            <div class="cm3-toolbar-group cm3-toolbar-range">
+              <span class="icon-calendar"></span> <span id="cm3apRangeInfo"> </span>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Products Analyzed <span class="icon-box"></span></div>
+                <div class="metric-value" id="cm3apTotalProducts">0</div>
+                <div class="metric-sub text-dim" id="cm3apPeriodLabel">Period: -</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Delivered GMV <span class="icon-dollar"></span></div>
+                <div class="metric-value text-green" id="cm3apTotalGmv">EGP 0</div>
+                <div class="metric-sub text-dim">Total CM3: <span id="cm3apTotalCm3">EGP 0</span></div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">CM3% (Current Period) <span class="icon-trend"></span></div>
+                <div class="metric-value text-purple" id="cm3apCm3Pct">0%</div>
+                <div class="metric-sub" id="cm3apCm3PctDelta">vs previous period: -</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">PPM / Delivered GMV <span class="icon-trend"></span></div>
+                <div class="metric-value text-blue" id="cm3apPpmGmvRatio">0%</div>
+                <div class="metric-sub text-dim">Total PPM: <span id="cm3apTotalPpm">EGP 0</span></div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-red">Fix PPM <span class="icon-check"></span></div>
+                <div class="metric-value text-red" id="cm3apFixPpmCount">0</div>
+                <div class="metric-sub text-dim">Products &lt; 80% of Target PPM</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>Pipeline &amp; Insights</h2>
+                  <p>Automatic read on this period's movers and PPM risk (Placed Pieces &ge; 10 to qualify)</p>
+                </div>
+                <div class="table-controls cm3ap-search-slot">
+                  <input id="cm3apSearchInput2" type="search" placeholder="Search SKU or Category..." />
+                </div>
+              </div>
+              <div class="cm3ap-pipeline-chart-wrap">
+                <div class="chart-container"><canvas id="cm3apPipelineChart"></canvas></div>
+                <div class="cm3ap-pipeline-stats" id="cm3apPipelineStats"></div>
+              </div>
+              <div id="cm3apInsights" class="cm3ap-insights"></div>
+            </div>
+          </section>
+
+          <section class="table-section">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Products Breakdown</h2>
+                  <p id="cm3apTableSub">Current period vs previous period</p>
+                </div>
+                <div class="table-controls cm3ap-search-slot">
+                  <input id="cm3apSearchInput" type="search" placeholder="Search SKU or Category..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="cm3apTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortCm3ap('sku')" style="cursor:pointer;" title="Click to sort">SKU</th>
+                      <th onclick="sortCm3ap('skuName')" class="truncate-cell" style="cursor:pointer;" title="Click to sort">SKU Name</th>
+                      <th onclick="sortCm3ap('category')" class="truncate-cell" style="cursor:pointer; max-width:110px;" title="Click to sort">Category</th>
+                      <th onclick="sortCm3ap('placed')" class="num" style="cursor:pointer;" title="Click to sort">Placed Pcs</th>
+                      <th onclick="sortCm3ap('confirmed')" class="num" style="cursor:pointer;" title="Click to sort">Confirmed Pcs</th>
+                      <th onclick="sortCm3ap('delivered')" class="num" style="cursor:pointer;" title="Click to sort">Delivered Pcs</th>
+                      <th onclick="sortCm3ap('crPct')" class="num" style="cursor:pointer;" title="Click to sort">CR%</th>
+                      <th onclick="sortCm3ap('drPct')" class="num" style="cursor:pointer;" title="Click to sort">DR%</th>
+                      <th onclick="sortCm3ap('ndrPct')" class="num" style="cursor:pointer;" title="Click to sort">NDR%</th>
+                      <th onclick="sortCm3ap('deliveredAsp')" class="num" style="cursor:pointer;" title="Click to sort">Delivered ASP</th>
+                      <th onclick="sortCm3ap('deliveredGmv')" class="num text-green" style="cursor:pointer;" title="Click to sort">Delivered GMV</th>
+                      <th onclick="sortCm3ap('cm3')" class="num" style="cursor:pointer;" title="Click to sort">CM3</th>
+                      <th onclick="sortCm3ap('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="Click to sort">CM3%</th>
+                      <th onclick="sortCm3ap('deltaCm3Pct')" class="num" style="cursor:pointer;" title="Click to sort">&Delta; vs Prev Period</th>
+                      <th onclick="sortCm3ap('ppm')" class="num" style="cursor:pointer;" title="Click to sort">Total PPM</th>
+                      <th onclick="sortCm3ap('ppmPerPiece')" class="num" style="cursor:pointer;" title="Click to sort">PPM/Piece</th>
+                      <th onclick="sortCm3ap('targetPpm')" class="num text-orange" style="cursor:pointer;" title="Click to sort">Target PPM</th>
+                      <th onclick="sortCm3ap('ppmActualPct')" class="num" style="cursor:pointer;" title="Click to sort">PPM Actual%</th>
+                      <th onclick="sortCm3ap('ppmGmvRatio')" class="num" style="cursor:pointer;" title="Click to sort">PPM/GMV%</th>
+                      <th class="center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cm3apTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountCm3ap">0 Products</span>
+                <div class="pager">
+                  <button id="prevPageCm3ap" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorCm3ap">Page 1 of 1</span>
+                  <button id="nextPageCm3ap" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Top Movers</h2>
+                  <p>Top 4 CM3% gainers vs top 4 drops this period (Placed Pieces &ge; 10 to qualify)</p>
+                </div>
+              </div>
+              <div id="cm3apMovers" class="cm3ap-movers-grid"></div>
             </div>
           </section>
         </div>
@@ -831,6 +967,28 @@
                 <div class="metric-sub text-dim">Target MTD: <span id="mpSpOverallMtdTarget">0</span></div>
               </div>
             </div>
+            <div class="metrics-grid mt-4">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Critical <span class="icon-trend"></span></div>
+                <div class="metric-value text-red" id="mpSpCountCritical">0</div>
+                <div class="metric-sub text-dim">% of MTD: 0% – 50%</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Good <span class="icon-check"></span></div>
+                <div class="metric-value text-blue" id="mpSpCountGood">0</div>
+                <div class="metric-sub text-dim">% of MTD: 50% – 85%</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Excellent <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="mpSpCountExcellent">0</div>
+                <div class="metric-sub text-dim">% of MTD: 85% – 100%</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-purple">Upside <span class="icon-calendar"></span></div>
+                <div class="metric-value text-purple" id="mpSpCountUpside">0</div>
+                <div class="metric-sub text-dim">% of MTD: 100%+</div>
+              </div>
+            </div>
           </section>
 
           <section class="table-section mt-4">
@@ -861,6 +1019,7 @@
                       <th onclick="sortMpSalesPlan('gap')" class="num text-red" style="cursor:pointer;">MTD Gap</th>
                       <th onclick="sortMpSalesPlan('runRate')" class="num" style="cursor:pointer;">Run Rate</th>
                       <th onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;">WoW Status</th>
+                      <th onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;">Final Status</th>
                     </tr>
                   </thead>
                   <tbody id="mpSalesPlanTableBody"></tbody>
@@ -1084,6 +1243,8 @@
                       <th data-stkey="stRate" class="num text-purple font-bold">SELLTHROUGH_RATE</th>
                       <th data-stkey="soldInb" class="num font-bold">SOLD_FROM_INBOUND</th>
                       <th data-stkey="firstBuy" class="center">First buy?</th>
+                      <th data-stkey="stock" class="num text-dim font-bold">STOCK</th>
+                      <th data-stkey="doh" class="num text-dim font-bold">DOH</th>
                     </tr>
                   </thead>
                   <tbody id="sellthroughTableBody"></tbody>

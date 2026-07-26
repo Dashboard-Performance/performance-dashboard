@@ -44,6 +44,11 @@ const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate nee
 // -------------------------------------------------------------------------
 const PRODUCTS_DEBUNDLE_MAP_GID = "1409034448";
 const SINGLE_SKU_TARGETS_GID = "1620722565";
+// شيت الـ COGS: الأعمدة Internal Reference (Product/Single ID), Cost, LAST_PP, Country.
+// مستخدم بس في Commercial Debundlized عشان نحسب نصيب كل Single من قيمة
+// البندل (GMV/CM3/PPM) بالنسبة لتكلفته (COGS) داخل نفس البندل — بالظبط زي
+// عمود "%" في شيت الـ BUNDLE TABLE المرجعي (Single Cogs ÷ Bundle Cogs).
+const COGS_GID = "1724469150";
 
 // -------------------------------------------------------------------------
 // DATA API (Apps Script backend) — ONE round trip for all sheets instead of
@@ -95,10 +100,13 @@ const CM3_LAG_DAYS = 4;
 // -------------------------------------------------------------------------
 
 const TICKER_MESSAGES = [
-  "Core Systems Optimal",
-  "Data Streams Encrypted",
-  "Live Quantum Connection",
-  "Welcome to Command Center"
+  "Welcome to Command Center",
+  "Live Performance Dashboard",
+  "Real-Time KPIs",
+  "Sales Tracking Active",
+  "Inventory Status Updated",
+  "Merchant Performance Insights",
+  "Data Synced Successfully"
 ];
 
 const SEGMENT_RANKS = { "in active": 0, "low value": 1, "occasional": 2, "promising": 3, "potential loyalist": 4, "loyal merchants": 5, "champions": 6 };
@@ -113,7 +121,7 @@ const state = {
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
   commercialTargets: {}, tcCategory: "grand total",
-  debundleMap: [], singleSkuTargets: {}, // Commercial Debundlized (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID)
+  debundleMap: [], singleSkuTargets: {}, cogsMap: new Map(), // Commercial Debundlized (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID / COGS_GID)
   cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
   cdzFiltered: [], cdzPage: 0,
   acmTableData: [], filteredAcmData: [], sortKey: "finalScorePct", sortDir: "desc", page: 0,
@@ -174,6 +182,7 @@ const marketplaceSubmenu = $("marketplaceSubmenu");
 const navMarketplaceCaret = $("navMarketplaceCaret");
 const navTargetsCommercial = $("navTargetsCommercial");
 const navCommercialDebundlized = $("navCommercialDebundlized");
+const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navMpSalesPlan = $("navMpSalesPlan");
@@ -217,6 +226,7 @@ function switchView(viewName) {
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
   if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
+  if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
@@ -231,6 +241,7 @@ function switchView(viewName) {
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
+  else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
@@ -254,6 +265,7 @@ if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerform
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
 if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
+if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
@@ -319,14 +331,14 @@ function segAchColor(ratio) {
 }
 function fmtSegValue(unit, value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
-  if (unit === "money") return fmtMoneyCompact(value);
-  if (unit === "percent") return fmtPct(value * 100);
-  return fmtInt.format(Math.round(value));
+  if (unit === "money") return fmtMoneyCompactCell(value);
+  if (unit === "percent") return fmtPctCell(value * 100);
+  return fmtIntCell(Math.round(value));
 }
 function fmtSegAch(ach) {
   if (!ach || ach.kind === "dash") return `<span class="text-dim">-</span>`;
   if (ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
-  return `<span class="font-bold ${segAchColor(ach.ratio)}">${fmtPct(ach.ratio * 100)}</span>`;
+  return `<span class="font-bold ${segAchColor(ach.ratio)}">${fmtPctCell(ach.ratio * 100)}</span>`;
 }
 function renderSegmentationPanel() {
   const grid = $("segSectionsGrid");
@@ -686,9 +698,18 @@ function isCm3RowEligible(row, cutoffTs) {
   return rd.getTime() <= cutoffTs;
 }
 
+// -------------------------------------------------------------------------
+// De-dup: شيت الـ Main (MAIN_GID) بيبقى فيه أحيانًا نفس صف (نفس التاريخ + نفس
+// التاجر + نفس الـ SKU) متكرر أكتر من مرة (مشكلة مصدر الداتا نفسه، مش من هنا).
+// لو سبناها زي ما هي، أي تجميع بيعتمد على state.allParsedRows — بما فيه
+// Commercial Debundlized — هيدبل الأرقام لكل صف متكرر، وده هيبعدنا عن أرقام
+// شيت Single المرجعي (اللي مصدره BUNDLE TABLE/Financial Profitabilty، مش
+// فيهم التكرار ده). فبنفلتر الصفوف اللي عندها نفس مفتاح (تاريخ+تاجر+SKU)
+// ونسيب أول ظهور بس، قبل ما نرجع الداتا لأي حساب في الداشبورد.
 function parseMainSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const rows = [];
+  const seenKeys = new Set();
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0 || (!c[0] && !c[1])) continue;
@@ -700,16 +721,24 @@ function parseMainSheet(payload) {
     let dateStr = cellText(c[0]);
     let d = new Date(dateStr);
     let monthYear = isNaN(d.getTime()) ? "Unknown Month" : d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    
+
+    const merchantId = cellText(c[1]); const sku = cellText(c[3]);
+    const dedupKey = `${dateStr}|${merchantId}|${sku}`;
+    if (seenKeys.has(dedupKey)) continue; // صف مكرر — اتجاهل
+    seenKeys.add(dedupKey);
+
     rows.push({
       date: dateStr, monthYear: monthYear, timestamp: isNaN(d.getTime()) ? 0 : d.getTime(),
-      merchantId: cellText(c[1]), merchantName: cellText(c[2]), sku: cellText(c[3]), category: cellText(c[5]) || "Uncategorized",
+      merchantId: merchantId, merchantName: cellText(c[2]), sku: sku, category: cellText(c[5]) || "Uncategorized",
       placedOrders: placedOrders, confirmedOrders: confirmedOrders, deliveredOrders: cellNumber(c[11]),
       placedGmv: placedGmv, deliveredGmv: cellNumber(c[22]), cm3: cellNumber(c[28]),
       acmName: cellText(c[31]) || "Unassigned", confirmedGmv: confirmedGmv,
       placedPieces: cellNumber(c[CM3_PLACED_PIECES_COL]),
       confirmedPieces: cellNumber(c[16]), deliveredPieces: cellNumber(c[17]),
-      ppm: cellNumber(c[27]) // DELIVERED_PPM — نفس عمود الـ PPM المستخدم في شيت الـ Sales Plan Performance
+      crPcs: cellNumber(c[18]), drPcs: cellNumber(c[19]), ndrPcs: cellNumber(c[20]), // CR_PCS / DR_PCS / NDR_PCS
+      deliveredAsp: cellNumber(c[24]), // DELIVERED_ASP — عمود Y
+      ppm: cellNumber(c[27]), // DELIVERED_PPM — نفس عمود الـ PPM المستخدم في شيت الـ Sales Plan Performance (عمود AB)
+      ppmPerPiece: cellNumber(c[29]) // PPM_PER_PIECE — عمود AD، بيتقرا مباشرة من الشيت وليس بالحساب
     });
   }
   return rows;
@@ -801,7 +830,9 @@ function parseInventorySheet(payload) {
     if (!c || c.length === 0) continue;
     const skuId = cellText(c[0]);
     if (skuId && skuId !== "SKU_ID") {
-      map[skuId] = { skuName: cellText(c[1]), stock: cellNumber(c[2]), doh: cellNumber(c[3]), category: cellText(c[4]), availability: cellText(c[5]), isLocked: cellText(c[6]) };
+      // Stock/DOH لازم يبقوا أعداد صحيحة (بدون كسور) في كل مكان بيتعرضوا فيه —
+      // بنقرّبهم هنا من مصدر الداتا نفسه عشان أي حساب تاني ياخدهم صحاح من الأول.
+      map[skuId] = { skuName: cellText(c[1]), stock: Math.round(cellNumber(c[2])), doh: Math.round(cellNumber(c[3])), category: cellText(c[4]), availability: cellText(c[5]), isLocked: cellText(c[6]) };
     }
   }
   return map;
@@ -860,7 +891,7 @@ function parseCategoryTargetsSheet(payload) {
 // اتحرك البلوك في الشيت.
 // -------------------------------------------------------------------------
 const TC_CATEGORY_ORDER = ["consumables", "electronics", "home", "leisure", "grand total"];
-const TC_PCT_KEYS = new Set(["targetCr", "targetDr", "targetNdr", "crRevPct", "drRevPct", "ndrRevPct"]);
+const TC_PCT_KEYS = new Set(["targetCr", "targetDr", "targetNdr", "crRevPct", "drRevPct", "ndrRevPct", "targetPpm"]);
 const TC_LABEL_MAP = {
   "placed pieces target": "placedPiecesTarget",
   "planed cnf pieces": "plannedCnfPieces",
@@ -889,6 +920,12 @@ const TC_LABEL_MAP = {
   "target gmv": "targetGmv",
   "target cm3": "targetCm3",
   "target ppm": "targetPpm",
+  "target ppm pieces": "targetPpmPieces",
+  "target ppm/piece": "targetPpmPieces",
+  "target ppm per piece": "targetPpmPieces",
+  "ppm pieces target": "targetPpmPieces",
+  "ppm per piece target": "targetPpmPieces",
+  "ppm/piece target": "targetPpmPieces",
   "asp dlv planed": "aspDlvPlanned",
   "asp dlv planned": "aspDlvPlanned",
   "asp dlv target": "aspDlvPlanned"
@@ -913,6 +950,7 @@ function tcFuzzyMatchLabel(label) {
   if (has("revenue")) return "targetRevenue";
   if (has("gmv")) return "targetGmv";
   if (has("cm3")) return "targetCm3";
+  if (has("ppm") && has("piece")) return "targetPpmPieces";
   if (has("ppm")) return "targetPpm";
   if (has("asp")) return "aspDlvPlanned";
   return null;
@@ -1089,6 +1127,24 @@ function parseAcmSalesPlanSheet(payload) {
     }
   }
   return plan;
+}
+
+// -------------------------------------------------------------------------
+// شيت الـ COGS (COGS_GID / gid=1724469150). الأعمدة: Internal Reference
+// (Product/Single ID), Cost, LAST_PP, Country. بيرجع Map(productId -> cost).
+// مستخدم بس في Commercial Debundlized لحساب وزن كل Single داخل البندل.
+// -------------------------------------------------------------------------
+function parseCogsSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const map = new Map();
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]).trim();
+    if (!productId || productId === "Internal Reference") continue;
+    if (!map.has(productId)) map.set(productId, cellNumber(c[1])); // عمود B: Cost
+  }
+  return map;
 }
 
 // -------------------------------------------------------------------------
@@ -1386,6 +1442,21 @@ const fmtMoneyCompact = (n) => {
   if (abs >= 1000) return `${sign}EGP ${Math.round(abs / 1000)}K`;
   return `${sign}EGP ${Math.round(abs)}`;
 }
+// -------------------------------------------------------------------------
+// نسخ "Cell" من نفس الفورمترز فوق: نفس الشكل المعروض بالظبط على الشاشة
+// (EGP / K / M / % / فواصل الآلاف) بدون أي تغيير بصري، لكن بتلف النص ده جوه
+// span عادي ومعاه data-raw = الرقم الحقيقي الخام زي ما هو. الداونلود
+// (downloadTableAsCsv) بيدور على data-raw ده ولو لقاه بينزل الرقم الخام زي
+// ما هو (number مش text، من غير EGP ولا K ولا فواصل) - غير كده بيرجع للنص
+// المعروض العادي زي ما كان.
+// -------------------------------------------------------------------------
+function wrapRawCell(raw, text) {
+  const safeRaw = Number.isFinite(raw) ? raw : 0;
+  return `<span class="raw-num" data-raw="${safeRaw}">${text}</span>`;
+}
+const fmtIntCell = (n) => wrapRawCell(n, fmtInt.format(n));
+const fmtPctCell = (n) => wrapRawCell(n, fmtPct(n));
+const fmtMoneyCompactCell = (n) => wrapRawCell(n, fmtMoneyCompact(n));
 
 function setupTicker() {
   const text = TICKER_MESSAGES.join("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
@@ -1441,7 +1512,7 @@ function updateDashboard(rows) {
       li.innerHTML = `
         <div class="lb-rank ${index === 0 ? 'gold' : ''}">${index + 1}</div>
         <div class="lb-name">${item.name}</div>
-        <div class="lb-stats"><div class="lb-ndr">${fmtPct(item.ndr)}</div><div class="lb-orders">${fmtInt.format(item.orders)} orders</div></div>
+        <div class="lb-stats"><div class="lb-ndr">${fmtPctCell(item.ndr)}</div><div class="lb-orders">${fmtIntCell(item.orders)} orders</div></div>
       `;
       lbContainer.appendChild(li);
     });
@@ -1452,6 +1523,7 @@ function updateDashboard(rows) {
   renderOverallAcmTargetsSummary();
   if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
+  if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
@@ -1556,24 +1628,24 @@ function renderPaginatedInventoryTable() {
       <td class="text-dim">#${start + idx + 1}</td>
       <td class="font-mono text-dim">${m.skuId}</td>
       <td class="font-bold text-light" style="white-space:normal; min-width: 150px; line-height: 1.4;">${m.skuName}</td>
-      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${m.stock}</span></td>
-      <td class="num font-bold text-dim">${fmtInt.format(Math.round(m.doh))}</td>
+      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(Math.round(m.stock))}</span></td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="text-dim">${m.category}</td>
       <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
-      <td class="num font-bold text-blue">${fmtMoneyCompact(m.price)}</td>
-      <td class="num font-bold text-green">${fmtMoneyCompact(m.profit)}</td>
-      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPct(m.cr)}</span></td>
-      <td class="num text-dim">${fmtPct(m.dr)}</td>
-      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td>
-      <td class="num text-light font-bold">${fmtMoneyCompact(m.cm3)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.price)}</td>
+      <td class="num font-bold text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.dr)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>
+      <td class="num text-light font-bold">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num text-dim">${m.avgPlacedDaily.toFixed(1)}</td>
-      <td class="num text-dim">${fmtInt.format(m.placedYday)}</td>
-      <td class="num text-blue font-bold">${fmtInt.format(m.confYday)}</td>
+      <td class="num text-dim">${fmtIntCell(m.placedYday)}</td>
+      <td class="num text-blue font-bold">${fmtIntCell(m.confYday)}</td>
       <td class="num text-orange font-bold">${m.avg3d.toFixed(1)}</td>
       <td class="num text-purple font-bold">${m.avg15d.toFixed(1)}</td>
       <td><span class="badge-status ${m.trendColor}">${m.trendStatus}</span></td>
       <td class="text-dim">${m.topMerch}</td>
-      <td class="num font-bold">${fmtPct(m.contr5d)}</td>
+      <td class="num font-bold">${fmtPctCell(m.contr5d)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1647,20 +1719,20 @@ function renderPaginatedAcmTable() {
     tr.innerHTML = `
       <td class="text-dim">#${start + idx + 1}</td>
       <td class="font-bold text-light">${m.name}</td>
-      <td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${finalColor})">${fmtPct(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${finalColor}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>
-      <td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompact(m.targetGmv) : '-'}</td>
-      <td class="num text-green font-bold">${fmtMoneyCompact(m.deliveredGmv)}</td>
+      <td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${finalColor})">${fmtPctCell(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${finalColor}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>
+      <td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td>
+      <td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
       <td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${gmvColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${gmvColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td>
-      <td class="num font-bold text-blue">${fmtMoneyCompact(m.runRate)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.runRate)}</td>
       <td class="num text-dim">${m.targetNdr > 0 ? m.targetNdr + '%' : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.ndr >= m.targetNdr && m.targetNdr > 0 ? 'green' : 'red'}">${fmtPct(m.ndr)}</span></td>
+      <td class="num"><span class="badge-outline ${m.ndr >= m.targetNdr && m.targetNdr > 0 ? 'green' : 'red'}">${fmtPctCell(m.ndr)}</span></td>
       <td class="num text-dim">${m.targetCm3 > 0 ? m.targetCm3 + '%' : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.cm3Pct >= m.targetCm3 && m.targetCm3 > 0 ? 'green' : 'red'}">${fmtPct(m.cm3Pct)}</span></td>
-      <td class="num text-dim font-bold">${m.targetRetention > 0 ? fmtInt.format(m.targetRetention) : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.actualRetention >= m.targetRetention && m.targetRetention > 0 ? 'green' : 'red'}">${fmtInt.format(m.actualRetention)}</span></td>
-      <td class="num text-dim">${fmtInt.format(m.placed)}</td>
-      <td class="num text-blue font-bold">${fmtInt.format(m.confirmed)}</td>
-      <td class="num text-dim">${fmtInt.format(m.delivered)}</td>
+      <td class="num"><span class="badge-outline ${m.cm3Pct >= m.targetCm3 && m.targetCm3 > 0 ? 'green' : 'red'}">${fmtPctCell(m.cm3Pct)}</span></td>
+      <td class="num text-dim font-bold">${m.targetRetention > 0 ? fmtIntCell(m.targetRetention) : '-'}</td>
+      <td class="num"><span class="badge-outline ${m.actualRetention >= m.targetRetention && m.targetRetention > 0 ? 'green' : 'red'}">${fmtIntCell(m.actualRetention)}</span></td>
+      <td class="num text-dim">${fmtIntCell(m.placed)}</td>
+      <td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td>
+      <td class="num text-dim">${fmtIntCell(m.delivered)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1701,7 +1773,7 @@ function renderTrendTables(allRows, selectedAcm) {
   if(wowTbody) {
     wowData.forEach((m, idx) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtInt.format(m.thisWeek)}</td><td class="num text-dim">${fmtInt.format(m.lastWeek)}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtInt.format(m.change) : fmtInt.format(m.change)}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtIntCell(m.thisWeek)}</td><td class="num text-dim">${fmtIntCell(m.lastWeek)}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtIntCell(m.change) : fmtIntCell(m.change)}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
       wowTbody.appendChild(tr);
     });
   }
@@ -1715,7 +1787,7 @@ function renderTrendTables(allRows, selectedAcm) {
   if(avgTbody) {
     momData.forEach((m, idx) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtInt.format(Math.round(m.currentAvg))}</td><td class="num text-dim">${fmtInt.format(Math.round(m.lastAvg))}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtInt.format(Math.round(m.change)) : fmtInt.format(Math.round(m.change))}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtIntCell(Math.round(m.currentAvg))}</td><td class="num text-dim">${fmtIntCell(Math.round(m.lastAvg))}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtIntCell(Math.round(m.change)) : fmtIntCell(Math.round(m.change))}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
       avgTbody.appendChild(tr);
     });
   }
@@ -1760,7 +1832,7 @@ function renderTop10Merchants() {
   const top10 = [...state.merchantTableData].sort((a, b) => b.deliveredGmv - a.deliveredGmv).slice(0, 10);
   top10.forEach((m, idx) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-blue font-bold">${fmtInt.format(m.confirmed)}</td><td class="num text-dim">${fmtInt.format(m.placed)}</td><td class="num text-dim">${fmtInt.format(m.delivered)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPct(m.cr)}</span></td><td class="num text-dim">${fmtPct(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td><td class="num text-green font-bold">${fmtMoneyCompact(m.deliveredGmv)}</td><td class="num text-dim">${fmtMoneyCompact(m.confirmedGmv)}</td><td class="num text-dim">${fmtInt.format(m.skuCount)}</td>`;
+    tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-dim">${fmtMoneyCompactCell(m.confirmedGmv)}</td><td class="num text-dim">${fmtIntCell(m.skuCount)}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -1779,7 +1851,7 @@ function renderPaginatedMerchantTable() {
   pageRows.forEach((m, idx) => {
     let progressColor = "blue"; if(m.targetGmv === 0) progressColor = "dim"; else if(m.achievedPct >= 100) progressColor = "green"; else if(m.achievedPct < 50) progressColor = "red"; else if(m.achievedPct >= 50 && m.achievedPct < 80) progressColor = "orange";
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim font-bold">${m.targetPlaced > 0 ? fmtInt.format(m.targetPlaced) : '-'}</td><td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompact(m.targetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompact(m.deliveredGmv)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td><td class="num font-bold text-light">${fmtMoneyCompact(m.runRate)}</td><td class="num text-dim">${fmtInt.format(m.placed)}</td><td class="num text-blue font-bold">${fmtInt.format(m.confirmed)}</td><td class="num text-dim">${fmtInt.format(m.delivered)}</td><td class="num font-bold text-light">${fmtMoneyCompact(m.cm3)}</td><td class="num font-bold text-purple">${fmtPct(m.cm3Pct)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td><td class="num font-bold text-light">${fmtPct(m.cm3Pct)}</td>`;
+    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim font-bold">${m.targetPlaced > 0 ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num font-bold text-light">${fmtPctCell(m.cm3Pct)}</td>`;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(state.filteredMerchantData.length / PAGE_SIZE));
@@ -1803,7 +1875,7 @@ function renderPaginatedSegTable() {
   const start = state.pageSeg * PAGE_SIZE; const pageRows = state.filteredSegData.slice(start, start + PAGE_SIZE);
   pageRows.forEach((m, idx) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td><span class="seg-badge ${getSegBadgeClass(m.currentSegment)}">${m.currentSegment}</span></td><td class="num font-bold text-light">${fmtInt.format(m.confirmed)}</td><td class="num font-bold text-blue">${fmtInt.format(Math.round(m.rrConfirmed))}</td><td><span class="seg-badge ${getSegBadgeClass(m.projectedSegment)}">${m.projectedSegment}</span></td>`;
+    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td><span class="seg-badge ${getSegBadgeClass(m.currentSegment)}">${m.currentSegment}</span></td><td class="num font-bold text-light">${fmtIntCell(m.confirmed)}</td><td class="num font-bold text-blue">${fmtIntCell(Math.round(m.rrConfirmed))}</td><td><span class="seg-badge ${getSegBadgeClass(m.projectedSegment)}">${m.projectedSegment}</span></td>`;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(state.filteredSegData.length / PAGE_SIZE));
@@ -1856,6 +1928,7 @@ function fmtCm3Money(n) {
   if (abs >= 1000) return `${sign}EGP ${Math.round(abs / 1000)}K`;
   return `${sign}EGP ${Math.round(abs)}`;
 }
+const fmtCm3MoneyCell = (n) => wrapRawCell(n, fmtCm3Money(n));
 
 function cm3PeriodLabel(dateObj, mode) {
   const y = dateObj.getFullYear(); const mo = dateObj.getMonth() + 1; const day = dateObj.getDate();
@@ -1983,18 +2056,18 @@ function renderCm3TargetTable(rows) {
     const tr = document.createElement("tr"); const contrClass = cm3ContrBadgeClass(r.contrNeg);
     tr.innerHTML = `
       <td class="cm3-period-cell">${r.period}</td>
-      <td class="num"><span class="badge-status turned-positive">${fmtInt.format(r.turnedPositive)}</span></td>
-      <td class="num"><span class="badge-status turned-negative">${fmtInt.format(r.turnedNegative)}</span></td>
-      <td class="num"><span class="badge-status became-zero">${fmtInt.format(r.becameZero)}</span></td>
-      <td class="num"><span class="badge-status stayed-negative">${fmtInt.format(r.stayedNegative)}</span></td>
-      <td class="num"><span class="badge-status stayed-positive">${fmtInt.format(r.stayedPositive)}</span></td>
-      <td class="num"><span class="badge-status new-match">${fmtInt.format(r.newMatch)}</span></td>
-      <td class="num text-dim font-bold">${fmtInt.format(r.totalNegLastPeriod)}</td>
-      <td class="num font-bold ${r.actionRate === null ? "text-dim" : "text-blue"}">${r.actionRate === null ? "-" : fmtPct(r.actionRate)}</td>
-      <td class="num font-bold ${r.recoveryRate === null ? "text-dim" : "text-green"}">${r.recoveryRate === null ? "-" : fmtPct(r.recoveryRate)}</td>
-      <td class="num text-red">${fmtCm3Money(r.cm3NegLast)}</td>
-      <td class="num text-red">${fmtCm3Money(r.cm3NegThis)}</td>
-      <td class="num"><span class="contr-pill ${contrClass}">${fmtPct(r.contrNeg)}</span></td>
+      <td class="num"><span class="badge-status turned-positive">${fmtIntCell(r.turnedPositive)}</span></td>
+      <td class="num"><span class="badge-status turned-negative">${fmtIntCell(r.turnedNegative)}</span></td>
+      <td class="num"><span class="badge-status became-zero">${fmtIntCell(r.becameZero)}</span></td>
+      <td class="num"><span class="badge-status stayed-negative">${fmtIntCell(r.stayedNegative)}</span></td>
+      <td class="num"><span class="badge-status stayed-positive">${fmtIntCell(r.stayedPositive)}</span></td>
+      <td class="num"><span class="badge-status new-match">${fmtIntCell(r.newMatch)}</span></td>
+      <td class="num text-dim font-bold">${fmtIntCell(r.totalNegLastPeriod)}</td>
+      <td class="num font-bold ${r.actionRate === null ? "text-dim" : "text-blue"}">${r.actionRate === null ? "-" : fmtPctCell(r.actionRate)}</td>
+      <td class="num font-bold ${r.recoveryRate === null ? "text-dim" : "text-green"}">${r.recoveryRate === null ? "-" : fmtPctCell(r.recoveryRate)}</td>
+      <td class="num text-red">${fmtCm3MoneyCell(r.cm3NegLast)}</td>
+      <td class="num text-red">${fmtCm3MoneyCell(r.cm3NegThis)}</td>
+      <td class="num"><span class="contr-pill ${contrClass}">${fmtPctCell(r.contrNeg)}</span></td>
     `;
     body.appendChild(tr);
   });
@@ -2040,7 +2113,7 @@ function renderCm3OverallTable(rows) {
   if (!rows || rows.length === 0) { body.innerHTML = `<tr><td colspan="4" class="text-dim center">No qualifying data for this range.</td></tr>`; return; }
   rows.forEach(r => {
     const contrClass = cm3ContrBadgeClass(r.contrNeg); const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="cm3-period-cell">${r.period}</td><td class="num text-green font-bold">${fmtCm3Money(r.cm3PositiveTotal)}</td><td class="num text-red font-bold">${fmtCm3Money(r.cm3NegativeTotal)}</td><td class="num"><span class="contr-pill ${contrClass}">${fmtPct(r.contrNeg)}</span></td>`;
+    tr.innerHTML = `<td class="cm3-period-cell">${r.period}</td><td class="num text-green font-bold">${fmtCm3MoneyCell(r.cm3PositiveTotal)}</td><td class="num text-red font-bold">${fmtCm3MoneyCell(r.cm3NegativeTotal)}</td><td class="num"><span class="contr-pill ${contrClass}">${fmtPctCell(r.contrNeg)}</span></td>`;
     body.appendChild(tr);
   });
 }
@@ -2066,15 +2139,15 @@ const TC_METRIC_ROWS = [
   { label: "Revenue", t: "targetRevenue", a: "revenue", fmt: "money" },
   { label: "GMV", t: "targetGmv", a: "gmv", fmt: "money" },
   { label: "CM3", t: "targetCm3", a: "cm3", fmt: "money" },
-  { label: "PPM", t: "targetPpm", a: "ppm", fmt: "money" },
+  { label: "PPM", t: "targetPpm", a: "ppm", fmt: "money", tFmt: "pct", noAch: true },
   { label: "ASP DLV", t: "aspDlvPlanned", a: "aspDlv", fmt: "money" },
   { label: "CM3 %", t: "targetCm3Pct", a: "cm3Pct", fmt: "pct" }
 ];
 function tcFmtValue(v, fmt) {
   if (v === null || v === undefined) return "—";
-  if (fmt === "pct") return fmtPct(v);
-  if (fmt === "money") return fmtMoneyCompact(v);
-  return fmtInt.format(Math.round(v));
+  if (fmt === "pct") return fmtPctCell(v);
+  if (fmt === "money") return fmtMoneyCompactCell(v);
+  return fmtIntCell(Math.round(v));
 }
 function tcAchievementBadge(achPct) {
   if (achPct === null) return { cls: "orange", text: "N/A" };
@@ -2088,14 +2161,14 @@ function renderTargetsCommercialTable(targetRow, actualRow) {
   TC_METRIC_ROWS.forEach(row => {
     const targetVal = targetRow ? (targetRow[row.t] || 0) : 0;
     const actualVal = (row.a && actualRow) ? (actualRow[row.a] || 0) : null;
-    const achPct = (actualVal !== null && targetVal) ? (actualVal / targetVal) * 100 : null;
+    const achPct = (!row.noAch && actualVal !== null && targetVal) ? (actualVal / targetVal) * 100 : null;
     const badge = tcAchievementBadge(achPct);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="font-bold text-light">${row.label}</td>
-      <td class="num text-dim">${tcFmtValue(targetVal, row.fmt)}</td>
+      <td class="num text-dim">${tcFmtValue(targetVal, row.tFmt || row.fmt)}</td>
       <td class="num font-bold">${tcFmtValue(actualVal, row.fmt)}</td>
-      <td class="num">${achPct === null ? "—" : `<span class="badge-outline ${badge.cls}">${fmtPct(achPct)}</span>`}</td>
+      <td class="num">${achPct === null ? "—" : `<span class="badge-outline ${badge.cls}">${fmtPctCell(achPct)}</span>`}</td>
       <td class="center">${achPct === null ? `<span class="badge-status stable">N/A</span>` : `<span class="badge-status ${badge.cls === 'green' ? 'spike' : (badge.cls === 'red' ? 'decline' : 'stable')}">${badge.text}</span>`}</td>
     `;
     body.appendChild(tr);
@@ -2241,21 +2314,21 @@ function renderPaginatedCm3AnalystTable() {
     let barWidth = Math.min(Math.abs(m.cm3Pct), 100); const tr = document.createElement("tr");
     
     if(analystState.scope === "merchant") {
-      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light">${m.name}</td><td class="num font-bold">${fmtInt.format(m.placedPieces)}</td><td class="num text-blue">${fmtInt.format(m.confirmedPieces)}</td><td class="num text-green">${fmtInt.format(m.deliveredPieces)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPct(m.cr)}</span></td><td class="num text-dim">${fmtPct(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPct(m.ndr)}</span></td><td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light">${m.name}</td><td class="num font-bold">${fmtIntCell(m.placedPieces)}</td><td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td><td class="num text-green">${fmtIntCell(m.deliveredPieces)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num font-bold text-dim">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPctCell(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
     } else if(analystState.scope === "category") {
       tr.innerHTML = `
         <td class="text-dim">#${start + idx + 1}</td>
         <td class="font-bold text-light">${m.category}</td>
-        <td class="num text-dim">${m.targetCm3 > 0 ? fmtMoneyCompact(m.targetCm3) : '-'}</td>
-        <td class="num font-bold ${m.cm3 >= m.targetCm3 && m.targetCm3 > 0 ? 'text-green' : (m.cm3 >= 0 ? 'text-blue' : 'text-red')}">${fmtMoneyCompact(m.cm3)}</td>
-        <td class="num text-dim">${m.targetCm3PerPiece > 0 ? fmtMoneyCompact(m.targetCm3PerPiece) : '-'}</td>
-        <td class="num font-bold ${m.cm3PerPiece >= m.targetCm3PerPiece && m.targetCm3PerPiece > 0 ? 'text-green' : 'text-dim'}">${fmtMoneyCompact(m.cm3PerPiece)}</td>
+        <td class="num text-dim">${m.targetCm3 > 0 ? fmtMoneyCompactCell(m.targetCm3) : '-'}</td>
+        <td class="num font-bold ${m.cm3 >= m.targetCm3 && m.targetCm3 > 0 ? 'text-green' : (m.cm3 >= 0 ? 'text-blue' : 'text-red')}">${fmtMoneyCompactCell(m.cm3)}</td>
+        <td class="num text-dim">${m.targetCm3PerPiece > 0 ? fmtMoneyCompactCell(m.targetCm3PerPiece) : '-'}</td>
+        <td class="num font-bold ${m.cm3PerPiece >= m.targetCm3PerPiece && m.targetCm3PerPiece > 0 ? 'text-green' : 'text-dim'}">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
         <td class="num text-dim">${m.targetCm3Pct > 0 ? m.targetCm3Pct.toFixed(1) + '%' : '-'}</td>
-        <td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td>
+        <td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPctCell(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td>
         <td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>
       `;
     } else if(analystState.scope === "match") {
-      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td><td class="font-mono text-dim">${m.sku}</td><td class="text-dim truncate-cell" title="${m.skuName}">${m.skuName}</td><td class="text-dim">${m.category}</td><td class="num font-bold">${fmtInt.format(m.placedPieces)}</td><td class="num text-blue">${fmtInt.format(m.confirmed)}</td><td class="num text-green">${fmtInt.format(m.delivered)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td><td class="num font-bold">${fmtMoneyCompact(m.cm3PerPiece)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPct(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
+      tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td><td class="font-mono text-dim">${m.sku}</td><td class="text-dim truncate-cell" title="${m.skuName}">${m.skuName}</td><td class="text-dim">${m.category}</td><td class="num font-bold">${fmtIntCell(m.placedPieces)}</td><td class="num text-blue">${fmtIntCell(m.confirmed)}</td><td class="num text-green">${fmtIntCell(m.delivered)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPctCell(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
     }
     tbody.appendChild(tr);
   });
@@ -2294,6 +2367,21 @@ function analystWireControlsOnce() {
 // التارجت الشهري (Target MTD) = Daily Target × عدد الأيام من أول الشهر لحد امبارح،
 // وبيتفلتر بفلتر الشهر/الـ ACM بره فوق زي أي قسم تاني في الداشبورد.
 // -------------------------------------------------------------------------
+// دالة تحديد الـ Final Status (Performance Band) بناءً على % of MTD
+// 0% = No Achievement | 1-49% = Critical | 50-69% = Needs Improvement
+// 70-84% = Fair | 85-94% = Good | 95-104% = Excellent
+// 105-119% = Overachiever | 120%+ = Upside
+function getMpSalesPlanFinalStatus(pct) {
+    if (pct <= 0) return { text: "No Achievement", cls: "gray" };
+    if (pct < 50) return { text: "Critical", cls: "red" };
+    if (pct < 70) return { text: "Needs Improvement", cls: "orange" };
+    if (pct < 85) return { text: "Fair", cls: "yellow" };
+    if (pct < 95) return { text: "Good", cls: "blue" };
+    if (pct < 105) return { text: "Excellent", cls: "green" };
+    if (pct < 120) return { text: "Overachiever", cls: "green" };
+    return { text: "Upside", cls: "purple" };
+}
+
 function prepareMpSalesPlanData() {
     if (!state.acmSalesPlanData || state.acmSalesPlanData.length === 0) return;
 
@@ -2315,6 +2403,7 @@ function prepareMpSalesPlanData() {
 
     let totalSkus = 0; let achievedCount = 0; let missedCount = 0;
     let totalMtdTarget = 0; let totalMtdActual = 0;
+    let countCritical = 0; let countGood = 0; let countExcellent = 0; let countUpside = 0;
 
     const mergedData = state.acmSalesPlanData.map(plan => {
         let metrics = { confirmed: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0, deliveredGmv: 0 };
@@ -2340,6 +2429,13 @@ function prepareMpSalesPlanData() {
         const gap = mtdTarget - mtdActual;
         const runRate = (mtdActual / elapsedDays) * currentMonthDays;
         const mtdAchievedPct = mtdTarget > 0 ? (mtdActual / mtdTarget) * 100 : 0;
+        const finalStatus = getMpSalesPlanFinalStatus(mtdAchievedPct);
+
+        // تجميع الأعداد للكروت الأربعة (Critical / Good / Excellent / Upside)
+        if (mtdAchievedPct < 50) countCritical++;
+        else if (mtdAchievedPct < 85) countGood++;
+        else if (mtdAchievedPct < 100) countExcellent++;
+        else countUpside++;
 
         const wowDiff = metrics.thisWeekConfirmed - metrics.lastWeekConfirmed;
         let wowPct = 0;
@@ -2359,7 +2455,7 @@ function prepareMpSalesPlanData() {
 
         return {
             ...plan, ...metrics, merchantName, gap, runRate, dailyTarget, mtdTarget, mtdActual, mtdAchievedPct,
-            wowDiff, wowPct, wowStatus, wowClass, wowIcon
+            wowDiff, wowPct, wowStatus, wowClass, wowIcon, finalStatus
         };
     });
 
@@ -2368,6 +2464,10 @@ function prepareMpSalesPlanData() {
     if($("mpSpMissed")) $("mpSpMissed").textContent = fmtInt.format(missedCount);
     if($("mpSpOverallMtdTarget")) $("mpSpOverallMtdTarget").textContent = fmtInt.format(Math.round(totalMtdTarget));
     if($("mpSpOverallMtdActual")) $("mpSpOverallMtdActual").textContent = fmtInt.format(totalMtdActual);
+    if($("mpSpCountCritical")) $("mpSpCountCritical").textContent = fmtInt.format(countCritical);
+    if($("mpSpCountGood")) $("mpSpCountGood").textContent = fmtInt.format(countGood);
+    if($("mpSpCountExcellent")) $("mpSpCountExcellent").textContent = fmtInt.format(countExcellent);
+    if($("mpSpCountUpside")) $("mpSpCountUpside").textContent = fmtInt.format(countUpside);
 
     state.mpSalesPlanDataPrepared = mergedData;
     applyMpSalesPlanFilterAndSort();
@@ -2433,13 +2533,14 @@ function renderMpSalesPlanTable(data) {
             <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
             <td class="font-bold">${m.fullName}</td>
             <td class="num text-dim font-bold">${Number(m.dailyTarget).toFixed(1)}</td>
-            <td class="num text-orange font-bold">${fmtInt.format(Math.round(m.mtdTarget))}</td>
-            <td class="num text-blue font-bold">${fmtInt.format(m.mtdActual)}</td>
-            <td class="num text-green font-bold">${fmtMoneyCompact(m.deliveredGmv)}</td>
-            <td class="num"><span class="badge-outline ${mtdColor}">${fmtPct(m.mtdAchievedPct)}</span></td>
-            <td class="num text-red font-bold">${fmtInt.format(m.gap > 0 ? Math.round(m.gap) : 0)}</td>
-            <td class="num text-blue">${fmtInt.format(Math.round(m.runRate))}</td>
+            <td class="num text-orange font-bold">${fmtIntCell(Math.round(m.mtdTarget))}</td>
+            <td class="num text-blue font-bold">${fmtIntCell(m.mtdActual)}</td>
+            <td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+            <td class="num"><span class="badge-outline ${mtdColor}">${fmtPctCell(m.mtdAchievedPct)}</span></td>
+            <td class="num text-red font-bold">${fmtIntCell(m.gap > 0 ? Math.round(m.gap) : 0)}</td>
+            <td class="num text-blue">${fmtIntCell(Math.round(m.runRate))}</td>
             <td class="center"><span class="badge-status ${m.wowClass}">${m.wowIcon} ${m.wowStatus} ${m.wowPct > 0 ? '+' : ''}${m.wowPct.toFixed(1)}% (${m.wowDiff > 0 ? '+' : ''}${m.wowDiff})</span></td>
+            <td class="center"><span class="badge-outline ${m.finalStatus.cls}">${m.finalStatus.text}</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -2457,7 +2558,7 @@ function renderMpSalesPlanTable(data) {
 // و Target (MTD) = Daily Target × عدد الأيام من أول الشهر لحد امبارح.
 // لو الـ Single SKU ملوش تارجت، hasTarget=false وبيتعرض "Not in Plan".
 // -------------------------------------------------------------------------
-function buildDebundleProductMap(debundleRows) {
+function buildDebundleProductMap(debundleRows, cogsMap) {
   // PRODUCT_ID -> [{ singleId, quantity }, ...]
   // ملحوظة مهمة: نفس الـ PRODUCT_ID (البندل) بيتكرر على أكتر من صف في الشيت،
   // صف لكل Single SKU جوه البندل ده (كل صف بمقادير SINGLE_ID/PRODUCT_QUANTITY
@@ -2473,11 +2574,21 @@ function buildDebundleProductMap(debundleRows) {
     if (!singlesList.has(r.singleId)) singlesList.set(r.singleId, r.singleName || r.singleId);
     if (r.stock) stockBySingle.set(r.singleId, r.stock);
   });
+  // وزن كل Single جوه البندل، بالظبط زي شيت الـ BUNDLE TABLE المرجعي:
+  //   Single Cogs (G) = COGS(SINGLE_ID) × PRODUCT_QUANTITY
+  //   Bundle Cogs  (H) = مجموع Single Cogs لكل الـ Singles اللي جوه نفس الـ PRODUCT_ID
+  //   %            (I) = Single Cogs ÷ Bundle Cogs  ← ده اللي بنوزع بيه GMV/CM3/PPM
+  // للمنتجات اللي مش بندل (Single لوحده)، الصف الوحيد بياخد وزن = 1 تلقائيًا.
+  productMap.forEach(mappings => {
+    let bundleCogsTotal = 0;
+    mappings.forEach(m => { m.cogs = ((cogsMap && cogsMap.get(m.singleId)) || 0) * m.quantity; bundleCogsTotal += m.cogs; });
+    mappings.forEach(m => { m.cogsWeight = bundleCogsTotal > 0 ? (m.cogs / bundleCogsTotal) : 0; });
+  });
   return { productMap, singlesList, stockBySingle };
 }
 
 function computeCommercialDebundlized() {
-  const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap);
+  const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
 
   const mainRowsAll = state.allParsedRows || [];
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
@@ -2497,7 +2608,7 @@ function computeCommercialDebundlized() {
 
   const buckets = new Map();
   function getBucket(id) {
-    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 });
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 });
     return buckets.get(id);
   }
 
@@ -2518,29 +2629,39 @@ function computeCommercialDebundlized() {
 
     // بندل ممكن يحتوي على أكتر من Single SKU مختلف — لازم نوزع الديماند (القطع) بتاعه
     // على كل واحد فيهم (كل واحد بالـ quantity الخاصة بيه)، مش واحد بس.
-    // ملحوظة: الفلوس (GMV/CM3) خاصية للأوردر ككل، مش للقطعة — فمينفعش نضربها في
-    // الـ quantity زي القطع، ده كان سبب تضخم الأرقام (كان بيضاعف GMV/CM3 بعدد
-    // مرات ظهور الـ Single في البندل × الكمية بتاعته).
     mappings.forEach(mapping => {
       const qty = mapping.quantity || 1;
       const b = getBucket(mapping.singleId);
       b.placed += r.placedPieces * qty; b.confirmed += r.confirmedPieces * qty; b.delivered += r.deliveredPieces * qty;
-      b.deliveredGmv += r.deliveredGmv;
       if (rTime >= d3Ms) b.conf3d += r.confirmedPieces * qty; // ديماند الـ Single (ديبندلايز) آخر 3 أيام
       if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces * qty; b.crConfirmed += r.confirmedPieces * qty; }
       if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces * qty; b.drDelivered += r.deliveredPieces * qty; }
-      if (isCm3RowEligible(r, cm3CutoffTs)) { b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; }
+      // GMV/CM3/PPM الخاصة بالـ Single: مش بناخد قيمة الأوردر كاملة (ده كان بيضاعفها لو
+      // البندل فيه أكتر من Single)، ولا بنوزعها بالقطع — بنوزعها بنفس منطق الملف
+      // المرجعي (BUNDLE TABLE): وزن الـ COGS بتاع الـ Single ده داخل نفس البندل
+      // (mapping.cogsWeight) × قيمة الأوردر الكاملة، بنفس الكات أوف بتاع الـ CM3.
+      if (isCm3RowEligible(r, cm3CutoffTs)) {
+        const weight = mapping.cogsWeight || 0;
+        b.deliveredGmv += r.deliveredGmv * weight;
+        b.cm3 += r.cm3 * weight;
+        b.ppm += (r.ppm || 0) * weight;
+        b.cm3Gmv += r.deliveredGmv * weight;
+      }
     });
   });
 
   const targets = state.singleSkuTargets || {};
   const result = [];
   singlesList.forEach((singleName, singleId) => {
-    const b = buckets.get(singleId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
+    const b = buckets.get(singleId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
     const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
     const ndrPct = (crPct * drPct) / 100;
     const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+    // CM3/Piece و PPM/Piece: نفس منطق شيت الـ Single المرجعي (G2=E2/C2، H2=F2/C2)
+    // — بيتقسموا على إجمالي القطع المستلمة (DLV Pieces) بتاعة الـ Single ده.
+    const cm3PerPiece = b.delivered ? (b.cm3 / b.delivered) : 0;
+    const ppmPerPiece = b.delivered ? (b.ppm / b.delivered) : 0;
 
     const targetInfo = targets[singleId];
     // شيت البلان بيكتب 0 لأي حاجة مش في البلان فعلياً — التارجت لازم يكون > 0
@@ -2566,7 +2687,7 @@ function computeCommercialDebundlized() {
       stock: Math.round(stock || 0), doh,
       hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate,
       totalPlaced: b.placed, totalConfirmed: b.confirmed, totalDelivered: b.delivered,
-      crPct, drPct, ndrPct, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct
+      crPct, drPct, ndrPct, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece
     });
   });
   return { rows: result, overallDeliveredGmv, overallCm3 };
@@ -2634,30 +2755,33 @@ function renderPaginatedCdzTable() {
   const pageRows = state.cdzFiltered.slice(start, start + PAGE_SIZE);
   const frag = document.createDocumentFragment();
   pageRows.forEach(m => {
-    const targetCell = m.hasTarget ? fmtInt.format(Math.round(m.mtdTarget)) : `<span class="badge-outline orange">Not in Plan</span>`;
+    const targetCell = m.hasTarget ? fmtIntCell(Math.round(m.mtdTarget)) : `<span class="badge-outline orange">Not in Plan</span>`;
     const dailyCell = m.hasTarget ? Number(m.dailyTarget).toFixed(1) : "—";
-    const achCell = (m.hasTarget && m.mtdAchPct !== null) ? `<span class="badge-outline ${m.mtdAchPct >= 100 ? 'green' : (m.mtdAchPct >= 85 ? 'orange' : 'red')}">${fmtPct(m.mtdAchPct)}</span>` : "—";
+    const achCell = (m.hasTarget && m.mtdAchPct !== null) ? `<span class="badge-outline ${m.mtdAchPct >= 100 ? 'green' : (m.mtdAchPct >= 85 ? 'orange' : 'red')}">${fmtPctCell(m.mtdAchPct)}</span>` : "—";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="font-mono text-dim" style="white-space:nowrap;">${m.singleId}</td>
       <td class="font-bold truncate-cell" title="${m.singleName}">${m.singleName}</td>
       <td class="text-dim truncate-cell" style="max-width:110px;" title="${m.category}">${m.category}</td>
-      <td class="num font-bold text-dim">${fmtInt.format(m.stock)}</td>
-      <td class="num font-bold text-dim">${fmtInt.format(m.doh)}</td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="num text-orange font-bold">${targetCell}</td>
       <td class="num text-dim">${dailyCell}</td>
-      <td class="num text-blue font-bold">${fmtInt.format(m.mtdActual)}</td>
+      <td class="num text-blue font-bold">${fmtIntCell(m.mtdActual)}</td>
       <td class="num">${achCell}</td>
-      <td class="num font-bold text-green">${fmtInt.format(m.runRate)}</td>
-      <td class="num">${fmtInt.format(m.totalPlaced)}</td>
-      <td class="num">${fmtInt.format(m.totalConfirmed)}</td>
-      <td class="num">${fmtInt.format(m.totalDelivered)}</td>
-      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPct(m.crPct)}</span></td>
-      <td class="num text-dim">${fmtPct(m.drPct)}</td>
-      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPct(m.ndrPct)}</span></td>
-      <td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td>
-      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td>
-      <td class="num">${fmtPct(m.cm3Pct)}</td>
+      <td class="num font-bold text-green">${fmtIntCell(m.runRate)}</td>
+      <td class="num">${fmtIntCell(m.totalPlaced)}</td>
+      <td class="num">${fmtIntCell(m.totalConfirmed)}</td>
+      <td class="num">${fmtIntCell(m.totalDelivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.ppm)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+      <td class="num">${fmtPctCell(m.cm3Pct)}</td>
     `;
     frag.appendChild(tr);
   });
@@ -2676,6 +2800,725 @@ function cdzWireControlsOnce() {
   if ($("searchCdzInput")) $("searchCdzInput").addEventListener("input", applyCdzFilterAndSort);
   if ($("prevPageCdz")) $("prevPageCdz").addEventListener("click", () => { if (state.cdzPage > 0) { state.cdzPage -= 1; renderPaginatedCdzTable(); } });
   if ($("nextPageCdz")) $("nextPageCdz").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.cdzFiltered.length / PAGE_SIZE)); if (state.cdzPage < totalPages - 1) { state.cdzPage += 1; renderPaginatedCdzTable(); } });
+}
+
+// =========================================================================
+// CM3 ANALYST / PRODUCTS (تحت Commercial Debundlized) — تحليل على مستوى
+// المنتج (SKU) بس، مباشرة من شيت الـ Main (MAIN_GID)، بنفس منطق/كات أوف الـ
+// CM3 (CM3_LAG_DAYS) المستخدم في أي سكشن تاني مصدره نفس الشيت.
+//
+// الداتا بتتقسم بفلاتر Day / Week(5D) / Month / Overall — كل فلتر بيقارن
+// آخر Period متاح في الداتا (لحد كات أوف الـ CM3) بالـ Period اللي قبله،
+// عشان نعرف كل منتج CM3% بتاعه زاد ولا نقص (Overall مفيهاش مقارنة، لأنها
+// شاملة الرينج كله دفعة واحدة).
+//
+// PPM Target: بيتقرا من شيت الـ Category Targets (CAT_TARGETS_GID) اللي
+// اتقرا أصلاً في state.commercialTargets (نفس الصف اللي المستخدم ضافه في
+// آخر الشيت باسم "PPM Target" بيتقرا generic بمطابقة النص، مش برقم صف
+// ثابت). PPM Actual% = PPM/Piece الفعلي ÷ الـ Target ده. أي منتج بيحقق أقل
+// من 80% بيتوسم "Fix PPM".
+// =========================================================================
+const CM3AP_PPM_FIX_THRESHOLD = 80;
+
+function cm3apPeriodKeyForRow(rd, mode) { return mode === "overall" ? "ALL" : cm3PeriodLabel(rd, mode); }
+function cm3apPeriodSort(rd, mode) { return mode === "overall" ? 0 : cm3PeriodSortKey(rd, mode); }
+
+// تارجت الـ PPM بتاع الكاتيجوري (لو موجود ومتحقق فيه)، وإلا بيرجع لـ Grand
+// Total (الصف العام اللي في آخر الشيت) كـ fallback.
+// تارجت الـ PPM بتاع الكاتيجوري — بيتقرا من عمود "Target PPM Pieces" في شيت
+// الـ Category Targets: ده رقم (قيمة PPM المستهدفة للقطعة) مش نسبة%. لو مش
+// موجود للكاتيجوري ده بيرجع لـ Grand Total (الصف العام في آخر الشيت) كـ fallback.
+function cm3apTargetPpmFor(category) {
+  const targets = state.commercialTargets || {};
+  const norm = normalizeName(category);
+  if (targets[norm] && targets[norm].targetPpmPieces > 0) return targets[norm].targetPpmPieces;
+  return (targets["grand total"] && targets["grand total"].targetPpmPieces) || 0;
+}
+
+// =========================================================================
+// PRODUCTS BREAKDOWN — SERIES VIEW (Daily / Weekly عمود لكل يوم/أسبوع)
+// -------------------------------------------------------------------------
+// لما الفلتر يكون Daily أو Weekly، الجدول بيوريّ صف واحد لكل SKU وعمود لكل
+// يوم (Placed PCS D1, D2, D3...) أو لكل أسبوع (كل 5 أيام مجمّعين سوا =
+// Placed PCS W1, W2, W3...) لكل المقاييس. الترقيم (D1/W1) بيبدأ من أول يوم
+// موجود فعليًا في الداتا المفلترة بالشهر المختار، مش من تاريخ اليوم في
+// الكالندر — يعني لو النهاردة رابع يوم موجود في الداتا هيتعرض كـ D4.
+//
+// Placed/Confirmed/Delivered (وأي حاجة متوقفة عليهم زي CR%/DR%/NDR%)
+// بتُجمع من كل الصفوف من غير أي Lag، فمفيش يوم/أسبوع يطلع صفر لمجرد قربه
+// من النهاردة. الأعمدة المعتمدة على الـ CM3 (GMV, CM3, CM3%, PPM,
+// PPM/Piece, PPM Actual%, PPM/GMV%) لوحدها بتحترم كات أوف الـ
+// CM3_LAG_DAYS (زي أي سكشن تاني في الداشبورد)، فمن الطبيعي إنها تفضل صفر
+// لآخر كذا يوم لسه الـ CM3 متأخر عليهم فعلاً — ده مش باج.
+// =========================================================================
+const CM3AP_SERIES_METRICS = [
+  { key: "placed", label: "Placed PCS", fmt: "int" },
+  { key: "confirmed", label: "Confirmed PCS", fmt: "int" },
+  { key: "delivered", label: "Delivered PCS", fmt: "int" },
+  { key: "crPct", label: "CR%", fmt: "pct" },
+  { key: "drPct", label: "DR%", fmt: "pct" },
+  { key: "ndrPct", label: "NDR%", fmt: "pct" },
+  { key: "deliveredAsp", label: "Delivered ASP", fmt: "money" },
+  { key: "deliveredGmv", label: "Delivered GMV", fmt: "money" },
+  { key: "cm3", label: "CM3", fmt: "money" },
+  { key: "cm3Pct", label: "CM3%", fmt: "pct" },
+  { key: "ppm", label: "Total PPM", fmt: "money" },
+  { key: "ppmPerPiece", label: "PPM/Piece", fmt: "money" },
+  { key: "ppmActualPct", label: "PPM Actual%", fmt: "pct" },
+  { key: "ppmGmvRatio", label: "PPM/GMV%", fmt: "pct" }
+];
+
+function cm3apSeriesFmtCell(v, fmt) {
+  if (v === null || v === undefined) return '<span class="text-dim">-</span>';
+  if (fmt === "pct") return fmtPctCell(v);
+  if (fmt === "money") return fmtMoneyCompactCell(v);
+  return fmtIntCell(v);
+}
+
+function buildCm3ApSeriesData(periodMode) {
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const rows = (state.allParsedRows || []).filter(r => selectedMonth === "" || r.monthYear === selectedMonth);
+  if (!rows.length) return { skuList: [], periodLabels: [] };
+
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
+  const crCutoff = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
+
+  // كل الأيام (تاريخ فقط، من غير وقت) اللي فيها أي صف، مرتبة زمنياً من الأقدم للأحدث.
+  const dateSet = new Set();
+  rows.forEach(r => { if (!r.sku) return; const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); dateSet.add(d.getTime()); });
+  const sortedDays = Array.from(dateSet).sort((a, b) => a - b);
+  if (!sortedDays.length) return { skuList: [], periodLabels: [] };
+
+  // Daily: كل يوم لوحده. Weekly: كل 5 أيام (بالترتيب الزمني) مجمّعين في "أسبوع" واحد.
+  const buckets = [];
+  if (periodMode === "weekly") {
+    for (let i = 0; i < sortedDays.length; i += 5) buckets.push({ label: `W${buckets.length + 1}`, days: sortedDays.slice(i, i + 5) });
+  } else {
+    sortedDays.forEach(() => buckets.push({ label: `D${buckets.length + 1}`, days: [sortedDays[buckets.length]] }));
+  }
+  const dayToBucket = new Map();
+  buckets.forEach((b, idx) => b.days.forEach(d => dayToBucket.set(d, idx)));
+
+  const skuMap = new Map();
+  rows.forEach(r => {
+    if (!r.sku) return;
+    const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0);
+    const bIdx = dayToBucket.get(d.getTime());
+    if (bIdx === undefined) return;
+    if (!skuMap.has(r.sku)) skuMap.set(r.sku, { sku: r.sku, category: r.category || "Uncategorized", buckets: new Map() });
+    const sEntry = skuMap.get(r.sku);
+    if ((!sEntry.category || sEntry.category === "Uncategorized") && r.category) sEntry.category = r.category;
+    if (!sEntry.buckets.has(bIdx)) {
+      sEntry.buckets.set(bIdx, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, aspWeighted: 0, aspWeight: 0 });
+    }
+    const b = sEntry.buckets.get(bIdx);
+    // Placed/Confirmed/Delivered/GMV/ASP/CR%/DR%/NDR% من غير أي Lag — دي كلها أرقام
+    // فعلية جاهزة على مستوى نفس الصف (مش محسوبة لاحقًا)، فميطلعوش صفر لمجرد إن
+    // اليوم/الأسبوع ده قريب من النهاردة.
+    b.placed += r.placedPieces || 0; b.confirmed += r.confirmedPieces || 0; b.delivered += r.deliveredPieces || 0;
+    b.deliveredGmv += r.deliveredGmv || 0;
+    b.drConfirmed += r.confirmedPieces || 0; b.drDelivered += r.deliveredPieces || 0;
+    b.crPlaced += r.placedPieces || 0; b.crConfirmed += r.confirmedPieces || 0;
+    b.aspWeighted += (r.deliveredAsp || 0) * (r.deliveredPieces || 0);
+    b.aspWeight += (r.deliveredPieces || 0);
+    // الـ CM3/PPM لوحدهم بيحترموا كات أوف الـ CM3_LAG_DAYS، لأن عمود الربحية في
+    // الشيت نفسه بيتأخر تعبيته أيام قبل ما يوصل — ده مش باج، ده طبيعة مصدر الداتا.
+    if (isCm3RowEligible(r, cm3Cutoff)) {
+      b.cm3 += r.cm3 || 0; b.cm3Gmv += r.deliveredGmv || 0; b.ppm += (r.ppm || 0);
+      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+    }
+  });
+
+  function metricsForBucket(b) {
+    if (!b) return { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Pct: 0, ppm: 0, ppmPerPiece: 0, crPct: 0, drPct: 0, ndrPct: 0, deliveredAsp: 0 };
+    const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+    const ppmPerPiece = b.ppmPerPieceWeight ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : (b.delivered ? (b.ppm / b.delivered) : 0);
+    const deliveredAsp = b.aspWeight ? (b.aspWeighted / b.aspWeight) : 0;
+    const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    return { placed: b.placed, confirmed: b.confirmed, delivered: b.delivered, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, ppm: b.ppm, ppmPerPiece, crPct, drPct, ndrPct, deliveredAsp };
+  }
+
+  const skuList = [];
+  skuMap.forEach(s => {
+    // بيتضم لو عنده أي Placed في أي يوم/أسبوع ضمن الرينج، مش بس آخر يوم — عشان
+    // منتج نشط يوم 1/2/3 ومفيش عنده Placed في آخر يوم يفضل يظهر بالداتا الحقيقية بتاعته.
+    const totalPlaced = Array.from(s.buckets.values()).reduce((sum, b) => sum + b.placed, 0);
+    if (totalPlaced <= 0) return;
+    const targetPpm = cm3apTargetPpmFor(s.category);
+    const periodsData = buckets.map((bkt, idx) => {
+      const m = metricsForBucket(s.buckets.get(idx));
+      const ppmGmvRatio = m.deliveredGmv ? (m.ppm / m.deliveredGmv) * 100 : 0;
+      // Actual PPM% = فعلي PPM/Piece (رقم كاش) ÷ Target PPM Pieces (رقم كاش برضو) — مش نسبة% لنسبة%.
+      const ppmActualPct = targetPpm > 0 ? (m.ppmPerPiece / targetPpm) * 100 : null;
+      return { ...m, ppmGmvRatio, ppmActualPct };
+    });
+    const skuName = (state.inventoryMap && state.inventoryMap[s.sku] && state.inventoryMap[s.sku].skuName) || "";
+    skuList.push({ sku: s.sku, skuName, category: s.category || "Uncategorized", targetPpm, periodsData });
+  });
+
+  skuList.sort((a, b) => a.sku.localeCompare(b.sku));
+  return { skuList, periodLabels: buckets.map(b => b.label) };
+}
+
+function buildCm3AnalystProductsData(periodMode) {
+  // بيحترم فلتر الشهر العام اللي فوق الموقع (نفس شيت monthSelect المستخدم في كل
+  // سكشن تاني) — لو مفيش شهر مختار (All Months) بيدي كل الداتا زي ما هي.
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const rows = (state.allParsedRows || []).filter(r => selectedMonth === "" || r.monthYear === selectedMonth);
+  if (!rows.length) return { products: [], latestPeriod: null, prevPeriod: null };
+  const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
+  const crCutoff = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين المستخدمين لـ CR% في أي مكان تاني
+
+  // sku -> { category, periods: Map(period -> bucket) }
+  const skuMap = new Map();
+  // مقارنة "vs Previous Period" بتاعة الـ CM3% لازم تفضل شغالة حتى لو المستخدم فاتح
+  // Overall (اللي مفيهوش غير Period واحد أصلاً فمفيش حاجة تتقارن بيها). فبنجمّع كمان
+  // نسخة أسبوعية (Weekly) ثابتة من نفس الداتا بغض النظر عن الـ periodMode المختار،
+  // وبنستخدمها بس لحساب آخر 2 Period فيهم نشاط فعلي — مش لعرض الأرقام نفسها.
+  const deltaSkuMap = new Map();
+  rows.forEach(r => {
+    if (!r.sku) return;
+    const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0);
+    const period = cm3apPeriodKeyForRow(rd, periodMode);
+    const periodSort = cm3apPeriodSort(rd, periodMode);
+    if (!skuMap.has(r.sku)) skuMap.set(r.sku, { sku: r.sku, category: r.category || "Uncategorized", periods: new Map() });
+    const sEntry = skuMap.get(r.sku);
+    if ((!sEntry.category || sEntry.category === "Uncategorized") && r.category) sEntry.category = r.category;
+    if (!sEntry.periods.has(period)) {
+      sEntry.periods.set(period, {
+        period, periodSort, placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, aspWeighted: 0, aspWeight: 0
+      });
+    }
+    const b = sEntry.periods.get(period);
+    // زي أي حساب تاني مصدره MAIN_GID: Placed/Confirmed/Delivered/GMV/ASP/CR%/DR%/NDR%
+    // من غير أي لاج — دي أرقام فعلية جاهزة على مستوى الصف. الـ CM3/CM3%/PPM بس
+    // هما اللي بيحترموا كات أوف الـ 4 أيام بالظبط، لأن عمود الربحية بيتأخر تعبيته.
+    b.placed += r.placedPieces; b.confirmed += r.confirmedPieces; b.delivered += r.deliveredPieces;
+    b.deliveredGmv += r.deliveredGmv;
+    b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces;
+    b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces;
+    b.aspWeighted += (r.deliveredAsp || 0) * (r.deliveredPieces || 0);
+    b.aspWeight += (r.deliveredPieces || 0);
+    if (isCm3RowEligible(r, cm3Cutoff)) {
+      b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; b.ppm += (r.ppm || 0);
+      // PPM_PER_PIECE (عمود AD) بيتقرا مباشرة من الشيت مش بيتحسب — بنعمله Weighted Average
+      // على أساس الـ Delivered Pieces بتاعة كل صف عشان نجمع أكتر من صف/تاجر لنفس الـ SKU صح.
+      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+    }
+
+    const wPeriod = cm3apPeriodKeyForRow(rd, "weekly");
+    const wSort = cm3apPeriodSort(rd, "weekly");
+    if (!deltaSkuMap.has(r.sku)) deltaSkuMap.set(r.sku, new Map());
+    const dPeriods = deltaSkuMap.get(r.sku);
+    if (!dPeriods.has(wPeriod)) dPeriods.set(wPeriod, { periodSort: wSort, placed: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0 });
+    const db = dPeriods.get(wPeriod);
+    db.placed += r.placedPieces; db.deliveredGmv += r.deliveredGmv;
+    if (isCm3RowEligible(r, cm3Cutoff)) { db.cm3 += r.cm3; db.cm3Gmv += r.deliveredGmv; }
+  });
+
+  // كل الـ Periods الموجودة في الداتا كلها، مرتبة زمنياً.
+  const periodSortMap = new Map();
+  skuMap.forEach(s => s.periods.forEach(b => { if (!periodSortMap.has(b.period)) periodSortMap.set(b.period, b.periodSort); }));
+  const allPeriodsSorted = Array.from(periodSortMap.keys()).sort((a, b) => periodSortMap.get(a) - periodSortMap.get(b));
+  const latestPeriod = allPeriodsSorted.length ? allPeriodsSorted[allPeriodsSorted.length - 1] : null;
+  const prevPeriod = allPeriodsSorted.length > 1 ? allPeriodsSorted[allPeriodsSorted.length - 2] : null;
+
+  // نفس الفكرة، بس على الخريطة الأسبوعية الثابتة (للمقارنة فقط).
+  const deltaPeriodSortMap = new Map();
+  deltaSkuMap.forEach(dPeriods => dPeriods.forEach((b, p) => { if (!deltaPeriodSortMap.has(p)) deltaPeriodSortMap.set(p, b.periodSort); }));
+  const deltaPeriodsSorted = Array.from(deltaPeriodSortMap.keys()).sort((a, b) => deltaPeriodSortMap.get(a) - deltaPeriodSortMap.get(b));
+
+  function metricsFor(b) {
+    if (!b) return { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Pct: 0, ppm: 0, ppmPerPiece: 0, crPct: 0, drPct: 0, ndrPct: 0, deliveredAsp: 0 };
+    const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+    // Actual PPM/Piece = عمود PPM_PER_PIECE (AD) نفسه، مش ناتج قسمة Total PPM على Delivered.
+    // بيرجع لقسمة Total PPM (AB) / Delivered كـ fallback لو مفيش قيمة في عمود AD أصلاً.
+    const ppmPerPiece = b.ppmPerPieceWeight ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : (b.delivered ? (b.ppm / b.delivered) : 0);
+    const deliveredAsp = b.aspWeight ? (b.aspWeighted / b.aspWeight) : 0;
+    const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    return { placed: b.placed, confirmed: b.confirmed, delivered: b.delivered, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, ppm: b.ppm, ppmPerPiece, crPct, drPct, ndrPct, deliveredAsp };
+  }
+
+  // بيرجع آخر 2 Period أسبوعي (من الأحدث للأقدم) فيهم فعلاً نشاط لنفس المنتج —
+  // بغض النظر عن الـ periodMode المختار في العرض، عشان "New" متظهرش غلط لمجرد
+  // إن Overall مفيهوش غير Period واحد.
+  function findLastTwoWeeksWithData(dPeriods) {
+    if (!dPeriods) return [null, null];
+    const found = [];
+    for (let i = deltaPeriodsSorted.length - 1; i >= 0 && found.length < 2; i--) {
+      const p = deltaPeriodsSorted[i];
+      const b = dPeriods.get(p);
+      if (b && (b.placed > 0 || b.deliveredGmv > 0)) found.push(b);
+    }
+    return [found[0] || null, found[1] || null];
+  }
+
+  const products = [];
+  skuMap.forEach(s => {
+    const curr = metricsFor(latestPeriod ? s.periods.get(latestPeriod) : null);
+    if (curr.placed === 0 && curr.deliveredGmv === 0) return; // مفيش نشاط في آخر Period، اتجاهل
+    const [wLatest, wPrev] = findLastTwoWeeksWithData(deltaSkuMap.get(s.sku));
+    let deltaCm3Pct = null, prevCm3PctForDisplay = null;
+    if (wLatest && wPrev) {
+      const latestCm3Pct = wLatest.cm3Gmv ? (wLatest.cm3 / wLatest.cm3Gmv) * 100 : 0;
+      const prevCm3PctCalc = wPrev.cm3Gmv ? (wPrev.cm3 / wPrev.cm3Gmv) * 100 : 0;
+      deltaCm3Pct = latestCm3Pct - prevCm3PctCalc;
+      prevCm3PctForDisplay = prevCm3PctCalc;
+    }
+    const hasPrev = deltaCm3Pct !== null;
+
+    // Target PPM دلوقتي بيتقرا كرقم (Target PPM Pieces) مش نسبة% — فالمقارنة الصحيحة:
+    // PPM/Piece الفعلي (رقم كاش) ÷ Target PPM Pieces (رقم كاش برضو).
+    const targetPpm = cm3apTargetPpmFor(s.category);
+    const ppmGmvRatio = curr.deliveredGmv ? (curr.ppm / curr.deliveredGmv) * 100 : 0;
+    const ppmActualPct = targetPpm > 0 ? (curr.ppmPerPiece / targetPpm) * 100 : null;
+    const needsFix = ppmActualPct !== null && ppmActualPct < CM3AP_PPM_FIX_THRESHOLD;
+    const skuName = (state.inventoryMap && state.inventoryMap[s.sku] && state.inventoryMap[s.sku].skuName) || "";
+
+    products.push({
+      sku: s.sku, skuName, category: s.category || "Uncategorized",
+      placed: curr.placed, confirmed: curr.confirmed, delivered: curr.delivered,
+      crPct: curr.crPct, drPct: curr.drPct, ndrPct: curr.ndrPct, deliveredAsp: curr.deliveredAsp,
+      deliveredGmv: curr.deliveredGmv, cm3: curr.cm3, cm3Pct: curr.cm3Pct,
+      prevCm3Pct: hasPrev ? prevCm3PctForDisplay : null, deltaCm3Pct,
+      ppm: curr.ppm, ppmPerPiece: curr.ppmPerPiece, targetPpm, ppmActualPct, ppmGmvRatio,
+      period: latestPeriod, status: targetPpm <= 0 ? "No Target" : (needsFix ? "Fix PPM" : "OK")
+    });
+  });
+
+  return { products, latestPeriod, prevPeriod, allPeriodsSorted };
+}
+
+const cm3apState = { period: "overall", category: "All", sortKey: "cm3Pct", sortDir: "desc", sortKeySeries: null, sortDirSeries: "desc", page: 0, wired: false, catOptionsBuilt: false };
+let cm3apDataAll = []; let cm3apFiltered = []; let cm3apMeta = { latestPeriod: null, prevPeriod: null };
+let cm3apPipelineChartInst = null;
+let cm3apSeriesAll = { skuList: [], periodLabels: [] };
+let cm3apSeriesFiltered = [];
+let cm3apStaticTheadHtml = null; // نسخة من الـ header الأصلي (Overall mode) عشان نرجعله زي ما هو
+
+function restoreCm3apStaticThead() {
+  const theadRow = document.querySelector("#cm3apTable thead tr");
+  if (theadRow && cm3apStaticTheadHtml !== null) theadRow.innerHTML = cm3apStaticTheadHtml;
+}
+
+// قيمة السورت لأي عمود في جدول الـ Series (Daily/Weekly): "sku"/"skuName"/"category"/"targetPpm"
+// ثابتين، وأي عمود مقياس بيتحدد بمفتاح "periodIndex|metricKey" (زي "2|drPct").
+function cm3apSeriesSortValue(row, key) {
+  if (key === "sku") return row.sku || "";
+  if (key === "skuName") return row.skuName || "";
+  if (key === "category") return row.category || "";
+  if (key === "targetPpm") return row.targetPpm ?? -Infinity;
+  const sep = key.indexOf("|");
+  if (sep === -1) return -Infinity;
+  const pIdx = parseInt(key.slice(0, sep), 10);
+  const metricKey = key.slice(sep + 1);
+  const period = row.periodsData ? row.periodsData[pIdx] : null;
+  const v = period ? period[metricKey] : null;
+  return (v === null || v === undefined) ? -Infinity : v;
+}
+
+function sortCm3apSeriesFiltered() {
+  const key = cm3apState.sortKeySeries; if (!key) return;
+  const dir = cm3apState.sortDirSeries === "asc" ? 1 : -1;
+  cm3apSeriesFiltered.sort((a, b) => {
+    const av = cm3apSeriesSortValue(a, key); const bv = cm3apSeriesSortValue(b, key);
+    if (typeof av === "string" || typeof bv === "string") return String(av).localeCompare(String(bv)) * dir;
+    return (av - bv) * dir;
+  });
+}
+
+function sortCm3apSeries(key) {
+  if (cm3apState.sortKeySeries === key) { cm3apState.sortDirSeries = cm3apState.sortDirSeries === "asc" ? "desc" : "asc"; }
+  else { cm3apState.sortKeySeries = key; cm3apState.sortDirSeries = "desc"; }
+  cm3apState.page = 0;
+  sortCm3apSeriesFiltered();
+  renderCm3apSeriesTable();
+}
+
+function cm3apSeriesSortArrow(key) {
+  if (cm3apState.sortKeySeries !== key) return "";
+  return cm3apState.sortDirSeries === "asc" ? " &#9650;" : " &#9660;";
+}
+
+// جدول الـ Products Breakdown في مود Daily/Weekly: عمود مقابل لكل يوم/أسبوع
+// موجود في الداتا، لكل المقاييس. (Overall بيفضل زي ما هو بالجدول التقليدي.)
+// كل عمود قابل للدوس عليه للسورت (تصاعدي/تنازلي)، مع سهم بيوري العمود المختار حاليًا.
+function renderCm3apSeriesTable() {
+  const theadRow = document.querySelector("#cm3apTable thead tr");
+  const tbody = $("cm3apTableBody");
+  if (!theadRow || !tbody) return;
+  if (cm3apStaticTheadHtml === null) cm3apStaticTheadHtml = theadRow.innerHTML;
+
+  const periodLabels = cm3apSeriesAll.periodLabels || [];
+  const th = (key, label, extraClass) => `<th class="${extraClass || ""}" style="cursor:pointer;" title="Click to sort" onclick="sortCm3apSeries('${key}')">${label}${cm3apSeriesSortArrow(key)}</th>`;
+  let headHtml = th("sku", "SKU") + th("skuName", "SKU Name", "truncate-cell") + th("category", "Category", "truncate-cell");
+  periodLabels.forEach((label, pIdx) => {
+    const pColClass = `cm3ap-pcol-${pIdx % 4}`;
+    CM3AP_SERIES_METRICS.forEach(m => { headHtml += th(`${pIdx}|${m.key}`, `${m.label} ${label}`, `num ${pColClass}`); });
+  });
+  headHtml += th("targetPpm", "Target PPM", "num text-orange");
+  theadRow.innerHTML = headHtml;
+
+  const totalCols = 3 + periodLabels.length * CM3AP_SERIES_METRICS.length + 1;
+  const start = cm3apState.page * PAGE_SIZE;
+  const pageRows = cm3apSeriesFiltered.slice(start, start + PAGE_SIZE);
+
+  if (!pageRows.length) {
+    tbody.innerHTML = `<tr><td colspan="${totalCols}" class="text-dim center">No qualifying data for this range.</td></tr>`;
+  } else {
+    tbody.innerHTML = pageRows.map(p => {
+      let rowHtml = `<td class="font-mono text-light font-bold">${p.sku}</td><td class="truncate-cell text-dim" title="${p.skuName || ""}">${p.skuName || '<span class="text-dim">-</span>'}</td><td class="truncate-cell text-dim">${p.category}</td>`;
+      p.periodsData.forEach((period, pIdx) => {
+        const pColClass = `cm3ap-pcol-${pIdx % 4}`;
+        CM3AP_SERIES_METRICS.forEach(m => { rowHtml += `<td class="num ${pColClass}">${cm3apSeriesFmtCell(period[m.key], m.fmt)}</td>`; });
+      });
+      rowHtml += `<td class="num text-orange">${p.targetPpm > 0 ? fmtMoneyCompactCell(p.targetPpm) : '<span class="text-dim">-</span>'}</td>`;
+      return `<tr>${rowHtml}</tr>`;
+    }).join("");
+  }
+
+  const totalPages = Math.max(1, Math.ceil(cm3apSeriesFiltered.length / PAGE_SIZE));
+  if ($("rowCountCm3ap")) $("rowCountCm3ap").textContent = `${fmtInt.format(cm3apSeriesFiltered.length)} Products`;
+  if ($("pageIndicatorCm3ap")) $("pageIndicatorCm3ap").textContent = `Page ${cm3apState.page + 1} of ${totalPages}`;
+  if ($("prevPageCm3ap")) $("prevPageCm3ap").disabled = cm3apState.page === 0;
+  if ($("nextPageCm3ap")) $("nextPageCm3ap").disabled = cm3apState.page >= totalPages - 1;
+}
+
+// بيقرر يرندر جدول الـ Overall التقليدي ولا جدول الـ Series (Daily/Weekly) —
+// مستخدمة في أماكن بره applyCm3apFilterAndSort زي تحميل CSV.
+function renderCm3apActiveTable() {
+  if (cm3apState.period === "overall") { restoreCm3apStaticThead(); renderPaginatedCm3apTable(); }
+  else { renderCm3apSeriesTable(); }
+}
+
+function populateCm3apCategoryFilter(products) {
+  const sel = $("cm3apCategorySelect"); if (!sel) return;
+  const current = sel.value || "All";
+  const cats = Array.from(new Set(products.map(p => p.category).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '<option value="All">All Categories</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join("");
+  sel.value = cats.includes(current) ? current : "All";
+}
+
+function cm3apDeltaBadge(delta) {
+  if (delta === null) return `<span class="badge-outline gray">New</span>`;
+  const cls = delta > 0.05 ? "green" : (delta < -0.05 ? "red" : "gray");
+  return `<span class="badge-outline ${cls}">${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%</span>`;
+}
+
+function cm3apStatusBadge(status) {
+  if (status === "Fix PPM") return `<span class="badge-outline red">Fix PPM</span>`;
+  if (status === "OK") return `<span class="badge-outline green">OK</span>`;
+  return `<span class="badge-outline gray">No Target</span>`;
+}
+
+// بيب لاين جرافيكي (Placed -> Confirmed -> Delivered) مقسّم لكل Category على حدة
+// (مش رقم واحد إجمالي)، لنفس الداتا المفلترة حالياً بحسب الـ Period المختار
+// (Day/Week/Overall) والـ Category/Search — زي ستايل شارت "Pipeline Velocity"
+// في الـ Overview بس بتاعة الـ Products هنا وبتتقسم Category.
+function renderCm3apPipelineChart(products) {
+  const canvas = document.getElementById("cm3apPipelineChart"); if (!canvas) return;
+
+  const catMap = new Map();
+  products.forEach(p => {
+    const cat = p.category || "Uncategorized";
+    if (!catMap.has(cat)) catMap.set(cat, { category: cat, placed: 0, confirmed: 0, delivered: 0 });
+    const e = catMap.get(cat);
+    e.placed += p.placed || 0; e.confirmed += p.confirmed || 0; e.delivered += p.delivered || 0;
+  });
+  const catRows = Array.from(catMap.values()).filter(c => c.placed > 0).sort((a, b) => b.placed - a.placed);
+
+  const ctx = canvas.getContext("2d");
+  if (cm3apPipelineChartInst) cm3apPipelineChartInst.destroy();
+  Chart.defaults.color = "#94a3b8"; Chart.defaults.font.family = "Inter";
+
+  if (!catRows.length) {
+    const statsBox = $("cm3apPipelineStats");
+    if (statsBox) statsBox.innerHTML = `<div class="text-dim">No qualifying data for this period.</div>`;
+    return;
+  }
+
+  cm3apPipelineChartInst = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: catRows.map(c => c.category),
+      datasets: [
+        { label: "Placed", data: catRows.map(c => c.placed), backgroundColor: "#475569", borderRadius: 6 },
+        { label: "Confirmed", data: catRows.map(c => c.confirmed), backgroundColor: "#3b82f6", borderRadius: 6 },
+        { label: "Delivered", data: catRows.map(c => c.delivered), backgroundColor: "#10b981", borderRadius: 6 }
+      ]
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: "top", labels: { boxWidth: 12, color: "#e2e8f0" } },
+        tooltip: { backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#cbd5e1", borderColor: "#334155", borderWidth: 1, padding: 10 }
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: "#1e293b", borderDash: [4, 4], drawBorder: false }, ticks: { callback: (v) => v >= 1000 ? (v / 1000) + "k" : v } },
+        y: { grid: { display: false, drawBorder: false }, ticks: { color: "#e2e8f0", font: { weight: "600" } } }
+      }
+    }
+  });
+
+  const statsBox = $("cm3apPipelineStats");
+  if (statsBox) {
+    statsBox.innerHTML = catRows.map(c => {
+      const crPct = c.placed ? (c.confirmed / c.placed) * 100 : 0;
+      const drPct = c.confirmed ? (c.delivered / c.confirmed) * 100 : 0;
+      return `
+      <div class="cm3ap-pipeline-stat">
+        <div class="k">${c.category}</div>
+        <div class="v"><span class="text-blue">CR ${fmtPctCell(crPct)}</span> &middot; <span class="text-green">DR ${fmtPctCell(drPct)}</span></div>
+        <div class="sub">${fmtIntCell(c.placed)} &rarr; ${fmtIntCell(c.confirmed)} &rarr; ${fmtIntCell(c.delivered)} pcs</div>
+      </div>`;
+    }).join("");
+  }
+}
+
+function renderCm3apInsights(products, meta) {
+  const box = $("cm3apInsights"); if (!box) return;
+  if (!products.length) { box.innerHTML = `<div class="text-dim">No qualifying data for this period.</div>`; return; }
+
+  const qualifying = products.filter(p => p.placed >= CM3_MIN_PLACED_PIECES);
+  const withDelta = qualifying.filter(p => p.deltaCm3Pct !== null);
+  const topGainers = [...withDelta].sort((a, b) => b.deltaCm3Pct - a.deltaCm3Pct).slice(0, 4);
+  const topDecliners = [...withDelta].sort((a, b) => a.deltaCm3Pct - b.deltaCm3Pct).slice(0, 4);
+  const fixList = qualifying.filter(p => p.status === "Fix PPM").sort((a, b) => (a.ppmActualPct ?? 0) - (b.ppmActualPct ?? 0)).slice(0, 5);
+  const negativeCm3 = qualifying.filter(p => p.cm3 < 0).length;
+
+  const listItem = (p, valueHtml) => `<li><span class="font-mono text-dim">${p.sku}</span>${p.skuName ? `<span class="cm3ap-insight-name" title="${p.skuName}">${p.skuName}</span>` : ""} <span class="text-dim">(${p.category})</span> — ${valueHtml}</li>`;
+
+  let html = `<div class="cm3ap-insights-grid">`;
+  html += `<div class="cm3ap-insight-card"><h4 class="text-green">Top CM3% Gainers</h4><ul>${
+    topGainers.length ? topGainers.map(p => listItem(p, cm3apDeltaBadge(p.deltaCm3Pct))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
+  }</ul></div>`;
+  html += `<div class="cm3ap-insight-card"><h4 class="text-red">Top CM3% Decliners</h4><ul>${
+    topDecliners.length ? topDecliners.map(p => listItem(p, cm3apDeltaBadge(p.deltaCm3Pct))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
+  }</ul></div>`;
+  html += `<div class="cm3ap-insight-card"><h4 class="text-orange">Needs PPM Fix (Top 5 Worst)</h4><ul>${
+    fixList.length ? fixList.map(p => listItem(p, `${fmtPctCell(p.ppmActualPct)} of target`)).join("") : `<li class="text-dim">Nothing below 80% of Target PPM right now.</li>`
+  }</ul></div>`;
+  html += `<div class="cm3ap-insight-card"><h4>Quick Read</h4><ul>
+    <li>${fmtIntCell(qualifying.length)} qualifying products (Placed Pieces &ge; ${CM3_MIN_PLACED_PIECES}) out of ${fmtIntCell(products.length)} active this period.</li>
+    <li>${fmtIntCell(negativeCm3)} product(s) delivering negative CM3.</li>
+    <li>${fmtIntCell(qualifying.filter(p => p.status === "Fix PPM").length)} product(s) flagged Fix PPM (below ${CM3AP_PPM_FIX_THRESHOLD}% of target).</li>
+    <li>Current period: <span class="text-dim">${meta.latestPeriod || "-"}</span>${meta.prevPeriod ? ` · Compared to <span class="text-dim">${meta.prevPeriod}</span>` : ""}</li>
+  </ul></div>`;
+  html += `</div>`;
+  box.innerHTML = html;
+}
+
+// سكشن "Top Movers" تحت الـ Products Breakdown: توب 4 Positive وتوب 4 Drops (بار مرئي بسيط لكل واحد).
+function renderCm3apMovers(products) {
+  const box = $("cm3apMovers"); if (!box) return;
+  const qualifying = products.filter(p => p.placed >= CM3_MIN_PLACED_PIECES && p.deltaCm3Pct !== null);
+  const topPositive = [...qualifying].sort((a, b) => b.deltaCm3Pct - a.deltaCm3Pct).slice(0, 4);
+  const topDrops = [...qualifying].sort((a, b) => a.deltaCm3Pct - b.deltaCm3Pct).slice(0, 4);
+  const maxAbs = Math.max(1, ...qualifying.map(p => Math.abs(p.deltaCm3Pct)));
+
+  const row = (p, colorVar) => {
+    const width = Math.min(100, (Math.abs(p.deltaCm3Pct) / maxAbs) * 100);
+    return `<div class="cm3ap-mover-row">
+      <div class="cm3ap-mover-info">
+        <div class="cm3ap-mover-sku">${p.sku}${p.skuName ? `<span class="cm3ap-mover-name" title="${p.skuName}"> ${p.skuName}</span>` : ""}<span class="cm3ap-mover-cat"> · ${p.category}</span></div>
+        <div class="cm3ap-mover-bar-track"><div class="cm3ap-mover-bar-fill" style="width:${width}%; background:${colorVar};"></div></div>
+      </div>
+      <div class="cm3ap-mover-value" style="color:${colorVar};">${p.deltaCm3Pct >= 0 ? "+" : ""}${p.deltaCm3Pct.toFixed(1)}%</div>
+    </div>`;
+  };
+
+  box.innerHTML = `
+    <div class="cm3ap-mover-col">
+      <h4 class="text-green">Top 4 Positive (CM3% &Delta;)</h4>
+      ${topPositive.length ? topPositive.map(p => row(p, "#10b981")).join("") : `<div class="text-dim" style="font-size:12px;">No period-over-period data yet.</div>`}
+    </div>
+    <div class="cm3ap-mover-col">
+      <h4 class="text-red">Top 4 Drops (CM3% &Delta;)</h4>
+      ${topDrops.length ? topDrops.map(p => row(p, "#ef4444")).join("") : `<div class="text-dim" style="font-size:12px;">No period-over-period data yet.</div>`}
+    </div>
+  `;
+}
+
+function prepareCm3AnalystProductsData() {
+  const periodMode = cm3apState.period;
+  const built = buildCm3AnalystProductsData(periodMode);
+  cm3apDataAll = built.products;
+  cm3apMeta = built;
+
+  // بره Overall: نبني كمان جدول الـ Series (عمود لكل يوم/أسبوع) للـ Products Breakdown.
+  cm3apSeriesAll = periodMode !== "overall" ? buildCm3ApSeriesData(periodMode) : { skuList: [], periodLabels: [] };
+
+  populateCm3apCategoryFilter(cm3apDataAll);
+
+  const totalProducts = cm3apDataAll.length;
+  const totalGmv = cm3apDataAll.reduce((s, p) => s + p.deliveredGmv, 0);
+  const totalCm3 = cm3apDataAll.reduce((s, p) => s + p.cm3, 0);
+  const totalPpm = cm3apDataAll.reduce((s, p) => s + p.ppm, 0);
+  const overallCm3Pct = totalGmv ? (totalCm3 / totalGmv) * 100 : 0;
+  const overallPpmGmvRatio = totalGmv ? (totalPpm / totalGmv) * 100 : 0;
+  const fixCount = cm3apDataAll.filter(p => p.status === "Fix PPM").length;
+
+  // دلتا الـ CM3% الأوفرال (مش لكل منتج): مجموع الـ CM3/GMV بتاع الـ Period اللي فات
+  // كله، مقارنة بمجموع الـ Period الحالي — عشان نعرف الأداء العام زاد ولا نقص.
+  let overallDelta = null;
+  {
+    const prevBuilt = cm3apDataAll.filter(p => p.deltaCm3Pct !== null);
+    if (prevBuilt.length) {
+      // تقدير مبسط: متوسط مرجح بالـ GMV الحالي للـ delta بتاع كل منتج (بدل ما نعيد بناء الـ GMV بتاع الـ Period اللي فات بالكامل).
+      const weightedDeltaSum = prevBuilt.reduce((s, p) => s + (p.deltaCm3Pct * (p.deliveredGmv || 1)), 0);
+      const weightSum = prevBuilt.reduce((s, p) => s + (p.deliveredGmv || 1), 0);
+      overallDelta = weightSum ? (weightedDeltaSum / weightSum) : null;
+    }
+  }
+
+  if ($("cm3apTotalProducts")) $("cm3apTotalProducts").textContent = fmtInt.format(totalProducts);
+  if ($("cm3apPeriodLabel")) $("cm3apPeriodLabel").textContent = `Period: ${built.latestPeriod || "-"}`;
+  if ($("cm3apTotalGmv")) $("cm3apTotalGmv").textContent = fmtMoneyCompact(totalGmv);
+  if ($("cm3apTotalCm3")) $("cm3apTotalCm3").textContent = fmtMoneyCompact(totalCm3);
+  if ($("cm3apCm3Pct")) $("cm3apCm3Pct").textContent = fmtPct(overallCm3Pct);
+  if ($("cm3apCm3PctDelta")) {
+    const el = $("cm3apCm3PctDelta");
+    if (overallDelta === null) { el.textContent = "vs previous period: -"; el.className = "metric-sub text-dim"; }
+    else { el.innerHTML = `vs previous period: ${cm3apDeltaBadge(overallDelta)}`; el.className = "metric-sub"; }
+  }
+  if ($("cm3apPpmGmvRatio")) $("cm3apPpmGmvRatio").textContent = fmtPct(overallPpmGmvRatio);
+  if ($("cm3apTotalPpm")) $("cm3apTotalPpm").textContent = fmtMoneyCompact(totalPpm);
+  if ($("cm3apFixPpmCount")) $("cm3apFixPpmCount").textContent = fmtInt.format(fixCount);
+  if ($("cm3apTableSub")) $("cm3apTableSub").textContent = periodMode === "overall"
+    ? "Full Range Up To The CM3 Cutoff"
+    : (periodMode === "daily"
+      ? `Daily breakdown — One Column Per Day (D1..D${cm3apSeriesAll.periodLabels.length})`
+      : `Weekly breakdown — Every 5 Days Grouped As One Week (W1..W${cm3apSeriesAll.periodLabels.length})`);
+  if ($("cm3apRangeInfo")) { const selectedMonth = $("monthSelect") ? $("monthSelect").value : ""; $("cm3apRangeInfo").textContent = selectedMonth || "All Months"; }
+
+  cm3apState.page = 0;
+  applyCm3apFilterAndSort();
+  cm3apWireControlsOnce();
+}
+
+function sortCm3ap(key) {
+  if (cm3apState.sortKey === key) { cm3apState.sortDir = cm3apState.sortDir === "asc" ? "desc" : "asc"; }
+  else { cm3apState.sortKey = key; cm3apState.sortDir = "desc"; }
+  applyCm3apFilterAndSort();
+}
+
+// السرش والكاتيجوري بيفلتروا مش بس جدول الـ Products Breakdown، لكن كمان
+// الـ Pipeline & Insights (الشارت + الكروت) وسكشن الـ Top Movers، عشان كل
+// السكاشن دي تتحرك مع بعض مع أي فلتر بيتعمل.
+function applyCm3apFilterAndSort() {
+  const q = $("cm3apSearchInput") ? $("cm3apSearchInput").value.trim().toLowerCase() : "";
+  const cat = $("cm3apCategorySelect") ? $("cm3apCategorySelect").value : "All";
+  let data = [...cm3apDataAll];
+  if (cat && cat !== "All") data = data.filter(p => p.category === cat);
+  if (q) data = data.filter(p => p.sku.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || (p.skuName || "").toLowerCase().includes(q));
+
+  const key = cm3apState.sortKey; const dir = cm3apState.sortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => {
+    let av = a[key]; let bv = b[key];
+    if (av === null || av === undefined) av = -Infinity;
+    if (bv === null || bv === undefined) bv = -Infinity;
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+
+  cm3apFiltered = data;
+  cm3apState.page = 0;
+
+  if (cm3apState.period === "overall") {
+    restoreCm3apStaticThead();
+    renderPaginatedCm3apTable();
+  } else {
+    cm3apSeriesFiltered = (cm3apSeriesAll.skuList || []).filter(p => {
+      if (cat && cat !== "All" && p.category !== cat) return false;
+      if (q && !(p.sku.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || (p.skuName || "").toLowerCase().includes(q))) return false;
+      return true;
+    });
+    sortCm3apSeriesFiltered();
+    renderCm3apSeriesTable();
+  }
+
+  renderCm3apPipelineChart(data);
+  renderCm3apInsights(data, cm3apMeta);
+  renderCm3apMovers(data);
+}
+
+function renderPaginatedCm3apTable() {
+  const tbody = $("cm3apTableBody"); if (!tbody) return;
+  tbody.innerHTML = "";
+  const start = cm3apState.page * PAGE_SIZE;
+  const pageRows = cm3apFiltered.slice(start, start + PAGE_SIZE);
+
+  if (!pageRows.length) {
+    tbody.innerHTML = `<tr><td colspan="20" class="text-dim center">No products match this filter.</td></tr>`;
+  } else {
+    pageRows.forEach(p => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="font-mono text-light font-bold">${p.sku}</td>
+        <td class="truncate-cell text-dim" title="${p.skuName || ""}">${p.skuName || '<span class="text-dim">-</span>'}</td>
+        <td class="truncate-cell text-dim">${p.category}</td>
+        <td class="num">${fmtIntCell(p.placed)}</td>
+        <td class="num text-blue">${fmtIntCell(p.confirmed)}</td>
+        <td class="num">${fmtIntCell(p.delivered)}</td>
+        <td class="num">${fmtPctCell(p.crPct)}</td>
+        <td class="num">${fmtPctCell(p.drPct)}</td>
+        <td class="num">${fmtPctCell(p.ndrPct)}</td>
+        <td class="num">${p.deliveredAsp ? fmtMoneyCompactCell(p.deliveredAsp) : '<span class="text-dim">-</span>'}</td>
+        <td class="num text-green">${fmtMoneyCompactCell(p.deliveredGmv)}</td>
+        <td class="num">${fmtMoneyCompactCell(p.cm3)}</td>
+        <td class="num font-bold text-purple">${fmtPctCell(p.cm3Pct)}</td>
+        <td class="num">${cm3apDeltaBadge(p.deltaCm3Pct)}</td>
+        <td class="num">${fmtMoneyCompactCell(p.ppm)}</td>
+        <td class="num">${fmtMoneyCompactCell(p.ppmPerPiece)}</td>
+        <td class="num text-orange">${p.targetPpm > 0 ? fmtMoneyCompactCell(p.targetPpm) : '<span class="text-dim">-</span>'}</td>
+        <td class="num">${p.ppmActualPct !== null ? fmtPctCell(p.ppmActualPct) : '<span class="text-dim">-</span>'}</td>
+        <td class="num">${fmtPctCell(p.ppmGmvRatio)}</td>
+        <td class="center">${cm3apStatusBadge(p.status)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  const totalPages = Math.max(1, Math.ceil(cm3apFiltered.length / PAGE_SIZE));
+  if ($("rowCountCm3ap")) $("rowCountCm3ap").textContent = `${fmtInt.format(cm3apFiltered.length)} Products`;
+  if ($("pageIndicatorCm3ap")) $("pageIndicatorCm3ap").textContent = `Page ${cm3apState.page + 1} of ${totalPages}`;
+  if ($("prevPageCm3ap")) $("prevPageCm3ap").disabled = cm3apState.page === 0;
+  if ($("nextPageCm3ap")) $("nextPageCm3ap").disabled = cm3apState.page >= totalPages - 1;
+}
+
+function cm3apWireControlsOnce() {
+  if (cm3apState.wired) return; cm3apState.wired = true;
+  document.querySelectorAll("#cm3apPeriodToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#cm3apPeriodToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active"); cm3apState.period = btn.dataset.period; prepareCm3AnalystProductsData();
+    });
+  });
+  if ($("cm3apCategorySelect")) $("cm3apCategorySelect").addEventListener("change", applyCm3apFilterAndSort);
+  // السرش موجود في مكانين (Products Breakdown و Pipeline & Insights) ومتزامنين مع بعض:
+  // كل واحد بيحدث التاني وبعدين بيطبق الفلتر، عشان تجربة استخدام واحدة موحدة.
+  if ($("cm3apSearchInput")) $("cm3apSearchInput").addEventListener("input", () => {
+    if ($("cm3apSearchInput2")) $("cm3apSearchInput2").value = $("cm3apSearchInput").value;
+    applyCm3apFilterAndSort();
+  });
+  if ($("cm3apSearchInput2")) $("cm3apSearchInput2").addEventListener("input", () => {
+    if ($("cm3apSearchInput")) $("cm3apSearchInput").value = $("cm3apSearchInput2").value;
+    applyCm3apFilterAndSort();
+  });
+  if ($("prevPageCm3ap")) $("prevPageCm3ap").addEventListener("click", () => { if (cm3apState.page > 0) { cm3apState.page -= 1; renderCm3apActiveTable(); } });
+  if ($("nextPageCm3ap")) $("nextPageCm3ap").addEventListener("click", () => {
+    const totalRows = cm3apState.period === "overall" ? cm3apFiltered.length : cm3apSeriesFiltered.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+    if (cm3apState.page < totalPages - 1) { cm3apState.page += 1; renderCm3apActiveTable(); }
+  });
 }
 
 // -------------------------------------------------------------------------
@@ -2865,14 +3708,13 @@ function getSellthroughIndices() {
     prodInfo: state.metabaseProductsInfo
   };
 
-  // لو نفس مراجع (references) الأراييز الخام زي المرة اللي فاتت، استخدم الكاش
-  if (
-    _stIndexCache &&
-    _stIndexCache._src.inbound === src.inbound &&
-    _stIndexCache._src.begInv === src.begInv &&
-    _stIndexCache._src.need === src.need &&
-    _stIndexCache._src.prodInfo === src.prodInfo
-  ) {
+  // بصمة محتوى (مش مجرد مرجع الأراييز) — عشان لو الـ fetch رجع أراييز جديدة
+  // بنفس المحتوى بالظبط (يحصل في كل ريفريش حتى لو الشيت متغيرش)، منعملش
+  // إعادة بناء للفهارس من غير داعي.
+  const fp = computeSellthroughSourceFingerprint();
+
+  // لو نفس بصمة المحتوى زي المرة اللي فاتت، استخدم الكاش
+  if (_stIndexCache && _stIndexCache._fp === fp) {
     return _stIndexCache;
   }
 
@@ -2952,11 +3794,35 @@ function getSellthroughIndices() {
     set.add(sku);
   });
 
+  // ---------------------------------------------------------------------
+  // STOCK & DOH — بنفس مصدر ونفس معادلة Commercial Debundlized بالظبط:
+  // STOCK من عمود G في شيت الديبندلايز (PRODUCTS_DEBUNDLE_MAP_GID)، وDOH =
+  // Stock ÷ متوسط آخر 3 أيام Confirmed. هنا مفيش داعي لأي ديبندلايز/بندل
+  // لأن الداتا في لوحة الـ Sellthrough سينجل SKU أصلاً، فبنقرأ الاستوك
+  // والكونفيرمد على مستوى نفس الـ SKU مباشرة.
+  // ---------------------------------------------------------------------
+  const stockBySingle = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (r.singleId && r.stock && !stockBySingle.has(r.singleId)) stockBySingle.set(r.singleId, r.stock);
+  });
+
+  const mainRows = state.allParsedRows || [];
+  let mainLatestTs = 0;
+  mainRows.forEach(r => { if (r.timestamp > mainLatestTs) mainLatestTs = r.timestamp; });
+  const mainToday = new Date(mainLatestTs); mainToday.setHours(0, 0, 0, 0);
+  const mainD3Ms = mainToday.getTime() - (3 * 86400000);
+  const conf3dBySku = new Map();
+  mainRows.forEach(r => {
+    if (!r.sku || r.timestamp < mainD3Ms) return;
+    conf3dBySku.set(r.sku, (conf3dBySku.get(r.sku) || 0) + (r.confirmedPieces || 0));
+  });
+
   _stIndexCache = {
-    _src: src,
+    _fp: fp,
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec, inboundNameCat,
     beginInvBySkuMonth, beginInvNameCat, needBySkuMonth, needNameCat,
-    skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed
+    skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
+    stockBySingle, conf3dBySku
   };
   return _stIndexCache;
 }
@@ -2976,7 +3842,8 @@ function recomputeSellthroughRows() {
   const {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec,
     inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
-    needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed
+    needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
+    stockBySingle, conf3dBySku
   } = idx;
 
   // مجموعة الـ SKU الأساسية = اتحاد الموجودين في الثلاث مصادر عند begInvKey
@@ -3020,6 +3887,12 @@ function recomputeSellthroughRows() {
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
 
+    // Stock/DOH: نفس المصدر بتاع Commercial Debundlized (عمود G في شيت
+    // الديبندلايز)، وDOH = Stock ÷ متوسط آخر 3 أيام Confirmed من MAIN_GID.
+    const stock = stockBySingle.has(sku) ? stockBySingle.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
+    const avg3dConfirmed = (conf3dBySku.get(sku) || 0) / 3;
+    const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
+
     rows.push({
       sku,
       name: info.name || "Unknown",
@@ -3028,7 +3901,8 @@ function recomputeSellthroughRows() {
       cnfQty, dlvQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
       stRate, soldInb, firstBuy,
-      cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales
+      cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
+      stock: Math.round(stock || 0), doh
     });
   });
 
@@ -3095,14 +3969,14 @@ function renderSellthroughSummaryTable(tbodyId, summaryRows) {
   tbody.innerHTML = summaryRows.map(r => `
     <tr${r.cat === "Grand Total" ? ' class="st-grand-total"' : ""}>
       <td>${r.cat}</td>
-      <td>${fmtInt.format(r.pieces)}</td>
-      <td>${fmtInt.format(r.begInv)}</td>
-      <td>${fmtInt.format(r.begSales)}</td>
-      <td>${fmtInt.format(r.returns)}</td>
-      <td>${fmtInt.format(r.retSales)}</td>
-      <td>${fmtInt.format(r.totPur)}</td>
-      <td>${fmtInt.format(r.purSales)}</td>
-      <td>${fmtInt.format(r.overflow)}</td>
+      <td>${fmtIntCell(r.pieces)}</td>
+      <td>${fmtIntCell(r.begInv)}</td>
+      <td>${fmtIntCell(r.begSales)}</td>
+      <td>${fmtIntCell(r.returns)}</td>
+      <td>${fmtIntCell(r.retSales)}</td>
+      <td>${fmtIntCell(r.totPur)}</td>
+      <td>${fmtIntCell(r.purSales)}</td>
+      <td>${fmtIntCell(r.overflow)}</td>
       <td class="st-rate">${r.stRate.toFixed(1)}%</td>
       <td class="st-inbound">${r.inboundVsSold.toFixed(1)}%</td>
     </tr>
@@ -3230,19 +4104,21 @@ function renderPaginatedSellthroughTable() {
       <td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td>
       <td class="text-dim">${m.cat}</td>
       <td class="text-dim">${m.lastRecDate}</td>
-      <td class="num text-blue font-bold">${fmtInt.format(m.cnfQty)}</td>
-      <td class="num text-green font-bold">${fmtInt.format(m.dlvQty)}</td>
-      <td class="num text-light">${fmtInt.format(m.begInv)}</td>
-      <td class="num text-dim">${fmtInt.format(m.begSales)}</td>
-      <td class="num text-orange font-bold">${fmtInt.format(m.remBeg)}</td>
-      <td class="num text-red font-bold">${fmtInt.format(m.rtos)}</td>
-      <td class="num text-red">${fmtInt.format(m.retSales)}</td>
-      <td class="num text-dim">${fmtInt.format(m.remPurSales)}</td>
-      <td class="num text-blue">${fmtInt.format(m.totPur)}</td>
-      <td class="num text-green">${fmtInt.format(m.purSales)}</td>
+      <td class="num text-blue font-bold">${fmtIntCell(m.cnfQty)}</td>
+      <td class="num text-green font-bold">${fmtIntCell(m.dlvQty)}</td>
+      <td class="num text-light">${fmtIntCell(m.begInv)}</td>
+      <td class="num text-dim">${fmtIntCell(m.begSales)}</td>
+      <td class="num text-orange font-bold">${fmtIntCell(m.remBeg)}</td>
+      <td class="num text-red font-bold">${fmtIntCell(m.rtos)}</td>
+      <td class="num text-red">${fmtIntCell(m.retSales)}</td>
+      <td class="num text-dim">${fmtIntCell(m.remPurSales)}</td>
+      <td class="num text-blue">${fmtIntCell(m.totPur)}</td>
+      <td class="num text-green">${fmtIntCell(m.purSales)}</td>
       <td class="num text-purple font-bold">${m.stRate.toFixed(1)}%</td>
       <td class="num font-bold">${m.soldInb.toFixed(1)}%</td>
       <td class="center"><span class="badge-outline ${m.firstBuy === 'Yes' ? 'green' : 'dim'}">${m.firstBuy}</span></td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -3335,18 +4211,18 @@ function renderPaginatedMpMatchesTable() {
       <td class="font-mono text-dim">${m.merchantId}</td>
       <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
       <td class="text-dim truncate-cell" style="max-width:120px;" title="${m.acm}">${m.acm}</td>
-      <td class="num font-bold">${fmtInt.format(m.totalPlaced)}</td>
-      <td class="num text-blue">${fmtInt.format(m.totalConfirmed)}</td>
-      <td class="num text-green">${fmtInt.format(m.totalDelivered)}</td>
-      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPct(m.crPct)}</span></td>
-      <td class="num text-dim">${fmtPct(m.drPct)}</td>
-      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPct(m.ndrPct)}</span></td>
-      <td class="num font-bold text-dim">${fmtMoneyCompact(m.deliveredGmv)}</td>
-      <td class="num">${fmtPct(m.contrPct)}</td>
-      <td class="num text-dim">${fmtMoneyCompact(m.placedAsp)}</td>
-      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompact(m.cm3)}</td>
-      <td class="num font-bold">${fmtMoneyCompact(m.cm3PerPiece)}</td>
-      <td class="num text-purple">${fmtPct(m.cm3Pct)}</td>
+      <td class="num font-bold">${fmtIntCell(m.totalPlaced)}</td>
+      <td class="num text-blue">${fmtIntCell(m.totalConfirmed)}</td>
+      <td class="num text-green">${fmtIntCell(m.totalDelivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num">${fmtPctCell(m.contrPct)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num text-purple">${fmtPctCell(m.cm3Pct)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -3781,7 +4657,7 @@ const ALL_SHEET_GIDS = [
   INVENTORY_GID, PRODUCTS_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID,
   SALES_PLAN_PERF_GID, NEW_SEGMENTATION_GID, INBOUND_GID,
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
-  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID
+  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -3810,7 +4686,8 @@ const GID_LABELS = {
   [SALES_PLAN_PERF_GID]: "Sales Plan Performance", [NEW_SEGMENTATION_GID]: "New Segmentation",
   [INBOUND_GID]: "Inbound", [PRODUCTS_INFO_GID]: "Products Info",
   [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
-  [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets"
+  [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets",
+  [COGS_GID]: "COGS"
 };
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
@@ -3839,7 +4716,7 @@ async function fetchAllSheetsSnapshot() {
       invPayload, prodPayload, catTargetsPayload, planPayload,
       salesPlanPerfPayload, newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
-      debundleMapPayload, singleSkuTargetsPayload
+      debundleMapPayload, singleSkuTargetsPayload, cogsPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -3856,7 +4733,8 @@ async function fetchAllSheetsSnapshot() {
       loadSheetWithRetry(BEGIN_INV_GID).catch(track(BEGIN_INV_GID)),
       loadSheetWithRetry(SELLTHROUGH_NEEDED_GID).catch(track(SELLTHROUGH_NEEDED_GID)),
       PRODUCTS_DEBUNDLE_MAP_GID ? loadSheetWithRetry(PRODUCTS_DEBUNDLE_MAP_GID).catch(track(PRODUCTS_DEBUNDLE_MAP_GID)) : Promise.resolve(null),
-      SINGLE_SKU_TARGETS_GID ? loadSheetWithRetry(SINGLE_SKU_TARGETS_GID).catch(track(SINGLE_SKU_TARGETS_GID)) : Promise.resolve(null)
+      SINGLE_SKU_TARGETS_GID ? loadSheetWithRetry(SINGLE_SKU_TARGETS_GID).catch(track(SINGLE_SKU_TARGETS_GID)) : Promise.resolve(null),
+      COGS_GID ? loadSheetWithRetry(COGS_GID).catch(track(COGS_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -3865,7 +4743,8 @@ async function fetchAllSheetsSnapshot() {
       [SALES_PLAN_PERF_GID]: salesPlanPerfPayload, [NEW_SEGMENTATION_GID]: newSegPayload,
       [INBOUND_GID]: inboundPayload, [PRODUCTS_INFO_GID]: prodInfoPayload,
       [BEGIN_INV_GID]: begInvPayload, [SELLTHROUGH_NEEDED_GID]: sellthroughNeededPayload,
-      [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload
+      [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload,
+      [COGS_GID]: cogsPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -3886,6 +4765,7 @@ async function fetchAllSheetsSnapshot() {
   const sellthroughNeededPayload = sheets[SELLTHROUGH_NEEDED_GID];
   const debundleMapPayload = sheets[PRODUCTS_DEBUNDLE_MAP_GID];
   const singleSkuTargetsPayload = sheets[SINGLE_SKU_TARGETS_GID];
+  const cogsPayload = sheets[COGS_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -3910,8 +4790,40 @@ async function fetchAllSheetsSnapshot() {
     metabaseSellthroughNeeded: sellthroughNeededPayload ? parseSellthroughNeededSheet(sellthroughNeededPayload) : state.metabaseSellthroughNeeded,
     debundleMap: debundleMapPayload ? parseDebundleMapSheet(debundleMapPayload) : state.debundleMap, // <-- Commercial Debundlized
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
+    cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
     staleGids // sheets that failed every retry and are still showing old data
   };
+}
+
+// -------------------------------------------------------------------------
+// بصمة خفيفة (زي computeSnapshotFingerprint) لكن خاصة بس بمصادر لوحة الـ
+// Sellthrough (Inbound / Beginning Inventory / Sellthrough Needed / Products
+// Info). بتتستخدم عشان نفرّق بين "الداتا الخام اتعمل لها fetch تاني" (بيحصل
+// في كل مرة يفتح فيها اليوزر الصفحة) و"الداتا اتغيرت فعلاً" — عشان منعملش
+// reset لعلم sellthroughPrepared ونرجع نعرض Loading Data من غير أي تغيير
+// حقيقي وصل من الشيت.
+// -------------------------------------------------------------------------
+function computeSellthroughSourceFingerprint() {
+  const inbound = state.inboundRows || [];
+  const begInv = state.metabaseBeginningInventory || [];
+  const need = state.metabaseSellthroughNeeded || [];
+  const prodInfo = state.metabaseProductsInfo || [];
+
+  let sumRcvQty = 0, maxRcvTs = 0;
+  inbound.forEach(r => { sumRcvQty += r.rcvQty || 0; if (r.rcvTs > maxRcvTs) maxRcvTs = r.rcvTs; });
+
+  let sumBegQty = 0;
+  begInv.forEach(r => { sumBegQty += r.QTY || 0; });
+
+  let sumCnf = 0, sumDlv = 0, sumRto = 0;
+  need.forEach(r => { sumCnf += r.CNF_QTY || 0; sumDlv += r.DLV_QTY || 0; sumRto += r.RTO_QTY || 0; });
+
+  return [
+    inbound.length, Math.round(sumRcvQty), maxRcvTs,
+    begInv.length, Math.round(sumBegQty),
+    need.length, Math.round(sumCnf), Math.round(sumDlv), Math.round(sumRto),
+    prodInfo.length
+  ].join("|");
 }
 
 function applySnapshotToState(snapshot) {
@@ -3934,9 +4846,18 @@ function applySnapshotToState(snapshot) {
   state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
   state.debundleMap = snapshot.debundleMap || [];
   state.singleSkuTargets = snapshot.singleSkuTargets || {};
-  // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — يبقى لازم لوحة الـ Sellthrough
-  // تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها، مش قبل كده.
-  state.sellthroughPrepared = false;
+  state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
+  // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — بس مش كل مرة اليوزر يفتح
+  // اللوحة أو يرجعلها لازم نعمل reset. نقارن بصمة مصادر الـ Sellthrough بس:
+  // لو نفسها زي قبل (يعني مفيش تحديث حقيقي وصل من الشيت)، نسيب
+  // sellthroughPrepared زي ما هي — لو كانت true يفضل الجدول زي ما هو من
+  // غير Loading Data تاني. لو فعلاً اتغيرت (أو أول مرة أصلاً)، نعمل reset
+  // عشان تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها.
+  const newStFingerprint = computeSellthroughSourceFingerprint();
+  if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== newStFingerprint) {
+    state.sellthroughPrepared = false;
+  }
+  state._stSourceFingerprint = newStFingerprint;
 }
 function renderCurrentState() {
   populateFilters(state.allParsedRows);
@@ -4098,12 +5019,14 @@ confirmDownloadBtn.addEventListener("click", () => {
         inv: state.pageInventory,
         analyst: analystState.page,
         sellthrough: state.sellthroughPage,
-        mpMatches: mpMatchesState.page
+        mpMatches: mpMatchesState.page,
+        cdz: state.cdzPage,
+        cm3ap: cm3apState.page
     };
     
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
-    state.sellthroughPage = 0; mpMatchesState.page = 0;
+    state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0;
     PAGE_SIZE = 999999; 
     
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
@@ -4113,6 +5036,8 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
     if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
     if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
+    if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
+    if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
     
     // Wait for DOM to render all rows
     setTimeout(() => {
@@ -4127,6 +5052,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         analystState.page = originalPage.analyst;
         state.sellthroughPage = originalPage.sellthrough;
         mpMatchesState.page = originalPage.mpMatches;
+        state.cdzPage = originalPage.cdz;
+        cm3apState.page = originalPage.cm3ap;
         
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -4135,18 +5062,32 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
         if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
         if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
+        if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
+        if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
     }, 150);
 });
 
+// أي خلية (td/th) فيها رقم/فلوس متحسب بـ fmtIntCell / fmtPctCell /
+// fmtMoneyCompactCell / fmtCm3MoneyCell بيبقى جواها span بيلف نفس النص المعروض ومعاه
+// data-raw = القيمة الخام زي ما هي (بدون EGP ولا K ولا M ولا % ولا فواصل
+// آلاف). هنا بندور على الـ span ده أول حاجة، ولو موجود بننزل الرقم الخام
+// زي ما هو (Number مش Text)، وغير كده (خلايا نصوص عادية زي الاسم/الـ ID)
+// بنرجع لنفس السلوك القديم (نص جوه quotes).
 function downloadTableAsCsv(tableEl, fileName) {
     let csv = [];
     const rows = tableEl.querySelectorAll("tr");
     for (let i = 0; i < rows.length; i++) {
         let row = [], cols = rows[i].querySelectorAll("td, th");
         for (let j = 0; j < cols.length; j++) {
-            let text = cols[j].innerText || cols[j].textContent;
-            text = text.replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ");
-            row.push('"' + text.trim() + '"');
+            const rawEl = cols[j].querySelector("[data-raw]");
+            if (rawEl) {
+                const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
+                row.push(Number.isFinite(rawVal) ? String(rawVal) : "0");
+            } else {
+                let text = cols[j].innerText || cols[j].textContent;
+                text = text.replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ");
+                row.push('"' + text.trim() + '"');
+            }
         }
         csv.push(row.join(","));
     }
