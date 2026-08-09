@@ -1241,10 +1241,16 @@ function computeCommercialActuals(mainRowsAll) {
 // شيت التارجت اليومي الخاص بسكشن Sales Plan-ACM (ACM_SALES_PLAN_GID / gid=892918900).
 // الأعمدة الجديدة (0-based): TAGER_ID, TAGER_NAME, PRODUCT_ID, PRODUCT_NAME,
 // CATEGORY, ACM, Adjust Daily Placed, Adjust Daily DLV, Adjust DLV GMV,
-// Rounded Daily Confirmed. الفرق عن الشكل القديم: بقى فيه أربع تارجتس يوميين
-// مستقلين (Placed / Delivered Pieces / Delivered GMV / Confirmed Pieces) بدل
-// تارجت واحد بس، وبقى فيه CATEGORY و ACM جوه الشيت نفسه (مش لازم نجيبهم من
-// شيت تاني) — ده اللي بيحدد "مين بتاع الـ SKU ده" (عمود ACM) دلوقتي.
+// Rounded Daily Confirmed.
+//
+// "Adjust Daily Placed"، "Adjust Daily DLV"، و"Rounded Daily Confirmed"
+// الثلاثة دول تارجت يومي فعلاً زي ما اسمهم بيقول، بياخدوا زي ما هم من غير
+// أي تحويل. الوحيد المختلف هو "Adjust DLV GMV": القيمة الموجودة في الشيت
+// فعليًا هي **إجمالي الشهر كله**، مش يومي. فلو استخدمناها زي ما هي هيبوظ
+// حساب الـ MTD (هيبقى أكبر من المفروض بمقدار عدد أيام الشهر). فبنسيبها
+// هنا زي ما هي (Monthly) وبنحولها لتارجت يومي في prepareMpSalesPlanData
+// (بالقسمة على عدد أيام الشهر) قبل ما نحسب منها MTD Target — بنفس منطق
+// Commercial Plan بالظبط.
 function parseAcmSalesPlanSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const plan = [];
@@ -1264,10 +1270,10 @@ function parseAcmSalesPlanSheet(payload) {
       productName: cellText(c[3]),
       category: cellText(c[4]) || "Uncategorized",
       acm: cellText(c[5]) || "Unassigned",
-      dailyPlacedTarget: cellNumber(c[6]),
-      dailyDlvTarget: cellNumber(c[7]),
-      dailyGmvTarget: cellNumber(c[8]),
-      dailyConfirmedTarget: cellNumber(c[9])
+      dailyPlacedTarget: cellNumber(c[6]),      // Adjust Daily Placed — يومي فعلاً
+      dailyDlvTarget: cellNumber(c[7]),          // Adjust Daily DLV — يومي فعلاً
+      gmvMonthlyTarget: cellNumber(c[8]),        // Adjust DLV GMV — إجمالي الشهر كله
+      dailyConfirmedTarget: cellNumber(c[9])     // Rounded Daily Confirmed — يومي فعلاً
     });
   }
   return plan;
@@ -2620,10 +2626,15 @@ function prepareMpSalesPlanData() {
             }
         });
 
+        // Adjust DLV GMV إجمالي الشهر كله في الشيت، فبنحوله لتارجت يومي
+        // (÷ عدد أيام الشهر) قبل ما نحسبه — بالظبط زي Commercial Plan.
+        // Confirmed يومي فعلاً، بياخد زي ما هو من غير أي تحويل.
+        const gmvDailyTarget = plan.gmvMonthlyTarget > 0 ? (plan.gmvMonthlyTarget / currentMonthDays) : 0;
+
         const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays);
         const confirmedM = mpSpBuildMetric(plan.dailyConfirmedTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
         const deliveredM = mpSpBuildMetric(plan.dailyDlvTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const gmvM = mpSpBuildMetric(plan.dailyGmvTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
+        const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
 
         // Confirmed Pieces هو المقياس الأساسي اللي بيحدد "الحالة العامة" للصف
         // وكروت الملخص فوق (زي ما كان قبل كده، ده أساس عمود "Rounded Daily Confirmed").
