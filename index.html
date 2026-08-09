@@ -165,7 +165,13 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Pipeline Velocity</h2>
-                  <p>Confirmed (bars) vs Placed (line) per day tracks daily performance</p>
+                  <p id="pipelineChartSubtitle">Confirmed (bars) vs Placed (line) per day tracks daily performance</p>
+                </div>
+                <div class="table-controls">
+                  <div class="segmented" id="pipelineMetricToggle">
+                    <button type="button" class="segmented-btn active" data-metric="orders">Orders</button>
+                    <button type="button" class="segmented-btn" data-metric="pieces">Pieces</button>
+                  </div>
                 </div>
               </div>
               <div class="chart-container">
@@ -615,7 +621,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Commercial Plan</h2>
-                  <p>Single SKU demand (bundle-weighted, live from Main) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
+                  <p>SKU demand (Bundle) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchCdzInput" type="search" placeholder="Search Single ID, Name or Category..." />
@@ -1016,7 +1022,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>ACM Sales Plan Tracking</h2>
-                  <p>Placed / Confirmed / Delivered / GMV — Target MTD, Run Rate (Projected Close) &amp; Achievement% per SKU, with Owner (ACM)</p>
+                  <p>Placed / Confirmed / Delivered / GMV — Target MTD, Run Rate &amp; Achievement% Per SKU, with Owner (ACM)</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchMpSalesPlanInput" type="search" placeholder="Search Product, Merchant, Category or ACM..." />
@@ -1274,7 +1280,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Availability Locking — by Category</h2>
-                  <p>Single SKU demand (bundle-weighted, live from Main) vs current stock locks, Placed Yesterday</p>
+                  <p>Single SKU demand (Bundle) vs current stock locks, Placed Yesterday</p>
                 </div>
               </div>
               <div class="table-responsive">

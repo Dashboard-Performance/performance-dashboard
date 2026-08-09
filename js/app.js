@@ -185,6 +185,8 @@ const availabilityLockingState = {
   data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0
 };
 let pipelineChartInst = null;
+let pipelineChartMetric = "orders"; // "orders" | "pieces" — Pipeline Velocity toggle
+let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
 let categoryChartInst = null;
 const $ = (id) => document.getElementById(id);
 let jsonpCounter = 0;
@@ -1590,9 +1592,9 @@ function updateDashboard(rows) {
   if($("placedOrdersVal")) $("placedOrdersVal").textContent = fmtInt.format(metrics.placedOrders);
   if($("confirmedOrdersVal")) $("confirmedOrdersVal").textContent = fmtInt.format(metrics.confirmedOrders);
   if($("deliveredGmvVal")) $("deliveredGmvVal").textContent = fmtMoneyCompact(metrics.deliveredGmv);
-  if($("placedOrdersRunRate")) $("placedOrdersRunRate").textContent = `Run Rate: will close ~${fmtInt.format(Math.round(metrics.placedRunRate))} by EOM`;
-  if($("confirmedOrdersRunRate")) $("confirmedOrdersRunRate").textContent = `Run Rate: will close ~${fmtInt.format(Math.round(metrics.confirmedRunRate))} by EOM`;
-  if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: will close ~${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
+  if($("placedOrdersRunRate")) $("placedOrdersRunRate").textContent = `Run Rate: ${fmtInt.format(Math.round(metrics.placedRunRate))} by EOM`;
+  if($("confirmedOrdersRunRate")) $("confirmedOrdersRunRate").textContent = `Run Rate: ${fmtInt.format(Math.round(metrics.confirmedRunRate))} by EOM`;
+  if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: ${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
   if($("confirmedGmvVal")) $("confirmedGmvVal").textContent = fmtMoneyCompact(metrics.confirmedGmv);
   if($("crVal")) $("crVal").textContent = fmtPct(metrics.cr);
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
@@ -2000,13 +2002,39 @@ function renderPaginatedSegTable() {
   document.querySelectorAll("#segTable thead th").forEach((th) => { if(th.dataset.skey) th.classList.toggle("sorted", th.dataset.skey === state.sortKeySeg); });
 }
 
+let pipelineControlsWired = false;
+function pipelineWireControlsOnce() {
+  if (pipelineControlsWired) return; pipelineControlsWired = true;
+  document.querySelectorAll("#pipelineMetricToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.classList.contains("active")) return;
+      document.querySelectorAll("#pipelineMetricToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      pipelineChartMetric = btn.dataset.metric;
+      renderPipelineChart(pipelineChartLastRows);
+    });
+  });
+}
+
+// Pipeline Velocity: بيدعم عرض المقياس بالـ Orders أو بالـ Pieces (Toggle
+// فوق الشارت)، من غير ما يحتاج يطلب بيانات جديدة — نفس الـ rows المفلترة
+// اللي بتتبعت لباقي كروت الأوفرفيو، وبس بيغيّر أي عمود يقرأ منه.
 function renderPipelineChart(rows) {
+  pipelineWireControlsOnce();
+  pipelineChartLastRows = rows || [];
   const pipelineCanvas = document.getElementById('pipelineChart'); if(!pipelineCanvas) return; const ctx = pipelineCanvas.getContext('2d');
+  const isPieces = pipelineChartMetric === "pieces";
+  const placedField = isPieces ? "placedPieces" : "placedOrders";
+  const confirmedField = isPieces ? "confirmedPieces" : "confirmedOrders";
+  const placedLabel = isPieces ? "Placed Pieces" : "Placed";
+  const confirmedLabel = isPieces ? "Confirmed Pieces" : "Confirmed";
+  if ($("pipelineChartSubtitle")) $("pipelineChartSubtitle").textContent = `${confirmedLabel} (bars) vs ${placedLabel} (line) per day tracks daily performance`;
+
   const dailyData = {};
   rows.forEach(r => {
     if(!r.date) return;
     if(!dailyData[r.date]) { dailyData[r.date] = { confirmed: 0, placed: 0, ts: r.timestamp }; }
-    dailyData[r.date].confirmed += r.confirmedOrders; dailyData[r.date].placed += r.placedOrders;
+    dailyData[r.date].confirmed += r[confirmedField] || 0; dailyData[r.date].placed += r[placedField] || 0;
   });
   const sortedDates = Object.keys(dailyData).sort((a, b) => dailyData[a].ts - dailyData[b].ts);
   const labels = sortedDates.map(d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
@@ -2015,7 +2043,7 @@ function renderPipelineChart(rows) {
   Chart.defaults.color = '#94a3b8'; Chart.defaults.font.family = 'Inter';
   pipelineChartInst = new Chart(ctx, {
     type: 'bar',
-    data: { labels: labels, datasets: [ { type: 'line', label: 'Placed', data: placedValues, borderColor: '#475569', borderWidth: 2, pointBackgroundColor: '#0f172a', pointBorderColor: '#475569', pointRadius: 2, pointHoverRadius: 5, fill: false, tension: 0.4, order: 1 }, { type: 'bar', label: 'Confirmed', data: confirmedValues, backgroundColor: '#3b82f6', borderRadius: 4, order: 2 } ] },
+    data: { labels: labels, datasets: [ { type: 'line', label: placedLabel, data: placedValues, borderColor: '#475569', borderWidth: 2, pointBackgroundColor: '#0f172a', pointBorderColor: '#475569', pointRadius: 2, pointHoverRadius: 5, fill: false, tension: 0.4, order: 1 }, { type: 'bar', label: confirmedLabel, data: confirmedValues, backgroundColor: '#3b82f6', borderRadius: 4, order: 2 } ] },
     options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { backgroundColor: '#1e293b', titleColor: '#f8fafc', bodyColor: '#cbd5e1', borderColor: '#334155', borderWidth: 1, padding: 10 } }, scales: { x: { grid: { display: false, drawBorder: false } }, y: { beginAtZero: true, grid: { color: '#1e293b', borderDash: [4, 4], drawBorder: false }, ticks: { callback: (v) => v >= 1000 ? (v/1000)+'k' : v } } } }
   });
 }
