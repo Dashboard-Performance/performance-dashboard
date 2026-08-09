@@ -37,7 +37,7 @@
           </a>
           <div class="nav-submenu hidden" id="commercialSubmenu">
             <a class="nav-item-sub" id="navTargetsCommercial">Targets Commercial</a>
-            <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Debundlized</a>
+            <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
           </div>
         </div>
@@ -50,6 +50,8 @@
             <a class="nav-item-sub" id="navInventory">Inventory</a>
             <a class="nav-item-sub" id="navCm3Target">CM3 Target</a>
             <a class="nav-item-sub" id="navCm3Analyst">CM3 Analyst</a>
+            <a class="nav-item-sub" id="navPoorMatches">Poor Matches</a>
+            <a class="nav-item-sub" id="navAvailabilityLocking">Availability Locking</a>
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
           </div>
         </div>
@@ -96,11 +98,13 @@
             <div class="metric-card hover-glow">
               <div class="metric-title">Total Placed Orders <span class="icon-cart"></span></div>
               <div class="metric-value" id="placedOrdersVal">0</div>
+              <div class="metric-sub text-purple" id="placedOrdersRunRate">Run Rate: —</div>
               <div class="metric-sub text-dim">Based on filter</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Confirmed Orders <span class="icon-cart"></span></div>
               <div class="metric-value" id="confirmedOrdersVal">0</div>
+              <div class="metric-sub text-purple" id="confirmedOrdersRunRate">Run Rate: —</div>
               <div class="metric-sub text-red">Based on filter</div>
             </div>
             <div class="metric-card hover-glow highlight-card">
@@ -110,6 +114,8 @@
             <div class="metric-card hover-glow">
               <div class="metric-title">Delivered GMV <span class="icon-dollar text-green"></span></div>
               <div class="metric-value text-green" id="deliveredGmvVal">EGP 0</div>
+              <div class="metric-sub text-purple" id="deliveredGmvRunRate">Run Rate: —</div>
+              <div class="metric-sub text-dim">Based on filter</div>
             </div>
           </div>
           <div class="metrics-grid">
@@ -518,6 +524,7 @@
               <div class="segmented" id="tcCategoryToggle">
                 <button type="button" class="segmented-btn" data-cat="consumables">Consumables</button>
                 <button type="button" class="segmented-btn" data-cat="electronics">Electronics</button>
+                <button type="button" class="segmented-btn" data-cat="fashion">Fashion</button>
                 <button type="button" class="segmented-btn" data-cat="home">Home</button>
                 <button type="button" class="segmented-btn" data-cat="leisure">Leisure</button>
                 <button type="button" class="segmented-btn active" data-cat="grand total">Grand Total</button>
@@ -539,10 +546,10 @@
               <div class="metric-value" id="tcDrVal">0%</div>
               <div class="progress-bar"><div id="tcDrBar" class="progress-fill blue" style="width:0%"></div></div>
             </div>
-            <div class="metric-card hover-glow" id="tcNdrCard">
-              <div class="metric-title">NDR % <span class="text-dim" id="tcNdrTarget">Target 0%</span></div>
-              <div class="metric-value" id="tcNdrVal">0%</div>
-              <div class="progress-bar"><div id="tcNdrBar" class="progress-fill blue" style="width:0%"></div></div>
+            <div class="metric-card hover-glow" id="tcPpmPctCard">
+              <div class="metric-title text-purple">PPM % <span class="text-dim" id="tcPpmPctTarget">Target 0%</span></div>
+              <div class="metric-value" id="tcPpmPctVal">0%</div>
+              <div class="progress-bar"><div id="tcPpmPctBar" class="progress-fill purple" style="width:0%"></div></div>
             </div>
             <div class="metric-card hover-glow highlight-card" id="tcCm3PctCard">
               <div class="metric-title text-orange">CM3 % <span class="text-dim" id="tcCm3PctTarget">Target 0%</span></div>
@@ -583,7 +590,7 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title">Total Single SKUs <span class="icon-box"></span></div>
                 <div class="metric-value" id="cdzTotalSkus">0</div>
-                <div class="metric-sub text-dim">Debundlized demand (single + bundles)</div>
+                <div class="metric-sub text-dim">Plan demand (single + bundles)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">In Plan <span class="icon-check"></span></div>
@@ -607,8 +614,8 @@
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
-                  <h2>Commercial Debundlized</h2>
-                  <p>Single SKU demand, debundlized from bundle SKUs (Quantity-Weighted) vs Target (Confirmed Pieces)</p>
+                  <h2>Commercial Plan</h2>
+                  <p>Single SKU demand (bundle-weighted, live from Main) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchCdzInput" type="search" placeholder="Search Single ID, Name or Category..." />
@@ -618,28 +625,41 @@
                 <table class="data-table" id="cdzTable">
                   <thead>
                     <tr>
-                      <th onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Single_ID</th>
-                      <th onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Single_Name</th>
-                      <th onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Click to sort">Category</th>
-                      <th onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Click to sort">Stock</th>
-                      <th onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Click to sort">DOH</th>
-                      <th onclick="sortCdz('mtdTarget')" class="num text-orange" style="cursor:pointer;">Target MTD</th>
-                      <th onclick="sortCdz('dailyTarget')" class="num text-dim" style="cursor:pointer;">Daily Target</th>
-                      <th onclick="sortCdz('mtdActual')" class="num text-blue" style="cursor:pointer;">MTD Actual</th>
-                      <th onclick="sortCdz('mtdAchPct')" class="num text-purple" style="cursor:pointer;">MTD ACH%</th>
-                      <th onclick="sortCdz('runRate')" class="num text-green" style="cursor:pointer;" title="توقع القفل آخر الشهر بناءً على المعدل الحالي">RR Confirmed</th>
-                      <th onclick="sortCdz('totalPlaced')" class="num" style="cursor:pointer;">Total Placed Pieces</th>
-                      <th onclick="sortCdz('totalConfirmed')" class="num" style="cursor:pointer;">Total Confirmed</th>
-                      <th onclick="sortCdz('totalDelivered')" class="num" style="cursor:pointer;">Total Delivered</th>
-                      <th onclick="sortCdz('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortCdz('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortCdz('deliveredGmv')" class="num text-green" style="cursor:pointer;">Total Delivered GMV</th>
-                      <th onclick="sortCdz('cm3')" class="num" style="cursor:pointer;">Total CM3</th>
-                      <th onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Piece</th>
-                      <th onclick="sortCdz('ppm')" class="num" style="cursor:pointer;">Total PPM</th>
-                      <th onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
-                      <th onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                      <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Single_ID</th>
+                      <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Single_Name</th>
+                      <th rowspan="2" onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Click to sort">Category</th>
+                      <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Click to sort">Stock</th>
+                      <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Click to sort">DOH</th>
+                      <th colspan="4" class="center">Placed Pieces</th>
+                      <th colspan="4" class="center">Confirmed Pieces</th>
+                      <th colspan="4" class="center">Delivered Pieces</th>
+                      <th colspan="4" class="center">Delivered GMV</th>
+                      <th rowspan="2" onclick="sortCdz('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th rowspan="2" onclick="sortCdz('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th rowspan="2" onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th rowspan="2" onclick="sortCdz('cm3')" class="num" style="cursor:pointer;">Total CM3</th>
+                      <th rowspan="2" onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Piece</th>
+                      <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;">Total PPM</th>
+                      <th rowspan="2" onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
+                      <th rowspan="2" onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                    </tr>
+                    <tr>
+                      <th onclick="sortCdz('placedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortCdz('placedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortCdz('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortCdz('placedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortCdz('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortCdz('confirmedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortCdz('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortCdz('confirmedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortCdz('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortCdz('deliveredMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortCdz('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortCdz('deliveredAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortCdz('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortCdz('gmvMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortCdz('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortCdz('gmvAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
                     </tr>
                   </thead>
                   <tbody id="cdzTableBody"></tbody>
@@ -656,7 +676,7 @@
             </div>
           </section>
         </div>
-        <!-- CM3 ANALYST / PRODUCTS SECTION (under Commercial Debundlized) -->
+        <!-- CM3 ANALYST / PRODUCTS SECTION (under Commercial Plan) -->
         <div id="viewCm3AnalystProducts" class="view-section hidden">
           <section class="cm3-toolbar hover-glow">
             <div class="cm3-toolbar-group">
@@ -996,34 +1016,58 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>ACM Sales Plan Tracking</h2>
-                  <p>Target MTD, Run Rate &amp; Week-over-Week performance based on Confirmed Pieces</p>
+                  <p>Placed / Confirmed / Delivered / GMV — Target MTD, Run Rate (Projected Close) &amp; Achievement% per SKU, with Owner (ACM)</p>
                 </div>
                 <div class="table-controls">
-                  <input id="searchMpSalesPlanInput" type="search" placeholder="Search Merchant or SKU..." />
+                  <input id="searchMpSalesPlanInput" type="search" placeholder="Search Product, Merchant, Category or ACM..." />
                 </div>
               </div>
               <div class="table-responsive">
                 <table class="data-table" id="mpSalesPlanTable">
                   <thead>
                     <tr>
-                      <th onclick="sortMpSalesPlan('singleId')" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortMpSalesPlan('singleName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">SKU NAME</th>
-                      <th onclick="sortMpSalesPlan('tagerId')" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortMpSalesPlan('fullName')" style="cursor:pointer;">ACM</th>
-                      <th onclick="sortMpSalesPlan('dailyTarget')" class="num text-dim" style="cursor:pointer;">Daily Target</th>
-                      <th onclick="sortMpSalesPlan('mtdTarget')" class="num text-orange" style="cursor:pointer;">Target MTD</th>
-                      <th onclick="sortMpSalesPlan('mtdActual')" class="num text-blue" style="cursor:pointer;">Actual Confirmed</th>
-                      <th onclick="sortMpSalesPlan('deliveredGmv')" class="num text-green" style="cursor:pointer;">Delivered GMV</th>
-                      <th onclick="sortMpSalesPlan('mtdAchievedPct')" class="num text-purple" style="cursor:pointer;">% of MTD</th>
-                      <th onclick="sortMpSalesPlan('gap')" class="num text-red" style="cursor:pointer;">MTD Gap</th>
-                      <th onclick="sortMpSalesPlan('runRate')" class="num" style="cursor:pointer;">Run Rate</th>
-                      <th onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;">WoW Status</th>
-                      <th onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;">Final Status</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('productId')" style="cursor:pointer;">Product ID</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('productName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product Name</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('tagerId')" style="cursor:pointer;">Merchant ID</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;">Merchant Name</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('category')" style="cursor:pointer;">Category</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('acm')" style="cursor:pointer;">ACM (Owner)</th>
+                      <th colspan="4" class="center">Placed Pieces</th>
+                      <th colspan="4" class="center">Confirmed Pieces</th>
+                      <th colspan="4" class="center">Delivered Pieces</th>
+                      <th colspan="4" class="center">Delivered GMV</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;">WoW (Confirmed)</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;">Status</th>
+                    </tr>
+                    <tr>
+                      <th onclick="sortMpSalesPlan('placedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('placedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortMpSalesPlan('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('placedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortMpSalesPlan('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('confirmedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortMpSalesPlan('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('confirmedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortMpSalesPlan('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('deliveredMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortMpSalesPlan('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('deliveredAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortMpSalesPlan('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('gmvMtdActual')" class="num" style="cursor:pointer;">Actual</th>
+                      <th onclick="sortMpSalesPlan('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('gmvAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
                     </tr>
                   </thead>
                   <tbody id="mpSalesPlanTableBody"></tbody>
                 </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMpSalesPlan">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPageMpSalesPlan" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMpSalesPlan">Page 1 of 1</span>
+                  <button id="nextPageMpSalesPlan" class="btn btn-outline small">Next</button>
+                </div>
               </div>
             </div>
           </section>
@@ -1091,6 +1135,210 @@
                   <button id="prevPageMpMatches" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorMpMatches">Page 1 of 1</span>
                   <button id="nextPageMpMatches" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- POOR MATCHES (under CM3 Analyst) -->
+        <div id="viewPoorMatches" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Placed <span class="icon-box"></span></div>
+                <div class="metric-value" id="pmTotalPlaced">0</div>
+                <div class="metric-sub text-dim">Matches &gt; 50 pcs, cutoff D-4, excl. Telesales</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Current Delivered <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="pmCurrentDelivered">0</div>
+                <div class="metric-sub text-dim">Current NDR: <span id="pmCurrentNdr">0%</span></div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Missed Deliveries <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="pmMissedDeliveries">0</div>
+                <div class="metric-sub text-dim">Extra pieces if Bad matches hit their sub-category benchmark</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Expected Delivered <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="pmExpectedDelivered">0</div>
+                <div class="metric-sub text-dim">Expected NDR: <span id="pmExpectedNdr">0%</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Good vs Bad Matches</h2>
+                  <p>Bad = match NDR% is more than 3pts below the rest of its Sub-Category (cutoff D-4) — <span id="pmCompareLabel" class="text-dim">vs last month</span></p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th rowspan="2">Status</th>
+                      <th rowspan="2" class="num">Count</th>
+                      <th colspan="3" class="center">Current Period</th>
+                      <th colspan="3" class="center">Same Days Last Month</th>
+                    </tr>
+                    <tr>
+                      <th class="num">Placed Pieces</th>
+                      <th class="num">Total NDR%</th>
+                      <th class="num">Contribution%</th>
+                      <th class="num text-dim">Placed Pieces</th>
+                      <th class="num text-dim">Total NDR%</th>
+                      <th class="num">Δ NDR</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pmStatusTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Poor Matches</h2>
+                  <p>Bad matches only, ranked by Impact Pieces — Merchant × SKU combos dragging NDR% down vs their Sub-Category</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchPoorMatchesInput" type="search" placeholder="Search Product, Merchant, Category or ACM..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="poorMatchesTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortPoorMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortPoorMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
+                      <th onclick="sortPoorMatches('sku')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortPoorMatches('productName')" class="truncate-cell" style="cursor:pointer;">Product Name</th>
+                      <th onclick="sortPoorMatches('category')" style="cursor:pointer;">Category</th>
+                      <th onclick="sortPoorMatches('subCategory')" style="cursor:pointer;">Sub-Category</th>
+                      <th onclick="sortPoorMatches('acm')" style="cursor:pointer; max-width:120px;">ACM</th>
+                      <th onclick="sortPoorMatches('placed')" class="num" style="cursor:pointer;">Placed Pieces</th>
+                      <th onclick="sortPoorMatches('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortPoorMatches('ndrBenchmark')" class="num" style="cursor:pointer;">Benchmark NDR%</th>
+                      <th onclick="sortPoorMatches('impactPieces')" class="num" style="cursor:pointer;">Impact Pieces</th>
+                      <th class="center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="poorMatchesTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountPoorMatches">0 Poor Matches</span>
+                <div class="pager">
+                  <button id="prevPagePoorMatches" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorPoorMatches">Page 1 of 1</span>
+                  <button id="nextPagePoorMatches" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- AVAILABILITY LOCKING (under Poor Matches) -->
+        <div id="viewAvailabilityLocking" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Locked SKUs <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="alTotalLockedSkus">0</div>
+                <div class="metric-sub text-dim">Single SKUs with an active lock</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Solo Locked SKUs <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="alTotalSoloLockedSkus">0</div>
+                <div class="metric-sub text-dim">Exclusively locked to one merchant</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Remaining Locked Pieces <span class="icon-box"></span></div>
+                <div class="metric-value" id="alRemainingLockedPieces">0</div>
+                <div class="metric-sub text-dim">Stock currently reserved, unused</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-orange">Stock at Risk % <span class="icon-trend"></span></div>
+                <div class="metric-value text-orange" id="alStockAtRiskPct">0%</div>
+                <div class="metric-sub text-dim">Remaining Locked Pieces ÷ Total Single SKU Stock</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Availability Locking — by Category</h2>
+                  <p>Single SKU demand (bundle-weighted, live from Main) vs current stock locks, Placed Yesterday</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="alCategoryTable">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th class="num">IN Stock SKUs</th>
+                      <th class="num">Total AVB SKUs</th>
+                      <th class="num text-orange">locked SKUs</th>
+                      <th class="num text-red">solo locked SKUs</th>
+                      <th class="num">Placed Yesterday</th>
+                      <th class="num text-orange">locked demand</th>
+                      <th class="num text-red">solo locked demand</th>
+                      <th class="num">Stock at Risk%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="alCategoryTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Active Locks</h2>
+                  <p>Every active lock (Merchant × SKU) — allocation, usage, remaining pieces &amp; expiry</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchAvailabilityLockingInput" type="search" placeholder="Search SKU, Merchant, Category or Locking Type..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="alLockTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortAvailabilityLocking('singleId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortAvailabilityLocking('singleName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
+                      <th onclick="sortAvailabilityLocking('category')" style="cursor:pointer;">Category</th>
+                      <th onclick="sortAvailabilityLocking('tagerId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortAvailabilityLocking('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
+                      <th onclick="sortAvailabilityLocking('lockingType')" class="center" style="cursor:pointer;">Locking Type</th>
+                      <th onclick="sortAvailabilityLocking('allocatedQty')" class="num" style="cursor:pointer;">Allocated Qty</th>
+                      <th onclick="sortAvailabilityLocking('usedQty')" class="num" style="cursor:pointer;">Used Qty</th>
+                      <th onclick="sortAvailabilityLocking('remainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces</th>
+                      <th onclick="sortAvailabilityLocking('stock')" class="num" style="cursor:pointer;">Stock</th>
+                      <th onclick="sortAvailabilityLocking('placedYday')" class="num" style="cursor:pointer;" title="Total Placed Yesterday for this SKU, all merchants combined">Placed Yesterday</th>
+                      <th onclick="sortAvailabilityLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="How much THIS merchant placed on this SKU yesterday (single or via bundles, overall)">Placed Yesterday per Merchant</th>
+                      <th>Expiry Date</th>
+                      <th onclick="sortAvailabilityLocking('daysToExpiry')" class="num" style="cursor:pointer;">Days to Expiry</th>
+                      <th class="center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="alLockTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountAvailabilityLocking">0 Active Locks</span>
+                <div class="pager">
+                  <button id="prevPageAvailabilityLocking" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorAvailabilityLocking">Page 1 of 1</span>
+                  <button id="nextPageAvailabilityLocking" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>
@@ -1245,6 +1493,8 @@
                       <th data-stkey="firstBuy" class="center">First buy?</th>
                       <th data-stkey="stock" class="num text-dim font-bold">STOCK</th>
                       <th data-stkey="doh" class="num text-dim font-bold">DOH</th>
+                      <th data-stkey="websiteStatus" class="center">Availability</th>
+                      <th data-stkey="isLocked" class="center">Is_Locked</th>
                     </tr>
                   </thead>
                   <tbody id="sellthroughTableBody"></tbody>

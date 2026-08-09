@@ -181,6 +181,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .progress-fill.orange { background-color: var(--orange); box-shadow: 0 0 10px rgba(245,158,11,0.5); }
 .progress-fill.red { background-color: var(--red); box-shadow: 0 0 10px rgba(239,68,68,0.5); }
 .progress-fill.dim { background-color: var(--dim); }
+.progress-fill.purple { background-color: var(--purple); box-shadow: 0 0 10px rgba(139,92,246,0.5); }
 .cm3-toolbar { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; padding: 16px 20px; margin-bottom: 20px; }
 .cm3-toolbar-group { display: flex; align-items: center; gap: 10px; }
 .cm3-toolbar-label { font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
