@@ -1539,17 +1539,20 @@ const fmtMoneyCompact = (n) => {
 // -------------------------------------------------------------------------
 // نسخ "Cell" من نفس الفورمترز فوق: نفس الشكل المعروض بالظبط على الشاشة
 // (EGP / K / M / % / فواصل الآلاف) بدون أي تغيير بصري، لكن بتلف النص ده جوه
-// span عادي ومعاه data-raw = الرقم الحقيقي الخام زي ما هو. الداونلود
-// (downloadTableAsCsv) بيدور على data-raw ده ولو لقاه بينزل الرقم الخام زي
-// ما هو (number مش text، من غير EGP ولا K ولا فواصل) - غير كده بيرجع للنص
-// المعروض العادي زي ما كان.
+// span عادي ومعاه data-raw = الرقم الخام (من غير % ولا EGP، عشان الأعمدة
+// اللي مش نسبة تنزل رقم نضيف تقدر تعمل عليه عمليات حسابية في إكسيل)،
+// ومعاه كمان data-export لو الشكل المطلوب في الداونلود مختلف عن الرقم
+// الخام البسيط — زي النسب المئوية، اللي المفروض تنزل "49.0%" بعلامة الـ%
+// معاها في الداونلود برضو (مش رقم عشري خام من غير وحدة)، عشان محدش يلخبط
+// 49% بـ 49 كرقم عادي أو بـ 0.49 كسر.
 // -------------------------------------------------------------------------
-function wrapRawCell(raw, text) {
+function wrapRawCell(raw, text, exportOverride) {
   const safeRaw = Number.isFinite(raw) ? raw : 0;
-  return `<span class="raw-num" data-raw="${safeRaw}">${text}</span>`;
+  const exportAttr = exportOverride !== undefined ? ` data-export="${String(exportOverride).replace(/"/g, "&quot;")}"` : "";
+  return `<span class="raw-num" data-raw="${safeRaw}"${exportAttr}>${text}</span>`;
 }
 const fmtIntCell = (n) => wrapRawCell(n, fmtInt.format(n));
-const fmtPctCell = (n) => wrapRawCell(n, fmtPct(n));
+const fmtPctCell = (n) => wrapRawCell(n, fmtPct(n), fmtPct(n)); // الداونلود بينزل "49.0%" زي ما هي، مش رقم خام من غير علامة %
 const fmtMoneyCompactCell = (n) => wrapRawCell(n, fmtMoneyCompact(n));
 
 function setupTicker() {
@@ -5934,27 +5937,77 @@ confirmDownloadBtn.addEventListener("click", () => {
 // أي خلية (td/th) فيها رقم/فلوس متحسب بـ fmtIntCell / fmtPctCell /
 // fmtMoneyCompactCell / fmtCm3MoneyCell بيبقى جواها span بيلف نفس النص المعروض ومعاه
 // data-raw = القيمة الخام زي ما هي (بدون EGP ولا K ولا M ولا % ولا فواصل
-// آلاف). هنا بندور على الـ span ده أول حاجة، ولو موجود بننزل الرقم الخام
-// زي ما هو (Number مش Text)، وغير كده (خلايا نصوص عادية زي الاسم/الـ ID)
-// بنرجع لنفس السلوك القديم (نص جوه quotes).
+// آلاف)، ومعاها كمان data-export لو محتاجين شكل مخصوص في الداونلود مختلف
+// عن الرقم الخام البسيط — زي النسب المئوية اللي المفروض تنزل "49.0%"
+// بعلامة الـ% معاها، مش رقم عشري خام.
+//
+// أهم حاجة تانية هنا: كل جداولنا فيها thead ممكن يكون على صف واحد أو صفين
+// (زي Sales Plan-ACM: صف فيه "Placed Pieces" بـ colspan=4، وتحته صف فيه
+// MTD Target/Actual/Run Rate/Ach%). لو مسكناها زي أي صف تاني (صف عناوين =
+// عدد خلاياه الحقيقي، من غير مراعاة colspan/rowspan)، صف العناوين هيطلع
+// بعدد أعمدة أقل من صفوف البيانات -> كل الأعمدة بعد أول عمود مجمّع بتتزحلق
+// وتتلغبط. فبنبني Grid كاملة (زي إحداثيات) بنحط فيها كل خلية عنوان في كل
+// الأعمدة اللي بتغطيها (colspan) وكل الصفوف اللي بتغطيها (rowspan)، وبعدين
+// بندمج قيم كل عمود من كل صفوف العناوين في اسم واحد مفهوم
+// ("Placed Pieces - MTD Target") — عشان صف العناوين النهائي يطلع بنفس عدد
+// أعمدة صفوف البيانات بالظبط، ومحاذي صح.
 function downloadTableAsCsv(tableEl, fileName) {
-    let csv = [];
-    const rows = tableEl.querySelectorAll("tr");
-    for (let i = 0; i < rows.length; i++) {
-        let row = [], cols = rows[i].querySelectorAll("td, th");
-        for (let j = 0; j < cols.length; j++) {
-            const rawEl = cols[j].querySelector("[data-raw]");
-            if (rawEl) {
-                const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
-                row.push(Number.isFinite(rawVal) ? String(rawVal) : "0");
-            } else {
-                let text = cols[j].innerText || cols[j].textContent;
-                text = text.replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ");
-                row.push('"' + text.trim() + '"');
-            }
+    const csvEscape = (val) => '"' + String(val).replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ").trim() + '"';
+    const cellExportValue = (cell) => {
+        const rawEl = cell.querySelector("[data-raw]");
+        if (rawEl) {
+            const exportVal = rawEl.getAttribute("data-export");
+            if (exportVal !== null && exportVal !== "") return exportVal;
+            const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
+            return Number.isFinite(rawVal) ? String(rawVal) : "0";
         }
-        csv.push(row.join(","));
+        return cell.innerText || cell.textContent || "";
+    };
+
+    let csv = [];
+    const thead = tableEl.querySelector("thead");
+    const tbody = tableEl.querySelector("tbody");
+
+    if (thead) {
+        const headerRows = Array.from(thead.querySelectorAll("tr"));
+        const grid = headerRows.map(() => []);
+        headerRows.forEach((tr, rowIdx) => {
+            let colIdx = 0;
+            Array.from(tr.children).forEach(cell => {
+                while (grid[rowIdx][colIdx] !== undefined) colIdx++;
+                const text = (cell.innerText || cell.textContent || "").trim();
+                const colspan = parseInt(cell.getAttribute("colspan") || "1", 10) || 1;
+                const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10) || 1;
+                for (let r = 0; r < rowspan; r++) {
+                    if (!grid[rowIdx + r]) grid[rowIdx + r] = [];
+                    for (let c = 0; c < colspan; c++) { grid[rowIdx + r][colIdx + c] = text; }
+                }
+                colIdx += colspan;
+            });
+        });
+        const totalCols = Math.max(0, ...grid.map(r => r.length));
+        const flatHeaders = [];
+        for (let c = 0; c < totalCols; c++) {
+            const parts = [];
+            for (let r = 0; r < headerRows.length; r++) {
+                const v = grid[r] ? grid[r][c] : undefined;
+                if (v && parts[parts.length - 1] !== v) parts.push(v);
+            }
+            flatHeaders.push(parts.join(" - "));
+        }
+        csv.push(flatHeaders.map(csvEscape).join(","));
     }
+
+    // صفوف البيانات: من الـ tbody لو موجود (الحالة العادية في كل جداولنا)،
+    // وإلا (نادرًا، جدول من غير thead/tbody صريحين) بنرجع لكل الصفوف زي
+    // ما كانت الطريقة القديمة، عشان مفيش جدول يفضل من غير داونلود خالص.
+    const bodyRows = tbody ? Array.from(tbody.querySelectorAll("tr")) : (thead ? [] : Array.from(tableEl.querySelectorAll("tr")));
+    bodyRows.forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll("td, th"));
+        const row = cells.map(cellExportValue);
+        csv.push(row.map(csvEscape).join(","));
+    });
+
     const csvFile = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv.join("\n")], {type: "text/csv;charset=utf-8;"});
     const downloadLink = document.createElement("a");
     downloadLink.download = (fileName || "Export") + ".csv";
