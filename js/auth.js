@@ -38,6 +38,13 @@
 
     // localStorage key used to keep the user logged in
     STORAGE_KEY: "taagerDashboardSession",
+
+    // Only this account ever sees the "who's online" widget. Everyone else's
+    // client still sends heartbeats (so the count stays accurate), but the
+    // panel itself is never built for them, and the backend refuses to hand
+    // the list back to any other email regardless.
+    PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
+    HEARTBEAT_INTERVAL_MS: 30000,
   };
 
   /* ------------------------------------------------------------------ *
@@ -59,7 +66,10 @@
   } else {
     // Already logged in on this device — just wire up the logout control
     // once the rest of the dashboard has loaded.
-    onDomReady(() => injectUserBadge(existingSession));
+    onDomReady(() => {
+      injectUserBadge(existingSession);
+      startPresence(existingSession);
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -369,7 +379,10 @@
     if (gate) gate.textContent = "";
     const overlay = document.getElementById("authOverlay");
     if (overlay) overlay.remove();
-    onDomReady(() => injectUserBadge(user));
+    onDomReady(() => {
+      injectUserBadge(user);
+      startPresence(user);
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -399,6 +412,153 @@
     });
 
     footer.prepend(wrap);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  5) Presence — heartbeat for everyone, "who's online" widget for
+   *     PRESENCE_ADMIN_EMAIL only
+   * ------------------------------------------------------------------ */
+  function startPresence(user) {
+    sendHeartbeat(user);
+    setInterval(() => sendHeartbeat(user), CONFIG.HEARTBEAT_INTERVAL_MS);
+
+    if (String(user.email || "").trim().toLowerCase() === CONFIG.PRESENCE_ADMIN_EMAIL.toLowerCase()) {
+      injectPresenceStyles();
+      buildPresenceWidget(user);
+    }
+  }
+
+  function sendHeartbeat(user) {
+    callApi({ action: "heartbeat", email: user.email, name: user.name }).catch(() => {
+      /* silent — a missed heartbeat just means one skipped "online" tick */
+    });
+  }
+
+  function injectPresenceStyles() {
+    const css = `
+    .presence-widget{position:fixed;top:16px;right:22px;z-index:9500;font-family:"Inter",-apple-system,sans-serif;}
+    .presence-pill{display:flex;align-items:center;gap:7px;background:#18181b;border:1px solid #27272a;
+      border-radius:20px;padding:7px 14px 7px 10px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35);
+      transition:border-color .2s;font-family:inherit;}
+    .presence-pill:hover{border-color:#3f3f46;}
+    .presence-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;
+      box-shadow:0 0 0 0 rgba(34,197,94,0.55);animation:presencePulse 2s infinite;}
+    @keyframes presencePulse{
+      0%{box-shadow:0 0 0 0 rgba(34,197,94,0.55);}
+      70%{box-shadow:0 0 0 6px rgba(34,197,94,0);}
+      100%{box-shadow:0 0 0 0 rgba(34,197,94,0);}
+    }
+    .presence-count{font-size:12px;font-weight:700;color:#fafafa;}
+    .presence-label{font-size:11px;font-weight:600;color:#a1a1aa;letter-spacing:0.3px;}
+    .presence-panel{position:absolute;top:calc(100% + 8px);right:0;width:280px;max-height:340px;overflow-y:auto;
+      background:#18181b;border:1px solid #27272a;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      padding:8px;}
+    .presence-panel.hidden{display:none;}
+    .presence-panel-header{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 10px 8px;
+      border-bottom:1px solid #27272a;margin-bottom:6px;}
+    .presence-panel-title{font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.5px;}
+    .presence-panel-sub{font-size:10px;color:#52525b;font-family:'JetBrains Mono',monospace;}
+    .presence-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;}
+    .presence-row:hover{background:#09090b;}
+    .presence-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;
+      flex-shrink:0;text-transform:uppercase;}
+    .presence-row-info{flex:1;min-width:0;}
+    .presence-row-name{font-size:12px;font-weight:600;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-email{font-size:10px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-time{font-size:10px;color:#22c55e;font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+    .presence-empty{padding:16px 8px;text-align:center;font-size:11px;color:#52525b;}
+    `;
+    const styleEl = document.createElement("style");
+    styleEl.id = "presenceStyles";
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  function buildPresenceWidget(user) {
+    if (document.getElementById("presenceWidget")) return;
+
+    const widget = document.createElement("div");
+    widget.id = "presenceWidget";
+    widget.className = "presence-widget";
+    widget.innerHTML = `
+      <button type="button" class="presence-pill" id="presencePillBtn" title="Who's online">
+        <span class="presence-dot"></span>
+        <span class="presence-count" id="presenceCount">—</span>
+        <span class="presence-label">Online</span>
+      </button>
+      <div class="presence-panel hidden" id="presencePanel">
+        <div class="presence-panel-header">
+          <span class="presence-panel-title">Active Now</span>
+          <span class="presence-panel-sub" id="presenceUpdatedAt"></span>
+        </div>
+        <div class="presence-list" id="presenceList"></div>
+      </div>
+    `;
+    document.body.appendChild(widget);
+
+    const pillBtn = widget.querySelector("#presencePillBtn");
+    const panel = widget.querySelector("#presencePanel");
+
+    pillBtn.addEventListener("click", () => {
+      const willOpen = panel.classList.contains("hidden");
+      panel.classList.toggle("hidden");
+      if (willOpen) refreshPresence(user);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!widget.contains(e.target)) panel.classList.add("hidden");
+    });
+
+    refreshPresence(user);
+    setInterval(() => refreshPresence(user), CONFIG.HEARTBEAT_INTERVAL_MS);
+  }
+
+  function refreshPresence(user) {
+    callApi({ action: "get_online_users", requesterEmail: user.email })
+      .then((res) => {
+        if (!res || !res.success) return;
+        renderPresence(res.users || [], res.now || Date.now());
+      })
+      .catch(() => {
+        /* silent — widget just keeps showing the last known state */
+      });
+  }
+
+  function renderPresence(users, now) {
+    const countEl = document.getElementById("presenceCount");
+    const listEl = document.getElementById("presenceList");
+    const updatedEl = document.getElementById("presenceUpdatedAt");
+    if (!countEl || !listEl) return;
+
+    countEl.textContent = String(users.length);
+    updatedEl.textContent = "now";
+
+    if (!users.length) {
+      listEl.innerHTML = `<div class="presence-empty">No one else is online right now.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = users
+      .map((u) => {
+        const secondsAgo = Math.max(0, Math.round((now - u.lastSeen) / 1000));
+        return `
+        <div class="presence-row">
+          <div class="presence-avatar">${escapeHtml(getInitials(u.name))}</div>
+          <div class="presence-row-info">
+            <div class="presence-row-name">${escapeHtml(u.name)}</div>
+            <div class="presence-row-email">${escapeHtml(u.email)}</div>
+          </div>
+          <div class="presence-row-time">${formatSecondsAgo(secondsAgo)}</div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function formatSecondsAgo(seconds) {
+    if (seconds < 10) return "now";
+    if (seconds < 60) return seconds + "s";
+    return Math.round(seconds / 60) + "m";
   }
 
   function getInitials(name) {

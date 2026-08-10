@@ -31,6 +31,21 @@ var SPREADSHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 var USERS_SHEET_GID = 1839838273;
 var ALLOWED_EMAIL_DOMAIN = "taager.com";
 
+// ----------------------------------------------------------------------------
+// PRESENCE ("who's online") — only this email is allowed to read the list of
+// currently active users. Anyone else's request for the list is refused
+// server-side, even if they somehow call the endpoint directly.
+// ----------------------------------------------------------------------------
+var PRESENCE_ADMIN_EMAIL = "youssef.hanafy@taager.com";
+// A user counts as "online" if their last heartbeat was within this window.
+// The client sends a heartbeat every 30s, so 90s comfortably survives one
+// missed beat (e.g. a brief network hiccup) without flickering offline.
+var PRESENCE_ONLINE_WINDOW_MS = 90 * 1000;
+// Entries older than this are dropped from storage entirely on every write,
+// so the stored map never grows unbounded over time.
+var PRESENCE_STALE_MS = 15 * 60 * 1000;
+var PRESENCE_PROP_KEY = "presence_map_v1";
+
 // Drive folder that snapshot backups get written to as .json files.
 // Leave "" to auto-create/reuse a folder named BACKUP_FOLDER_NAME the first
 // time a backup comes in (its ID gets logged — you can paste it here after
@@ -54,7 +69,90 @@ function doPost(e) {
   if (action === "signup") return handleSignup(payload);
   if (action === "login") return handleLogin(payload);
   if (action === "backup_chunk") return handleBackupChunk(payload);
+  if (action === "heartbeat") return handleHeartbeat(payload);
+  if (action === "get_online_users") return handleGetOnlineUsers(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
+}
+
+/**
+ * ============================================================================
+ *  PRESENCE — lightweight "who's online" tracking
+ * ============================================================================
+ *  The client (js/auth.js) pings action=heartbeat every 30s while the
+ *  dashboard tab is open, identifying itself by email/name. Those pings are
+ *  kept in a single small JSON blob in PropertiesService (no sheet writes,
+ *  no quota pressure). Only PRESENCE_ADMIN_EMAIL can read the list back via
+ *  action=get_online_users — everyone else gets a generic refusal, so the
+ *  feature stays invisible/unusable to any other account even if they
+ *  inspect the network calls.
+ * ============================================================================
+ */
+function handleHeartbeat(payload) {
+  var email = String(payload.email || "").trim().toLowerCase();
+  var name = String(payload.name || "").trim();
+
+  if (!email || !isAllowedEmail(email)) {
+    return jsonResponse({ success: false, message: "Not authorized." });
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var map = getPresenceMap();
+    map[email] = { name: name || email, lastSeen: Date.now() };
+    savePresenceMap(pruneStalePresence(map));
+    return jsonResponse({ success: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleGetOnlineUsers(payload) {
+  var requesterEmail = String(payload.requesterEmail || "").trim().toLowerCase();
+
+  if (requesterEmail !== PRESENCE_ADMIN_EMAIL.toLowerCase()) {
+    // Deliberately vague — do not confirm/deny that this feature exists.
+    return jsonResponse({ success: false, message: "Not authorized." });
+  }
+
+  var map = pruneStalePresence(getPresenceMap());
+  var cutoff = Date.now() - PRESENCE_ONLINE_WINDOW_MS;
+  var online = [];
+
+  Object.keys(map).forEach(function (email) {
+    var entry = map[email];
+    if (entry.lastSeen >= cutoff) {
+      online.push({ email: email, name: entry.name, lastSeen: entry.lastSeen });
+    }
+  });
+
+  online.sort(function (a, b) { return b.lastSeen - a.lastSeen; });
+
+  return jsonResponse({ success: true, now: Date.now(), users: online });
+}
+
+function getPresenceMap() {
+  var raw = PropertiesService.getScriptProperties().getProperty(PRESENCE_PROP_KEY);
+  if (!raw) return {};
+  try {
+    var parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function savePresenceMap(map) {
+  PropertiesService.getScriptProperties().setProperty(PRESENCE_PROP_KEY, JSON.stringify(map));
+}
+
+function pruneStalePresence(map) {
+  var cutoff = Date.now() - PRESENCE_STALE_MS;
+  var cleaned = {};
+  Object.keys(map).forEach(function (email) {
+    if (map[email] && map[email].lastSeen >= cutoff) cleaned[email] = map[email];
+  });
+  return cleaned;
 }
 
 /**
