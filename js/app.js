@@ -184,6 +184,11 @@ const poorMatchesState = {
 const availabilityLockingState = {
   data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0
 };
+// Healthy Locking (تحت Availability Locking): نفس فكرة availabilityLockingState
+// بس على مستوى صحة كل قفل (Healthy/At Risk/Unhealthy) بدل مجرد Active/Expiring.
+const healthyLockingState = {
+  data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0, merchantPage: 0
+};
 let pipelineChartInst = null;
 let pipelineChartMetric = "orders"; // "orders" | "pieces" — Pipeline Velocity toggle
 let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
@@ -221,6 +226,7 @@ const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
 const navAvailabilityLocking = $("navAvailabilityLocking");
+const navHealthyLocking = $("navHealthyLocking");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navMpMatches = $("navMpMatches");
 const navAdminToggle = $("navAdminToggle");
@@ -267,6 +273,7 @@ function switchView(viewName) {
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
   if(navAvailabilityLocking) navAvailabilityLocking.classList.remove("active");
+  if(navHealthyLocking) navHealthyLocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
@@ -284,6 +291,7 @@ function switchView(viewName) {
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
   else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
+  else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
   else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); renderSegmentationPanel(); }
@@ -310,6 +318,7 @@ if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Tar
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
 if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () => switchView("availabilityLocking"));
+if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
@@ -481,6 +490,13 @@ const searchAvailabilityLockingInput = $("searchAvailabilityLockingInput");
 if (searchAvailabilityLockingInput) searchAvailabilityLockingInput.addEventListener("input", applyAvailabilityLockingSearchAndSort);
 if($("prevPageAvailabilityLocking")) $("prevPageAvailabilityLocking").addEventListener("click", () => { if (availabilityLockingState.page > 0) { availabilityLockingState.page -= 1; renderPaginatedAvailabilityLockingTable(); } });
 if($("nextPageAvailabilityLocking")) $("nextPageAvailabilityLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((availabilityLockingState.filtered || []).length / PAGE_SIZE)); if (availabilityLockingState.page < totalPages - 1) { availabilityLockingState.page += 1; renderPaginatedAvailabilityLockingTable(); } });
+
+const searchHealthyLockingInput = $("searchHealthyLockingInput");
+if (searchHealthyLockingInput) searchHealthyLockingInput.addEventListener("input", applyHealthyLockingSearchAndSort);
+if($("prevPageHealthyLocking")) $("prevPageHealthyLocking").addEventListener("click", () => { if (healthyLockingState.page > 0) { healthyLockingState.page -= 1; renderPaginatedHealthyLockingTable(); } });
+if($("nextPageHealthyLocking")) $("nextPageHealthyLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((healthyLockingState.filtered || []).length / PAGE_SIZE)); if (healthyLockingState.page < totalPages - 1) { healthyLockingState.page += 1; renderPaginatedHealthyLockingTable(); } });
+if($("prevPageHlMerchant")) $("prevPageHlMerchant").addEventListener("click", () => { if (healthyLockingState.merchantPage > 0) { healthyLockingState.merchantPage -= 1; renderHealthyLockingMerchantTable(); } });
+if($("nextPageHlMerchant")) $("nextPageHlMerchant").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.healthyLockingMerchantRows || []).length / PAGE_SIZE)); if (healthyLockingState.merchantPage < totalPages - 1) { healthyLockingState.merchantPage += 1; renderHealthyLockingMerchantTable(); } });
 
 if($("prevPageMpSalesPlan")) $("prevPageMpSalesPlan").addEventListener("click", () => { if (state.mpSalesPlanPage > 0) { state.mpSalesPlanPage -= 1; renderPaginatedMpSalesPlanTable(); } });
 if($("nextPageMpSalesPlan")) $("nextPageMpSalesPlan").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.mpSalesPlanFiltered || []).length / PAGE_SIZE)); if (state.mpSalesPlanPage < totalPages - 1) { state.mpSalesPlanPage += 1; renderPaginatedMpSalesPlanTable(); } });
@@ -1646,8 +1662,23 @@ function computeMetrics(rows) {
     if(r.sku && r.placedOrders > 0) skus.add(r.sku);
     if(r.merchantId && r.placedOrders > 0) merchants.add(r.merchantId);
   });
-  const cr = totalPlaced ? (totalConfirmed / totalPlaced) : 0;
-  const dr = totalConfirmed ? (totalDelivered / totalConfirmed) : 0;
+
+  // CR% / DR% / NDR% في الأوفرفيو: بتاخد كات أوف الـ 4 أيام (CM3_LAG_DAYS) —
+  // نفس الكات أوف المستخدم في أي سكشن تاني مصدره MAIN_GID (Commercial Plan،
+  // Performance-Matches...). الأوردرات اللي اتحطت في آخر 4 أيام لسه مالهاش
+  // وقت كافي تتأكد/تتسلم، فلو دخلناها في الحساب هتوهم إن الـ Rate واطي وهو
+  // مش كده فعلاً. باقي الأرقام (Placed/Confirmed Orders, GMV) فاضلة زي ما
+  // هي من غير أي لاج.
+  const cutoffTs = getCm3LagCutoffTimestamp(rows);
+  let crPlaced = 0, crConfirmed = 0, drConfirmed = 0, drDelivered = 0;
+  rows.forEach(r => {
+    if (isCm3RowEligible(r, cutoffTs)) {
+      crPlaced += r.placedOrders; crConfirmed += r.confirmedOrders;
+      drConfirmed += r.confirmedOrders; drDelivered += r.deliveredOrders;
+    }
+  });
+  const cr = crPlaced ? (crConfirmed / crPlaced) : 0;
+  const dr = drConfirmed ? (drDelivered / drConfirmed) : 0;
 
   // Run Rate: إسقاط "هيقفل الشهر كام" لو الأداء الحالي (لحد آخر تاريخ في
   // الداتا المفلترة) استمر لحد آخر يوم في نفس الشهر — نفس المنطق المستخدم
@@ -1671,9 +1702,13 @@ function computeMetrics(rows) {
 }
 
 function computeLeaderboard(rows) {
+  // بنفس كات أوف الـ4 أيام المستخدم في كروت CR/DR/NDR فوق في نفس الصفحة —
+  // عشان الـ Leaderboard يبقى متسق معاهم (كان قبل كده بيحسب من غير كات أوف خالص).
+  const cutoffTs = getCm3LagCutoffTimestamp(rows);
   const map = new Map();
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
+    if (!isCm3RowEligible(r, cutoffTs)) return;
     const entry = map.get(r.acmName) || { name: r.acmName, placed: 0, confirmed: 0, delivered: 0 };
     entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
     map.set(r.acmName, entry);
@@ -2950,6 +2985,12 @@ function computeCommercialDebundlized() {
     const mtdActual = confirmedM.mtdActual; const mtdAchPct = confirmedM.achievedPct;
     const runRate = Math.round(confirmedM.runRate);
 
+    // Status (آخر عمود في الجدول): بنفس الباكتس المستخدمة في Sales Plan-ACM
+    // بالظبط (No Achievement/Critical/Needs Improvement/Fair/Good/Excellent/
+    // Overachiever/Upside) — لو الـ Single SKU مش في البلان أصلاً (hasTarget=false)
+    // بيبقى "Not in Plan" بدل ما يتحط في باكت وهمي مالوش تارجت يتقاس عليه.
+    const finalStatus = hasTarget ? getMpSalesPlanFinalStatus(mtdAchPct) : { text: "Not in Plan", cls: "gray" };
+
     // Stock: من عمود G في شيت الديبندلايز (1409034448) — الاستوك الخاص بالـ SINGLE_ID.
     // DOH = Stock ÷ Avg Last 3 Days Confirmed (ديبندلايز، على مستوى الـ Single ككل).
     const stock = stockBySingle.has(singleId) ? stockBySingle.get(singleId) : (state.inventoryMap[singleId] ? state.inventoryMap[singleId].stock : 0);
@@ -2960,7 +3001,7 @@ function computeCommercialDebundlized() {
       singleId, singleName,
       category: (targetInfo && targetInfo.category) || (state.inventoryMap[singleId] ? state.inventoryMap[singleId].category : "") || "Uncategorized",
       stock: Math.round(stock || 0), doh,
-      hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate,
+      hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate, finalStatus,
       metrics: { placed: placedM, confirmed: confirmedM, delivered: deliveredM, gmv: gmvM },
       // فلات كوبيز لكل جروب عشان الترتيب (sortCdz) يقدر ياخد القيمة بـ row[key] مباشرة.
       placedMtdTarget: placedM.mtdTarget, placedMtdActual: placedM.mtdActual, placedRunRate: placedM.runRate, placedAchievedPct: placedM.achievedPct,
@@ -2987,11 +3028,29 @@ function prepareCommercialDebundlizedData() {
   const totalGmv = computed.overallDeliveredGmv;
   const totalCm3 = computed.overallCm3;
 
+  // بكتات Critical/Good/Excellent/Upside: بنفس منطق/حدود Sales Plan-ACM
+  // بالظبط (مبنية على Ach% بتاع Confirmed - المقياس الأساسي)، وبتاخد بس
+  // الـ Single SKUs اللي "In Plan" فعلاً (hasTarget=true) — غير كده مفيش
+  // تارجت أصلاً نقيس عليه الـ Achievement.
+  let countCritical = 0, countGood = 0, countExcellent = 0, countUpside = 0;
+  state.cdzDataPrepared.forEach(d => {
+    if (!d.hasTarget) return;
+    const pct = d.mtdAchPct;
+    if (pct < 50) countCritical++;
+    else if (pct < 85) countGood++;
+    else if (pct < 100) countExcellent++;
+    else countUpside++;
+  });
+
   if ($("cdzTotalSkus")) $("cdzTotalSkus").textContent = fmtInt.format(totalSkus);
   if ($("cdzInPlan")) $("cdzInPlan").textContent = fmtInt.format(inPlan);
   if ($("cdzAchieved")) $("cdzAchieved").textContent = fmtInt.format(achieved);
   if ($("cdzTotalGmv")) $("cdzTotalGmv").textContent = fmtMoneyCompact(totalGmv);
   if ($("cdzTotalCm3")) $("cdzTotalCm3").textContent = fmtMoneyCompact(totalCm3);
+  if ($("cdzCountCritical")) $("cdzCountCritical").textContent = fmtInt.format(countCritical);
+  if ($("cdzCountGood")) $("cdzCountGood").textContent = fmtInt.format(countGood);
+  if ($("cdzCountExcellent")) $("cdzCountExcellent").textContent = fmtInt.format(countExcellent);
+  if ($("cdzCountUpside")) $("cdzCountUpside").textContent = fmtInt.format(countUpside);
 
   cdzWireControlsOnce();
   applyCdzFilterAndSort();
@@ -3070,6 +3129,7 @@ function renderPaginatedCdzTable() {
       <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.ppm)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
       <td class="num">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="center"><span class="badge-outline ${m.finalStatus.cls}">${m.finalStatus.text}</span></td>
     `;
     frag.appendChild(tr);
   });
@@ -3829,6 +3889,17 @@ function prepareMpMatchesData() {
   const map = new Map();
   const productConfirmedTotals = new Map();
 
+  // مفاتيح المتاشات اللي ليها تارجت في الـ Sales Plan-ACM (Merchant + Product)،
+  // عشان بعدين نقدر نميز أي ماتش "برة البلان" (مفيهوش تارجت خالص).
+  const planKeys = new Set((state.acmSalesPlanData || []).map(p => p.tagerId + "||" + p.productId));
+
+  // Placed Pieces: من غير كات أوف خالص (الرقم الكامل زي ما هو، مفيش لاج على
+  // الـ Placed أصلاً). Confirmed/Delivered Pieces لسه بياخدوا كات أوف الـ 4
+  // أيام (زي الـ CM3 بالظبط) عشان يبقوا مؤكدين/متسلمين فعلاً.
+  let totalPlacedPcs = 0, totalConfirmedPcs = 0, totalDeliveredPcs = 0;
+  let outPlacedPcs = 0, outConfirmedPcs = 0, outDeliveredGmv = 0, inPlanDeliveredGmv = 0, grandDeliveredGmv = 0;
+  const outPlanKeysSeen = new Set();
+
   mainRows.forEach(r => {
     if (!r.sku || !r.merchantId) return;
     const key = r.merchantId + "||" + r.sku;
@@ -3844,11 +3915,23 @@ function prepareMpMatchesData() {
     e.placedGmv += r.placedGmv; e.deliveredGmv += r.deliveredGmv;
     e.crConfirmed += r.confirmedPieces; e.crPlaced += r.placedPieces;
     e.drDelivered += r.deliveredPieces; e.drConfirmed += r.confirmedPieces;
-    if (isCm3RowEligible(r, cm3Cutoff)) { e.cm3 += r.cm3; e.cm3Gmv += r.deliveredGmv; }
+    totalPlacedPcs += r.placedPieces;
+
+    // GMV in-plan/out-plan: بدون كات أوف (زي كارت Total Delivered GMV بالظبط
+    // — الـ GMV مالهاش لاج أصلاً، اللاج بس على الـ CM3).
+    grandDeliveredGmv += r.deliveredGmv;
+    if (planKeys.has(key)) inPlanDeliveredGmv += r.deliveredGmv;
+    else { outDeliveredGmv += r.deliveredGmv; outPlanKeysSeen.add(key); outPlacedPcs += r.placedPieces; }
+
+    if (isCm3RowEligible(r, cm3Cutoff)) {
+      e.cm3 += r.cm3; e.cm3Gmv += r.deliveredGmv;
+      totalConfirmedPcs += r.confirmedPieces; totalDeliveredPcs += r.deliveredPieces;
+      if (!planKeys.has(key)) outConfirmedPcs += r.confirmedPieces;
+    }
     productConfirmedTotals.set(r.sku, (productConfirmedTotals.get(r.sku) || 0) + r.confirmedPieces);
   });
 
-  let totalGmv = 0, totalCm3 = 0;
+  let totalGmv = 0, totalCm3 = 0, totalCm3Gmv = 0;
   mpMatchesState.data = Array.from(map.values()).map(e => {
     const crPct = e.crPlaced ? (e.crConfirmed / e.crPlaced) * 100 : 0;
     const drPct = e.drConfirmed ? (e.drDelivered / e.drConfirmed) * 100 : 0;
@@ -3858,13 +3941,38 @@ function prepareMpMatchesData() {
     const placedAsp = e.totalPlaced ? (e.placedGmv / e.totalPlaced) : 0;
     const cm3PerPiece = e.totalDelivered ? (e.cm3 / e.totalDelivered) : 0;
     const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
-    totalGmv += e.deliveredGmv; totalCm3 += e.cm3;
+    totalGmv += e.deliveredGmv; totalCm3 += e.cm3; totalCm3Gmv += e.cm3Gmv;
     return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, cm3PerPiece, cm3Pct };
   });
+
+  // CM3% الإجمالي: لازم ياخد نفس أساس الـ CM3 (كات أوف الـ4 أيام) في البسط
+  // والمقام مع بعض — يعني Total CM3 ÷ الـ Delivered GMV بتاعة نفس الفترة
+  // المؤهلة بس (e.cm3Gmv)، مش إجمالي الـ GMV الكامل من غير كات أوف. غير كده
+  // النسبة كانت هتطلع أقل من الحقيقي (فيه GMV آخر 4 أيام في المقام من غير
+  // CM3 مقابله في البسط).
+  const overallCm3Pct = totalCm3Gmv ? (totalCm3 / totalCm3Gmv) * 100 : 0;
 
   if($("mpMatchesTotal")) $("mpMatchesTotal").textContent = fmtInt.format(mpMatchesState.data.length);
   if($("mpMatchesTotalGmv")) $("mpMatchesTotalGmv").textContent = fmtMoneyCompact(totalGmv);
   if($("mpMatchesTotalCm3")) $("mpMatchesTotalCm3").textContent = fmtMoneyCompact(totalCm3);
+  if($("mpMatchesCm3Pct")) $("mpMatchesCm3Pct").textContent = fmtPct(overallCm3Pct);
+  if($("mpMatchesTotalPlacedPcs")) $("mpMatchesTotalPlacedPcs").textContent = fmtInt.format(totalPlacedPcs);
+  if($("mpMatchesTotalConfirmedPcs")) $("mpMatchesTotalConfirmedPcs").textContent = fmtInt.format(totalConfirmedPcs);
+  if($("mpMatchesTotalDeliveredPcs")) $("mpMatchesTotalDeliveredPcs").textContent = fmtInt.format(totalDeliveredPcs);
+  if($("mpMatchesInPlanGmv")) $("mpMatchesInPlanGmv").textContent = fmtMoneyCompact(inPlanDeliveredGmv);
+  if($("mpMatchesOutPlanGmv")) $("mpMatchesOutPlanGmv").textContent = fmtMoneyCompact(outDeliveredGmv);
+  if($("mpMatchesGrandGmv")) $("mpMatchesGrandGmv").textContent = fmtMoneyCompact(grandDeliveredGmv);
+
+  // "برة البلان" Coverage: نسبة الماتشات اللي مفيهاش تارجت في Sales Plan-ACM.
+  // Placed/GMV من غير كات أوف؛ Confirmed لسه بياخد كات أوف الـ 4 أيام زي فوق.
+  const outPlacedPct = totalPlacedPcs ? (outPlacedPcs / totalPlacedPcs) * 100 : 0;
+  const outConfirmedPct = totalConfirmedPcs ? (outConfirmedPcs / totalConfirmedPcs) * 100 : 0;
+  const outGmvPct = grandDeliveredGmv ? (outDeliveredGmv / grandDeliveredGmv) * 100 : 0;
+  if($("mpMatchesOutPlanCount")) $("mpMatchesOutPlanCount").textContent = fmtInt.format(outPlanKeysSeen.size);
+  if($("mpMatchesOutPlanTotalCount")) $("mpMatchesOutPlanTotalCount").textContent = fmtInt.format(mpMatchesState.data.length);
+  if($("mpMatchesOutPlanPlacedPct")) $("mpMatchesOutPlanPlacedPct").textContent = fmtPct(outPlacedPct);
+  if($("mpMatchesOutPlanConfirmedPct")) $("mpMatchesOutPlanConfirmedPct").textContent = fmtPct(outConfirmedPct);
+  if($("mpMatchesOutPlanGmvPct")) $("mpMatchesOutPlanGmvPct").textContent = fmtPct(outGmvPct);
 
   applyMpMatchesSearchAndSort();
 }
@@ -4876,6 +4984,7 @@ function computeAvailabilityLocking() {
   let latestTs = 0; mainRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
   const ydayStart = todayMs - 86400000; const ydayEnd = todayMs; // [إمبارح 00:00, النهاردة 00:00)
+  const d3Start = todayMs - (3 * 86400000); // آخر 3 أيام (Avg Last 3 Days Placed)
 
   // ديماند الأمس موزّع على مستوى Single SKU (× PRODUCT_QUANTITY)، بالظبط
   // زي توزيع القطع (Placed Pieces) في Commercial Plan.
@@ -4886,6 +4995,10 @@ function computeAvailabilityLocking() {
   // كل التجار مع بعض.
   const ydayDemandBySingle = new Map();
   const ydayDemandByMerchantSingle = new Map(); // "merchantId||singleId" -> pieces
+  // نفس الفكرة بس على مستوى آخر 3 أيام (تاجر × Single) — مستخدمة لحساب
+  // DOH بتاع الـ Remaining Pieces في كل قفل: كام يوم هتقضي القطع المتبقية
+  // لو التاجر ده استمر يطلب بنفس معدل آخر 3 أيام.
+  const d3DemandByMerchantSingle = new Map();
   mainRows.forEach(r => {
     if (!r.sku || r.timestamp < ydayStart || r.timestamp >= ydayEnd) return;
     const mappings = productMap.get(r.sku);
@@ -4898,6 +5011,16 @@ function computeAvailabilityLocking() {
         const key = r.merchantId + "||" + mapping.singleId;
         ydayDemandByMerchantSingle.set(key, (ydayDemandByMerchantSingle.get(key) || 0) + demand);
       }
+    });
+  });
+  mainRows.forEach(r => {
+    if (!r.sku || r.timestamp < d3Start || r.timestamp >= ydayEnd || !r.merchantId) return;
+    const mappings = productMap.get(r.sku);
+    if (!mappings || !mappings.length) return;
+    mappings.forEach(mapping => {
+      const qty = mapping.quantity || 1;
+      const key = r.merchantId + "||" + mapping.singleId;
+      d3DemandByMerchantSingle.set(key, (d3DemandByMerchantSingle.get(key) || 0) + r.placedPieces * qty);
     });
   });
 
@@ -4924,7 +5047,8 @@ function computeAvailabilityLocking() {
       // (سواء اشتراه هو Single لوحده أو جوه أي بندل بيحتوي عليه)، مش
       // إجمالي كل التجار مع بعض على نفس الـ SKU.
       const placedYdayMerchant = ydayDemandByMerchantSingle.get(l.tagerId + "||" + singleId) || 0;
-      return { ...l, daysToExpiry, statusLabel: daysToExpiry === null ? "Active" : (daysToExpiry <= 3 ? "Expiring Soon" : "Active"), placedYdayMerchant };
+      const avg3dPlacedMerchant = (d3DemandByMerchantSingle.get(l.tagerId + "||" + singleId) || 0) / 3;
+      return { ...l, daysToExpiry, statusLabel: daysToExpiry === null ? "Active" : (daysToExpiry <= 3 ? "Expiring Soon" : "Active"), placedYdayMerchant, avg3dPlacedMerchant };
     });
     const hasLock = activeLocks.length > 0;
     // Solo Lock = الـ SKU ده مقفول (Active) على تاجر واحد بس دلوقتي — يعني
@@ -5093,6 +5217,327 @@ function renderPaginatedAvailabilityLockingTable() {
   if ($("pageIndicatorAvailabilityLocking")) $("pageIndicatorAvailabilityLocking").textContent = `Page ${availabilityLockingState.page + 1} of ${totalPages}`;
   if ($("prevPageAvailabilityLocking")) $("prevPageAvailabilityLocking").disabled = availabilityLockingState.page === 0;
   if ($("nextPageAvailabilityLocking")) $("nextPageAvailabilityLocking").disabled = availabilityLockingState.page >= totalPages - 1;
+}
+
+// =========================================================================
+// HEALTHY LOCKING (تحت Availability Locking) — بتاخد نفس صفوف القفلات
+// النشطة (activeLocks) من computeAvailabilityLocking() وبتحكم على كل قفل:
+// "صحي" (Healthy) — بيتستخدم فعلاً وفيه ديماند حالي عليه، "في خطر" (At Risk)
+// — استخدام واطي أو قرب ينتهي، أو "مش صحي" (Unhealthy/Idle) — واقف من غير
+// أي استخدام ولا ديماند، يعني استوك محبوس من غير أي فايدة وممكن يتفك.
+//
+// منطق التصنيف (Utilization% = Used Qty ÷ Allocated Qty):
+//   - Unhealthy/Idle : Utilization% < 20  و  مفيش ديماند أمس من التاجر ده على
+//                       الـ SKU ده خالص (placedYdayMerchant = 0). قفل واقف
+//                       من غير أي حركة حقيقية.
+//   - At Risk        : باقي على انتهاء القفل 3 أيام أو أقل (وفيه استوك لسه
+//                       متبقي، يعني هيتحبس/يضيع لو محدش جدده)، أو Utilization%
+//                       بين 20% و50% (استخدام واطي لكن مش صفر خالص).
+//   - Healthy         : Utilization% ≥ 50% ومفيش خطر انتهاء قريب — القفل ده
+//                       شغال وبيتستخدم فعلاً.
+// =========================================================================
+function hlComputeLockHealth(l) {
+  const utilizationPct = l.allocatedQty > 0 ? (l.usedQty / l.allocatedQty) * 100 : 0;
+  const hasRecentDemand = (l.placedYdayMerchant || 0) > 0;
+  const expiringSoon = l.daysToExpiry !== null && l.daysToExpiry !== undefined && l.daysToExpiry <= 3;
+  if (utilizationPct < 20 && !hasRecentDemand) {
+    return { key: "unhealthy", text: "Unhealthy — Idle", cls: "red", utilizationPct };
+  }
+  if (expiringSoon && (l.remainingPieces || 0) > 0) {
+    return { key: "risk", text: "At Risk — Expiring Soon", cls: "orange", utilizationPct };
+  }
+  if (utilizationPct < 50) {
+    return { key: "risk", text: "At Risk — Low Usage", cls: "orange", utilizationPct };
+  }
+  return { key: "healthy", text: "Healthy", cls: "green", utilizationPct };
+}
+
+function hlEmptyGroup() {
+  return { activeLocks: 0, healthy: 0, risk: 0, unhealthy: 0, utilWeighted: 0, lockedPieces: 0, idlePieces: 0 };
+}
+function hlAddToGroup(g, l, health) {
+  g.activeLocks++;
+  if (health.key === "healthy") g.healthy++; else if (health.key === "risk") g.risk++; else g.unhealthy++;
+  g.utilWeighted += health.utilizationPct;
+  g.lockedPieces += (l.remainingPieces || 0);
+  if (health.key === "unhealthy") g.idlePieces += (l.remainingPieces || 0);
+}
+function hlFinalizeGroup(g) {
+  return { ...g, avgUtilizationPct: g.activeLocks ? (g.utilWeighted / g.activeLocks) : 0 };
+}
+
+// بيحسب Delivered GMV لكل (Merchant × Single SKU) — بنفس منطق توزيع البندل
+// المستخدم في Commercial Plan بالظبط (وزن الـ COGS بتاع كل Single داخل
+// البندل × قيمة الأوردر)، من غير أي كات أوف (الـ GMV مالهاش لاج أصلاً).
+// CONTR% في Renew Candidates = نصيب الـ Match ده من إجمالي الـ Delivered GMV
+// كله — عشان نعرف مين أهم الـ SKUs اللي القفل بتاعها قرب يخلص.
+function hlBuildGmvContribution() {
+  const { productMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const rows = (state.allParsedRows || []).filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const gmvMap = new Map(); // "merchantId||singleId" -> gmv
+  let totalGmv = 0;
+  rows.forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    totalGmv += r.deliveredGmv;
+    const mappings = productMap.get(r.sku);
+    if (!mappings || !mappings.length) return;
+    mappings.forEach(mapping => {
+      const weight = mapping.cogsWeight || 0;
+      const key = r.merchantId + "||" + mapping.singleId;
+      gmvMap.set(key, (gmvMap.get(key) || 0) + r.deliveredGmv * weight);
+    });
+  });
+  return { gmvMap, totalGmv };
+}
+
+function prepareHealthyLockingData() {
+  const skuRows = computeAvailabilityLocking();
+  const { gmvMap, totalGmv } = hlBuildGmvContribution();
+
+  const matchRows = [];
+  const categoryMap = new Map();
+  const merchantMap = new Map();
+  let totalLocks = 0, healthyCount = 0, riskCount = 0, unhealthyCount = 0;
+  let utilSum = 0, idlePiecesTotal = 0, healthyPiecesTotal = 0;
+
+  skuRows.forEach(r => {
+    r.activeLocks.forEach(l => {
+      const health = hlComputeLockHealth(l);
+      totalLocks++;
+      utilSum += health.utilizationPct;
+      if (health.key === "healthy") { healthyCount++; healthyPiecesTotal += (l.remainingPieces || 0); }
+      else if (health.key === "risk") riskCount++;
+      else { unhealthyCount++; idlePiecesTotal += (l.remainingPieces || 0); }
+
+      const gmvShare = gmvMap.get(l.tagerId + "||" + r.singleId) || 0;
+      const contrGmvPct = totalGmv ? (gmvShare / totalGmv) * 100 : 0;
+      // DOH بتاع الـ Remaining Pieces: كام يوم هتقضي القطع المتبقية في القفل
+      // ده لو التاجر استمر يطلب بنفس معدل آخر 3 أيام (Avg Last 3 Days Placed).
+      // لو مفيش ديماند خالص آخر 3 أيام، الـ DOH بيبقى null (يعني مش قادرين
+      // نتوقع إمتى هيخلص من الإيقاع الحالي — مش إنه "مش هيخلص خالص").
+      const remainingDoh = l.avg3dPlacedMerchant > 0 ? (l.remainingPieces || 0) / l.avg3dPlacedMerchant : null;
+
+      matchRows.push({
+        singleId: r.singleId, singleName: r.singleName, category: r.category, stock: r.stock,
+        placedYday: r.placedYday, placedYdayMerchant: l.placedYdayMerchant, avg3dPlacedMerchant: l.avg3dPlacedMerchant, remainingDoh,
+        tagerId: l.tagerId, merchantName: l.merchantName, lockingType: l.lockingType,
+        allocatedQty: l.allocatedQty, usedQty: l.usedQty, remainingPieces: l.remainingPieces,
+        utilizationPct: health.utilizationPct, expiryText: l.expiryText, daysToExpiry: l.daysToExpiry,
+        healthKey: health.key, healthText: health.text, healthCls: health.cls,
+        deliveredGmv: gmvShare, contrGmvPct
+      });
+
+      const cat = r.category || "Uncategorized";
+      if (!categoryMap.has(cat)) categoryMap.set(cat, hlEmptyGroup());
+      hlAddToGroup(categoryMap.get(cat), l, health);
+
+      const mKey = l.tagerId || "Unassigned";
+      if (!merchantMap.has(mKey)) merchantMap.set(mKey, { ...hlEmptyGroup(), tagerId: l.tagerId, merchantName: l.merchantName });
+      hlAddToGroup(merchantMap.get(mKey), l, health);
+    });
+  });
+
+  healthyLockingState.data = matchRows;
+
+  const categoryRows = Array.from(categoryMap.entries()).map(([category, g]) => ({ category, ...hlFinalizeGroup(g) })).sort((a, b) => b.activeLocks - a.activeLocks);
+  const merchantRows = Array.from(merchantMap.values()).map(g => hlFinalizeGroup(g)).sort((a, b) => b.activeLocks - a.activeLocks);
+  state.healthyLockingCategoryRows = categoryRows;
+  state.healthyLockingMerchantRows = merchantRows;
+  healthyLockingState.merchantPage = 0;
+
+  const avgUtilizationPct = totalLocks ? (utilSum / totalLocks) : 0;
+  const healthScorePct = totalLocks ? (healthyCount / totalLocks) * 100 : 0;
+
+  if ($("hlTotalLocks")) $("hlTotalLocks").textContent = fmtInt.format(totalLocks);
+  if ($("hlHealthyLocks")) $("hlHealthyLocks").textContent = fmtInt.format(healthyCount);
+  if ($("hlHealthyPct")) $("hlHealthyPct").textContent = fmtPct(totalLocks ? (healthyCount / totalLocks) * 100 : 0);
+  if ($("hlRiskLocks")) $("hlRiskLocks").textContent = fmtInt.format(riskCount);
+  if ($("hlRiskPct")) $("hlRiskPct").textContent = fmtPct(totalLocks ? (riskCount / totalLocks) * 100 : 0);
+  if ($("hlUnhealthyLocks")) $("hlUnhealthyLocks").textContent = fmtInt.format(unhealthyCount);
+  if ($("hlUnhealthyPct")) $("hlUnhealthyPct").textContent = fmtPct(totalLocks ? (unhealthyCount / totalLocks) * 100 : 0);
+  if ($("hlAvgUtilization")) $("hlAvgUtilization").textContent = fmtPct(avgUtilizationPct);
+  if ($("hlIdlePieces")) $("hlIdlePieces").textContent = fmtInt.format(Math.round(idlePiecesTotal));
+  if ($("hlHealthyPieces")) $("hlHealthyPieces").textContent = fmtInt.format(Math.round(healthyPiecesTotal));
+  if ($("hlHealthScore")) $("hlHealthScore").textContent = fmtPct(healthScorePct);
+
+  renderHealthyLockingCategoryTable();
+  renderHealthyLockingMerchantTable();
+  renderHealthyLockingRecommendations();
+  applyHealthyLockingSearchAndSort();
+}
+
+function renderHealthyLockingCategoryTable() {
+  const tbody = $("hlCategoryTableBody");
+  if (!tbody) return;
+  const rows = state.healthyLockingCategoryRows || [];
+  tbody.innerHTML = rows.map(c => `
+    <tr>
+      <td class="font-bold text-purple">${c.category}</td>
+      <td class="num font-bold">${fmtIntCell(c.activeLocks)}</td>
+      <td class="num text-green">${fmtIntCell(c.healthy)}</td>
+      <td class="num text-orange">${fmtIntCell(c.risk)}</td>
+      <td class="num text-red">${fmtIntCell(c.unhealthy)}</td>
+      <td class="num"><span class="badge-outline ${c.avgUtilizationPct >= 50 ? 'green' : (c.avgUtilizationPct >= 20 ? 'orange' : 'red')}">${fmtPctCell(c.avgUtilizationPct)}</span></td>
+      <td class="num">${fmtIntCell(Math.round(c.lockedPieces))}</td>
+      <td class="num text-red">${fmtIntCell(Math.round(c.idlePieces))}</td>
+    </tr>`).join("");
+}
+
+function renderHealthyLockingMerchantTable() {
+  const tbody = $("hlMerchantTableBody");
+  if (!tbody) return;
+  const rows = state.healthyLockingMerchantRows || [];
+  const page = healthyLockingState.merchantPage || 0;
+  const start = page * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+  tbody.innerHTML = pageRows.map(m => `
+    <tr>
+      <td class="font-mono text-dim">${m.tagerId}</td>
+      <td class="font-bold truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
+      <td class="num font-bold">${fmtIntCell(m.activeLocks)}</td>
+      <td class="num text-green">${fmtIntCell(m.healthy)}</td>
+      <td class="num text-orange">${fmtIntCell(m.risk)}</td>
+      <td class="num text-red">${fmtIntCell(m.unhealthy)}</td>
+      <td class="num"><span class="badge-outline ${m.avgUtilizationPct >= 50 ? 'green' : (m.avgUtilizationPct >= 20 ? 'orange' : 'red')}">${fmtPctCell(m.avgUtilizationPct)}</span></td>
+      <td class="num">${fmtIntCell(Math.round(m.lockedPieces))}</td>
+      <td class="num text-red">${fmtIntCell(Math.round(m.idlePieces))}</td>
+    </tr>`).join("");
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if ($("rowCountHlMerchant")) $("rowCountHlMerchant").textContent = `${fmtInt.format(rows.length)} Merchants`;
+  if ($("pageIndicatorHlMerchant")) $("pageIndicatorHlMerchant").textContent = `Page ${page + 1} of ${totalPages}`;
+  if ($("prevPageHlMerchant")) $("prevPageHlMerchant").disabled = page === 0;
+  if ($("nextPageHlMerchant")) $("nextPageHlMerchant").disabled = page >= totalPages - 1;
+}
+
+// Release Candidates: أعلى 10 قفلات Unhealthy (مفيهاش استخدام ولا ديماند)
+// مرتبة بأكبر Remaining Pieces — دي أكبر كتلة استوك محبوسة من غير أي فايدة.
+// مستبعد منها كاتيجوري "Taager Gomla" و"Fashion" بالذات.
+//
+// Renew Candidates: أي قفل (أي حالة صحية) قرب يخلص، سواء بتاريخ الانتهاء
+// (≤7 أيام) أو بالكمية (Remaining Pieces قربت من الصفر نسبة للـ Allocated،
+// أو رقم صغير جدًا) — مستبعد منها قفلات ميرشنت "admin-service". الترتيب
+// مش بس CONTR% لوحدها: بنجمع بين أعلى CONTR% (الأهم تجاريًا) وأقل DOH
+// (الأقرب يخلص) في score واحد (CONTR% ÷ DOH)، فاللي يطلع فوق هو اللي مهم
+// تجاريًا *و* قرب يخلص مع بعض — مش بس مهم، ولا بس قرب يخلص لوحده.
+const HL_RELEASE_EXCLUDED_CATEGORIES = ["taager gomla", "tager gomla", "fashion"];
+const HL_RENEW_EXCLUDED_MERCHANTS = ["admin-service", "admin service", "adminservice"];
+function renderHealthyLockingRecommendations() {
+  const data = healthyLockingState.data || [];
+  const releaseRows = data.filter(d => {
+    if (d.healthKey !== "unhealthy" || !((d.remainingPieces || 0) > 0)) return false;
+    const catNorm = (d.category || "").trim().toLowerCase();
+    return !HL_RELEASE_EXCLUDED_CATEGORIES.some(ex => catNorm.includes(ex));
+  }).sort((a, b) => (b.remainingPieces || 0) - (a.remainingPieces || 0)).slice(0, 10);
+
+  const renewRows = data.filter(d => {
+    const merchantNorm = (d.merchantName || "").trim().toLowerCase();
+    if (HL_RENEW_EXCLUDED_MERCHANTS.some(ex => merchantNorm.includes(ex))) return false;
+    const expiringSoon = d.daysToExpiry !== null && d.daysToExpiry !== undefined && d.daysToExpiry <= 7;
+    const qtyRunningOut = (d.allocatedQty > 0 && (d.remainingPieces / d.allocatedQty) <= 0.15) || ((d.remainingPieces || 0) <= 5);
+    return expiringSoon || qtyRunningOut;
+  }).map(d => {
+    const expiringSoon = d.daysToExpiry !== null && d.daysToExpiry !== undefined && d.daysToExpiry <= 7;
+    const qtyRunningOut = (d.allocatedQty > 0 && (d.remainingPieces / d.allocatedQty) <= 0.15) || ((d.remainingPieces || 0) <= 5);
+    const reason = expiringSoon && qtyRunningOut ? "Expiring & Low Qty" : expiringSoon ? "Expiring Soon" : "Low Quantity";
+    // dohForScore: لو مفيش ديماند آخر 3 أيام خالص (DOH = null) بنحطها 30 يوم
+    // بس لأغراض الترتيب (مش القيمة المعروضة) عشان ميتصدرش الترتيب غلط —
+    // مش معناها إنها مستعجلة، معناها إننا مش عارفين نتوقع بالإيقاع الحالي.
+    const dohForScore = (d.remainingDoh === null || d.remainingDoh === undefined) ? 30 : Math.max(1, d.remainingDoh);
+    const renewScore = (d.contrGmvPct || 0) / dohForScore;
+    return { ...d, reason, renewScore };
+  }).sort((a, b) => b.renewScore - a.renewScore).slice(0, 15);
+
+  const releaseTbody = $("hlReleaseTableBody");
+  if (releaseTbody) {
+    releaseTbody.innerHTML = releaseRows.length ? releaseRows.map(d => `
+      <tr>
+        <td class="font-mono text-dim">${d.singleId}</td>
+        <td class="font-bold truncate-cell" title="${d.singleName}">${d.singleName}</td>
+        <td class="text-dim">${d.category}</td>
+        <td class="truncate-cell" title="${d.merchantName}">${d.merchantName}</td>
+        <td class="num">${fmtIntCell(d.allocatedQty)}</td>
+        <td class="num text-dim">${fmtIntCell(d.usedQty)}</td>
+        <td class="num"><span class="badge-outline red">${fmtPctCell(d.utilizationPct)}</span></td>
+        <td class="num text-red font-bold">${fmtIntCell(d.remainingPieces)}</td>
+        <td class="num">${d.daysToExpiry === null || d.daysToExpiry === undefined ? "—" : d.daysToExpiry}</td>
+      </tr>`).join("") : `<tr><td colspan="9" class="text-dim center">No idle locks found — everything's being used 🎉</td></tr>`;
+  }
+
+  const renewTbody = $("hlRenewTableBody");
+  if (renewTbody) {
+    renewTbody.innerHTML = renewRows.length ? renewRows.map(d => `
+      <tr>
+        <td class="font-mono text-dim">${d.singleId}</td>
+        <td class="font-bold truncate-cell" title="${d.singleName}">${d.singleName}</td>
+        <td class="text-dim">${d.category}</td>
+        <td class="font-mono text-dim">${d.tagerId}</td>
+        <td class="truncate-cell" title="${d.merchantName}">${d.merchantName}</td>
+        <td class="num font-bold text-purple">${fmtPctCell(d.contrGmvPct)}</td>
+        <td class="num text-orange font-bold">${fmtIntCell(d.remainingPieces)}</td>
+        <td class="num text-dim">${fmtIntCell(d.allocatedQty)}</td>
+        <td class="num">${fmtIntCell(Math.round(d.placedYdayMerchant))}</td>
+        <td class="num">${d.remainingDoh === null ? "—" : `<span class="badge-outline ${d.remainingDoh <= 3 ? 'red' : (d.remainingDoh <= 7 ? 'orange' : 'green')}">${Math.round(d.remainingDoh)}d</span>`}</td>
+        <td class="num">${d.daysToExpiry === null || d.daysToExpiry === undefined ? "—" : d.daysToExpiry}</td>
+        <td class="num"><span class="badge-outline ${d.stock > 0 ? 'green' : 'red'}">${fmtIntCell(Math.round(d.stock))}</span></td>
+        <td class="center"><span class="badge-outline ${d.reason === 'Low Quantity' ? 'red' : (d.reason === 'Expiring Soon' ? 'orange' : 'purple')}">${d.reason}</span></td>
+      </tr>`).join("") : `<tr><td colspan="13" class="text-dim center">No locks about to end right now</td></tr>`;
+  }
+}
+
+function sortHealthyLocking(key) {
+  if (healthyLockingState.sortKey === key) { healthyLockingState.sortDir = healthyLockingState.sortDir === "asc" ? "desc" : "asc"; } else { healthyLockingState.sortKey = key; healthyLockingState.sortDir = "desc"; }
+  applyHealthyLockingSearchAndSort();
+}
+
+function applyHealthyLockingSearchAndSort() {
+  const term = $("searchHealthyLockingInput") ? $("searchHealthyLockingInput").value.trim().toLowerCase() : "";
+  let data = (healthyLockingState.data || []).filter(d => {
+    if (!term) return true;
+    return (d.singleId && String(d.singleId).toLowerCase().includes(term)) || (d.singleName && d.singleName.toLowerCase().includes(term)) ||
+      (d.merchantName && d.merchantName.toLowerCase().includes(term)) || (d.tagerId && String(d.tagerId).toLowerCase().includes(term)) ||
+      (d.category && d.category.toLowerCase().includes(term)) || (d.lockingType && d.lockingType.toLowerCase().includes(term));
+  });
+  const { sortKey, sortDir } = healthyLockingState; const dir = sortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  healthyLockingState.filtered = data;
+  healthyLockingState.page = 0;
+  renderPaginatedHealthyLockingTable();
+}
+
+function renderPaginatedHealthyLockingTable() {
+  const tbody = $("hlMatchesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const data = healthyLockingState.filtered || [];
+  const start = healthyLockingState.page * PAGE_SIZE;
+  const pageRows = data.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(l => {
+    const tr = document.createElement("tr");
+    const typeCls = (l.lockingType || "").toLowerCase().includes("solo") ? "red" : "blue";
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${l.singleId}</td>
+      <td class="font-bold truncate-cell" title="${l.singleName}">${l.singleName}</td>
+      <td class="text-dim">${l.category}</td>
+      <td class="font-mono text-dim">${l.tagerId}</td>
+      <td class="truncate-cell" title="${l.merchantName}">${l.merchantName}</td>
+      <td class="center"><span class="badge-outline ${typeCls}">${l.lockingType}</span></td>
+      <td class="num font-bold">${fmtIntCell(l.allocatedQty)}</td>
+      <td class="num text-dim">${fmtIntCell(l.usedQty)}</td>
+      <td class="num">${fmtPctCell(l.utilizationPct)}</td>
+      <td class="num text-orange font-bold">${fmtIntCell(l.remainingPieces)}</td>
+      <td class="num font-bold text-purple">${fmtIntCell(Math.round(l.placedYdayMerchant))}</td>
+      <td class="num">${l.daysToExpiry === null || l.daysToExpiry === undefined ? "—" : l.daysToExpiry}</td>
+      <td class="center"><span class="badge-outline ${l.healthCls}">${l.healthText}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE));
+  if ($("rowCountHealthyLocking")) $("rowCountHealthyLocking").textContent = `${fmtInt.format(data.length)} Matches`;
+  if ($("pageIndicatorHealthyLocking")) $("pageIndicatorHealthyLocking").textContent = `Page ${healthyLockingState.page + 1} of ${totalPages}`;
+  if ($("prevPageHealthyLocking")) $("prevPageHealthyLocking").disabled = healthyLockingState.page === 0;
+  if ($("nextPageHealthyLocking")) $("nextPageHealthyLocking").disabled = healthyLockingState.page >= totalPages - 1;
 }
 
 // =========================================================================

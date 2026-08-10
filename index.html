@@ -52,6 +52,7 @@
             <a class="nav-item-sub" id="navCm3Analyst">CM3 Analyst</a>
             <a class="nav-item-sub" id="navPoorMatches">Poor Matches</a>
             <a class="nav-item-sub" id="navAvailabilityLocking">Availability Locking</a>
+            <a class="nav-item-sub" id="navHealthyLocking">Healthy Locking</a>
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
           </div>
         </div>
@@ -110,6 +111,7 @@
             <div class="metric-card hover-glow highlight-card">
               <div class="metric-title text-orange">Net Delivery Rate (NDR) <span class="icon-trend"></span></div>
               <div class="metric-value" id="ndrVal">0%</div>
+              <div class="metric-sub text-dim">Cutoff D-4</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Delivered GMV <span class="icon-dollar text-green"></span></div>
@@ -122,10 +124,12 @@
             <div class="metric-card hover-glow">
               <div class="metric-title">Confirmation Rate (CR) <span class="icon-check"></span></div>
               <div class="metric-value" id="crVal">0%</div>
+              <div class="metric-sub text-dim">Cutoff D-4</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Delivery Rate (DR) <span class="icon-truck"></span></div>
               <div class="metric-value" id="drVal">0%</div>
+              <div class="metric-sub text-dim">Cutoff D-4</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Active SKUs <span class="icon-box"></span></div>
@@ -152,7 +156,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-green">
                   <h2>NDR Leaderboard</h2>
-                  <p>ACMs ranked by Net Delivery Rate</p>
+                  <p>ACMs ranked by Net Delivery Rate (Cutoff D-4)</p>
                 </div>
               </div>
               <div style="max-height: 300px; overflow-y: auto; padding-right: 5px;">
@@ -614,6 +618,28 @@
                 <div class="metric-sub text-dim">Total CM3: <span id="cdzTotalCm3">EGP 0</span></div>
               </div>
             </div>
+            <div class="metrics-grid mt-4">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Critical <span class="icon-trend"></span></div>
+                <div class="metric-value text-red" id="cdzCountCritical">0</div>
+                <div class="metric-sub text-dim">% of MTD: 0% – 50%</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Good <span class="icon-check"></span></div>
+                <div class="metric-value text-blue" id="cdzCountGood">0</div>
+                <div class="metric-sub text-dim">% of MTD: 50% – 85%</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Excellent <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="cdzCountExcellent">0</div>
+                <div class="metric-sub text-dim">% of MTD: 85% – 100%</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-purple">Upside <span class="icon-calendar"></span></div>
+                <div class="metric-value text-purple" id="cdzCountUpside">0</div>
+                <div class="metric-sub text-dim">% of MTD: 100%+</div>
+              </div>
+            </div>
           </section>
 
           <section class="table-section mt-4">
@@ -648,6 +674,7 @@
                       <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;">Total PPM</th>
                       <th rowspan="2" onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
                       <th rowspan="2" onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                      <th rowspan="2" onclick="sortCdz('mtdAchPct')" class="center" style="cursor:pointer;" title="Click to sort">Status</th>
                     </tr>
                     <tr>
                       <th onclick="sortCdz('placedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
@@ -1095,6 +1122,64 @@
                 <div class="metric-title text-blue">Total CM3 <span class="icon-dollar"></span></div>
                 <div class="metric-value text-blue" id="mpMatchesTotalCm3">EGP 0</div>
               </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">CM3% <span class="icon-trend"></span></div>
+                <div class="metric-value text-purple" id="mpMatchesCm3Pct">0%</div>
+                <div class="metric-sub text-dim">Total CM3 / Delivered GMV (Cutoff D-4)</div>
+              </div>
+            </div>
+            <div class="metrics-grid mt-4">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Placed Pieces <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpMatchesTotalPlacedPcs">0</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total Confirmed Pieces <span class="icon-check"></span></div>
+                <div class="metric-value text-blue" id="mpMatchesTotalConfirmedPcs">0</div>
+                <div class="metric-sub text-dim">Cutoff D-4</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Total Delivered Pieces <span class="icon-truck"></span></div>
+                <div class="metric-value text-green" id="mpMatchesTotalDeliveredPcs">0</div>
+                <div class="metric-sub text-dim">Cutoff D-4</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-orange">Delivered GMV in Plan <span class="icon-dollar"></span></div>
+                <div class="metric-value text-orange" id="mpMatchesInPlanGmv">EGP 0</div>
+                <div class="metric-sub text-dim" style="font-size:10px;">Out Plan GMV: <span id="mpMatchesOutPlanGmv">EGP 0</span></div>
+                <div class="metric-sub text-dim" style="font-size:10px;">Total Delivered GMV: <span id="mpMatchesGrandGmv">EGP 0</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4 mt-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-orange">
+                <h2>Outside Sales Plan-ACM Coverage</h2>
+                <p>Matches (Merchant × Product) with no target in the Sales Plan-ACM — their share of the totals above</p>
+              </div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Matches Outside Plan <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="mpMatchesOutPlanCount">0</div>
+                <div class="metric-sub text-dim">Out of <span id="mpMatchesOutPlanTotalCount">0</span> total matches</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Placed Pieces Coverage <span class="icon-cart"></span></div>
+                <div class="metric-value" id="mpMatchesOutPlanPlacedPct">0%</div>
+                <div class="metric-sub text-dim">Share of Total Placed Pieces</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Confirmed Pieces Coverage <span class="icon-check"></span></div>
+                <div class="metric-value text-blue" id="mpMatchesOutPlanConfirmedPct">0%</div>
+                <div class="metric-sub text-dim">Share of Total Confirmed Pieces</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Delivered GMV Coverage <span class="icon-dollar"></span></div>
+                <div class="metric-value text-green" id="mpMatchesOutPlanGmvPct">0%</div>
+                <div class="metric-sub text-dim">Share of Total Delivered GMV</div>
+              </div>
             </div>
           </section>
 
@@ -1346,6 +1431,226 @@
                   <span id="pageIndicatorAvailabilityLocking">Page 1 of 1</span>
                   <button id="nextPageAvailabilityLocking" class="btn btn-outline small">Next</button>
                 </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- HEALTHY LOCKING (under Availability Locking) -->
+        <div id="viewHealthyLocking" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Active Locks <span class="icon-box"></span></div>
+                <div class="metric-value" id="hlTotalLocks">0</div>
+                <div class="metric-sub text-dim">Merchant × SKU active locks</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-green">Healthy Locks <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="hlHealthyLocks">0</div>
+                <div class="metric-sub text-dim"><span id="hlHealthyPct">0%</span> of total locks</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">At Risk Locks <span class="icon-trend"></span></div>
+                <div class="metric-value text-orange" id="hlRiskLocks">0</div>
+                <div class="metric-sub text-dim"><span id="hlRiskPct">0%</span> — low usage or expiring ≤3 days</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Unhealthy / Idle Locks <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="hlUnhealthyLocks">0</div>
+                <div class="metric-sub text-dim"><span id="hlUnhealthyPct">0%</span> — no usage, no demand</div>
+              </div>
+            </div>
+            <div class="metrics-grid mt-4">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Avg Utilization% <span class="icon-trend"></span></div>
+                <div class="metric-value text-blue" id="hlAvgUtilization">0%</div>
+                <div class="metric-sub text-dim">Used Qty ÷ Allocated Qty, across all locks</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Idle Locked Pieces <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="hlIdlePieces">0</div>
+                <div class="metric-sub text-dim">Stuck stock in Unhealthy locks — release candidates</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Healthy Locked Pieces <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="hlHealthyPieces">0</div>
+                <div class="metric-sub text-dim">Remaining pieces in well-used, active locks</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">Health Score <span class="icon-check"></span></div>
+                <div class="metric-value text-purple" id="hlHealthScore">0%</div>
+                <div class="metric-sub text-dim">Healthy Locks ÷ Total Active Locks</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Healthy Locking — by Category</h2>
+                  <p>Lock health breakdown per category — where idle stock is stuck vs performing well</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="hlCategoryTable">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th class="num">Active Locks</th>
+                      <th class="num text-green">Healthy</th>
+                      <th class="num text-orange">At Risk</th>
+                      <th class="num text-red">Unhealthy</th>
+                      <th class="num">Avg Utilization%</th>
+                      <th class="num">Locked Pieces</th>
+                      <th class="num text-red">Idle Pieces</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hlCategoryTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Healthy Locking — by Merchant</h2>
+                  <p>Lock health breakdown per merchant — who's actually using their locked stock</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="hlMerchantTable">
+                  <thead>
+                    <tr>
+                      <th>Merchant ID</th>
+                      <th>Merchant Name</th>
+                      <th class="num">Active Locks</th>
+                      <th class="num text-green">Healthy</th>
+                      <th class="num text-orange">At Risk</th>
+                      <th class="num text-red">Unhealthy</th>
+                      <th class="num">Avg Utilization%</th>
+                      <th class="num">Locked Pieces</th>
+                      <th class="num text-red">Idle Pieces</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hlMerchantTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountHlMerchant">0 Merchants</span>
+                <div class="pager">
+                  <button id="prevPageHlMerchant" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorHlMerchant">Page 1 of 1</span>
+                  <button id="nextPageHlMerchant" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Healthy Locking — Matches</h2>
+                  <p>Every active lock (Merchant × SKU) with a Health Status — Healthy, At Risk, or Unhealthy</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchHealthyLockingInput" type="search" placeholder="Search SKU, Merchant, Category or Locking Type..." />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="hlMatchesTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortHealthyLocking('singleId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortHealthyLocking('singleName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
+                      <th onclick="sortHealthyLocking('category')" style="cursor:pointer;">Category</th>
+                      <th onclick="sortHealthyLocking('tagerId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortHealthyLocking('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
+                      <th onclick="sortHealthyLocking('lockingType')" class="center" style="cursor:pointer;">Locking Type</th>
+                      <th onclick="sortHealthyLocking('allocatedQty')" class="num" style="cursor:pointer;">Allocated Qty</th>
+                      <th onclick="sortHealthyLocking('usedQty')" class="num" style="cursor:pointer;">Used Qty</th>
+                      <th onclick="sortHealthyLocking('utilizationPct')" class="num" style="cursor:pointer;">Utilization%</th>
+                      <th onclick="sortHealthyLocking('remainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces</th>
+                      <th onclick="sortHealthyLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="How much this merchant placed on this SKU yesterday">Placed Yesterday</th>
+                      <th onclick="sortHealthyLocking('daysToExpiry')" class="num" style="cursor:pointer;">Days to Expiry</th>
+                      <th class="center">Health Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hlMatchesTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountHealthyLocking">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPageHealthyLocking" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorHealthyLocking">Page 1 of 1</span>
+                  <button id="nextPageHealthyLocking" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-red">
+                  <h2>Recommended: Release Candidates</h2>
+                  <p>Unhealthy locks (no usage, no recent demand) tying up the most stock — good candidates to release back to open availability</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="hlReleaseTable">
+                  <thead>
+                    <tr>
+                      <th>SKU ID</th>
+                      <th>SKU Name</th>
+                      <th>Category</th>
+                      <th>Merchant</th>
+                      <th class="num">Allocated Qty</th>
+                      <th class="num">Used Qty</th>
+                      <th class="num">Utilization%</th>
+                      <th class="num text-red">Remaining Pieces</th>
+                      <th class="num">Days to Expiry</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hlReleaseTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Recommended: Renew Candidates</h2>
+                  <p>Top by CONTR% of Delivered GMV combined with lowest DOH</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="hlRenewTable">
+                  <thead>
+                    <tr>
+                      <th>SKU ID</th>
+                      <th>SKU Name</th>
+                      <th>Category</th>
+                      <th>Merchant ID</th>
+                      <th>Merchant</th>
+                      <th class="num text-purple">CONTR% (Delivered GMV)</th>
+                      <th class="num">Remaining Pieces</th>
+                      <th class="num text-dim">Allocated Qty</th>
+                      <th class="num" title="Placed Pieces yesterday, this merchant on this SKU">Placed Yesterday (Pieces)</th>
+                      <th class="num" title="Remaining Pieces ÷ Avg Last 3 Days Placed Pieces — how many days the remaining lock will last at the merchant's recent pace">DOH</th>
+                      <th class="num">Days to Expiry</th>
+                      <th class="num" title="Current SKU stock — is there stock to top up the lock with, or is it out of stock?">Stock</th>
+                      <th class="center">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hlRenewTableBody"></tbody>
+                </table>
               </div>
             </div>
           </section>
