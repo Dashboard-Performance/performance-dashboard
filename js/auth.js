@@ -436,7 +436,7 @@
 
   function injectPresenceStyles() {
     const css = `
-    .presence-widget{position:fixed;top:16px;right:22px;z-index:9500;font-family:"Inter",-apple-system,sans-serif;}
+    .presence-widget{position:relative;display:inline-flex;z-index:9500;font-family:"Inter",-apple-system,sans-serif;}
     .presence-pill{display:flex;align-items:center;gap:7px;background:#18181b;border:1px solid #27272a;
       border-radius:20px;padding:7px 14px 7px 10px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35);
       transition:border-color .2s;font-family:inherit;}
@@ -495,7 +495,12 @@
         <div class="presence-list" id="presenceList"></div>
       </div>
     `;
-    document.body.appendChild(widget);
+    const actionsRow = document.querySelector(".topbar-actions");
+    if (actionsRow) {
+      actionsRow.prepend(widget);
+    } else {
+      document.body.appendChild(widget);
+    }
 
     const pillBtn = widget.querySelector("#presencePillBtn");
     const panel = widget.querySelector("#presencePanel");
