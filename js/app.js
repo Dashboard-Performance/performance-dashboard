@@ -75,7 +75,7 @@ const AVAILABILITY_LOCKING_GID = "2085802038";
 // Leave this empty ("") to keep the old per-sheet JSONP path as a fallback
 // — the app works either way, but JSONP is the one that was failing.
 // -------------------------------------------------------------------------
-const DATA_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
+const DATA_API_URL = "";
 // The backend fetches every GID sequentially (one gviz request at a time,
 // on purpose — see backend/Code.gs), so the total round trip for ~14
 // sheets can take longer than a single sheet used to. 60s gives it room.
