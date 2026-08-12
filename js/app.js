@@ -1191,7 +1191,7 @@ function tcEmptyBucket() {
 }
 // grandPlaced بيتحسب مسبقاً (من مجموع كل الأقسام) عشان نقدر نحسب Contribution %
 // (نصيب كل قسم من إجمالي الـ Placed) بنفس منطق عمود "Contribution %" في الشيت.
-function tcFinalizeBucket(b, grandPlaced) {
+function tcFinalizeBucket(b, grandDeliveredGmv) {
   const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
   const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
   const activeDays = b.dateSet.size || 1;
@@ -1200,10 +1200,13 @@ function tcFinalizeBucket(b, grandPlaced) {
   const ppmPerPiece = b.ppmPerPieceWeight ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : (b.delivered ? (b.ppm / b.delivered) : 0);
   const ppmPct = b.cm3Gmv ? (b.ppm / b.cm3Gmv) * 100 : 0;
   const aspDlv = b.delivered ? (b.deliveredGmv / b.delivered) : 0;
-  const contribution = grandPlaced ? (b.placed / grandPlaced) * 100 : 0;
+  // Contribution % دلوقتي بتحسب نصيب الكاتيجوري من إجمالي الـ Total Delivered GMV
+  // (مش من إجمالي الـ Placed Pieces زي الأول).
+  const contribution = grandDeliveredGmv ? (b.deliveredGmv / grandDeliveredGmv) * 100 : 0;
   return {
     skuCount: b.skuSet.size,
     placedDaily: b.placed / activeDays,
+    confirmedDaily: b.confirmed / activeDays,
     placed: b.placed, contribution, confirmed: b.confirmed, crPct, delivered: b.delivered, drPct,
     aspDlv, gmv: b.deliveredGmv,
     cm3: b.cm3, cm3PerPiece, cm3Pct, ppm: b.ppm, ppmPerPiece, ppmPct
@@ -1249,8 +1252,8 @@ function computeCommercialActuals(mainRowsAll) {
   });
 
   const results = {};
-  CATS.forEach(cat => { results[cat] = tcFinalizeBucket(buckets[cat], grand.placed); });
-  results["grand total"] = tcFinalizeBucket(grand, grand.placed);
+  CATS.forEach(cat => { results[cat] = tcFinalizeBucket(buckets[cat], grand.deliveredGmv); });
+  results["grand total"] = tcFinalizeBucket(grand, grand.deliveredGmv);
   return results;
 }
 
@@ -1320,7 +1323,7 @@ function parseCogsSheet(payload) {
 // أصلاً سنجل-بسنجل، PRODUCT_ID == SINGLE_ID والكمية بتبقى 1.
 // الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY
 // -------------------------------------------------------------------------
-// الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY, STOCK (عمود G)
+// الأعمدة: PRODUCT_ID, PRODUCT_NAME, IS_BUNDLE, SINGLE_ID, SINGLE_NAME, PRODUCT_QUANTITY, (F فاضي/مش مستخدم), STOCK (عمود H)
 function parseDebundleMapSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const rows = [];
@@ -1338,7 +1341,7 @@ function parseDebundleMapSheet(payload) {
       singleId: singleId,
       singleName: cellText(c[4]),
       quantity: cellNumber(c[5]) || 1,
-      stock: cellNumber(c[6]) || 0 // العمود G — الاستوك الخاص بالـ SINGLE_ID
+      stock: cellNumber(c[7]) || 0 // العمود H — الاستوك الخاص بالـ SINGLE_ID
     });
   }
   return rows;
@@ -2337,7 +2340,7 @@ const TC_CATEGORY_LABELS = { consumables: "Consumables", electronics: "Electroni
 // في شيت الـ Main) فبيظهر كـ "—" في عمود Actual.
 const TC_METRIC_ROWS = [
   { label: "Count of SKUs", t: "skuCountTarget", a: "skuCount", fmt: "int" },
-  { label: "Daily Target (Pcs/day)", t: "targetPlacedDaily", a: "placedDaily", fmt: "int" },
+  { label: "Daily Target (Pcs/day)", t: "targetPlacedDaily", a: "confirmedDaily", fmt: "int" },
   { label: "Total Placed (Pcs)", t: "placedPiecesTarget", a: "placed", fmt: "int" },
   { label: "Contribution %", t: "targetContribution", a: "contribution", fmt: "pct" },
   { label: "Total Confirmed (Pcs)", t: "plannedCnfPieces", a: "confirmed", fmt: "int" },
@@ -2884,7 +2887,17 @@ function cdzBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays,
 }
 
 function computeCommercialDebundlized() {
-  const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  // من غير أي تجميع/توزيع بندل خالص: كل SKU (PRODUCT_ID، عمود A في شيت
+  // الديبندلايز) بيتقرا لوحده منفصل تمامًا، وديماند بتاعه بييجي من صفوف شيت
+  // الـ Main اللي فيها r.sku == نفس الـ PRODUCT_ID ده بالظبط (من غير ضرب في
+  // Quantity ولا توزيع بوزن الـ COGS زي قبل كده).
+  const skuList = new Map(); // PRODUCT_ID -> { name, stock, category }
+  (state.debundleMap || []).forEach(r => {
+    if (!r.productId) return;
+    if (!skuList.has(r.productId)) {
+      skuList.set(r.productId, { name: r.productName || r.singleName || r.productId, stock: r.stock || 0 });
+    }
+  });
 
   const mainRowsAll = state.allParsedRows || [];
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
@@ -2908,60 +2921,49 @@ function computeCommercialDebundlized() {
     return buckets.get(id);
   }
 
-  // إجمالي حقيقي غير مكرر لكل صف مرة واحدة بس (مش لكل Single جوه البندل)، عشان
-  // التوتال ده يمثل نفس أرقام الأوفرفيو الحقيقية ومينفعش يبقى أكبر من الكل.
+  // إجمالي حقيقي غير مكرر لكل صف مرة واحدة بس، عشان التوتال ده يمثل نفس
+  // أرقام الأوفرفيو الحقيقية ومينفعش يبقى أكبر من الكل.
   let overallDeliveredGmv = 0, overallCm3 = 0;
 
   rows.forEach(r => {
     if (!r.sku) return;
-    const mappings = productMap.get(r.sku);
-    if (!mappings || !mappings.length) return; // مش جزء من خريطة الديبندلايز خالص
-    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
-
-    // التوتال بتاع الفلوس (Delivered GMV / CM3) بتاع الصف/الأوردر ده بيتحسب مرة واحدة بس
-    // هنا (زي أي مكان تاني في الداشبورد)، مش لكل Single جوه البندل — عشان منضاعفهوش.
     overallDeliveredGmv += r.deliveredGmv;
     if (isCm3RowEligible(r, cm3CutoffTs)) overallCm3 += r.cm3;
 
-    // بندل ممكن يحتوي على أكتر من Single SKU مختلف — لازم نوزع الديماند (القطع) بتاعه
-    // على كل واحد فيهم (كل واحد بالـ quantity الخاصة بيه)، مش واحد بس.
-    mappings.forEach(mapping => {
-      const qty = mapping.quantity || 1;
-      const b = getBucket(mapping.singleId);
-      b.placed += r.placedPieces * qty; b.confirmed += r.confirmedPieces * qty; b.delivered += r.deliveredPieces * qty;
-      if (rTime >= d3Ms) b.conf3d += r.confirmedPieces * qty; // ديماند الـ Single (ديبندلايز) آخر 3 أيام
-      if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces * qty; b.crConfirmed += r.confirmedPieces * qty; }
-      if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces * qty; b.drDelivered += r.deliveredPieces * qty; }
-      // GMV/CM3/PPM الخاصة بالـ Single: مش بناخد قيمة الأوردر كاملة (ده كان بيضاعفها لو
-      // البندل فيه أكتر من Single)، ولا بنوزعها بالقطع — بنوزعها بنفس منطق الملف
-      // المرجعي (BUNDLE TABLE): وزن الـ COGS بتاع الـ Single ده داخل نفس البندل
-      // (mapping.cogsWeight) × قيمة الأوردر الكاملة، بنفس الكات أوف بتاع الـ CM3.
-      if (isCm3RowEligible(r, cm3CutoffTs)) {
-        const weight = mapping.cogsWeight || 0;
-        b.deliveredGmv += r.deliveredGmv * weight;
-        b.cm3 += r.cm3 * weight;
-        b.ppm += (r.ppm || 0) * weight;
-        b.cm3Gmv += r.deliveredGmv * weight;
-      }
-    });
+    if (!skuList.has(r.sku)) return; // مش موجود في شيت الديبندلايز خالص (عمود A)
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
+
+    // كل SKU بياخد قيمته الحقيقية كاملة زي ما هي — من غير توزيع أو ضرب في
+    // Quantity ولا وزن COGS (مفيش تجميع/فك بندل خالص هنا دلوقتي).
+    const b = getBucket(r.sku);
+    b.placed += r.placedPieces; b.confirmed += r.confirmedPieces; b.delivered += r.deliveredPieces;
+    if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
+    if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
+    if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    if (isCm3RowEligible(r, cm3CutoffTs)) {
+      b.deliveredGmv += r.deliveredGmv;
+      b.cm3 += r.cm3;
+      b.ppm += (r.ppm || 0);
+      b.cm3Gmv += r.deliveredGmv;
+    }
   });
 
   const targets = state.singleSkuTargets || {};
   const result = [];
-  singlesList.forEach((singleName, singleId) => {
-    const b = buckets.get(singleId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
+  skuList.forEach((skuInfo, productId) => {
+    const b = buckets.get(productId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
     const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
     const ndrPct = (crPct * drPct) / 100;
     const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
     // CM3/Piece و PPM/Piece: نفس منطق شيت الـ Single المرجعي (G2=E2/C2، H2=F2/C2)
-    // — بيتقسموا على إجمالي القطع المستلمة (DLV Pieces) بتاعة الـ Single ده.
+    // — بيتقسموا على إجمالي القطع المستلمة (DLV Pieces) بتاعة الـ SKU ده.
     const cm3PerPiece = b.delivered ? (b.cm3 / b.delivered) : 0;
     const ppmPerPiece = b.delivered ? (b.ppm / b.delivered) : 0;
 
-    const targetInfo = targets[singleId];
+    const targetInfo = targets[productId];
     // شيت البلان بيكتب 0 لأي حاجة مش في البلان فعلياً — التارجت لازم يكون > 0
-    // عشان نعتبره Single SKU "في البلان"، غير كده بيتعرض Not in Plan.
+    // عشان نعتبره SKU "في البلان"، غير كده بيتعرض Not in Plan.
     // أربع تارجتس مستقلين دلوقتي (زي جروبات Sales Plan-ACM بالظبط):
     //   - Placed / Confirmed: يوميين فعلاً من الشيت، يتاخدوا زي ما هم.
     //   - Delivered PCS / GMV: إجمالي الشهر كله في الشيت، فبنحولهم لتارجت
@@ -2987,19 +2989,20 @@ function computeCommercialDebundlized() {
 
     // Status (آخر عمود في الجدول): بنفس الباكتس المستخدمة في Sales Plan-ACM
     // بالظبط (No Achievement/Critical/Needs Improvement/Fair/Good/Excellent/
-    // Overachiever/Upside) — لو الـ Single SKU مش في البلان أصلاً (hasTarget=false)
+    // Overachiever/Upside) — لو الـ SKU مش في البلان أصلاً (hasTarget=false)
     // بيبقى "Not in Plan" بدل ما يتحط في باكت وهمي مالوش تارجت يتقاس عليه.
     const finalStatus = hasTarget ? getMpSalesPlanFinalStatus(mtdAchPct) : { text: "Not in Plan", cls: "gray" };
 
-    // Stock: من عمود G في شيت الديبندلايز (1409034448) — الاستوك الخاص بالـ SINGLE_ID.
-    // DOH = Stock ÷ Avg Last 3 Days Confirmed (ديبندلايز، على مستوى الـ Single ككل).
-    const stock = stockBySingle.has(singleId) ? stockBySingle.get(singleId) : (state.inventoryMap[singleId] ? state.inventoryMap[singleId].stock : 0);
+    // Stock: من عمود H في شيت الديبندلايز (1409034448) — لنفس صف الـ SKU ده
+    // بالظبط (عمود A)، من غير أي تجميع مع SKUs تانية.
+    // DOH = Stock ÷ Avg Last 3 Days Confirmed.
+    const stock = skuInfo.stock;
     const avg3dConfirmed = b.conf3d / 3;
     const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
 
     result.push({
-      singleId, singleName,
-      category: (targetInfo && targetInfo.category) || (state.inventoryMap[singleId] ? state.inventoryMap[singleId].category : "") || "Uncategorized",
+      singleId: productId, singleName: skuInfo.name,
+      category: (targetInfo && targetInfo.category) || (state.inventoryMap[productId] ? state.inventoryMap[productId].category : "") || "Uncategorized",
       stock: Math.round(stock || 0), doh,
       hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate, finalStatus,
       metrics: { placed: placedM, confirmed: confirmedM, delivered: deliveredM, gmv: gmvM },
@@ -3414,12 +3417,19 @@ function buildCm3AnalystProductsData(periodMode) {
     const curr = metricsFor(latestPeriod ? s.periods.get(latestPeriod) : null);
     if (curr.placed === 0 && curr.deliveredGmv === 0) return; // مفيش نشاط في آخر Period، اتجاهل
     const [wLatest, wPrev] = findLastTwoWeeksWithData(deltaSkuMap.get(s.sku));
-    let deltaCm3Pct = null, prevCm3PctForDisplay = null;
+    // مهم: الـ delta ولازم يكون مقارنة حقيقية بين آخر أسبوع فعلي فيه بيانات
+    // والأسبوع اللي قبله بالظبط (مش بين متوسط الـ Period كله المختار فوق
+    // زي "Overall" اللي بيجمع كل أسابيع الشهر مع بعض والأسبوع اللي قبل
+    // الأخير). لو استخدمنا متوسط الشهر ككل كـ"الحالي"، منتج عمل Spike فجأة
+    // في آخر أسبوع بس كان أداءه واطي بقية الشهر ممكن يطلع "نازل" غلط رغم إنه
+    // في الحقيقة صاعد (Spike) — وده اللي كان بيحصل بالظبط.
+    let deltaCm3Pct = null, prevCm3PctForDisplay = null, latestWeekCm3PctForDisplay = null;
     if (wLatest && wPrev) {
-      const latestCm3Pct = wLatest.cm3Gmv ? (wLatest.cm3 / wLatest.cm3Gmv) * 100 : 0;
+      const latestWeekCm3PctCalc = wLatest.cm3Gmv ? (wLatest.cm3 / wLatest.cm3Gmv) * 100 : 0;
       const prevCm3PctCalc = wPrev.cm3Gmv ? (wPrev.cm3 / wPrev.cm3Gmv) * 100 : 0;
-      deltaCm3Pct = latestCm3Pct - prevCm3PctCalc;
+      deltaCm3Pct = latestWeekCm3PctCalc - prevCm3PctCalc;
       prevCm3PctForDisplay = prevCm3PctCalc;
+      latestWeekCm3PctForDisplay = latestWeekCm3PctCalc;
     }
     const hasPrev = deltaCm3Pct !== null;
 
@@ -3436,7 +3446,13 @@ function buildCm3AnalystProductsData(periodMode) {
       placed: curr.placed, confirmed: curr.confirmed, delivered: curr.delivered,
       crPct: curr.crPct, drPct: curr.drPct, ndrPct: curr.ndrPct, deliveredAsp: curr.deliveredAsp,
       deliveredGmv: curr.deliveredGmv, cm3: curr.cm3, cm3Pct: curr.cm3Pct,
-      prevCm3Pct: hasPrev ? prevCm3PctForDisplay : null, deltaCm3Pct,
+      // prevCm3Pct/latestWeekCm3Pct دول بالظبط الرقمين اللي اتطرحوا من بعض عشان
+      // يطلعوا deltaCm3Pct — مستخدمين بس في كروت Top Gainers/Decliners عشان
+      // الأرقام المعروضة تتطابق حسابيًا مع الـ Delta تمامًا، من غير ما تتلخبط
+      // بالـ cm3Pct العادي (اللي بيمثل الـ Period المختار فوق زي Overall).
+      prevCm3Pct: hasPrev ? prevCm3PctForDisplay : null,
+      latestWeekCm3Pct: hasPrev ? latestWeekCm3PctForDisplay : null,
+      deltaCm3Pct,
       ppm: curr.ppm, ppmPerPiece: curr.ppmPerPiece, targetPpm, ppmActualPct, ppmGmvRatio,
       period: latestPeriod, status: targetPpm <= 0 ? "No Target" : (needsFix ? "Fix PPM" : "OK")
     });
@@ -3631,25 +3647,64 @@ function renderCm3apPipelineChart(products) {
   }
 }
 
+// بيرجع الميديان (الوسيط) بتاع مصفوفة أرقام — مستخدم عشان نحدد إيه هو
+// "أداء عالي" (High Performer) بشكل نسبي للداتا الحالية، بدل رقم ثابت.
+function cm3apMedian(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+// Top CM3% Decliners: مش أي منتج عمل سوينج كبير — لازم يكون أصلاً "منتج
+// مهم" (عالي في الـ Delivered GMV وكان عالي في الـ CM3% قبل النزول)، وبعدين
+// من بين المنتجات دي بس بناخد أسوأ نزول (فرق نقاط الـ CM3% بين آخر Period
+// واللي قبله — زي مثال 10% -> 5% يبقى Declined بـ 5 نقاط).
+function cm3apTopDecliners(withDelta, count) {
+  const candidates = withDelta.filter(p => p.deliveredGmv > 0 && p.deltaCm3Pct < 0);
+  const gmvMedian = cm3apMedian(candidates.map(p => p.deliveredGmv));
+  const prevCm3Median = cm3apMedian(candidates.map(p => p.prevCm3Pct ?? 0));
+  let pool = candidates.filter(p => p.deliveredGmv >= gmvMedian && (p.prevCm3Pct ?? 0) >= prevCm3Median);
+  if (!pool.length) pool = candidates; // fallback لو الفلتر ضيّق الداتا لحد ما تفضى
+  return [...pool].sort((a, b) => a.deltaCm3Pct - b.deltaCm3Pct).slice(0, count);
+}
+// Top CM3% Gainers: نفس فكرة الـ Decliners بالظبط لكن معكوسة، وبنفس المصدر
+// بالظبط (p.deltaCm3Pct — آخر Period واللي قبله) عشان منتج واحد يستحيل
+// يظهر في الكارتين مع بعض (Gainer لازم يكون Delta موجب، Decliner لازم يكون
+// Delta سالب — الاتنين مبنيين على نفس الرقم بالظبط فمفيش تعارض تاني).
+// برضو لازم يكون منتج مهم (عالي في الـ Delivered GMV وعالي في الـ CM3%
+// الحالي بعد الزيادة)، وبعدين من بينهم أعلى زيادة نقاط.
+function cm3apTopGainers(withDelta, count) {
+  const candidates = withDelta.filter(p => p.deliveredGmv > 0 && p.deltaCm3Pct > 0);
+  const gmvMedian = cm3apMedian(candidates.map(p => p.deliveredGmv));
+  const cm3PctMedian = cm3apMedian(candidates.map(p => p.latestWeekCm3Pct ?? 0));
+  let pool = candidates.filter(p => p.deliveredGmv >= gmvMedian && (p.latestWeekCm3Pct ?? 0) >= cm3PctMedian);
+  if (!pool.length) pool = candidates; // fallback لو الفلتر ضيّق الداتا لحد ما تفضى
+  return [...pool].sort((a, b) => b.deltaCm3Pct - a.deltaCm3Pct).slice(0, count);
+}
+
 function renderCm3apInsights(products, meta) {
   const box = $("cm3apInsights"); if (!box) return;
   if (!products.length) { box.innerHTML = `<div class="text-dim">No qualifying data for this period.</div>`; return; }
 
   const qualifying = products.filter(p => p.placed >= CM3_MIN_PLACED_PIECES);
   const withDelta = qualifying.filter(p => p.deltaCm3Pct !== null);
-  const topGainers = [...withDelta].sort((a, b) => b.deltaCm3Pct - a.deltaCm3Pct).slice(0, 4);
-  const topDecliners = [...withDelta].sort((a, b) => a.deltaCm3Pct - b.deltaCm3Pct).slice(0, 4);
+  const topGainers = cm3apTopGainers(withDelta, 3);
+  const topDecliners = cm3apTopDecliners(withDelta, 3);
   const fixList = qualifying.filter(p => p.status === "Fix PPM").sort((a, b) => (a.ppmActualPct ?? 0) - (b.ppmActualPct ?? 0)).slice(0, 5);
   const negativeCm3 = qualifying.filter(p => p.cm3 < 0).length;
 
   const listItem = (p, valueHtml) => `<li><span class="font-mono text-dim">${p.sku}</span>${p.skuName ? `<span class="cm3ap-insight-name" title="${p.skuName}">${p.skuName}</span>` : ""} <span class="text-dim">(${p.category})</span> — ${valueHtml}</li>`;
+  // الأرقام المعروضة هنا (prevCm3Pct -> latestWeekCm3Pct) هي بالظبط نفس
+  // الرقمين اللي اتطرحوا من بعض عشان يطلعوا الـ Delta — فمينفعش تتلخبط
+  // اتجاهاتها أبداً (Gainer يبان صاعد فعلاً، Decliner يبان نازل فعلاً).
+  const movementValue = (p) => `${cm3apDeltaBadge(p.deltaCm3Pct)} <span class="text-dim">(${fmtPctCell(p.prevCm3Pct ?? 0)} &rarr; ${fmtPctCell(p.latestWeekCm3Pct ?? 0)}, ${fmtMoneyCompactCell(p.deliveredGmv)} GMV)</span>`;
 
   let html = `<div class="cm3ap-insights-grid">`;
   html += `<div class="cm3ap-insight-card"><h4 class="text-green">Top CM3% Gainers</h4><ul>${
-    topGainers.length ? topGainers.map(p => listItem(p, cm3apDeltaBadge(p.deltaCm3Pct))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
+    topGainers.length ? topGainers.map(p => listItem(p, movementValue(p))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
   }</ul></div>`;
   html += `<div class="cm3ap-insight-card"><h4 class="text-red">Top CM3% Decliners</h4><ul>${
-    topDecliners.length ? topDecliners.map(p => listItem(p, cm3apDeltaBadge(p.deltaCm3Pct))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
+    topDecliners.length ? topDecliners.map(p => listItem(p, movementValue(p))).join("") : `<li class="text-dim">No period-over-period data yet.</li>`
   }</ul></div>`;
   html += `<div class="cm3ap-insight-card"><h4 class="text-orange">Needs PPM Fix (Top 5 Worst)</h4><ul>${
     fixList.length ? fixList.map(p => listItem(p, `${fmtPctCell(p.ppmActualPct)} of target`)).join("") : `<li class="text-dim">Nothing below 80% of Target PPM right now.</li>`
@@ -3667,30 +3722,48 @@ function renderCm3apInsights(products, meta) {
 // سكشن "Top Movers" تحت الـ Products Breakdown: توب 4 Positive وتوب 4 Drops (بار مرئي بسيط لكل واحد).
 function renderCm3apMovers(products) {
   const box = $("cm3apMovers"); if (!box) return;
-  const qualifying = products.filter(p => p.placed >= CM3_MIN_PLACED_PIECES && p.deltaCm3Pct !== null);
-  const topPositive = [...qualifying].sort((a, b) => b.deltaCm3Pct - a.deltaCm3Pct).slice(0, 4);
-  const topDrops = [...qualifying].sort((a, b) => a.deltaCm3Pct - b.deltaCm3Pct).slice(0, 4);
-  const maxAbs = Math.max(1, ...qualifying.map(p => Math.abs(p.deltaCm3Pct)));
+  const qualifying = products.filter(p => p.placed >= CM3_MIN_PLACED_PIECES);
+  const withDelta = qualifying.filter(p => p.deltaCm3Pct !== null);
+  // نفس منطق كارت الـ Insights بالظبط، ونفس المصدر بالظبط (deltaCm3Pct) —
+  // Top Positive لازم يكون Delta موجب، Top Drops لازم يكون Delta سالب، فمفيش
+  // منتج ممكن يظهر في العمودين مع بعض زي ما كان بيحصل قبل كده.
+  const topPositive = cm3apTopGainers(withDelta, 3);
+  // Top Drops: نفس منطق كارت الـ Decliners بالظبط — لازم يكونوا منتجات مهمة
+  // فعلاً (عالية في Delivered GMV وكانت عالية في CM3% قبل النزول)، بعدين
+  // أسوأ نزول بينهم (فرق نقاط الـ CM3%).
+  const topDrops = cm3apTopDecliners(withDelta, 3);
+  const maxPositive = Math.max(1, ...topPositive.map(p => Math.abs(p.deltaCm3Pct)));
+  const maxDrop = Math.max(1, ...topDrops.map(p => Math.abs(p.deltaCm3Pct)));
 
-  const row = (p, colorVar) => {
-    const width = Math.min(100, (Math.abs(p.deltaCm3Pct) / maxAbs) * 100);
+  const positiveRow = (p) => {
+    const width = Math.min(100, (Math.abs(p.deltaCm3Pct) / maxPositive) * 100);
     return `<div class="cm3ap-mover-row">
       <div class="cm3ap-mover-info">
         <div class="cm3ap-mover-sku">${p.sku}${p.skuName ? `<span class="cm3ap-mover-name" title="${p.skuName}"> ${p.skuName}</span>` : ""}<span class="cm3ap-mover-cat"> · ${p.category}</span></div>
-        <div class="cm3ap-mover-bar-track"><div class="cm3ap-mover-bar-fill" style="width:${width}%; background:${colorVar};"></div></div>
+        <div class="cm3ap-mover-bar-track"><div class="cm3ap-mover-bar-fill" style="width:${width}%; background:#10b981;"></div></div>
       </div>
-      <div class="cm3ap-mover-value" style="color:${colorVar};">${p.deltaCm3Pct >= 0 ? "+" : ""}${p.deltaCm3Pct.toFixed(1)}%</div>
+      <div class="cm3ap-mover-value" style="color:#10b981;">+${p.deltaCm3Pct.toFixed(1)}%</div>
+    </div>`;
+  };
+  const dropRow = (p) => {
+    const width = Math.min(100, (Math.abs(p.deltaCm3Pct) / maxDrop) * 100);
+    return `<div class="cm3ap-mover-row">
+      <div class="cm3ap-mover-info">
+        <div class="cm3ap-mover-sku">${p.sku}${p.skuName ? `<span class="cm3ap-mover-name" title="${p.skuName}"> ${p.skuName}</span>` : ""}<span class="cm3ap-mover-cat"> · ${p.category}</span></div>
+        <div class="cm3ap-mover-bar-track"><div class="cm3ap-mover-bar-fill" style="width:${width}%; background:#ef4444;"></div></div>
+      </div>
+      <div class="cm3ap-mover-value" style="color:#ef4444;">${p.deltaCm3Pct >= 0 ? "+" : ""}${p.deltaCm3Pct.toFixed(1)}%</div>
     </div>`;
   };
 
   box.innerHTML = `
     <div class="cm3ap-mover-col">
-      <h4 class="text-green">Top 4 Positive (CM3% &Delta;)</h4>
-      ${topPositive.length ? topPositive.map(p => row(p, "#10b981")).join("") : `<div class="text-dim" style="font-size:12px;">No period-over-period data yet.</div>`}
+      <h4 class="text-green">Top 3 CM3% Gainers</h4>
+      ${topPositive.length ? topPositive.map(p => positiveRow(p)).join("") : `<div class="text-dim" style="font-size:12px;">No qualifying data yet.</div>`}
     </div>
     <div class="cm3ap-mover-col">
-      <h4 class="text-red">Top 4 Drops (CM3% &Delta;)</h4>
-      ${topDrops.length ? topDrops.map(p => row(p, "#ef4444")).join("") : `<div class="text-dim" style="font-size:12px;">No period-over-period data yet.</div>`}
+      <h4 class="text-red">Top 3 CM3% Decliners</h4>
+      ${topDrops.length ? topDrops.map(p => dropRow(p)).join("") : `<div class="text-dim" style="font-size:12px;">No period-over-period data yet.</div>`}
     </div>
   `;
 }
