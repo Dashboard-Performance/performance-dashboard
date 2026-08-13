@@ -598,9 +598,9 @@
           <section class="mb-4">
             <div class="metrics-grid">
               <div class="metric-card hover-glow">
-                <div class="metric-title">Total Single SKUs <span class="icon-box"></span></div>
+                <div class="metric-title">Total SKUs <span class="icon-box"></span></div>
                 <div class="metric-value" id="cdzTotalSkus">0</div>
-                <div class="metric-sub text-dim">Plan demand (single + bundles)</div>
+                <div class="metric-sub text-dim">Plan demand (Product_ID level)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">In Plan <span class="icon-check"></span></div>
@@ -618,26 +618,54 @@
                 <div class="metric-sub text-dim">Total CM3: <span id="cdzTotalCm3">EGP 0</span></div>
               </div>
             </div>
-            <div class="metrics-grid mt-4">
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-red">Critical <span class="icon-trend"></span></div>
-                <div class="metric-value text-red" id="cdzCountCritical">0</div>
-                <div class="metric-sub text-dim">% of MTD: 0% – 50%</div>
+            <div class="st-summary-grid mt-4">
+              <div class="panel hover-glow">
+                <div class="panel-head-modern">
+                  <div class="panel-title-wrapper border-blue">
+                    <h2>Placed — Status</h2>
+                    <p>SKUs grouped by Placed Ach% vs Target MTD</p>
+                  </div>
+                </div>
+                <div class="table-responsive">
+                  <table class="st-summary-table" id="cdzPlacedBucketTable">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Placed Count</th>
+                        <th>Total Placed Daily Target</th>
+                        <th>Total Placed AVG</th>
+                        <th>Total Placed Target MTD</th>
+                        <th>Total Placed MTD</th>
+                        <th>AVG ACH</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cdzPlacedBucketBody"></tbody>
+                  </table>
+                </div>
               </div>
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-blue">Good <span class="icon-check"></span></div>
-                <div class="metric-value text-blue" id="cdzCountGood">0</div>
-                <div class="metric-sub text-dim">% of MTD: 50% – 85%</div>
-              </div>
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-green">Excellent <span class="icon-check"></span></div>
-                <div class="metric-value text-green" id="cdzCountExcellent">0</div>
-                <div class="metric-sub text-dim">% of MTD: 85% – 100%</div>
-              </div>
-              <div class="metric-card hover-glow highlight-card">
-                <div class="metric-title text-purple">Upside <span class="icon-calendar"></span></div>
-                <div class="metric-value text-purple" id="cdzCountUpside">0</div>
-                <div class="metric-sub text-dim">% of MTD: 100%+</div>
+              <div class="panel hover-glow">
+                <div class="panel-head-modern">
+                  <div class="panel-title-wrapper border-green">
+                    <h2>Confirmed — Status</h2>
+                    <p>SKUs grouped by Confirmed Ach% vs Target MTD</p>
+                  </div>
+                </div>
+                <div class="table-responsive">
+                  <table class="st-summary-table" id="cdzConfirmedBucketTable">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Confirmed Count</th>
+                        <th>Total Confirmed Daily Target</th>
+                        <th>Total Confirmed AVG</th>
+                        <th>Total Confirmed Target MTD</th>
+                        <th>Total Confirmed MTD</th>
+                        <th>AVG ACH</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cdzConfirmedBucketBody"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </section>
@@ -650,15 +678,15 @@
                   <p>SKU demand (Bundle) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
                 </div>
                 <div class="table-controls">
-                  <input id="searchCdzInput" type="search" placeholder="Search Single ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <input id="searchCdzInput" type="search" placeholder="Search Product ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
               <div class="table-responsive">
                 <table class="data-table" id="cdzTable">
                   <thead>
                     <tr>
-                      <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Single_ID</th>
-                      <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Single_Name</th>
+                      <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Product_ID</th>
+                      <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product_Name</th>
                       <th rowspan="2" onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Click to sort">Category</th>
                       <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Click to sort">Stock</th>
                       <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Click to sort">DOH</th>
@@ -699,7 +727,7 @@
                 </table>
               </div>
               <div class="table-footer">
-                <span id="rowCountCdz">0 Single SKUs</span>
+                <span id="rowCountCdz">0 SKUs</span>
                 <div class="pager">
                   <button id="prevPageCdz" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorCdz">Page 1 of 1</span>

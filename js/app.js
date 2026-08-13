@@ -3037,12 +3037,127 @@ function computeCommercialDebundlized() {
       crPct, drPct, ndrPct, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece
     });
   });
-  return { rows: result, overallDeliveredGmv, overallCm3 };
+  return { rows: result, overallDeliveredGmv, overallCm3, daysUntilYesterday };
+}
+
+// -------------------------------------------------------------------------
+// Status (Commercial Plan) — بديل بكتات Critical/Good/Excellent/Upside
+// القديمة. بتاخد نفس بيانات الـ SKUs المحسوبة فعلاً فوق (state.cdzDataPrepared
+// / metrics.placed / metrics.confirmed) وبتجمعها بنفس الـ Status بالظبط اللي
+// شايفينه في عمود "Status" بتاع الجدول التفصيلي تحت (getMpSalesPlanFinalStatus)
+// — No Achievement / Critical / Needs Improvement / Fair / Good / Excellent /
+// Overachiever / Upside — عشان يبقوا نفس التسمية والحدود بالظبط، مش تسمية
+// تانية. الـ SKU اللي مفيهوش تارجت مستقل للمقياس ده (hasTarget=false) بيروح
+// لباكت "Not in Plan" (زي نص الـ Status بتاعه في الجدول التفصيلي بالظبط).
+// -------------------------------------------------------------------------
+// cls بتاعت كل باكت هي بالظبط نفس الـ cls اللي getMpSalesPlanFinalStatus
+// بترجعها لنفس النص ده (نفس ألوان badge-outline بتاعت عمود الـ Status في
+// الجدول التفصيلي)، عشان اللون هنا وهناك يبقى نفسه بالظبط.
+const CDZ_STATUS_BUCKETS = [
+  { key: "noach", label: "No Achievement", range: "0%", cls: "gray" },
+  { key: "critical", label: "Critical", range: "1% – 49%", cls: "red" },
+  { key: "needsimp", label: "Needs Improvement", range: "50% – 69%", cls: "orange" },
+  { key: "fair", label: "Fair", range: "70% – 84%", cls: "yellow" },
+  { key: "good", label: "Good", range: "85% – 94%", cls: "blue" },
+  { key: "excellent", label: "Excellent", range: "95% – 104%", cls: "green" },
+  { key: "overachiever", label: "Overachiever", range: "105% – 119%", cls: "green" },
+  { key: "upside", label: "Upside", range: "120%+", cls: "purple" },
+  { key: "notinplan", label: "Not in Plan", range: "No Target", cls: "gray" },
+];
+const CDZ_STATUS_KEY_BY_TEXT = {
+  "No Achievement": "noach", "Critical": "critical", "Needs Improvement": "needsimp",
+  "Fair": "fair", "Good": "good", "Excellent": "excellent",
+  "Overachiever": "overachiever", "Upside": "upside",
+};
+
+// بتستخدم نفس getMpSalesPlanFinalStatus المستخدمة أصلاً في عمود الـ Status
+// بتاع الجدول التفصيلي — عشان الحدود والتسمية يبقوا نفس المصدر بالظبط
+// ومفيش احتمال اختلاف بين العمود ده والملخص فوق.
+function getCdzStatusBucketKey(hasTarget, pct) {
+  if (!hasTarget) return "notinplan";
+  const s = getMpSalesPlanFinalStatus(pct);
+  return CDZ_STATUS_KEY_BY_TEXT[s.text] || "notinplan";
+}
+
+// بيبني صفوف باكت واحد (Placed أو Confirmed) — الأعمدة زي الشيت المرجعي
+// بالظبط: Count / Total Daily Target / Total AVG (المعدل اليومي الفعلي حتى
+// امبارح = MTD Actual ÷ نفس عدد الأيام المستخدم لحساب Target MTD) /
+// Total Target MTD / Total MTD (Actual) / AVG ACH (= Total MTD ÷ Total
+// Target MTD)، وفي الآخر صف Total إجمالي لكل الباكتات.
+function computeCdzAchievementBuckets(metricKey) {
+  const days = state.cdzDaysUntilYesterday || 1;
+  const buckets = {};
+  CDZ_STATUS_BUCKETS.forEach(b => { buckets[b.key] = { count: 0, dailyTarget: 0, mtdTarget: 0, mtdActual: 0 }; });
+
+  // كل PRODUCT_ID بييجي مرة واحدة بس هنا (state.cdzDataPrepared مبني من Map
+  // فريد لكل PRODUCT_ID)، فمفيش تكرار عد أصلاً. لكن باكت "Not in Plan" تحديدًا:
+  // مينفعش ياخد أي SKU مالوش تارجت حتى لو مالوش أي حركة خالص الشهر ده (يعني
+  // صفر Placed/Confirmed فعلي) — ده SKU مش نشط أصلاً ومش لازم يتحسب في
+  // الملخص. لازم يقرا بس الـ SKUs اللي فعلاً "رفعت" (MTD Actual > 0) الشهر ده
+  // من الماين شيت، مع إنها مالهاش تارجت مستقل للمقياس ده.
+  (state.cdzDataPrepared || []).forEach(row => {
+    const m = row.metrics && row.metrics[metricKey];
+    if (!m) return;
+    if (!m.hasTarget && !(m.mtdActual > 0)) return; // مفيش تارجت ومفيش نشاط فعلي — يتشال من الملخص خالص
+    const key = getCdzStatusBucketKey(m.hasTarget, m.achievedPct);
+    const b = buckets[key];
+    b.count++;
+    if (m.hasTarget) { b.dailyTarget += (m.dailyTarget || 0); b.mtdTarget += (m.mtdTarget || 0); }
+    b.mtdActual += (m.mtdActual || 0);
+  });
+
+  const rows = CDZ_STATUS_BUCKETS.map(b => {
+    const d = buckets[b.key];
+    const avg = d.mtdActual / days;
+    const achPct = d.mtdTarget > 0 ? (d.mtdActual / d.mtdTarget) * 100 : null;
+    return { label: b.label, range: b.range, cls: b.cls, count: d.count, dailyTarget: d.dailyTarget, avg, mtdTarget: d.mtdTarget, mtdActual: d.mtdActual, achPct };
+  });
+
+  const totals = rows.reduce((acc, r) => {
+    acc.count += r.count; acc.dailyTarget += r.dailyTarget; acc.avg += r.avg; acc.mtdTarget += r.mtdTarget; acc.mtdActual += r.mtdActual;
+    return acc;
+  }, { count: 0, dailyTarget: 0, avg: 0, mtdTarget: 0, mtdActual: 0 });
+  const totalAchPct = totals.mtdTarget > 0 ? (totals.mtdActual / totals.mtdTarget) * 100 : null;
+  rows.push({ label: "Total", range: "", cls: "", count: totals.count, dailyTarget: totals.dailyTarget, avg: totals.avg, mtdTarget: totals.mtdTarget, mtdActual: totals.mtdActual, achPct: totalAchPct, isTotal: true });
+
+  return rows;
+}
+
+// خلية اسم الستاتيوس: التكست نفسه ملوّن بنفس لون عمود الـ Status في الجدول
+// التفصيلي (من غير أي مربع/بوردر حواليه)، وتحته رينج الـ % بخط Inter صغير
+// ودّي — مش نفس فونت الأرقام (JetBrains Mono) عشان يبان واضح إنه تسمية مش رقم.
+function cdzStatusCellHtml(r) {
+  if (r.isTotal) return `<span class="st-status-total-label">${r.label}</span>`;
+  return `
+    <span class="st-status-label ${r.cls}">${r.label}</span>
+    <div class="st-status-range">${r.range}</div>`;
+}
+
+function renderCdzAchievementBucketTable(tbodyId, bucketRows) {
+  const tbody = $(tbodyId);
+  if (!tbody) return;
+  tbody.innerHTML = bucketRows.map(r => `
+    <tr${r.isTotal ? ' class="st-grand-total"' : ""}>
+      <td class="st-status-cell">${cdzStatusCellHtml(r)}</td>
+      <td>${fmtIntCell(r.count)}</td>
+      <td>${fmtIntCell(Math.round(r.dailyTarget))}</td>
+      <td>${fmtIntCell(Math.round(r.avg))}</td>
+      <td>${fmtIntCell(Math.round(r.mtdTarget))}</td>
+      <td>${fmtIntCell(Math.round(r.mtdActual))}</td>
+      <td>${r.achPct === null ? "—" : `<span class="badge-outline ${r.achPct >= 100 ? 'green' : (r.achPct >= 85 ? 'orange' : 'red')}">${fmtPctCell(r.achPct)}</span>`}</td>
+    </tr>
+  `).join("");
+}
+
+function renderCdzAchievementBuckets() {
+  renderCdzAchievementBucketTable("cdzPlacedBucketBody", computeCdzAchievementBuckets("placed"));
+  renderCdzAchievementBucketTable("cdzConfirmedBucketBody", computeCdzAchievementBuckets("confirmed"));
 }
 
 function prepareCommercialDebundlizedData() {
   const computed = computeCommercialDebundlized();
   state.cdzDataPrepared = computed.rows;
+  state.cdzDaysUntilYesterday = computed.daysUntilYesterday;
 
   const totalSkus = state.cdzDataPrepared.length;
   const inPlan = state.cdzDataPrepared.filter(d => d.hasTarget).length;
@@ -3053,29 +3168,13 @@ function prepareCommercialDebundlizedData() {
   const totalGmv = computed.overallDeliveredGmv;
   const totalCm3 = computed.overallCm3;
 
-  // بكتات Critical/Good/Excellent/Upside: بنفس منطق/حدود Sales Plan-ACM
-  // بالظبط (مبنية على Ach% بتاع Confirmed - المقياس الأساسي)، وبتاخد بس
-  // الـ Single SKUs اللي "In Plan" فعلاً (hasTarget=true) — غير كده مفيش
-  // تارجت أصلاً نقيس عليه الـ Achievement.
-  let countCritical = 0, countGood = 0, countExcellent = 0, countUpside = 0;
-  state.cdzDataPrepared.forEach(d => {
-    if (!d.hasTarget) return;
-    const pct = d.mtdAchPct;
-    if (pct < 50) countCritical++;
-    else if (pct < 85) countGood++;
-    else if (pct < 100) countExcellent++;
-    else countUpside++;
-  });
-
   if ($("cdzTotalSkus")) $("cdzTotalSkus").textContent = fmtInt.format(totalSkus);
   if ($("cdzInPlan")) $("cdzInPlan").textContent = fmtInt.format(inPlan);
   if ($("cdzAchieved")) $("cdzAchieved").textContent = fmtInt.format(achieved);
   if ($("cdzTotalGmv")) $("cdzTotalGmv").textContent = fmtMoneyCompact(totalGmv);
   if ($("cdzTotalCm3")) $("cdzTotalCm3").textContent = fmtMoneyCompact(totalCm3);
-  if ($("cdzCountCritical")) $("cdzCountCritical").textContent = fmtInt.format(countCritical);
-  if ($("cdzCountGood")) $("cdzCountGood").textContent = fmtInt.format(countGood);
-  if ($("cdzCountExcellent")) $("cdzCountExcellent").textContent = fmtInt.format(countExcellent);
-  if ($("cdzCountUpside")) $("cdzCountUpside").textContent = fmtInt.format(countUpside);
+
+  renderCdzAchievementBuckets();
 
   cdzWireControlsOnce();
   applyCdzFilterAndSort();
@@ -3161,7 +3260,7 @@ function renderPaginatedCdzTable() {
   tbody.appendChild(frag);
 
   const totalPages = Math.max(1, Math.ceil(state.cdzFiltered.length / PAGE_SIZE));
-  if ($("rowCountCdz")) $("rowCountCdz").textContent = `${fmtInt.format(state.cdzFiltered.length)} Single SKUs`;
+  if ($("rowCountCdz")) $("rowCountCdz").textContent = `${fmtInt.format(state.cdzFiltered.length)} SKUs`;
   if ($("pageIndicatorCdz")) $("pageIndicatorCdz").textContent = `Page ${state.cdzPage + 1} of ${totalPages}`;
   if ($("prevPageCdz")) $("prevPageCdz").disabled = state.cdzPage === 0;
   if ($("nextPageCdz")) $("nextPageCdz").disabled = state.cdzPage >= totalPages - 1;

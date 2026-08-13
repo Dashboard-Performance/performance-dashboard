@@ -134,13 +134,24 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .data-table .truncate-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .data-table th.truncate-cell { max-width: 180px; }
 .data-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
-/* CM3 Analyst Products — Daily/Weekly breakdown: كل عمود Period (يوم أو أسبوع) بلون خفيف
-   ثابت يفرق عن اللي جنبه، عشان العين تلاقي بسهولة كل أعمدة اليوم/الأسبوع مجمعة مع بعض. */
-.data-table th.cm3ap-pcol-0, .data-table td.cm3ap-pcol-0 { color: var(--blue); }
-.data-table th.cm3ap-pcol-1, .data-table td.cm3ap-pcol-1 { color: var(--purple); }
-.data-table th.cm3ap-pcol-2, .data-table td.cm3ap-pcol-2 { color: var(--green); }
-.data-table th.cm3ap-pcol-3, .data-table td.cm3ap-pcol-3 { color: var(--orange); }
-.data-table td.cm3ap-pcol-0 span.text-dim, .data-table td.cm3ap-pcol-1 span.text-dim, .data-table td.cm3ap-pcol-2 span.text-dim, .data-table td.cm3ap-pcol-3 span.text-dim { color: inherit; opacity: 0.6; }
+/* CM3 Analyst Products — Daily/Weekly breakdown: هوية كل عمود Period (يوم أو
+   أسبوع) بتتنقل من خلال العنوان (header) + شريط خفيف تحته وتينت خلفية باهت
+   جدًا للخلية — مش من تلوين كل رقم بلون مشبع زي الأول (ده اللي كان بيبان
+   "غريب"/متعب للعين لما 8 أعمدة مختلفة (عدد/نسبة/فلوس) كلهم بنفس اللون
+   الصارخ). الأرقام نفسها فضلت بلون النص العادي عشان تفضل مريحة وسهلة القراءة. */
+.data-table th.cm3ap-pcol-0 { color: var(--blue); border-bottom: 2px solid rgba(59,130,246,0.5); }
+.data-table th.cm3ap-pcol-1 { color: var(--purple); border-bottom: 2px solid rgba(139,92,246,0.5); }
+.data-table th.cm3ap-pcol-2 { color: var(--green); border-bottom: 2px solid rgba(16,185,129,0.5); }
+.data-table th.cm3ap-pcol-3 { color: var(--orange); border-bottom: 2px solid rgba(245,158,11,0.5); }
+.data-table td.cm3ap-pcol-0 { background: rgba(59,130,246,0.045); color: var(--text); }
+.data-table td.cm3ap-pcol-1 { background: rgba(139,92,246,0.045); color: var(--text); }
+.data-table td.cm3ap-pcol-2 { background: rgba(16,185,129,0.045); color: var(--text); }
+.data-table td.cm3ap-pcol-3 { background: rgba(245,158,11,0.045); color: var(--text); }
+.data-table td.cm3ap-pcol-0 span.text-dim, .data-table td.cm3ap-pcol-1 span.text-dim, .data-table td.cm3ap-pcol-2 span.text-dim, .data-table td.cm3ap-pcol-3 span.text-dim { color: var(--text-dim); }
+.data-table tbody tr:hover td.cm3ap-pcol-0 { background: rgba(59,130,246,0.09); }
+.data-table tbody tr:hover td.cm3ap-pcol-1 { background: rgba(139,92,246,0.09); }
+.data-table tbody tr:hover td.cm3ap-pcol-2 { background: rgba(16,185,129,0.09); }
+.data-table tbody tr:hover td.cm3ap-pcol-3 { background: rgba(245,158,11,0.09); }
 .badge-outline { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; border: 1px solid currentColor; font-family: 'JetBrains Mono', monospace; }
 .badge-outline.green { color: #10b981; background: rgba(16,185,129,0.1); }
 .badge-outline.blue { color: #3b82f6; background: rgba(59,130,246,0.1); }
@@ -235,6 +246,21 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .st-summary-table tr.st-grand-total td { font-weight: 700; color: #fff; border-top: 1px solid var(--line-light); background: rgba(255,255,255,0.03); }
 .st-summary-table td.st-rate { color: var(--purple); font-weight: 700; }
 .st-summary-table td.st-inbound { color: var(--green); font-weight: 700; }
+
+/* خلية اسم الستاتيوس (Placed/Confirmed — Status): التكست نفسه ملوّن من غير
+   أي مربع/بوردر حواليه، ورينج % بخط Inter صغير ودّي تحته — بدل الفونت
+   المونوسبيس الافتراضي بتاع باقي الأعمدة الرقمية في الجدول ده. */
+.st-summary-table td.st-status-cell { white-space: normal; vertical-align: middle; padding-top: 8px; padding-bottom: 8px; }
+.st-status-label { font-family: "Inter", -apple-system, sans-serif; font-size: 12.5px; font-weight: 700; letter-spacing: 0.1px; }
+.st-status-label.green { color: #10b981; }
+.st-status-label.blue { color: #3b82f6; }
+.st-status-label.orange { color: #f59e0b; }
+.st-status-label.red { color: #ef4444; }
+.st-status-label.purple { color: #a78bfa; }
+.st-status-label.yellow { color: #eab308; }
+.st-status-label.gray { color: #94a3b8; }
+.st-status-range { margin-top: 4px; font-family: "Inter", -apple-system, sans-serif; font-size: 10px; font-weight: 500; color: var(--text-dim); letter-spacing: 0.2px; }
+.st-status-total-label { font-family: "Inter", -apple-system, sans-serif; font-weight: 700; color: #fff; font-size: 12px; }
 
 /* Sellthrough Progress Overlay */
 #viewSellthroughPanel { position: relative; }
