@@ -62,6 +62,20 @@ const COGS_GID = "1724469150";
 const AVAILABILITY_LOCKING_GID = "2085802038";
 
 // -------------------------------------------------------------------------
+// RECOMMENDED TRACKER (sidebar item right under "Over View") — شيت المنتجات
+// والماتشات (PRODUCTS_MATCHES_GID / gid=1298408207). كل صف = ماتش
+// (PRODUCT_ID × Merchant ID) واحد. الأعمدة (0-based):
+//   0 Type | 1 PRODUCT_ID | 2 PRODUCT_NAME | 3 Merchant ID | 4 Merchant |
+//   5 Stock | 6 Action | 7 Starting Cogs | 8 Merchant Starting AVG |
+//   9 SKU Starting AVG
+// الأعمدة دي بتتقرا زي ما هي من الشيت (starting snapshot). كل باقي
+// الأعمدة (Current/Placed today/Placed Yesterday/Current Inventory/DOH)
+// بتتحسب لايف هنا فوق MAIN_GID و PRODUCTS_DEBUNDLE_MAP_GID — التفاصيل جوه
+// prepareRecommendedTrackerData().
+// -------------------------------------------------------------------------
+const PRODUCTS_MATCHES_GID = "1298408207";
+
+// -------------------------------------------------------------------------
 // DATA API (Apps Script backend) — ONE round trip for all sheets instead of
 // the old ~14 parallel gviz/JSONP calls, which Google was rate-limiting
 // (that's what caused the repeating "Timeout on GID: ..." errors and the
@@ -162,6 +176,9 @@ const state = {
   commercialTargets: {}, tcCategory: "grand total",
   debundleMap: [], singleSkuTargets: {}, cogsMap: new Map(), // Commercial Plan (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID / COGS_GID)
   availabilityLockingRows: [], // Availability Locking (تحت Poor Matches) — AVAILABILITY_LOCKING_GID
+  productsMatchesRows: [], // Recommended Tracker (تحت Over View) — PRODUCTS_MATCHES_GID
+  recTrackerDataPrepared: [], recTrackerSortKey: "skuPlacedToday", recTrackerSortDir: "desc",
+  recTrackerFiltered: [], recTrackerPage: 0,
   availabilityLockingSkuRows: [], availabilityLockingCategoryRows: [], availabilityLockingTotals: null,
   cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
   cdzFiltered: [], cdzPage: 0,
@@ -228,6 +245,7 @@ document.addEventListener("mousemove", (e) => {
 });
 
 const navOverview = $("navOverview");
+const navRecommendedTracker = $("navRecommendedTracker");
 const navInventory = $("navInventory");
 const navAcmToggle = $("navAcmToggle");
 const acmSubmenu = $("acmSubmenu");
@@ -284,6 +302,7 @@ if (navAdminToggle) {
 function switchView(viewName) {
   document.querySelectorAll('.view-section').forEach(el => { el.classList.remove('active-view'); el.classList.add('hidden'); });
   if(navOverview) navOverview.classList.remove("active");
+  if(navRecommendedTracker) navRecommendedTracker.classList.remove("active");
   if(navInventory) navInventory.classList.remove("active");
   if(navAcmPerf) navAcmPerf.classList.remove("active");
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
@@ -301,8 +320,9 @@ function switchView(viewName) {
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
 
   let activeSection = null;
-  if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); } 
-  else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); } 
+  if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); }
+  else if (viewName === "recommendedTracker") { activeSection = $("viewRecommendedTracker"); if(navRecommendedTracker) navRecommendedTracker.classList.add("active"); prepareRecommendedTrackerData(); }
+  else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); }
   else if (viewName === "acmPerformance") { activeSection = $("viewAcmPerformance"); if(navAcmPerf) navAcmPerf.classList.add("active"); } 
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
@@ -329,6 +349,7 @@ function switchView(viewName) {
 }
 
 if(navOverview) navOverview.addEventListener("click", () => switchView("overview"));
+if(navRecommendedTracker) navRecommendedTracker.addEventListener("click", () => switchView("recommendedTracker"));
 if(navInventory) navInventory.addEventListener("click", () => switchView("inventory"));
 if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerformance"));
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
@@ -1370,6 +1391,385 @@ function parseDebundleMapSheet(payload) {
 }
 
 // -------------------------------------------------------------------------
+// شيت المنتجات والماتشات (PRODUCTS_MATCHES_GID / gid=1298408207) — مصدر
+// الـ Recommended Tracker. الأعمدة (0-based) زي ما هي في الشيت:
+//   0 Type | 1 PRODUCT_ID | 2 PRODUCT_NAME | 3 Merchant ID | 4 Merchant |
+//   5 Stock | 6 Action | 7 Starting Cogs | 8 Merchant Starting AVG |
+//   9 SKU Starting AVG
+// -------------------------------------------------------------------------
+function parseProductsMatchesSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[1]).trim();
+    if (!productId || productId === "PRODUCT_ID") continue; // يتخطى صف الهيدر لو اتكرر
+    rows.push({
+      type: cellText(c[0]),
+      productId: productId,
+      productName: cellText(c[2]),
+      merchantId: cellText(c[3]).trim(),
+      merchant: cellText(c[4]),
+      stock: cellNumber(c[5]),
+      action: cellText(c[6]),
+      startingCogs: cellNumber(c[7]),
+      merchantStartingAvg: cellNumber(c[8]),
+      skuStartingAvg: cellNumber(c[9])
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
+// RECOMMENDED TRACKER — بيثري كل صف من parseProductsMatchesSheet() بأرقام
+// لايف محسوبة من MAIN_GID و PRODUCTS_DEBUNDLE_MAP_GID، بنفس المعادلات
+// المستخدمة في باقي الداشبورد (Commercial Debundlized / Availability
+// Locking) عشان الأرقام تفضل متسقة مع أي سكشن تاني:
+//
+//  • "النهاردة" هنا معناها التاريخ الفعلي الحقيقي (تاريخ الجهاز وقت ما
+//    الصفحة بتتحسب) — مش آخر تاريخ موجود في MAIN_GID زي باقي سكاشن
+//    الداشبورد. لو الشيت لسه ما اتحدثش لليوم الحقيقي ده، الأعمدة دي بترجع 0
+//    لنهارده بدل ما تدّي بيانات يوم قديم وتعتبرها غلط إنها "النهاردة".
+//  • SKU Placed today  = مجموع Placed Pieces لكل التجار على نفس الـ SKU في
+//    تاريخ النهاردة الحقيقي بالظبط — لو مفيش صفوف بتاريخ النهاردة أصلاً في
+//    MAIN_GID، القيمة بترجع 0.
+//  • SKU Placed Yesterday = نفس الحاجة بس بتاريخ (النهاردة الحقيقي - يوم).
+//  • SKU Current AVG   = متوسط Placed Pieces اليومي لنفس الـ SKU (كل
+//    التجار مع بعض) آخر 3 أيام قبل النهاردة (يعني امبارح + يومين قبله،
+//    من غير النهاردة نفسه لأن يومه لسه ماخلصش) — بيتقارن بعمود "SKU
+//    Starting AVG" الجاي من الشيت.
+//  • Merchant Current AVG = نفس الفكرة بس على مستوى (Merchant × SKU) —
+//    متوسط Placed Pieces اليومي بتاع التاجر ده بالذات على الـ SKU ده بالذات
+//    آخر 3 أيام قبل النهاردة (بنفس منطق avg3dPlacedMerchant المستخدم في
+//    Availability/Healthy Locking) — بيتقارن بعمود "Merchant Starting AVG".
+//  • Current Inventory  = عمود H (STOCK) في شيت الديبندلايز
+//    (PRODUCTS_DEBUNDLE_MAP_GID)، بمطابقة مباشرة على عمود A (PRODUCT_ID) في
+//    نفس الشيت — القيمة بتتقرا زي ما هي من غير أي جمع/طرح أو أي عملية
+//    حسابية عليها. لو الـ PRODUCT_ID ده مش موجود في شيت الديبندلايز أصلاً،
+//    fallback لعمود Stock الموجود في نفس شيت الماتشات (1298408207) نفسه.
+//  • Current Inventory DOH = "SKU TOTAL DEMAND OVERALL" (Debundled):
+//      - لو الـ PRODUCT_ID Single (مش بندل): Stock (عمود H بتاعه) ÷ متوسط
+//        آخر 3 أيام Confirmed المجمّع من *كل* المنتجات (سنجل أو بندل) اللي
+//        بتحتوي عليه — يعني بنشوف كل البندلات اللي فيها نفس الـ Single ده
+//        (من شيت الديبندلايز 1409034448) ونجمع TOTAL DEMAND بتاعها كلها
+//        (Confirmed × PRODUCT_QUANTITY) فوق الديماند المباشر بتاعه، مش بس
+//        الطلب اللي جاي عليه هو لوحده كـ PRODUCT_ID مباشر.
+//      - لو الـ PRODUCT_ID أصلاً Bundle (IS_BUNDLE=TRUE في نفس الشيت):
+//        بياخد أقل DOH (Minimum) بين كل الـ Singles اللي جوه البندل ده —
+//        أضعف Single هو اللي بيتحكم في توفر البندل ككل.
+//      - لو مفيش Confirmed خالص آخر 3 أيام لأي Single، الـ DOH بيرجع
+//        لـ Stock بتاعه نفسه (زي ما بيحصل بالظبط في باقي السكشنز).
+//
+// الأعمدة دي كلها بتتحسب على مستوى الماتش (Merchant × PRODUCT_ID) بالتحديد،
+// كل واحد بلاج مختلف (زي ما اتطلب بالظبط، مبني على "النهاردة الحقيقي"):
+//  • CR%  = Confirmed Pieces ÷ Placed Pieces، بس للصفوف اللي عدى عليها
+//    يومين (lag يومين، عشان الـ Confirm ياخد وقت يستقر).
+//  • DR%  = Delivered Pieces ÷ Confirmed Pieces، بس للصفوف اللي عدى عليها
+//    5 أيام (lag 5 أيام).
+//  • NDR% = CR% × DR% (زي ما هما، من غير أي تعديل إضافي).
+//  • PPM/Piece = متوسط PPM_PER_PIECE (عمود AD في MAIN_GID) موزون بالـ
+//    Delivered Pieces، بس للصفوف اللي عدى عليها 4 أيام (lag 4 أيام، نفس
+//    كات أوف الـ CM3).
+//  • Placed ASP = Placed GMV ÷ Placed Pieces لآخر 3 أيام "فيهم داتا فعلاً"
+//    لنفس الماتش (مش آخر 3 أيام تقويم عمياني) — لو آخر 3 أيام تقويم
+//    (النهاردة-3 لحد امبارح) مفيهمش Placed خالص، بيرجع تلقائيًا يدوّر
+//    لأقرب 3 أيام قبلهم فيهم داتا (هيستوريكل) ويحسب منهم.
+//  • CM3 Per Merchant = مجموع CM3 لنفس الماتش، بس للصفوف اللي عدى عليها
+//    4 أيام (lag 4 أيام).
+//  • CM3% = CM3 Per Merchant ÷ Delivered GMV لنفس الماتش، بنفس كات أوف الـ
+//    4 أيام (نفس الصفوف بالظبط المستخدمة في CM3 Per Merchant).
+//  • SKU PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID/1779314157) -
+//    Cost (شيت COGS، COGS_GID/1724469150) — القيم الثلاثة بتتقرا زي ما هي
+//    من الشيتين، مفيش أي حسبة عليهم غير الطرح المذكور.
+// -------------------------------------------------------------------------
+function prepareRecommendedTrackerData() {
+  const mainRows = state.allParsedRows || [];
+
+  // النهاردة هنا = التاريخ الحقيقي الفعلي (تاريخ الجهاز)، مش آخر تاريخ
+  // موجود في MAIN_GID — طلب صريح عشان Placed Today/Yesterday و Current
+  // AVG يتقاسوا على التاريخ الحقيقي مش على آخر يوم اتحدثت فيه الداتا.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const ydayMs = todayMs - 86400000;
+  // نطاق "آخر 3 أيام" لحساب الـ Current AVG = 3 أيام كاملة قبل النهاردة
+  // (امبارح + يومين قبله) — من غير النهاردة نفسه، لأن يومه لسه ماخلصش.
+  const d3Start = todayMs - (3 * 86400000);
+
+  // كات أوف الـ CR%/DR%/CM3% — كل واحد له لاج مختلف بالظبط زي ما اتطلب:
+  // CR% (Confirmed/Placed) بيرجع يومين، DR% (Delivered/Confirmed) بيرجع 5
+  // أيام، CM3%/PPM/Piece بيرجعوا 4 أيام (نفس منطق الـ lag cutoff المستخدم
+  // في Commercial Debundlized/Targets Commercial، بس بأرقام لاج مختلفة هنا
+  // ومبنية على "النهاردة الحقيقي" بدل آخر تاريخ في MAIN_GID).
+  const crCutoffMs = todayMs - (2 * 86400000);
+  const drCutoffMs = todayMs - (5 * 86400000);
+  const cm3CutoffMs = todayMs - (4 * 86400000);
+
+  // Current Inventory: بيتقرا مباشرة من شيت الديبندلايز (1409034448) — عمود A
+  // (PRODUCT_ID) وعمود H (STOCK) لنفس الصف، مباشرة زي ما هو من غير أي جمع/طرح
+  // أو أي عملية حسابية عليه. الـ join هنا لازم يبقى بعمود A (PRODUCT_ID) مش
+  // SINGLE_ID (عمود D) — دا اللي كان بيطلّع Current Inventory غلط قبل كده.
+  // لو نفس PRODUCT_ID اتكرر أكتر من صف، بناخد أول قيمة H نلاقيها بس (من غير
+  // جمع القيم مع بعض).
+  const stockByProductId = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (r.productId && !stockByProductId.has(r.productId)) stockByProductId.set(r.productId, r.stock);
+  });
+
+  // -----------------------------------------------------------------------
+  // Current Inventory DOH — "SKU TOTAL DEMAND OVERALL" (Debundled):
+  //   • bundleProductMap: PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity}]
+  //     من شيت الديبندلايز نفسه (1409034448) — نفس الماب المستخدم في
+  //     Commercial Debundlized/Availability Locking.
+  //   • isBundleByProductId: PRODUCT_ID -> IS_BUNDLE (عمود C) زي ما هو في الشيت.
+  //   • conf3dBySingleOverall: لكل SINGLE_ID، مجموع الـ Confirmed Pieces آخر
+  //     3 أيام الجايه من *كل* المنتجات (سنجل أو بندل) اللي بتحتوي عليه —
+  //     يعني بنوزع ديماند أي بندل اتباع على كل Single جواه (× PRODUCT_QUANTITY)
+  //     بدل ما نقرا بس الطلب المباشر على الـ Single ID نفسه.
+  // -----------------------------------------------------------------------
+  const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const isBundleByProductId = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (!r.productId || isBundleByProductId.has(r.productId)) return;
+    isBundleByProductId.set(r.productId, /^(true|yes|1)$/i.test(String(r.isBundle || "").trim()));
+  });
+  const conf3dBySingleOverall = new Map();
+
+  // خرائط تجميع لكل SKU: Placed Pieces اليوم/امبارح/آخر 3 أيام (overall)،
+  // وآخر 3 أيام على مستوى (Merchant × SKU). (Confirmed Pieces آخر 3 أيام
+  // بقت conf3dBySingleOverall فوق — مبنية Debundled مش مباشرة زي هنا.)
+  const placedTodayBySku = new Map();
+  const placedYdayBySku = new Map();
+  const placed3dBySku = new Map();
+  const placed3dByMerchantSku = new Map(); // "merchantId||sku" -> pieces
+
+  // تجميع على مستوى (Merchant × SKU) — نفس مفتاح صفوف الـ Recommended
+  // Tracker (كل صف = ماتش Merchant×PRODUCT_ID) — للـ CR%/DR%/NDR%/PPM/
+  // Placed ASP/CM3 Per Merchant/CM3%.
+  const byMatch = new Map(); // "merchantId||sku" -> bucket
+  const getMatchBucket = (key) => {
+    let b = byMatch.get(key);
+    if (!b) {
+      b = {
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        cm3: 0, cm3Gmv: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0,
+        placedByDate: new Map() // rTime -> { gmv, pieces } — للـ Placed ASP (آخر 3 أيام فيهم داتا فعلاً)
+      };
+      byMatch.set(key, b);
+    }
+    return b;
+  };
+
+  mainRows.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+
+    if (rTime === todayMs) placedTodayBySku.set(r.sku, (placedTodayBySku.get(r.sku) || 0) + (r.placedPieces || 0));
+    if (rTime === ydayMs) placedYdayBySku.set(r.sku, (placedYdayBySku.get(r.sku) || 0) + (r.placedPieces || 0));
+    if (rTime >= d3Start && rTime < todayMs) {
+      placed3dBySku.set(r.sku, (placed3dBySku.get(r.sku) || 0) + (r.placedPieces || 0));
+      if (r.merchantId) {
+        const key = r.merchantId + "||" + r.sku;
+        placed3dByMerchantSku.set(key, (placed3dByMerchantSku.get(key) || 0) + (r.placedPieces || 0));
+      }
+      // SKU TOTAL DEMAND OVERALL (Debundled) — نفس صف الـ MAIN_GID ده ممكن
+      // يكون بندل، فبنوزع الـ Confirmed Pieces بتاعه على كل Single جواه
+      // (× PRODUCT_QUANTITY) بدل ما نحطها بس تحت الـ PRODUCT_ID الأصلي.
+      const mappings = bundleProductMap.get(r.sku);
+      if (mappings && mappings.length) {
+        mappings.forEach(mp => {
+          conf3dBySingleOverall.set(mp.singleId, (conf3dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+        });
+      } else {
+        // مش موجود في شيت الديبندلايز خالص — نعتبره Single لوحده بكمية 1.
+        conf3dBySingleOverall.set(r.sku, (conf3dBySingleOverall.get(r.sku) || 0) + (r.confirmedPieces || 0));
+      }
+    }
+
+    if (!r.merchantId) return;
+    const matchKey = r.merchantId + "||" + r.sku;
+    const b = getMatchBucket(matchKey);
+    // Placed ASP — بنسجل كل يوم بيانات Placed فيه لوحده (تاريخ -> gmv/pieces)
+    // لنفس الماتش، عشان بعدين ناخد آخر 3 أيام "فيهم داتا فعلاً" مش آخر 3
+    // أيام تقويم عمياني — لو آخر 3 أيام تقويم مفيهمش داتا، بيرجع تلقائيًا
+    // لأقرب 3 أيام قبلهم فيهم داتا (تفاصيل الاختيار في نهاية الفانكشن).
+    if (r.placedPieces > 0) {
+      const dEntry = b.placedByDate.get(rTime) || { gmv: 0, pieces: 0 };
+      dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
+      b.placedByDate.set(rTime, dEntry);
+    }
+    // CR% — Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (CR lag).
+    if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
+    // DR% — Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (DR lag).
+    if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
+    // CM3 Per Merchant / CM3% / PPM per Piece — بس للصفوف اللي عدى عليها 4
+    // أيام (CM3 lag)، بنفس منطق الـ weighted average المستخدم في Commercial
+    // Debundlized/Targets Commercial لعمود PPM/Piece.
+    if (rTime <= cm3CutoffMs) {
+      b.cm3 += (r.cm3 || 0); b.cm3Gmv += (r.deliveredGmv || 0);
+      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+    }
+  });
+
+  // DOH بتاع Single واحد (Overall/Debundled): Stock بتاعه (عمود H، من نفس
+  // صفه في شيت الديبندلايز) ÷ متوسط آخر 3 أيام Confirmed المجمّع من *كل*
+  // المنتجات (سنجل أو بندل) اللي بتحتوي عليه (conf3dBySingleOverall).
+  const singleOverallDoh = (singleId) => {
+    const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
+    const avg = (conf3dBySingleOverall.get(singleId) || 0) / 3;
+    return avg > 0 ? (stock / avg) : (stock || 0);
+  };
+
+  const rows = (state.productsMatchesRows || []).map(m => {
+    const sku = m.productId;
+    const matchKey = m.merchantId + "||" + sku;
+    const skuCurrentAvg = (placed3dBySku.get(sku) || 0) / 3;
+    const merchantCurrentAvg = (placed3dByMerchantSku.get(matchKey) || 0) / 3;
+    const currentInventory = stockByProductId.has(sku) ? stockByProductId.get(sku) : (m.stock || 0);
+
+    // Current Inventory DOH:
+    //  • لو الـ SKU ده Single (مش بندل) → "SKU TOTAL DEMAND OVERALL" DOH
+    //    بتاعه هو نفسه (singleOverallDoh(sku)).
+    //  • لو الـ SKU ده Bundle → أضعف حلقة بتتحكم في التوفر: بناخد الـ DOH
+    //    الأقل (Minimum) بين كل الـ Singles اللي جوه البندل ده.
+    const mappings = bundleProductMap.get(sku) || [];
+    const isBundleSku = isBundleByProductId.get(sku) || mappings.length > 1;
+    let currentInventoryDoh;
+    if (isBundleSku && mappings.length) {
+      const singleDohs = mappings.map(mp => singleOverallDoh(mp.singleId));
+      currentInventoryDoh = Math.min(...singleDohs);
+    } else {
+      currentInventoryDoh = singleOverallDoh(sku);
+    }
+
+    const b = byMatch.get(matchKey) || { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, cm3: 0, cm3Gmv: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, placedByDate: new Map() };
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const ppmPerPiece = b.ppmPerPieceWeight > 0 ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : 0;
+
+    // Placed ASP — آخر 3 أيام "فيهم داتا فعلاً" لنفس الماتش (مش آخر 3 أيام
+    // تقويم عمياني): بنرتب كل الأيام اللي فيها Placed لنفس الماتش من الأحدث
+    // للأقدم، وناخد أول 3 أيام بس. لو آخر 3 أيام تقويم (النهاردة-3 لحد
+    // امبارح) مفيهمش داتا، الترتيب ده بيرجع تلقائيًا لأقرب 3 أيام قبلهم
+    // فيهم داتا (زي ما اتطلب بالظبط: "هات الداتا اللي قبليها هيستوريكل").
+    const sortedPlacedDates = Array.from(b.placedByDate.entries()).sort((x, y) => y[0] - x[0]).slice(0, 3);
+    let placedAspGmv = 0, placedAspPieces = 0;
+    sortedPlacedDates.forEach(([, entry]) => { placedAspGmv += entry.gmv; placedAspPieces += entry.pieces; });
+    const placedAsp = placedAspPieces > 0 ? (placedAspGmv / placedAspPieces) : 0;
+
+    const cm3PerMerchant = b.cm3;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+
+    // SKU PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID 1779314157) -
+    // Cost (شيت COGS، COGS_GID 1724469150) لنفس الـ PRODUCT_ID — القيم دي
+    // بتتقرا زي ما هي من الشيتين من غير أي حسبة تانية عليها.
+    const prodInfo = state.productsMap[sku] || { price: 0, profit: 0 };
+    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    const skuPpm = (prodInfo.price || 0) - (prodInfo.profit || 0) - cogsCost;
+
+    return {
+      type: m.type, productId: m.productId, productName: m.productName,
+      merchantId: m.merchantId, merchant: m.merchant, stock: m.stock, action: m.action,
+      startingCogs: m.startingCogs,
+      merchantStartingAvg: m.merchantStartingAvg, merchantCurrentAvg,
+      skuStartingAvg: m.skuStartingAvg, skuCurrentAvg,
+      skuPlacedToday: placedTodayBySku.get(sku) || 0,
+      skuPlacedYday: placedYdayBySku.get(sku) || 0,
+      currentInventory: Math.round(currentInventory || 0),
+      currentInventoryDoh: Math.round(currentInventoryDoh),
+      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm
+    };
+  });
+
+  state.recTrackerDataPrepared = rows;
+  applyRecommendedTrackerSearchAndSort();
+  renderRecommendedTrackerSummary(rows);
+}
+
+function renderRecommendedTrackerSummary(rows) {
+  const skuSet = new Set(rows.map(r => r.productId));
+  const totalInventory = rows.reduce((s, r) => s + (r.currentInventory || 0), 0);
+  const dohRows = rows.filter(r => r.currentInventoryDoh > 0);
+  const avgDoh = dohRows.length ? dohRows.reduce((s, r) => s + r.currentInventoryDoh, 0) / dohRows.length : 0;
+  if ($("rtTotalRows")) $("rtTotalRows").textContent = fmtInt.format(rows.length);
+  if ($("rtTotalSkus")) $("rtTotalSkus").textContent = fmtInt.format(skuSet.size);
+  if ($("rtTotalInventory")) $("rtTotalInventory").textContent = fmtInt.format(Math.round(totalInventory));
+  if ($("rtAvgDoh")) $("rtAvgDoh").textContent = Math.round(avgDoh);
+}
+
+function sortRecommendedTracker(key) {
+  if (state.recTrackerSortKey === key) { state.recTrackerSortDir = state.recTrackerSortDir === "asc" ? "desc" : "asc"; }
+  else { state.recTrackerSortKey = key; state.recTrackerSortDir = "desc"; }
+  applyRecommendedTrackerSearchAndSort();
+}
+
+function applyRecommendedTrackerSearchAndSort() {
+  const term = $("searchRecommendedTrackerInput") ? $("searchRecommendedTrackerInput").value.trim().toLowerCase() : "";
+  state.recTrackerFiltered = (state.recTrackerDataPrepared || []).filter(m => {
+    if (!term) return true;
+    return (m.productName && m.productName.toLowerCase().includes(term)) || (m.productId && String(m.productId).toLowerCase().includes(term)) ||
+      (m.merchant && m.merchant.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
+      (m.action && m.action.toLowerCase().includes(term)) || (m.type && m.type.toLowerCase().includes(term));
+  });
+  const { recTrackerSortKey, recTrackerSortDir } = state; const dir = recTrackerSortDir === "asc" ? 1 : -1;
+  state.recTrackerFiltered.sort((a, b) => {
+    const av = a[recTrackerSortKey]; const bv = b[recTrackerSortKey];
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return ((av || 0) - (bv || 0)) * dir;
+  });
+  state.recTrackerPage = 0;
+  renderPaginatedRecommendedTrackerTable();
+}
+
+function renderPaginatedRecommendedTrackerTable() {
+  const tbody = $("recommendedTrackerTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = state.recTrackerPage * PAGE_SIZE;
+  const pageRows = state.recTrackerFiltered.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="text-dim">${m.type || "-"}</td>
+      <td class="font-mono text-dim">${m.productId}</td>
+      <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
+      <td class="font-mono text-dim">${m.merchantId}</td>
+      <td class="truncate-cell" title="${m.merchant}">${m.merchant}</td>
+      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(Math.round(m.stock))}</span></td>
+      <td class="text-dim">${m.action || "-"}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.startingCogs)}</td>
+      <td class="num text-dim">${m.merchantStartingAvg.toFixed(1)}</td>
+      <td class="num font-bold ${m.merchantCurrentAvg >= m.merchantStartingAvg ? 'text-green' : 'text-red'}">${m.merchantCurrentAvg.toFixed(1)}</td>
+      <td class="num text-dim">${m.skuStartingAvg.toFixed(1)}</td>
+      <td class="num font-bold ${m.skuCurrentAvg >= m.skuStartingAvg ? 'text-green' : 'text-red'}">${m.skuCurrentAvg.toFixed(1)}</td>
+      <td class="num text-light font-bold">${fmtIntCell(Math.round(m.skuPlacedToday))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.skuPlacedYday))}</td>
+      <td class="num font-bold text-orange">${fmtIntCell(m.currentInventory)}</td>
+      <td class="num font-bold text-purple">${fmtIntCell(m.currentInventoryDoh)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
+      <td class="num font-bold ${m.cm3PerMerchant >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3PerMerchant)}</td>
+      <td class="num font-bold">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.skuPpm)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE));
+  if ($("rowCountRecommendedTracker")) $("rowCountRecommendedTracker").textContent = `${fmtInt.format(state.recTrackerFiltered.length)} Rows`;
+  if ($("pageIndicatorRecommendedTracker")) $("pageIndicatorRecommendedTracker").textContent = `Page ${state.recTrackerPage + 1} of ${totalPages}`;
+  if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").disabled = state.recTrackerPage === 0;
+  if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").disabled = state.recTrackerPage >= totalPages - 1;
+}
+
+if ($("searchRecommendedTrackerInput")) $("searchRecommendedTrackerInput").addEventListener("input", applyRecommendedTrackerSearchAndSort);
+if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").addEventListener("click", () => { if (state.recTrackerPage > 0) { state.recTrackerPage -= 1; renderPaginatedRecommendedTrackerTable(); } });
+if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE)); if (state.recTrackerPage < totalPages - 1) { state.recTrackerPage += 1; renderPaginatedRecommendedTrackerTable(); } });
+
+// -------------------------------------------------------------------------
 // شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
 // الأعمدة الجديدة (0-based): PRODUCT_ID, PRODUCT_NAME, CATEGORY,
 // Availability Placed Daily, Adjust Target Daily Confirmed,
@@ -1674,6 +2074,7 @@ function updateDashboard(rows) {
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
+  if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
@@ -6163,7 +6564,8 @@ const ALL_SHEET_GIDS = [
   INVENTORY_GID, PRODUCTS_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID,
   NEW_SEGMENTATION_GID, INBOUND_GID,
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
-  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID
+  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
+  PRODUCTS_MATCHES_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -6193,7 +6595,8 @@ const GID_LABELS = {
   [INBOUND_GID]: "Inbound", [PRODUCTS_INFO_GID]: "Products Info",
   [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
   [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets",
-  [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking"
+  [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
+  [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)"
 };
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
@@ -6222,7 +6625,8 @@ async function fetchAllSheetsSnapshot() {
       invPayload, prodPayload, catTargetsPayload, planPayload,
       newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
-      debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload
+      debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
+      productsMatchesPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -6240,7 +6644,8 @@ async function fetchAllSheetsSnapshot() {
       PRODUCTS_DEBUNDLE_MAP_GID ? loadSheetWithRetry(PRODUCTS_DEBUNDLE_MAP_GID).catch(track(PRODUCTS_DEBUNDLE_MAP_GID)) : Promise.resolve(null),
       SINGLE_SKU_TARGETS_GID ? loadSheetWithRetry(SINGLE_SKU_TARGETS_GID).catch(track(SINGLE_SKU_TARGETS_GID)) : Promise.resolve(null),
       COGS_GID ? loadSheetWithRetry(COGS_GID).catch(track(COGS_GID)) : Promise.resolve(null),
-      AVAILABILITY_LOCKING_GID ? loadSheetWithRetry(AVAILABILITY_LOCKING_GID).catch(track(AVAILABILITY_LOCKING_GID)) : Promise.resolve(null)
+      AVAILABILITY_LOCKING_GID ? loadSheetWithRetry(AVAILABILITY_LOCKING_GID).catch(track(AVAILABILITY_LOCKING_GID)) : Promise.resolve(null),
+      PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -6250,7 +6655,8 @@ async function fetchAllSheetsSnapshot() {
       [INBOUND_GID]: inboundPayload, [PRODUCTS_INFO_GID]: prodInfoPayload,
       [BEGIN_INV_GID]: begInvPayload, [SELLTHROUGH_NEEDED_GID]: sellthroughNeededPayload,
       [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload,
-      [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload
+      [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload,
+      [PRODUCTS_MATCHES_GID]: productsMatchesPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -6272,6 +6678,7 @@ async function fetchAllSheetsSnapshot() {
   const singleSkuTargetsPayload = sheets[SINGLE_SKU_TARGETS_GID];
   const cogsPayload = sheets[COGS_GID];
   const availabilityLockingPayload = sheets[AVAILABILITY_LOCKING_GID];
+  const productsMatchesPayload = sheets[PRODUCTS_MATCHES_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -6301,6 +6708,7 @@ async function fetchAllSheetsSnapshot() {
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
     cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
+    productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     staleGids // sheets that failed every retry and are still showing old data
   };
 }
@@ -6357,6 +6765,7 @@ function applySnapshotToState(snapshot) {
   state.singleSkuTargets = snapshot.singleSkuTargets || {};
   state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
   state.availabilityLockingRows = snapshot.availabilityLockingRows || state.availabilityLockingRows || [];
+  state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
   // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — بس مش كل مرة اليوزر يفتح
   // اللوحة أو يرجعلها لازم نعمل reset. نقارن بصمة مصادر الـ Sellthrough بس:
   // لو نفسها زي قبل (يعني مفيش تحديث حقيقي وصل من الشيت)، نسيب
@@ -6534,15 +6943,18 @@ confirmDownloadBtn.addEventListener("click", () => {
         availabilityLocking: availabilityLockingState.page,
         mpSalesPlan: state.mpSalesPlanPage,
         cdz: state.cdzPage,
-        cm3ap: cm3apState.page
+        cm3ap: cm3apState.page,
+        recTracker: state.recTrackerPage
     };
-    
+
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
-    PAGE_SIZE = 999999; 
-    
+    state.recTrackerPage = 0;
+    PAGE_SIZE = 999999;
+
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
+    if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
@@ -6573,7 +6985,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.mpSalesPlanPage = originalPage.mpSalesPlan;
         state.cdzPage = originalPage.cdz;
         cm3apState.page = originalPage.cm3ap;
-        
+        state.recTrackerPage = originalPage.recTracker;
+
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
         if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
@@ -6586,6 +6999,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
         if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
+        if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     }, 150);
 });
 

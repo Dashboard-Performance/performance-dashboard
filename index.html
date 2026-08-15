@@ -19,6 +19,7 @@
       </div>
       <nav class="sidebar-nav">
         <a class="nav-item active" id="navOverview"><span class="nav-icon"></span>Over View</a>
+        <a class="nav-item" id="navRecommendedTracker"><span class="nav-icon"></span>Recommended Tracker</a>
         <div class="nav-dropdown-wrapper">
           <a class="nav-item" id="navAcmToggle">
             <span class="nav-icon"></span>Account Manager
@@ -180,6 +181,88 @@
               </div>
               <div class="chart-container">
                 <canvas id="pipelineChart"></canvas>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- RECOMMENDED TRACKER (right under Over View) -->
+        <div id="viewRecommendedTracker" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
+                <div class="metric-value" id="rtTotalRows">0</div>
+                <div class="metric-sub text-dim">Product × Merchant rows from the matches sheet</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="rtTotalSkus">0</div>
+                <div class="metric-sub text-dim">Unique PRODUCT_IDs in this tracker</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="rtTotalInventory">0</div>
+                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map, column H)</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="rtAvgDoh">0</div>
+                <div class="metric-sub text-dim">Stock ÷ Avg Last 3 Days Confirmed (SKU level)</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Recommended Tracker</h2>
+                  <p>Products &amp; Matches (GID 1298408207) — live Starting vs Current, placed history, inventory/DOH and CR/DR/NDR/CM3</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchRecommendedTrackerInput" type="search" placeholder="Search Product, Merchant or Action..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="recommendedTrackerTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortRecommendedTracker('type')" style="cursor:pointer;">Type</th>
+                      <th onclick="sortRecommendedTracker('productId')" class="font-mono" style="cursor:pointer;">PRODUCT_ID</th>
+                      <th onclick="sortRecommendedTracker('productName')" class="truncate-cell" style="cursor:pointer;">PRODUCT_NAME</th>
+                      <th onclick="sortRecommendedTracker('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortRecommendedTracker('merchant')" class="truncate-cell" style="cursor:pointer;">Merchant</th>
+                      <th onclick="sortRecommendedTracker('stock')" class="num" style="cursor:pointer;">Stock</th>
+                      <th onclick="sortRecommendedTracker('action')" style="cursor:pointer;">Action</th>
+                      <th onclick="sortRecommendedTracker('startingCogs')" class="num" style="cursor:pointer;">Starting Cogs</th>
+                      <th onclick="sortRecommendedTracker('merchantStartingAvg')" class="num" style="cursor:pointer;">Merchant Starting AVG</th>
+                      <th onclick="sortRecommendedTracker('merchantCurrentAvg')" class="num" style="cursor:pointer;">Merchant Current AVG</th>
+                      <th onclick="sortRecommendedTracker('skuStartingAvg')" class="num" style="cursor:pointer;">SKU Starting AVG</th>
+                      <th onclick="sortRecommendedTracker('skuCurrentAvg')" class="num" style="cursor:pointer;">SKU Current AVG</th>
+                      <th onclick="sortRecommendedTracker('skuPlacedToday')" class="num" style="cursor:pointer;">SKU Placed today</th>
+                      <th onclick="sortRecommendedTracker('skuPlacedYday')" class="num" style="cursor:pointer;">SKU Placed Yesterday</th>
+                      <th onclick="sortRecommendedTracker('currentInventory')" class="num" style="cursor:pointer;">Current Inventory</th>
+                      <th onclick="sortRecommendedTracker('currentInventoryDoh')" class="num" style="cursor:pointer;">Current Inventory DOH</th>
+                      <th onclick="sortRecommendedTracker('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th onclick="sortRecommendedTracker('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th onclick="sortRecommendedTracker('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortRecommendedTracker('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
+                      <th onclick="sortRecommendedTracker('placedAsp')" class="num" style="cursor:pointer;">Placed ASP</th>
+                      <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;">CM3 Per Merchant</th>
+                      <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;">SKU PPM</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recommendedTrackerTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountRecommendedTracker">0 Rows</span>
+                <div class="pager">
+                  <button id="prevPageRecommendedTracker" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorRecommendedTracker">Page 1 of 1</span>
+                  <button id="nextPageRecommendedTracker" class="btn btn-outline small">Next</button>
+                </div>
               </div>
             </div>
           </section>
