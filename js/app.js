@@ -1868,22 +1868,28 @@ if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").addEventLis
 //  • STOCK/DOH: نفس الـ "SKU TOTAL DEMAND OVERALL" (Debundled) المستخدمة في
 //    Recommended Tracker بالظبط (buildDebundledStockDohIndex فوق) — ومبنية
 //    على آخر 3 أيام Confirmed الفعليين (كل الشهور)، مش بس صفوف الشهر الحالي.
+//  • Delivered GMV / TOTAL DELIVERED PPM = مجموع عمودي DELIVERED_GMV وPPM
+//    (AB) لنفس الـ SKU، من غير أي كات أوف خالص — إجمالي صفوف الشهر ده زي ما
+//    هي (اتشال منها كات أوف الـ 4 أيام اللي كان موجود الأول بطلب صريح).
 //  • CONTR GMV% = Delivered GMV بتاع الـ SKU ده ÷ إجمالي Delivered GMV لكل
-//    الـ SKUs في الشهر ده (بنفس كات أوف الـ CM3 اللي تحت).
+//    الـ SKUs في الشهر ده (نفس الأرقام اللي من غير كات أوف فوق).
 //  • CR% = Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (lag يومين).
 //  • DR% = Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (lag 5 أيام).
 //  • NDR% = CR% × DR%.
-//  • PPM/Piece = متوسط PPM_PER_PIECE موزون بالـ Delivered Pieces، بس
-//    للصفوف اللي عدى عليها 4 أيام (lag 4 أيام) — زي Recommended Tracker بالظبط.
-//  • PPM% = TOTAL DELIVERED PPM ÷ Delivered GMV لنفس الـ SKU (نفس كات أوف الـ
-//    4 أيام)، بنفس منطق PPM/GMV% المستخدم في باقي الداشبورد.
-//  • TOTAL DELIVERED PPM = مجموع عمود PPM (AB) لنفس الـ SKU، بكات أوف 4 أيام
-//    (نفس الـ CM3 lag، لأن الـ PPM برضو محتاج وقت يستقر زي أي رقم مبني على
-//    Delivered).
+//  • PPM/Piece = متوسط PPM_PER_PIECE موزون بالـ Delivered Pieces، لسه بياخد
+//    كات أوف 4 أيام (lag 4 أيام) — زي Recommended Tracker بالظبط؛ العمود ده
+//    الوحيد اللي محتفظ بالكات أوف، مش من ضمن الأعمدة اللي اتشال منها.
+//  • PPM% = TOTAL DELIVERED PPM ÷ Delivered GMV لنفس الـ SKU (نفس الأرقام
+//    اللي من غير كات أوف فوق)، بنفس منطق PPM/GMV% المستخدم في باقي الداشبورد.
 //  • TOTAL DELIVERED PCS = مجموع Delivered Pieces لنفس الـ SKU، من غير أي
-//    كات أوف خالص (زي ما اتطلب بالظبط).
+//    كات أوف خالص برضو (زي ما اتطلب بالظبط من الأول).
 //  • CONTR PPM% = TOTAL DELIVERED PPM بتاع الـ SKU ده ÷ إجمالي TOTAL DELIVERED
-//    PPM لكل الـ SKUs في الشهر ده (نفس كات أوف الـ 4 أيام).
+//    PPM لكل الـ SKUs في الشهر ده (نفس الأرقام اللي من غير كات أوف فوق).
+//
+// كروت الملخص فوق الجدول (Total Delivered GMV / Total Delivered PPM / PPM%
+// Overall) بتستخدم نفس إجمالي الـ Delivered GMV/PPM من غير كات أوف بتاع
+// الجدول بالظبط — مفيش نسختين مختلفتين. PPM% Overall = Total Delivered PPM
+// ÷ Total Delivered GMV.
 // =========================================================================
 const ppmAnalystState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
@@ -1923,18 +1929,27 @@ function preparePpmAnalystProductsData() {
     const b = getBucket(r.sku);
     // TOTAL DELIVERED PCS — من غير أي كات أوف (زي ما اتطلب بالظبط).
     b.deliveredPieces += (r.deliveredPieces || 0);
+    // Delivered GMV / TOTAL DELIVERED PPM (وبالتبعية CONTR GMV%/PPM%/CONTR
+    // PPM% اللي متبنية عليهم) — من غير أي كات أوف خالص برضو، بطلب صريح إن
+    // الـ 4 أيام لاج يتشال من الأعمدة دي في الجدول نفسه (مش بس الكروت فوق).
+    b.ppm += (r.ppm || 0);
+    b.deliveredGmv += (r.deliveredGmv || 0);
     if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
     if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
+    // PPM/Piece لسه بياخد نفس كات أوف الـ 4 أيام (مش من ضمن الأعمدة اللي
+    // اتطلب شيل الكات أوف منها).
     if (rTime <= cm3CutoffMs) {
-      b.ppm += (r.ppm || 0);
-      b.deliveredGmv += (r.deliveredGmv || 0);
       b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
       b.ppmPerPieceWeight += (r.deliveredPieces || 0);
     }
   });
 
+  // كل الأرقام اللي بتتجمع من bySku بقت أصلاً من غير كات أوف (زي فوق)، فكروت
+  // الملخص وأعمدة الجدول (Delivered GMV/CONTR%/PPM%/TOTAL DELIVERED PPM)
+  // بيستخدموا نفس الإجمالي ده بالظبط — مفيش نسختين مختلفتين تاني.
   let grandDeliveredGmv = 0, grandPpm = 0;
   bySku.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
+  const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
 
   const rows = [];
   bySku.forEach((b, sku) => {
@@ -1949,9 +1964,18 @@ function preparePpmAnalystProductsData() {
     const contrGmvPct = grandDeliveredGmv > 0 ? (b.deliveredGmv / grandDeliveredGmv) * 100 : 0;
     const contrPpmPct = grandPpm > 0 ? (b.ppm / grandPpm) * 100 : 0;
 
+    // Selling Price / Profit — من شيت Products (PRODUCTS_GID/1779314157)،
+    // عمودي PRICE وPROFIT زي ما هما بالظبط.
+    const sellingPrice = prod.price || 0;
+    const profit = prod.profit || 0;
+    // ASP = DELIVERED_GMV ÷ DELIVERED_PIECES من غير أي كات أوف — بنفس
+    // أرقام Delivered GMV/TOTAL DELIVERED PCS اللي أصلاً من غير كات أوف فوق.
+    const asp = b.deliveredPieces > 0 ? (b.deliveredGmv / b.deliveredPieces) : 0;
+
     rows.push({
       skuId: sku, skuName: inv.skuName || prod.name || sku, category: inv.category || prod.category || "Uncategorized",
       stock: Math.round(stock || 0), doh: Math.round(doh),
+      sellingPrice, profit, asp,
       deliveredGmv: b.deliveredGmv, contrGmvPct,
       crPct, drPct, ndrPct, ppmPerPiece, ppmPct,
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
@@ -1961,11 +1985,12 @@ function preparePpmAnalystProductsData() {
 
   ppmAnalystState.data = rows;
   applyPpmAnalystSearchAndSort();
-  renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, currentMonthYear);
+  renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, currentMonthYear, overallPpmPct);
 }
 
-function renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, monthLabel) {
+function renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, monthLabel, overallPpmPct) {
   if ($("ppmApTotalSkus")) $("ppmApTotalSkus").textContent = fmtInt.format(rows.length);
+  if ($("ppmApOverallPpmPct")) $("ppmApOverallPpmPct").textContent = fmtPct(overallPpmPct || 0);
   if ($("ppmApTotalGmv")) $("ppmApTotalGmv").textContent = fmtMoneyCompact(grandDeliveredGmv);
   if ($("ppmApTotalPpm")) $("ppmApTotalPpm").textContent = fmtMoneyCompact(grandPpm);
   if ($("ppmApMonthLabel")) $("ppmApMonthLabel").textContent = monthLabel || "-";
@@ -2017,6 +2042,9 @@ function renderPaginatedPpmAnalystTable() {
       <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
       <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(m.stock)}</span></td>
       <td class="num font-bold text-purple">${fmtIntCell(m.doh)}</td>
+      <td class="num text-blue">${fmtMoneyCompactCell(m.sellingPrice)}</td>
+      <td class="num text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num font-bold">${fmtMoneyCompactCell(m.asp)}</td>
       <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
       <td class="num font-bold">${fmtPctCell(m.contrGmvPct)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
