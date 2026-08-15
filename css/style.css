@@ -102,6 +102,16 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .table-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .table-controls input { font-family: inherit; font-size: 12px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: #fff; min-width: 220px; transition: border-color 0.2s, box-shadow 0.2s; }
 .table-controls input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+.table-controls input.filter-number { min-width: 90px; }
+.table-controls select.filter-select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background: rgba(0,0,0,0.2) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23a1a1aa' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 10px center;
+  border: 1px solid var(--line); border-radius: 6px; color: #fff;
+  padding: 8px 28px 8px 12px; font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; min-width: 130px; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.table-controls select.filter-select:hover { border-color: var(--line-light); }
+.table-controls select.filter-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
 .table-footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 6px 0; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--line); margin-top: 16px; font-weight: 500; }
 .pager { display: flex; align-items: center; gap: 12px; }
 .leaderboard-list { list-style: none; padding: 0; margin: 0; }

@@ -40,6 +40,7 @@
             <a class="nav-item-sub" id="navTargetsCommercial">Targets Commercial</a>
             <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
+            <a class="nav-item-sub" id="navPpmAnalystProducts">PPM Analyst / Products</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -243,6 +244,7 @@
                       <th onclick="sortRecommendedTracker('skuPlacedYday')" class="num" style="cursor:pointer;">SKU Placed Yesterday</th>
                       <th onclick="sortRecommendedTracker('currentInventory')" class="num" style="cursor:pointer;">Current Inventory</th>
                       <th onclick="sortRecommendedTracker('currentInventoryDoh')" class="num" style="cursor:pointer;">Current Inventory DOH</th>
+                      <th onclick="sortRecommendedTracker('avgSkuLast3d')" class="num" style="cursor:pointer;">Avg SKU Last 3D</th>
                       <th onclick="sortRecommendedTracker('crPct')" class="num" style="cursor:pointer;">CR%</th>
                       <th onclick="sortRecommendedTracker('drPct')" class="num" style="cursor:pointer;">DR%</th>
                       <th onclick="sortRecommendedTracker('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
@@ -1104,6 +1106,80 @@
                  </div>
                </div>
              </div>
+          </section>
+        </div>
+        <!-- PPM ANALYST / PRODUCTS (under Commercial, after CM3 Analyst / Products) -->
+        <div id="viewPpmAnalystProducts" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">SKUs Analyzed <span class="icon-box"></span></div>
+                <div class="metric-value" id="ppmApTotalSkus">0</div>
+                <div class="metric-sub text-dim" id="ppmApMonthLabel">-</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-light">Total Delivered GMV <span class="icon-box"></span></div>
+                <div class="metric-value text-light" id="ppmApTotalGmv">0</div>
+                <div class="metric-sub text-dim">This month, cutoff D-4</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total Delivered PPM <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="ppmApTotalPpm">0</div>
+                <div class="metric-sub text-dim">This month, cutoff D-4</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>PPM Analyst / Products</h2>
+                  <p>MAIN_GID, this month, SKUs only — sorted by Delivered GMV, with Stock/DOH from Recommended Tracker's debundled logic</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchPpmAnalystInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <select id="ppmAnalystFilterOp" class="filter-select">
+                    <option value="">PPM% Filter</option>
+                    <option value="gte">PPM% more than</option>
+                    <option value="lte">PPM% less than</option>
+                  </select>
+                  <input id="ppmAnalystFilterValue" class="filter-number" type="number" step="0.1" placeholder="e.g. 20" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="ppmAnalystTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortPpmAnalyst('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortPpmAnalyst('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
+                      <th onclick="sortPpmAnalyst('category')" style="cursor:pointer;">CATEGORY</th>
+                      <th onclick="sortPpmAnalyst('stock')" class="num" style="cursor:pointer;">STOCK</th>
+                      <th onclick="sortPpmAnalyst('doh')" class="num" style="cursor:pointer;">DOH</th>
+                      <th onclick="sortPpmAnalyst('deliveredGmv')" class="num" style="cursor:pointer;">Delivered GMV</th>
+                      <th onclick="sortPpmAnalyst('contrGmvPct')" class="num" style="cursor:pointer;">CONTR GMV%</th>
+                      <th onclick="sortPpmAnalyst('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th onclick="sortPpmAnalyst('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th onclick="sortPpmAnalyst('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortPpmAnalyst('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
+                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
+                      <th onclick="sortPpmAnalyst('totalDeliveredPpm')" class="num" style="cursor:pointer;">TOTAL DELIVERED PPM</th>
+                      <th onclick="sortPpmAnalyst('totalDeliveredPcs')" class="num" style="cursor:pointer;">TOTAL DELIVERED PCS</th>
+                      <th onclick="sortPpmAnalyst('contrPpmPct')" class="num" style="cursor:pointer;">CONTR PPM%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ppmAnalystTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountPpmAnalyst">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPagePpmAnalyst" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorPpmAnalyst">Page 1 of 1</span>
+                  <button id="nextPagePpmAnalyst" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
         <!-- MARKETPLACE SALES PLAN SECTION -->

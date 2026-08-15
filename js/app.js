@@ -261,6 +261,7 @@ const navMarketplaceCaret = $("navMarketplaceCaret");
 const navTargetsCommercial = $("navTargetsCommercial");
 const navCommercialDebundlized = $("navCommercialDebundlized");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
+const navPpmAnalystProducts = $("navPpmAnalystProducts");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
@@ -309,6 +310,7 @@ function switchView(viewName) {
   if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
+  if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
@@ -328,6 +330,7 @@ function switchView(viewName) {
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
+  else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
@@ -356,6 +359,7 @@ if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("
 if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
+if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
@@ -1460,6 +1464,12 @@ function parseProductsMatchesSheet(payload) {
 //        أضعف Single هو اللي بيتحكم في توفر البندل ككل.
 //      - لو مفيش Confirmed خالص آخر 3 أيام لأي Single، الـ DOH بيرجع
 //        لـ Stock بتاعه نفسه (زي ما بيحصل بالظبط في باقي السكشنز).
+//  • Avg SKU Last 3D = متوسط الـ Confirmed آخر 3 أيام اللي هو أصلاً مقام
+//    معادلة الـ Current Inventory DOH (نفس "SKU TOTAL DEMAND OVERALL"
+//    Debundled فوق) — لو الـ PRODUCT_ID Single، الرقم ده بتاعه هو نفسه؛
+//    ولو Bundle، بيبقى بتاع نفس الـ Single اللي هو "عنق الزجاجة" (صاحب أقل
+//    DOH) المستخدم في حساب Current Inventory DOH بتاع البندل، عشان الرقمين
+//    (DOH والـ Avg) يفضلوا متسقين مع بعض ودايمًا بيتكلموا عن نفس الـ Single.
 //
 // الأعمدة دي كلها بتتحسب على مستوى الماتش (Merchant × PRODUCT_ID) بالتحديد،
 // كل واحد بلاج مختلف (زي ما اتطلب بالظبط، مبني على "النهاردة الحقيقي"):
@@ -1483,6 +1493,76 @@ function parseProductsMatchesSheet(payload) {
 //    Cost (شيت COGS، COGS_GID/1724469150) — القيم الثلاثة بتتقرا زي ما هي
 //    من الشيتين، مفيش أي حسبة عليهم غير الطرح المذكور.
 // -------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------
+// SHARED HELPER — بنفس معادلة Stock/DOH المستخدمة في Recommended Tracker
+// بالظبط ("SKU TOTAL DEMAND OVERALL" Debundled)، مستخرجة هنا في فانكشن
+// منفصلة عشان أي سكشن تاني (زي PPM Analyst / Products) يقدر يستخدمها من
+// غير ما يكرر نفس الـ 40 سطر. الشرح الكامل موجود فوق جوه تعليق
+// prepareRecommendedTrackerData (Current Inventory DOH).
+// -------------------------------------------------------------------------
+function buildDebundledStockDohIndex(mainRows) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const d3Start = todayMs - (3 * 86400000);
+
+  const stockByProductId = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (r.productId && !stockByProductId.has(r.productId)) stockByProductId.set(r.productId, r.stock);
+  });
+
+  const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const isBundleByProductId = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (!r.productId || isBundleByProductId.has(r.productId)) return;
+    isBundleByProductId.set(r.productId, /^(true|yes|1)$/i.test(String(r.isBundle || "").trim()));
+  });
+
+  const conf3dBySingleOverall = new Map();
+  (mainRows || []).forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime < d3Start || rTime >= todayMs) return;
+    const mappings = bundleProductMap.get(r.sku);
+    if (mappings && mappings.length) {
+      mappings.forEach(mp => {
+        conf3dBySingleOverall.set(mp.singleId, (conf3dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+      });
+    } else {
+      conf3dBySingleOverall.set(r.sku, (conf3dBySingleOverall.get(r.sku) || 0) + (r.confirmedPieces || 0));
+    }
+  });
+
+  const singleOverallStats = (singleId) => {
+    const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
+    const avg = (conf3dBySingleOverall.get(singleId) || 0) / 3;
+    const doh = avg > 0 ? (stock / avg) : (stock || 0);
+    return { avg, doh };
+  };
+
+  // getStockDoh(sku): الرقم النهائي الجاهز للعرض — Stock بتاع الصف نفسه
+  // (Current Inventory)، و DOH بنفس منطق Bundle-minimum اللي في Recommended
+  // Tracker (لو Single: DOH/Avg بتوعه هو نفسه؛ لو Bundle: بتوع أضعف Single
+  // جواه، أقل DOH بينهم).
+  const getStockDoh = (sku) => {
+    const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : 0;
+    const mappings = bundleProductMap.get(sku) || [];
+    const isBundleSku = isBundleByProductId.get(sku) || mappings.length > 1;
+    let doh, avg;
+    if (isBundleSku && mappings.length) {
+      const stats = mappings.map(mp => singleOverallStats(mp.singleId));
+      const bottleneck = stats.reduce((min, s) => (s.doh < min.doh ? s : min), stats[0]);
+      doh = bottleneck.doh; avg = bottleneck.avg;
+    } else {
+      const stats = singleOverallStats(sku);
+      doh = stats.doh; avg = stats.avg;
+    }
+    return { stock, doh, avg };
+  };
+
+  return { stockByProductId, bundleProductMap, isBundleByProductId, singleOverallStats, getStockDoh };
+}
 function prepareRecommendedTrackerData() {
   const mainRows = state.allParsedRows || [];
 
@@ -1613,13 +1693,15 @@ function prepareRecommendedTrackerData() {
     }
   });
 
-  // DOH بتاع Single واحد (Overall/Debundled): Stock بتاعه (عمود H، من نفس
-  // صفه في شيت الديبندلايز) ÷ متوسط آخر 3 أيام Confirmed المجمّع من *كل*
-  // المنتجات (سنجل أو بندل) اللي بتحتوي عليه (conf3dBySingleOverall).
-  const singleOverallDoh = (singleId) => {
+  // Avg/DOH بتاع Single واحد (Overall/Debundled): avg = متوسط آخر 3 أيام
+  // Confirmed المجمّع من *كل* المنتجات (سنجل أو بندل) اللي بتحتوي عليه
+  // (conf3dBySingleOverall) — نفس الرقم ده هو مقام معادلة الـ DOH (Stock ÷
+  // avg، من عمود H بتاع نفس صف الـ Single في شيت الديبندلايز).
+  const singleOverallStats = (singleId) => {
     const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
     const avg = (conf3dBySingleOverall.get(singleId) || 0) / 3;
-    return avg > 0 ? (stock / avg) : (stock || 0);
+    const doh = avg > 0 ? (stock / avg) : (stock || 0);
+    return { avg, doh };
   };
 
   const rows = (state.productsMatchesRows || []).map(m => {
@@ -1629,19 +1711,26 @@ function prepareRecommendedTrackerData() {
     const merchantCurrentAvg = (placed3dByMerchantSku.get(matchKey) || 0) / 3;
     const currentInventory = stockByProductId.has(sku) ? stockByProductId.get(sku) : (m.stock || 0);
 
-    // Current Inventory DOH:
-    //  • لو الـ SKU ده Single (مش بندل) → "SKU TOTAL DEMAND OVERALL" DOH
-    //    بتاعه هو نفسه (singleOverallDoh(sku)).
-    //  • لو الـ SKU ده Bundle → أضعف حلقة بتتحكم في التوفر: بناخد الـ DOH
-    //    الأقل (Minimum) بين كل الـ Singles اللي جوه البندل ده.
+    // Current Inventory DOH + Avg SKU Last 3D:
+    //  • لو الـ SKU ده Single (مش بندل) → الـ DOH والـ Avg بتوع
+    //    "SKU TOTAL DEMAND OVERALL" هما بتوع نفسه (singleOverallStats(sku)).
+    //  • لو الـ SKU ده Bundle → أضعف حلقة بتتحكم في التوفر: بناخد الـ Single
+    //    صاحب أقل DOH (Minimum) بين كل الـ Singles اللي جوه البندل ده، وكل
+    //    من الـ DOH والـ Avg SKU Last 3D بيطلعوا بتوع نفس الـ Single ده
+    //    بالتحديد (مش بس الـ DOH لوحده) — عشان الرقمين يفضلوا متسقين مع
+    //    بعض ويوضحوا مين فعلاً هو عنق الزجاجة جوه البندل.
     const mappings = bundleProductMap.get(sku) || [];
     const isBundleSku = isBundleByProductId.get(sku) || mappings.length > 1;
-    let currentInventoryDoh;
+    let currentInventoryDoh, avgSkuLast3d;
     if (isBundleSku && mappings.length) {
-      const singleDohs = mappings.map(mp => singleOverallDoh(mp.singleId));
-      currentInventoryDoh = Math.min(...singleDohs);
+      const singleStats = mappings.map(mp => singleOverallStats(mp.singleId));
+      const bottleneck = singleStats.reduce((min, s) => (s.doh < min.doh ? s : min), singleStats[0]);
+      currentInventoryDoh = bottleneck.doh;
+      avgSkuLast3d = bottleneck.avg;
     } else {
-      currentInventoryDoh = singleOverallDoh(sku);
+      const stats = singleOverallStats(sku);
+      currentInventoryDoh = stats.doh;
+      avgSkuLast3d = stats.avg;
     }
 
     const b = byMatch.get(matchKey) || { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, cm3: 0, cm3Gmv: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, placedByDate: new Map() };
@@ -1680,6 +1769,7 @@ function prepareRecommendedTrackerData() {
       skuPlacedYday: placedYdayBySku.get(sku) || 0,
       currentInventory: Math.round(currentInventory || 0),
       currentInventoryDoh: Math.round(currentInventoryDoh),
+      avgSkuLast3d,
       crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm
     };
   });
@@ -1747,6 +1837,7 @@ function renderPaginatedRecommendedTrackerTable() {
       <td class="num text-dim">${fmtIntCell(Math.round(m.skuPlacedYday))}</td>
       <td class="num font-bold text-orange">${fmtIntCell(m.currentInventory)}</td>
       <td class="num font-bold text-purple">${fmtIntCell(m.currentInventoryDoh)}</td>
+      <td class="num text-dim">${m.avgSkuLast3d.toFixed(1)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
@@ -1768,6 +1859,189 @@ function renderPaginatedRecommendedTrackerTable() {
 if ($("searchRecommendedTrackerInput")) $("searchRecommendedTrackerInput").addEventListener("input", applyRecommendedTrackerSearchAndSort);
 if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").addEventListener("click", () => { if (state.recTrackerPage > 0) { state.recTrackerPage -= 1; renderPaginatedRecommendedTrackerTable(); } });
 if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE)); if (state.recTrackerPage < totalPages - 1) { state.recTrackerPage += 1; renderPaginatedRecommendedTrackerTable(); } });
+
+// =========================================================================
+// PPM ANALYST / PRODUCTS (تحت Commercial، بعد CM3 Analyst / Products) —
+// مصدرها MAIN_GID بس (2099497960)، الشهر الحالي بس، SKUs بس (مش ماتشات
+// Merchant×SKU). مرتبة افتراضيًا على Delivered GMV الأعلى.
+//
+//  • STOCK/DOH: نفس الـ "SKU TOTAL DEMAND OVERALL" (Debundled) المستخدمة في
+//    Recommended Tracker بالظبط (buildDebundledStockDohIndex فوق) — ومبنية
+//    على آخر 3 أيام Confirmed الفعليين (كل الشهور)، مش بس صفوف الشهر الحالي.
+//  • CONTR GMV% = Delivered GMV بتاع الـ SKU ده ÷ إجمالي Delivered GMV لكل
+//    الـ SKUs في الشهر ده (بنفس كات أوف الـ CM3 اللي تحت).
+//  • CR% = Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (lag يومين).
+//  • DR% = Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (lag 5 أيام).
+//  • NDR% = CR% × DR%.
+//  • PPM/Piece = متوسط PPM_PER_PIECE موزون بالـ Delivered Pieces، بس
+//    للصفوف اللي عدى عليها 4 أيام (lag 4 أيام) — زي Recommended Tracker بالظبط.
+//  • PPM% = TOTAL DELIVERED PPM ÷ Delivered GMV لنفس الـ SKU (نفس كات أوف الـ
+//    4 أيام)، بنفس منطق PPM/GMV% المستخدم في باقي الداشبورد.
+//  • TOTAL DELIVERED PPM = مجموع عمود PPM (AB) لنفس الـ SKU، بكات أوف 4 أيام
+//    (نفس الـ CM3 lag، لأن الـ PPM برضو محتاج وقت يستقر زي أي رقم مبني على
+//    Delivered).
+//  • TOTAL DELIVERED PCS = مجموع Delivered Pieces لنفس الـ SKU، من غير أي
+//    كات أوف خالص (زي ما اتطلب بالظبط).
+//  • CONTR PPM% = TOTAL DELIVERED PPM بتاع الـ SKU ده ÷ إجمالي TOTAL DELIVERED
+//    PPM لكل الـ SKUs في الشهر ده (نفس كات أوف الـ 4 أيام).
+// =========================================================================
+const ppmAnalystState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
+
+function preparePpmAnalystProductsData() {
+  const mainRowsAll = state.allParsedRows || [];
+
+  // "الشهر ده" = الشهر الحقيقي الحالي (تاريخ الجهاز)، بنفس فورمات monthYear
+  // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const crCutoffMs = todayMs - (2 * 86400000);
+  const drCutoffMs = todayMs - (5 * 86400000);
+  const cm3CutoffMs = todayMs - (4 * 86400000);
+
+  // DOH بيتحسب من كل تاريخ MAIN_GID (آخر 3 أيام فعليين)، مش بس صفوف الشهر
+  // الحالي — بنفس منطق Recommended Tracker بالظبط.
+  const { getStockDoh } = buildDebundledStockDohIndex(mainRowsAll);
+
+  const bySku = new Map();
+  const getBucket = (sku) => {
+    let b = bySku.get(sku);
+    if (!b) {
+      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0 };
+      bySku.set(sku, b);
+    }
+    return b;
+  };
+
+  monthRows.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    const b = getBucket(r.sku);
+    // TOTAL DELIVERED PCS — من غير أي كات أوف (زي ما اتطلب بالظبط).
+    b.deliveredPieces += (r.deliveredPieces || 0);
+    if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
+    if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
+    if (rTime <= cm3CutoffMs) {
+      b.ppm += (r.ppm || 0);
+      b.deliveredGmv += (r.deliveredGmv || 0);
+      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+    }
+  });
+
+  let grandDeliveredGmv = 0, grandPpm = 0;
+  bySku.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
+
+  const rows = [];
+  bySku.forEach((b, sku) => {
+    const inv = state.inventoryMap[sku] || {};
+    const prod = state.productsMap[sku] || {};
+    const { stock, doh } = getStockDoh(sku);
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const ppmPerPiece = b.ppmPerPieceWeight > 0 ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : 0;
+    const ppmPct = b.deliveredGmv > 0 ? (b.ppm / b.deliveredGmv) * 100 : 0;
+    const contrGmvPct = grandDeliveredGmv > 0 ? (b.deliveredGmv / grandDeliveredGmv) * 100 : 0;
+    const contrPpmPct = grandPpm > 0 ? (b.ppm / grandPpm) * 100 : 0;
+
+    rows.push({
+      skuId: sku, skuName: inv.skuName || prod.name || sku, category: inv.category || prod.category || "Uncategorized",
+      stock: Math.round(stock || 0), doh: Math.round(doh),
+      deliveredGmv: b.deliveredGmv, contrGmvPct,
+      crPct, drPct, ndrPct, ppmPerPiece, ppmPct,
+      totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
+      contrPpmPct
+    });
+  });
+
+  ppmAnalystState.data = rows;
+  applyPpmAnalystSearchAndSort();
+  renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, currentMonthYear);
+}
+
+function renderPpmAnalystSummary(rows, grandDeliveredGmv, grandPpm, monthLabel) {
+  if ($("ppmApTotalSkus")) $("ppmApTotalSkus").textContent = fmtInt.format(rows.length);
+  if ($("ppmApTotalGmv")) $("ppmApTotalGmv").textContent = fmtMoneyCompact(grandDeliveredGmv);
+  if ($("ppmApTotalPpm")) $("ppmApTotalPpm").textContent = fmtMoneyCompact(grandPpm);
+  if ($("ppmApMonthLabel")) $("ppmApMonthLabel").textContent = monthLabel || "-";
+}
+
+function sortPpmAnalyst(key) {
+  if (ppmAnalystState.sortKey === key) { ppmAnalystState.sortDir = ppmAnalystState.sortDir === "asc" ? "desc" : "asc"; }
+  else { ppmAnalystState.sortKey = key; ppmAnalystState.sortDir = "desc"; }
+  applyPpmAnalystSearchAndSort();
+}
+
+function applyPpmAnalystSearchAndSort() {
+  const term = $("searchPpmAnalystInput") ? $("searchPpmAnalystInput").value.trim().toLowerCase() : "";
+  // فلتر PPM% (more than / less than) — لو مفيش عملية متحددة أو الرقم فاضي،
+  // الفلتر بيتجاهل تمامًا (كل الصفوف بتعدي).
+  const filterOp = $("ppmAnalystFilterOp") ? $("ppmAnalystFilterOp").value : "";
+  const filterValueRaw = $("ppmAnalystFilterValue") ? $("ppmAnalystFilterValue").value : "";
+  const filterValue = filterValueRaw === "" ? null : parseFloat(filterValueRaw);
+  const hasFilter = filterOp && filterValue !== null && !Number.isNaN(filterValue);
+
+  ppmAnalystState.filtered = (ppmAnalystState.data || []).filter(m => {
+    if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
+      (m.category && m.category.toLowerCase().includes(term)))) return false;
+    if (hasFilter) {
+      if (filterOp === "gte" && !(m.ppmPct > filterValue)) return false;
+      if (filterOp === "lte" && !(m.ppmPct < filterValue)) return false;
+    }
+    return true;
+  });
+  const { sortKey, sortDir } = ppmAnalystState; const dir = sortDir === "asc" ? 1 : -1;
+  ppmAnalystState.filtered.sort((a, b) => {
+    const av = a[sortKey]; const bv = b[sortKey];
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return ((av || 0) - (bv || 0)) * dir;
+  });
+  ppmAnalystState.page = 0;
+  renderPaginatedPpmAnalystTable();
+}
+
+function renderPaginatedPpmAnalystTable() {
+  const tbody = $("ppmAnalystTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = ppmAnalystState.page * PAGE_SIZE;
+  const pageRows = ppmAnalystState.filtered.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.skuId}</td>
+      <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
+      <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(m.stock)}</span></td>
+      <td class="num font-bold text-purple">${fmtIntCell(m.doh)}</td>
+      <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num font-bold">${fmtPctCell(m.contrGmvPct)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
+      <td class="num text-dim">${fmtIntCell(m.totalDeliveredPcs)}</td>
+      <td class="num font-bold">${fmtPctCell(m.contrPpmPct)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(ppmAnalystState.filtered.length / PAGE_SIZE));
+  if ($("rowCountPpmAnalyst")) $("rowCountPpmAnalyst").textContent = `${fmtInt.format(ppmAnalystState.filtered.length)} SKUs`;
+  if ($("pageIndicatorPpmAnalyst")) $("pageIndicatorPpmAnalyst").textContent = `Page ${ppmAnalystState.page + 1} of ${totalPages}`;
+  if ($("prevPagePpmAnalyst")) $("prevPagePpmAnalyst").disabled = ppmAnalystState.page === 0;
+  if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").disabled = ppmAnalystState.page >= totalPages - 1;
+}
+
+if ($("searchPpmAnalystInput")) $("searchPpmAnalystInput").addEventListener("input", applyPpmAnalystSearchAndSort);
+if ($("ppmAnalystFilterOp")) $("ppmAnalystFilterOp").addEventListener("change", applyPpmAnalystSearchAndSort);
+if ($("ppmAnalystFilterValue")) $("ppmAnalystFilterValue").addEventListener("input", applyPpmAnalystSearchAndSort);
+if ($("prevPagePpmAnalyst")) $("prevPagePpmAnalyst").addEventListener("click", () => { if (ppmAnalystState.page > 0) { ppmAnalystState.page -= 1; renderPaginatedPpmAnalystTable(); } });
+if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystState.filtered.length / PAGE_SIZE)); if (ppmAnalystState.page < totalPages - 1) { ppmAnalystState.page += 1; renderPaginatedPpmAnalystTable(); } });
 
 // -------------------------------------------------------------------------
 // شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
@@ -2071,6 +2345,7 @@ function updateDashboard(rows) {
   if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
+  if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
@@ -6944,17 +7219,19 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpSalesPlan: state.mpSalesPlanPage,
         cdz: state.cdzPage,
         cm3ap: cm3apState.page,
-        recTracker: state.recTrackerPage
+        recTracker: state.recTrackerPage,
+        ppmAnalyst: ppmAnalystState.page
     };
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
-    state.recTrackerPage = 0;
+    state.recTrackerPage = 0; ppmAnalystState.page = 0;
     PAGE_SIZE = 999999;
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
+    if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
@@ -6986,6 +7263,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.cdzPage = originalPage.cdz;
         cm3apState.page = originalPage.cm3ap;
         state.recTrackerPage = originalPage.recTracker;
+        ppmAnalystState.page = originalPage.ppmAnalyst;
 
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -7000,6 +7278,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
         if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
+        if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
     }, 150);
 });
 
