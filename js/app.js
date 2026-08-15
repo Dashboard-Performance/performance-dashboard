@@ -228,7 +228,7 @@ const healthyLockingState = {
   data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0, merchantPage: 0
 };
 let pipelineChartInst = null;
-let pipelineChartMetric = "orders"; // "orders" | "pieces" — Pipeline Velocity toggle
+let pipelineChartMetric = "pieces"; // "orders" | "pieces" — Pipeline Velocity toggle
 let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
 let categoryChartInst = null;
 const $ = (id) => document.getElementById(id);
@@ -1028,7 +1028,7 @@ function parseAvailabilityLockingSheet(payload) {
     rows.push({
       singleId,
       skuName: cellText(c[1]),
-      tagerId: cellText(c[2]),
+      tagerId: cellText(c[2]).trim(),
       merchantName: cellText(c[3]) || cellText(c[2]),
       allocatedQty: cellNumber(c[4]),
       usedQty: cellNumber(c[5]),
@@ -1245,7 +1245,10 @@ function tcFinalizeBucket(b, grandDeliveredGmv) {
   const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
   const cm3PerPiece = b.delivered ? (b.cm3 / b.delivered) : 0;
   const ppmPerPiece = b.ppmPerPieceWeight ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : (b.delivered ? (b.ppm / b.delivered) : 0);
-  const ppmPct = b.cm3Gmv ? (b.ppm / b.cm3Gmv) * 100 : 0;
+  // PPM% بيتقسم على Delivered GMV من غير كات أوف (b.deliveredGmv) عشان يفضل
+  // متسق مع PPM اللي بقى من غير كات أوف برضو — مش على b.cm3Gmv (اللي لسه
+  // محترم كات أوف الـ CM3).
+  const ppmPct = b.deliveredGmv ? (b.ppm / b.deliveredGmv) * 100 : 0;
   const aspDlv = b.delivered ? (b.deliveredGmv / b.delivered) : 0;
   // Contribution % دلوقتي بتحسب نصيب الكاتيجوري من إجمالي الـ Total Delivered GMV
   // (مش من إجمالي الـ Placed Pieces زي الأول).
@@ -1280,10 +1283,13 @@ function computeCommercialActuals(mainRowsAll) {
     if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
     if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
     if (isCm3RowEligible(r, cm3CutoffTs)) {
-      b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; b.ppm += (r.ppm || 0);
-      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+      b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv;
     }
+    // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
+    // CM3 اللي لسه بياخد كات أوف الـ CM3_LAG_DAYS زي ما هو فوق.
+    b.ppm += (r.ppm || 0);
+    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
   });
 
   const grand = tcEmptyBucket();
@@ -1615,6 +1621,34 @@ function prepareRecommendedTrackerData() {
   });
   const conf3dBySingleOverall = new Map();
 
+  // -----------------------------------------------------------------------
+  // Allocated Qty / Used Qty / Remaining Pieces — من شيت Availability
+  // Locking (AVAILABILITY_LOCKING_GID)، على مستوى (Merchant × Single SKU)
+  // بالظبط — يعني قفل التاجر بتاع الصف ده تحديدًا على الـ Single، مش
+  // إجمالي كل التجار مع بعض على نفس الـ SKU (زي TAGER_ID في الشيت =
+  // merchantId هنا). بنجمع القفلات النشطة (Active) بس لنفس (تاجر × Single)
+  // (عادة قفل واحد، بس بنجمع للاحتياط لو فيه أكتر من صف):
+  //   • لو الـ PRODUCT_ID في Recommended Tracker Single (مش بندل): بناخد
+  //     الأرقام دي بتاعة (التاجر × الـ Single) نفسه مباشرة.
+  //   • لو الـ PRODUCT_ID Bundle: بندور على كل الـ Singles اللي جواه (من
+  //     شيت الديبندلايز، زي بالظبط الـ Current Inventory DOH فوق)، لنفس
+  //     التاجر بتاع الصف ده، وناخد الـ Single صاحب أقل Remaining Pieces
+  //     (أضعف حلقة/الأكتر تقييدًا)، والـ 3 أعمدة (Allocated/Used/Remaining)
+  //     بتطلع كلها بتاعة نفس الـ Single ده بالتحديد عشان الأرقام تفضل
+  //     متسقة مع بعض.
+  // -----------------------------------------------------------------------
+  const lockingByMerchantSingle = new Map();
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
+    const key = l.tagerId + "||" + l.singleId;
+    const agg = lockingByMerchantSingle.get(key) || { allocatedQty: 0, usedQty: 0, remainingPieces: 0 };
+    agg.allocatedQty += (l.allocatedQty || 0);
+    agg.usedQty += (l.usedQty || 0);
+    agg.remainingPieces += (l.remainingPieces || 0);
+    lockingByMerchantSingle.set(key, agg);
+  });
+  const lockingForMerchantSingle = (merchantId, singleId) => lockingByMerchantSingle.get(merchantId + "||" + singleId) || { allocatedQty: 0, usedQty: 0, remainingPieces: 0 };
+
   // خرائط تجميع لكل SKU: Placed Pieces اليوم/امبارح/آخر 3 أيام (overall)،
   // وآخر 3 أيام على مستوى (Merchant × SKU). (Confirmed Pieces آخر 3 أيام
   // بقت conf3dBySingleOverall فوق — مبنية Debundled مش مباشرة زي هنا.)
@@ -1683,14 +1717,14 @@ function prepareRecommendedTrackerData() {
     if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
     // DR% — Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (DR lag).
     if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
-    // CM3 Per Merchant / CM3% / PPM per Piece — بس للصفوف اللي عدى عليها 4
-    // أيام (CM3 lag)، بنفس منطق الـ weighted average المستخدم في Commercial
-    // Debundlized/Targets Commercial لعمود PPM/Piece.
+    // CM3 Per Merchant / CM3% — بس للصفوف اللي عدى عليها 4 أيام (CM3 lag).
     if (rTime <= cm3CutoffMs) {
       b.cm3 += (r.cm3 || 0); b.cm3Gmv += (r.deliveredGmv || 0);
-      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
     }
+    // PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس CM3 اللي لسه
+    // بياخد كات أوف الـ 4 أيام فوق.
+    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
   });
 
   // Avg/DOH بتاع Single واحد (Overall/Debundled): avg = متوسط آخر 3 أيام
@@ -1759,6 +1793,21 @@ function prepareRecommendedTrackerData() {
     const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
     const skuPpm = (prodInfo.price || 0) - (prodInfo.profit || 0) - cogsCost;
 
+    // Allocated Qty / Used Qty / Remaining Pieces (Availability Locking) —
+    // على مستوى (التاجر × SKU) بتاع الصف ده تحديدًا (m.merchantId)، مش كل
+    // التجار مع بعض. لو بندل: أقل Remaining Pieces بين كل الـ Singles جواه
+    // لنفس التاجر ده (bottleneck)، وناخد الـ Allocated/Used منه هو نفسه مش
+    // مجموع كل الـ Singles.
+    let lockAllocatedQty = 0, lockUsedQty = 0, lockRemainingPieces = 0;
+    if (isBundleSku && mappings.length) {
+      const singleLocks = mappings.map(mp => lockingForMerchantSingle(m.merchantId, mp.singleId));
+      const minLock = singleLocks.reduce((min, s) => (s.remainingPieces < min.remainingPieces ? s : min), singleLocks[0]);
+      lockAllocatedQty = minLock.allocatedQty; lockUsedQty = minLock.usedQty; lockRemainingPieces = minLock.remainingPieces;
+    } else {
+      const lock = lockingForMerchantSingle(m.merchantId, sku);
+      lockAllocatedQty = lock.allocatedQty; lockUsedQty = lock.usedQty; lockRemainingPieces = lock.remainingPieces;
+    }
+
     return {
       type: m.type, productId: m.productId, productName: m.productName,
       merchantId: m.merchantId, merchant: m.merchant, stock: m.stock, action: m.action,
@@ -1770,7 +1819,8 @@ function prepareRecommendedTrackerData() {
       currentInventory: Math.round(currentInventory || 0),
       currentInventoryDoh: Math.round(currentInventoryDoh),
       avgSkuLast3d,
-      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm
+      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm,
+      lockAllocatedQty, lockUsedQty, lockRemainingPieces
     };
   });
 
@@ -1846,6 +1896,9 @@ function renderPaginatedRecommendedTrackerTable() {
       <td class="num font-bold ${m.cm3PerMerchant >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3PerMerchant)}</td>
       <td class="num font-bold">${fmtPctCell(m.cm3Pct)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.skuPpm)}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.lockAllocatedQty))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.lockUsedQty))}</td>
+      <td class="num font-bold ${m.lockRemainingPieces > 0 ? 'text-green' : 'text-red'}">${fmtIntCell(Math.round(m.lockRemainingPieces))}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1906,7 +1959,6 @@ function preparePpmAnalystProductsData() {
   const todayMs = today.getTime();
   const crCutoffMs = todayMs - (2 * 86400000);
   const drCutoffMs = todayMs - (5 * 86400000);
-  const cm3CutoffMs = todayMs - (4 * 86400000);
 
   // DOH بيتحسب من كل تاريخ MAIN_GID (آخر 3 أيام فعليين)، مش بس صفوف الشهر
   // الحالي — بنفس منطق Recommended Tracker بالظبط.
@@ -1936,12 +1988,10 @@ function preparePpmAnalystProductsData() {
     b.deliveredGmv += (r.deliveredGmv || 0);
     if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
     if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
-    // PPM/Piece لسه بياخد نفس كات أوف الـ 4 أيام (مش من ضمن الأعمدة اللي
-    // اتطلب شيل الكات أوف منها).
-    if (rTime <= cm3CutoffMs) {
-      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
-    }
+    // PPM/Piece — من غير أي كات أوف خالص كمان دلوقتي (بطلب صريح إن كل حاجة
+    // تخص PPM متبقاش عليها كات أوف، مش بس Total PPM).
+    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
   });
 
   // كل الأرقام اللي بتتجمع من bySku بقت أصلاً من غير كات أوف (زي فوق)، فكروت
@@ -3669,9 +3719,11 @@ function computeCommercialDebundlized() {
     if (isCm3RowEligible(r, cm3CutoffTs)) {
       b.deliveredGmv += r.deliveredGmv;
       b.cm3 += r.cm3;
-      b.ppm += (r.ppm || 0);
       b.cm3Gmv += r.deliveredGmv;
     }
+    // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
+    // CM3/Delivered GMV اللي لسه بياخدوا كات أوف الـ CM3_LAG_DAYS فوق.
+    b.ppm += (r.ppm || 0);
   });
 
   const targets = state.singleSkuTargets || {};
@@ -4097,13 +4149,15 @@ function buildCm3ApSeriesData(periodMode) {
     b.crPlaced += r.placedPieces || 0; b.crConfirmed += r.confirmedPieces || 0;
     b.aspWeighted += (r.deliveredAsp || 0) * (r.deliveredPieces || 0);
     b.aspWeight += (r.deliveredPieces || 0);
-    // الـ CM3/PPM لوحدهم بيحترموا كات أوف الـ CM3_LAG_DAYS، لأن عمود الربحية في
-    // الشيت نفسه بيتأخر تعبيته أيام قبل ما يوصل — ده مش باج، ده طبيعة مصدر الداتا.
+    // الـ CM3 بيحترم كات أوف الـ CM3_LAG_DAYS، لأن عمود الربحية في الشيت نفسه
+    // بيتأخر تعبيته أيام قبل ما يوصل — ده مش باج، ده طبيعة مصدر الداتا.
     if (isCm3RowEligible(r, cm3Cutoff)) {
-      b.cm3 += r.cm3 || 0; b.cm3Gmv += r.deliveredGmv || 0; b.ppm += (r.ppm || 0);
-      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+      b.cm3 += r.cm3 || 0; b.cm3Gmv += r.deliveredGmv || 0;
     }
+    // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس CM3.
+    b.ppm += (r.ppm || 0);
+    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
   });
 
   function metricsForBucket(b) {
@@ -4181,12 +4235,16 @@ function buildCm3AnalystProductsData(periodMode) {
     b.aspWeighted += (r.deliveredAsp || 0) * (r.deliveredPieces || 0);
     b.aspWeight += (r.deliveredPieces || 0);
     if (isCm3RowEligible(r, cm3Cutoff)) {
-      b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv; b.ppm += (r.ppm || 0);
-      // PPM_PER_PIECE (عمود AD) بيتقرا مباشرة من الشيت مش بيتحسب — بنعمله Weighted Average
-      // على أساس الـ Delivered Pieces بتاعة كل صف عشان نجمع أكتر من صف/تاجر لنفس الـ SKU صح.
-      b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-      b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+      b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv;
     }
+    // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
+    // CM3/CM3% اللي لسه بياخدوا كات أوف الـ 4 أيام فوق. PPM_PER_PIECE (عمود
+    // AD) بيتقرا مباشرة من الشيت مش بيتحسب — بنعمله Weighted Average على
+    // أساس الـ Delivered Pieces بتاعة كل صف عشان نجمع أكتر من صف/تاجر لنفس
+    // الـ SKU صح.
+    b.ppm += (r.ppm || 0);
+    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
+    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
 
     const wPeriod = cm3apPeriodKeyForRow(rd, "weekly");
     const wSort = cm3apPeriodSort(rd, "weekly");
@@ -4960,6 +5018,20 @@ function buildPoorMatchesFromRows(rows) {
   return matches;
 }
 
+// PPM لكل ماتش (Merchant × SKU) من غير أي كات أوف خالص — بنفس شرط استبعاد
+// الصفوف اللي معندهاش Merchant ID والصفوف اللي ACM بتاعتها "Telesales"
+// المستخدم في buildPoorMatchesFromRows، عشان المفاتيح تتطابق مع matchMap.
+function buildPpmByMatchNoCutoff(rows) {
+  const ppmByMatch = new Map();
+  (rows || []).forEach(r => {
+    if (!r.merchantId || !r.sku) return;
+    if ((r.acmName || "").toLowerCase().includes("telesales")) return;
+    const key = r.merchantId + "||" + r.sku;
+    ppmByMatch.set(key, (ppmByMatch.get(key) || 0) + (r.ppm || 0));
+  });
+  return ppmByMatch;
+}
+
 function computePoorMatches() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
@@ -4968,9 +5040,16 @@ function computePoorMatches() {
   );
   if (!rowsFiltered.length) return [];
 
-  const cutoffTs = getCm3LagCutoffTimestamp(rowsFiltered); // نفس كات أوف الـ 4 أيام، لكن مطبق هنا على كل حاجة مش بس CM3
+  const cutoffTs = getCm3LagCutoffTimestamp(rowsFiltered); // نفس كات أوف الـ 4 أيام، مطبق هنا على Placed/Confirmed/Delivered/CM3/NDR
   const eligibleRows = rowsFiltered.filter(r => isCm3RowEligible(r, cutoffTs)); // بس الصفوف اللي قبل/يوم الكات أوف
-  return buildPoorMatchesFromRows(eligibleRows);
+  const matches = buildPoorMatchesFromRows(eligibleRows);
+
+  // PPM بس هو اللي بقى من غير كات أوف خالص (بطلب صريح) — بنجيبه من كل
+  // الصفوف (rowsFiltered) مش بس eligibleRows، وبنعيد كتابة m.ppm بيه.
+  const ppmByMatch = buildPpmByMatchNoCutoff(rowsFiltered);
+  matches.forEach(m => { m.ppm = ppmByMatch.get(m.merchantId + "||" + m.sku) || 0; });
+
+  return matches;
 }
 
 // -------------------------------------------------------------------------

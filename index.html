@@ -175,8 +175,8 @@
                 </div>
                 <div class="table-controls">
                   <div class="segmented" id="pipelineMetricToggle">
-                    <button type="button" class="segmented-btn active" data-metric="orders">Orders</button>
-                    <button type="button" class="segmented-btn" data-metric="pieces">Pieces</button>
+                    <button type="button" class="segmented-btn" data-metric="orders">Orders</button>
+                    <button type="button" class="segmented-btn active" data-metric="pieces">Pieces</button>
                   </div>
                 </div>
               </div>
@@ -193,17 +193,17 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
                 <div class="metric-value" id="rtTotalRows">0</div>
-                <div class="metric-sub text-dim">Matches</div>
+                <div class="metric-sub text-dim">Product × Merchant rows from the matches sheet</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
                 <div class="metric-value text-blue" id="rtTotalSkus">0</div>
-                <div class="metric-sub text-dim">Count Products in this tracker</div>
+                <div class="metric-sub text-dim">Unique PRODUCT_IDs in this tracker</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
                 <div class="metric-value text-orange" id="rtTotalInventory">0</div>
-                <div class="metric-sub text-dim">Sum of Current Inventory (On Tarcker)</div>
+                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map, column H)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
@@ -218,7 +218,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Recommended Tracker</h2>
-                  <p>Products &amp; Matches — live Starting vs Current</p>
+                  <p>Products &amp; Matches (GID 1298408207) — live Starting vs Current, placed history, inventory/DOH and CR/DR/NDR/CM3</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchRecommendedTrackerInput" type="search" placeholder="Search Product, Merchant or Action..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -253,6 +253,9 @@
                       <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;">CM3 Per Merchant</th>
                       <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
                       <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;">SKU PPM</th>
+                      <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;">Allocated Qty (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;">Used Qty (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces (Merchant)</th>
                     </tr>
                   </thead>
                   <tbody id="recommendedTrackerTableBody"></tbody>
@@ -1120,17 +1123,17 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title text-light">Total Delivered GMV <span class="icon-box"></span></div>
                 <div class="metric-value text-light" id="ppmApTotalGmv">0</div>
-                <div class="metric-sub text-dim">This Month</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">Total Delivered PPM <span class="icon-box"></span></div>
                 <div class="metric-value text-blue" id="ppmApTotalPpm">0</div>
-                <div class="metric-sub text-dim">This Month</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-purple">PPM% Overall <span class="icon-box"></span></div>
                 <div class="metric-value text-purple" id="ppmApOverallPpmPct">0%</div>
-                <div class="metric-sub text-dim">Total Delivered PPM ÷ Total Delivered GMV</div>
+                <div class="metric-sub text-dim">Total Delivered PPM ÷ Total Delivered GMV, no cutoff</div>
               </div>
             </div>
           </section>
@@ -1140,7 +1143,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>PPM Analyst / Products</h2>
-                  <p>SKUs Only — Sorted by Delivered GMV, with Stock/DOH</p>
+                  <p>MAIN_GID, this month, SKUs only — sorted by Delivered GMV, with Stock/DOH from Recommended Tracker's debundled logic</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchPpmAnalystInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
