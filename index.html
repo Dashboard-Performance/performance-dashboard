@@ -195,17 +195,17 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
                 <div class="metric-value" id="rtTotalRows">0</div>
-                <div class="metric-sub text-dim">Product × Merchant</div>
+                <div class="metric-sub text-dim">Product × Merchant rows from the matches sheet</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
                 <div class="metric-value text-blue" id="rtTotalSkus">0</div>
-                <div class="metric-sub text-dim">Count Proucts Tracker</div>
+                <div class="metric-sub text-dim">Unique PRODUCT_IDs in this tracker</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
                 <div class="metric-value text-orange" id="rtTotalInventory">0</div>
-                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map)</div>
+                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map, column H)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
@@ -220,7 +220,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Recommended Tracker</h2>
-                  <p>Products &amp; Matches — live Starting vs Current</p>
+                  <p>Products &amp; Matches (GID 1298408207) — live Starting vs Current, placed history, inventory/DOH and CR/DR/NDR/CM3</p>
                 </div>
                 <div class="table-controls">
                   <select id="rtAcmFilterSelect" class="filter-select">
@@ -2063,7 +2063,7 @@
                   <p>Apply filters to update the Sellthrough data</p>
                 </div>
               </div>
-              <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+              <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; margin-left: 0; justify-content: flex-start; width: 100%;">
                 <select id="stMonthSelect" class="st-filter-select">
                   <option value="">All Months</option>
                 </select>
