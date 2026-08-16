@@ -112,6 +112,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 }
 .table-controls select.filter-select:hover { border-color: var(--line-light); }
 .table-controls select.filter-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+.rt-feedback-cell { display: flex; flex-direction: column; gap: 6px; min-width: 210px; }
+.rt-feedback-view { font-size: 11px; color: var(--text-dim); line-height: 1.4; max-height: 48px; overflow-y: auto; white-space: pre-wrap; }
+.rt-feedback-view.rt-feedback-empty { font-style: italic; opacity: 0.6; }
+.rt-feedback-write { display: flex; gap: 6px; }
+.rt-feedback-input { flex: 1; font-family: inherit; font-size: 11px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: #fff; min-width: 0; }
+.rt-feedback-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+.rt-feedback-send { white-space: nowrap; }
+.rt-feedback-send.is-saving { opacity: 0.6; pointer-events: none; }
+.rt-feedback-status { font-size: 10px; }
+.rt-feedback-status.ok { color: var(--green); }
+.rt-feedback-status.err { color: var(--red); }
 .table-footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 6px 0; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--line); margin-top: 16px; font-weight: 500; }
 .pager { display: flex; align-items: center; gap: 12px; }
 .leaderboard-list { list-style: none; padding: 0; margin: 0; }

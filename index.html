@@ -41,6 +41,7 @@
             <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystProducts">PPM Analyst / Products</a>
+            <a class="nav-item-sub" id="navProductsAnalyst">Products / Analyst</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -193,17 +194,17 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
                 <div class="metric-value" id="rtTotalRows">0</div>
-                <div class="metric-sub text-dim">Product × Merchant rows from the matches sheet</div>
+                <div class="metric-sub text-dim">Product × Merchant</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
                 <div class="metric-value text-blue" id="rtTotalSkus">0</div>
-                <div class="metric-sub text-dim">Unique PRODUCT_IDs in this tracker</div>
+                <div class="metric-sub text-dim">Count Products Tracker</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
                 <div class="metric-value text-orange" id="rtTotalInventory">0</div>
-                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map, column H)</div>
+                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
@@ -218,21 +219,29 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Recommended Tracker</h2>
-                  <p>Products &amp; Matches (GID 1298408207) — live Starting vs Current, placed history, inventory/DOH and CR/DR/NDR/CM3</p>
+                  <p>Products &amp; Matches — live Starting vs Current</p>
                 </div>
                 <div class="table-controls">
-                  <input id="searchRecommendedTrackerInput" type="search" placeholder="Search Product, Merchant or Action..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <select id="rtAcmFilterSelect" class="filter-select">
+                    <option value="">All ACMs</option>
+                  </select>
+                  <select id="rtFeedbackDateSelect" class="filter-select" title="Pick a date to view that day's feedback, or 'All Feedback' to see every day's column">
+                    <option value="">Feedback: Today</option>
+                    <option value="__ALL__">All Feedback (all dates)</option>
+                  </select>
+                  <input id="searchRecommendedTrackerInput" type="search" placeholder="Search Product, Merchant, ACM or Action..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" style="margin-left:auto;" />
                 </div>
               </div>
               <div class="table-responsive">
                 <table class="data-table" id="recommendedTrackerTable">
                   <thead>
-                    <tr>
+                    <tr id="rtTableHeaderRow">
                       <th onclick="sortRecommendedTracker('type')" style="cursor:pointer;">Type</th>
                       <th onclick="sortRecommendedTracker('productId')" class="font-mono" style="cursor:pointer;">PRODUCT_ID</th>
                       <th onclick="sortRecommendedTracker('productName')" class="truncate-cell" style="cursor:pointer;">PRODUCT_NAME</th>
                       <th onclick="sortRecommendedTracker('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
                       <th onclick="sortRecommendedTracker('merchant')" class="truncate-cell" style="cursor:pointer;">Merchant</th>
+                      <th onclick="sortRecommendedTracker('acm')" style="cursor:pointer;">ACM</th>
                       <th onclick="sortRecommendedTracker('stock')" class="num" style="cursor:pointer;">Stock</th>
                       <th onclick="sortRecommendedTracker('action')" style="cursor:pointer;">Action</th>
                       <th onclick="sortRecommendedTracker('startingCogs')" class="num" style="cursor:pointer;">Starting Cogs</th>
@@ -256,6 +265,7 @@
                       <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;">Allocated Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;">Used Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces (Merchant)</th>
+                      <th id="rtFeedbackTh" style="min-width: 220px;">Feedback</th>
                     </tr>
                   </thead>
                   <tbody id="recommendedTrackerTableBody"></tbody>
@@ -1188,6 +1198,81 @@
                   <button id="prevPagePpmAnalyst" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorPpmAnalyst">Page 1 of 1</span>
                   <button id="nextPagePpmAnalyst" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- PRODUCTS / ANALYST (under Commercial, nested under PPM Analyst / Products) -->
+        <div id="viewProductsAnalyst" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Products (Inbound This Year) <span class="icon-box"></span></div>
+                <div class="metric-value" id="prodAnTotalSkus">0</div>
+                <div class="metric-sub text-dim" id="prodAnMonthLabel">-</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total PPM Delivered <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="prodAnTotalPpm">0</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">PPM% Overall <span class="icon-box"></span></div>
+                <div class="metric-value text-purple" id="prodAnOverallPpmPct">0%</div>
+                <div class="metric-sub text-dim">Total PPM Delivered ÷ Total Delivered GMV, no cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Total CM3 <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="prodAnTotalCm3">0</div>
+                <div class="metric-sub text-dim">This month, CM3 cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">CM3% Overall <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="prodAnOverallCm3Pct">0%</div>
+                <div class="metric-sub text-dim">Total CM3 ÷ Total Delivered GMV, CM3 cutoff</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Products / Analyst</h2>
+                  <p>Single SKU level (all its bundles combined) — All Products Inbound This Year, Demand Confirmed (last 3 months), current-month PPM &amp; CM3 (CM3 respects the standard lag cutoff)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchProdAnInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="prodAnTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortProdAn('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortProdAn('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
+                      <th onclick="sortProdAn('category')" style="cursor:pointer;">CATEGORY</th>
+                      <th onclick="sortProdAn('demandConfirmed3m')" class="num" style="cursor:pointer;" title="Sum of CNF_QTY from EGY Sell-through rate needed data (GID 548859670) for the last 3 months">DEMAND CONFIRMED (3M)</th>
+                      <th onclick="sortProdAn('avgConfirmedDaily')" class="num" style="cursor:pointer;" title="Demand Confirmed (3M) ÷ total days across the last 3 months">AVG CONFIRMED DAILY</th>
+                      <th onclick="sortProdAn('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Overall across all bundles this Single SKU is part of">TOTAL PPM DELIVERED</th>
+                      <th onclick="sortProdAn('totalDeliveredPcs')" class="num" style="cursor:pointer;">TOTAL DELIVERED PCS</th>
+                      <th onclick="sortProdAn('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/PIECE</th>
+                      <th onclick="sortProdAn('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
+                      <th onclick="sortProdAn('cm3')" class="num" style="cursor:pointer;">CM3</th>
+                      <th onclick="sortProdAn('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/PIECE</th>
+                      <th onclick="sortProdAn('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="prodAnTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountProdAn">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPageProdAn" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorProdAn">Page 1 of 1</span>
+                  <button id="nextPageProdAn" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

@@ -90,6 +90,10 @@ const PRODUCTS_MATCHES_GID = "1298408207";
 // — the app works either way, but JSONP is the one that was failing.
 // -------------------------------------------------------------------------
 const DATA_API_URL = "";
+// نفس رابط الـ Apps Script Web App الموجود في js/auth.js (CONFIG.API_URL) —
+// مستخدم هنا بس عشان يبعت فيدباك الـ Recommended Tracker (save_match_feedback)
+// لل backend، اللي بيكتبه لايف في شيت الماتشات (PRODUCTS_MATCHES_GID).
+const MATCHES_FEEDBACK_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
 // The backend fetches every GID sequentially (one gviz request at a time,
 // on purpose — see backend/Code.gs), so the total round trip for ~14
 // sheets can take longer than a single sheet used to. 60s gives it room.
@@ -179,6 +183,13 @@ const state = {
   productsMatchesRows: [], // Recommended Tracker (تحت Over View) — PRODUCTS_MATCHES_GID
   recTrackerDataPrepared: [], recTrackerSortKey: "skuPlacedToday", recTrackerSortDir: "desc",
   recTrackerFiltered: [], recTrackerPage: 0,
+  // Match Feedback (Recommended Tracker) — كل عمود من K فأكتر في شيت الماتشات
+  // (1298408207) هو تاريخ (يوم واحد)، وكل صف فيه فيدباك الأكاونت مانجر بتاع
+  // الماتش ده في اليوم ده. matchesFeedbackDateLabels = ترتيب أعمدة التواريخ
+  // زي ما هي في الشيت (من قديم لجديد، نفس ترتيب الأعمدة نفسها).
+  matchesFeedbackDateLabels: [],
+  rtAcmFilter: "", // فلتر عمود ACM في Recommended Tracker
+  rtFeedbackDateFilter: "", // "" = النهاردة، غير كده = تاريخ من matchesFeedbackDateLabels
   availabilityLockingSkuRows: [], availabilityLockingCategoryRows: [], availabilityLockingTotals: null,
   cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
   cdzFiltered: [], cdzPage: 0,
@@ -262,6 +273,7 @@ const navTargetsCommercial = $("navTargetsCommercial");
 const navCommercialDebundlized = $("navCommercialDebundlized");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
+const navProductsAnalyst = $("navProductsAnalyst");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
@@ -311,6 +323,7 @@ function switchView(viewName) {
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
+  if(navProductsAnalyst) navProductsAnalyst.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
@@ -331,6 +344,7 @@ function switchView(viewName) {
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
+  else if (viewName === "productsAnalyst") { activeSection = $("viewProductsAnalyst"); if(navProductsAnalyst) navProductsAnalyst.classList.add("active"); prepareProductsAnalystData(); }
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
@@ -360,6 +374,7 @@ if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => sw
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
+if(navProductsAnalyst) navProductsAnalyst.addEventListener("click", () => switchView("productsAnalyst"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
@@ -1243,7 +1258,11 @@ function tcFinalizeBucket(b, grandDeliveredGmv) {
   const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
   const activeDays = b.dateSet.size || 1;
   const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
-  const cm3PerPiece = b.delivered ? (b.cm3 / b.delivered) : 0;
+  // CM3/Piece: المقام لازم ياخد نفس كات أوف الـ CM3 بالظبط (زي CM3%) — مش
+  // إجمالي الـ Delivered الكامل من غير كات أوف. b.drDelivered أصلاً Delivered
+  // Pieces من نفس الصفوف اللي عدت كات أوف الـ CM3 (نفس cm3CutoffTs المستخدم
+  // في isRowEligibleForLag وisCm3RowEligible)، فبنعيد استخدامه هنا بدل b.delivered.
+  const cm3PerPiece = b.drDelivered ? (b.cm3 / b.drDelivered) : 0;
   const ppmPerPiece = b.ppmPerPieceWeight ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : (b.delivered ? (b.ppm / b.delivered) : 0);
   // PPM% بيتقسم على Delivered GMV من غير كات أوف (b.deliveredGmv) عشان يفضل
   // متسق مع PPM اللي بقى من غير كات أوف برضو — مش على b.cm3Gmv (اللي لسه
@@ -1405,16 +1424,43 @@ function parseDebundleMapSheet(payload) {
 // الـ Recommended Tracker. الأعمدة (0-based) زي ما هي في الشيت:
 //   0 Type | 1 PRODUCT_ID | 2 PRODUCT_NAME | 3 Merchant ID | 4 Merchant |
 //   5 Stock | 6 Action | 7 Starting Cogs | 8 Merchant Starting AVG |
-//   9 SKU Starting AVG
+//   9 SKU Starting AVG | 10+ (K فأكتر) عمود لكل يوم فيدباك — عنوان العمود
+//   نفسه هو التاريخ (زي "16-Aug")، وكل خلية جواه هي فيدباك الأكاونت مانجر
+//   بتاع الماتش (الصف) ده في اليوم ده. الأعمدة دي بتتضاف تلقائيًا من
+//   backend/Code.gs (handleSaveMatchFeedback) كل ما حد يبعت فيدباك جديد.
 // -------------------------------------------------------------------------
 function parseProductsMatchesSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
+  const rawCols = payload?.table?.cols ?? [];
   const rows = [];
+  let feedbackDateLabels = [];
+  // جوجل شيتس (gviz) أحيانًا بيحط صف العناوين في table.cols (label) بدل ما
+  // يحطه جوه table.rows — زي ما بيحصل بالظبط في parseCommercialTargetsSheet.
+  // فبنتأكد الأول من هنا (index >= 10 = أعمدة الفيدباك K فأكتر)، ولو مفيش
+  // حاجة هنا بنرجع نلتقطها من صف العناوين جوه rows (الكود القديم تحت).
+  if (rawCols.length > 10) {
+    const colsLabels = rawCols.slice(10).map(col => (col && col.label ? String(col.label).trim() : "")).filter(Boolean);
+    if (colsLabels.length) feedbackDateLabels = colsLabels;
+  }
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
     const productId = cellText(c[1]).trim();
-    if (!productId || productId === "PRODUCT_ID") continue; // يتخطى صف الهيدر لو اتكرر
+    if (!productId || productId === "PRODUCT_ID") {
+      // صف الهيدر (لو اتكرر جوه الصفوف) — نلتقط منه عناوين أعمدة الفيدباك
+      // (K فأكتر) قبل ما نتخطاه، لو لسه ملقطناش حاجة من table.cols فوق.
+      if (productId === "PRODUCT_ID" && c.length > 10 && !feedbackDateLabels.length) {
+        feedbackDateLabels = c.slice(10).map(cell => cellText(cell).trim()).filter(Boolean);
+      }
+      continue;
+    }
+    const feedbackByDate = {};
+    for (let i = 10; i < c.length; i++) {
+      const label = feedbackDateLabels[i - 10];
+      if (!label) continue;
+      const text = cellText(c[i]).trim();
+      if (text) feedbackByDate[label] = text;
+    }
     rows.push({
       type: cellText(c[0]),
       productId: productId,
@@ -1425,9 +1471,14 @@ function parseProductsMatchesSheet(payload) {
       action: cellText(c[6]),
       startingCogs: cellNumber(c[7]),
       merchantStartingAvg: cellNumber(c[8]),
-      skuStartingAvg: cellNumber(c[9])
+      skuStartingAvg: cellNumber(c[9]),
+      feedbackByDate
     });
   }
+  // بنعلق ترتيب أعمدة التواريخ نفسه على الـ array المرجعة (من غير ما نغير
+  // شكل الإرجاع الأساسي — لسه array زي ما كانت — عشان أي كود تاني بيتعامل
+  // مع state.productsMatchesRows كـ array عادي يفضل شغال من غير أي تعديل).
+  rows.feedbackDateLabels = feedbackDateLabels;
   return rows;
 }
 
@@ -1808,6 +1859,10 @@ function prepareRecommendedTrackerData() {
       lockAllocatedQty = lock.allocatedQty; lockUsedQty = lock.usedQty; lockRemainingPieces = lock.remainingPieces;
     }
 
+    // ACM بتاع التاجر ده — من merchantInfoMap (مبني من شيت الـ Main) —
+    // عشان الأكاونت مانجر يقدر يفلتر ويشوف بس الماتشات بتاعته.
+    const acmName = ((state.merchantInfoMap || new Map()).get(m.merchantId) || {}).acmName || "Unassigned";
+
     return {
       type: m.type, productId: m.productId, productName: m.productName,
       merchantId: m.merchantId, merchant: m.merchant, stock: m.stock, action: m.action,
@@ -1820,13 +1875,136 @@ function prepareRecommendedTrackerData() {
       currentInventoryDoh: Math.round(currentInventoryDoh),
       avgSkuLast3d,
       crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm,
-      lockAllocatedQty, lockUsedQty, lockRemainingPieces
+      lockAllocatedQty, lockUsedQty, lockRemainingPieces,
+      acm: acmName, matchKey, feedbackByDate: m.feedbackByDate || {}
     };
   });
 
   state.recTrackerDataPrepared = rows;
+  populateRtFilterDropdowns(rows);
   applyRecommendedTrackerSearchAndSort();
   renderRecommendedTrackerSummary(rows);
+}
+
+// -------------------------------------------------------------------------
+// بيملأ الـ 2 Dropdown الجداد فوق جدول Recommended Tracker:
+//  • rtAcmFilterSelect: كل الـ ACM المختلفين الموجودين في الصفوف الحالية.
+//  • rtFeedbackDateSelect: "Feedback: Today" + كل تواريخ أعمدة الفيدباك
+//    الموجودة فعليًا في الشيت (state.matchesFeedbackDateLabels)، من الأحدث
+//    للأقدم، عشان المستخدم يقدر يرجع لأي يوم فات ويشوف/يعدل الفيدباك بتاعه.
+// -------------------------------------------------------------------------
+function populateRtFilterDropdowns(rows) {
+  const acmSelect = $("rtAcmFilterSelect");
+  if (acmSelect) {
+    const acms = Array.from(new Set(rows.map(r => r.acm).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const prevVal = state.rtAcmFilter || "";
+    acmSelect.innerHTML = `<option value="">All ACMs</option>` + acms.map(a => `<option value="${a}">${a}</option>`).join("");
+    acmSelect.value = acms.includes(prevVal) ? prevVal : "";
+    state.rtAcmFilter = acmSelect.value;
+  }
+  const dateSelect = $("rtFeedbackDateSelect");
+  if (dateSelect) {
+    const labels = (state.matchesFeedbackDateLabels || []).slice().reverse(); // الأحدث الأول
+    const todayLabel = rtTodayFeedbackLabel();
+    const prevVal = state.rtFeedbackDateFilter || "";
+    const options = labels.filter(l => l !== todayLabel).map(l => `<option value="${l}">${l}</option>`).join("");
+    // "All Feedback" — بيوري كل أعمدة التواريخ مع بعض كأعمدة منفصلة في آخر
+    // الجدول (15-Aug, 16-Aug, ...) بدل ما تختار يوم واحد بس.
+    dateSelect.innerHTML = `<option value="">Feedback: Today (${todayLabel})</option>` + options + `<option value="__ALL__">All Feedback (all dates)</option>`;
+    const validValues = labels.concat(["__ALL__"]);
+    dateSelect.value = validValues.includes(prevVal) ? prevVal : "";
+    state.rtFeedbackDateFilter = dateSelect.value;
+  }
+}
+
+// عنوان عمود فيدباك "النهاردة" بنفس فورمات الأعمدة الموجودة في الشيت (زي
+// "16-Aug") — عشان لو مفيش عمود بالتاريخ ده لسه، هيتضاف تلقائيًا في
+// backend/Code.gs أول ما حد يبعت فيدباك جديد النهاردة.
+function rtTodayFeedbackLabel() {
+  const d = new Date();
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${d.getDate()}-${months[d.getMonth()]}`;
+}
+
+// المستخدم اللي عامل login حاليًا (من نفس session بتاعة auth.js) — بيرجع
+// null لو مفيش حد عامل login عشان نمنع بعت فيدباك من غير اسم معروف.
+function getLoggedInUser() {
+  try {
+    const raw = localStorage.getItem("taagerDashboardSession");
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    return session && session.name ? session : null;
+  } catch (e) { return null; }
+}
+
+// عشان نمنع أي XSS بسيط لو حد كتب فيدباك فيه < أو > أو " جوه النص.
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// -------------------------------------------------------------------------
+// بيبعت فيدباك الأكاونت مانجر على ماتش معين (Merchant × PRODUCT_ID) لل
+// backend (Code.gs) عشان يتكتب لايف في شيت الماتشات (PRODUCTS_MATCHES_GID)،
+// في عمود تاريخ النهاردة (K فأكتر) — لو حصل أكتر من فيدباك في نفس اليوم
+// لنفس الماتش، آخر واحد بيكتب فوق اللي قبله (Overwrite، مفيش هيستوري).
+// الاسم اللي بيتسجل مع الفيدباك بياخده تلقائيًا من المستخدم Login حاليًا.
+// -------------------------------------------------------------------------
+async function submitMatchFeedback(merchantId, productId, text, rowEl) {
+  const statusEl = rowEl ? rowEl.querySelector(".rt-feedback-status") : null;
+  const sendBtn = rowEl ? rowEl.querySelector(".rt-feedback-send") : null;
+  const setStatus = (msg, cls) => { if (statusEl) { statusEl.textContent = msg; statusEl.className = "rt-feedback-status " + (cls || ""); } };
+
+  const trimmed = (text || "").trim();
+  if (!trimmed) { setStatus("اكتب فيدباك الأول", "err"); return; }
+
+  const user = getLoggedInUser();
+  if (!user) { setStatus("لازم تعمل Login الأول", "err"); return; }
+
+  if (!MATCHES_FEEDBACK_API_URL) { setStatus("Backend مش متظبط", "err"); return; }
+
+  if (sendBtn) { sendBtn.classList.add("is-saving"); sendBtn.disabled = true; }
+  setStatus("بيتبعت...", "");
+
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي auth.js بالظبط — عشان نتفادى CORS preflight مع Apps Script
+      body: JSON.stringify({
+        action: "save_match_feedback",
+        merchantId: merchantId,
+        productId: productId,
+        feedback: trimmed,
+        acmName: user.name
+      })
+    });
+    const data = await resp.json();
+    if (!data || data.success === false) throw new Error((data && data.error) || "فشل الحفظ");
+
+    // نحدّث الداتا المحلية فورًا (من غير ما نستنى Refresh كامل للداشبورد)
+    // عشان المستخدم يشوف الفيدباك اتحفظ في نفس اللحظة.
+    const todayLabel = rtTodayFeedbackLabel();
+    const matchKey = merchantId + "||" + productId;
+    (state.productsMatchesRows || []).forEach(m => {
+      if (m.merchantId === merchantId && m.productId === productId) { m.feedbackByDate = m.feedbackByDate || {}; m.feedbackByDate[todayLabel] = trimmed; }
+    });
+    (state.recTrackerDataPrepared || []).forEach(m => {
+      if (m.matchKey === matchKey) { m.feedbackByDate = m.feedbackByDate || {}; m.feedbackByDate[todayLabel] = trimmed; }
+    });
+    if (!state.matchesFeedbackDateLabels) state.matchesFeedbackDateLabels = [];
+    if (!state.matchesFeedbackDateLabels.includes(todayLabel)) state.matchesFeedbackDateLabels.push(todayLabel);
+
+    setStatus("اتحفظ ✓", "ok");
+    renderPaginatedRecommendedTrackerTable();
+  } catch (err) {
+    console.error("submitMatchFeedback error:", err);
+    setStatus("حصل خطأ، جرب تاني", "err");
+    if (sendBtn) { sendBtn.classList.remove("is-saving"); sendBtn.disabled = false; }
+  }
 }
 
 function renderRecommendedTrackerSummary(rows) {
@@ -1848,11 +2026,14 @@ function sortRecommendedTracker(key) {
 
 function applyRecommendedTrackerSearchAndSort() {
   const term = $("searchRecommendedTrackerInput") ? $("searchRecommendedTrackerInput").value.trim().toLowerCase() : "";
+  const acmFilter = state.rtAcmFilter || "";
   state.recTrackerFiltered = (state.recTrackerDataPrepared || []).filter(m => {
+    if (acmFilter && m.acm !== acmFilter) return false;
     if (!term) return true;
     return (m.productName && m.productName.toLowerCase().includes(term)) || (m.productId && String(m.productId).toLowerCase().includes(term)) ||
       (m.merchant && m.merchant.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
-      (m.action && m.action.toLowerCase().includes(term)) || (m.type && m.type.toLowerCase().includes(term));
+      (m.action && m.action.toLowerCase().includes(term)) || (m.type && m.type.toLowerCase().includes(term)) ||
+      (m.acm && m.acm.toLowerCase().includes(term));
   });
   const { recTrackerSortKey, recTrackerSortDir } = state; const dir = recTrackerSortDir === "asc" ? 1 : -1;
   state.recTrackerFiltered.sort((a, b) => {
@@ -1864,18 +2045,76 @@ function applyRecommendedTrackerSearchAndSort() {
   renderPaginatedRecommendedTrackerTable();
 }
 
+// كل تواريخ أعمدة الفيدباك الموجودة فعليًا في الشيت + النهاردة (حتى لو
+// عمود النهاردة لسه مش موجود في الشيت لأنه محدش بعت فيدباك النهاردة لسه) —
+// بترتيب الشيت نفسه (من الأقدم للأحدث)، مستخدمة في وضع "All Feedback".
+function rtAllFeedbackLabelsIncludingToday() {
+  const todayLabel = rtTodayFeedbackLabel();
+  const labels = (state.matchesFeedbackDateLabels || []).slice();
+  if (!labels.includes(todayLabel)) labels.push(todayLabel);
+  return labels;
+}
+
+// بيزود/بيشيل أعمدة الهيدر الإضافية بتاعة "All Feedback" (عمود لكل تاريخ)
+// جمب عمود "Feedback" الأساسي (بتاع النهاردة، قابل للكتابة). بيتنفذ قبل ما
+// نبني صفوف الـ tbody عشان عدد الأعمدة يفضل متطابق بين thead وtbody.
+function syncRtFeedbackHeaders(isAllMode) {
+  const headerRow = $("rtTableHeaderRow");
+  if (!headerRow) return;
+  headerRow.querySelectorAll(".rt-feedback-date-th").forEach(el => el.remove());
+  if (!isAllMode) return;
+  const todayLabel = rtTodayFeedbackLabel();
+  rtAllFeedbackLabelsIncludingToday().filter(l => l !== todayLabel).forEach(label => {
+    const th = document.createElement("th");
+    th.className = "rt-feedback-date-th";
+    th.style.minWidth = "180px";
+    th.textContent = label;
+    headerRow.appendChild(th);
+  });
+}
+
 function renderPaginatedRecommendedTrackerTable() {
   const tbody = $("recommendedTrackerTableBody"); if (!tbody) return; tbody.innerHTML = "";
   const start = state.recTrackerPage * PAGE_SIZE;
   const pageRows = state.recTrackerFiltered.slice(start, start + PAGE_SIZE);
+  const todayLabel = rtTodayFeedbackLabel();
+  const isAllMode = state.rtFeedbackDateFilter === "__ALL__";
+  // في وضع "All Feedback"، عمود "Feedback" الأساسي بيفضل دايمًا عمود
+  // النهاردة (قابل للكتابة)، وباقي التواريخ بتتضاف كأعمدة إضافية للقراءة بس.
+  const selectedDateLabel = isAllMode ? todayLabel : (state.rtFeedbackDateFilter || todayLabel);
+  const isViewingToday = selectedDateLabel === todayLabel;
+  syncRtFeedbackHeaders(isAllMode);
+  const extraDateLabels = isAllMode ? rtAllFeedbackLabelsIncludingToday().filter(l => l !== todayLabel) : [];
   pageRows.forEach(m => {
     const tr = document.createElement("tr");
+    tr.dataset.matchKey = m.matchKey;
+    tr.dataset.merchantId = m.merchantId;
+    tr.dataset.productId = m.productId;
+    const feedbackText = (m.feedbackByDate && m.feedbackByDate[selectedDateLabel]) || "";
+    const feedbackCellHtml = isViewingToday
+      ? `<div class="rt-feedback-cell">
+           <div class="rt-feedback-view ${feedbackText ? '' : 'rt-feedback-empty'}">${feedbackText ? escapeHtml(feedbackText) : 'No feedback yet today'}</div>
+           <div class="rt-feedback-write">
+             <input type="text" class="rt-feedback-input" placeholder="Write feedback for ${todayLabel}..." value="${feedbackText ? escapeHtml(feedbackText) : ''}" />
+             <button type="button" class="btn btn-primary small rt-feedback-send">Send</button>
+           </div>
+           <div class="rt-feedback-status"></div>
+         </div>`
+      : `<div class="rt-feedback-cell">
+           <div class="rt-feedback-view ${feedbackText ? '' : 'rt-feedback-empty'}">${feedbackText ? escapeHtml(feedbackText) : `No feedback on ${selectedDateLabel}`}</div>
+         </div>`;
+    // في وضع "All Feedback" — عمود إضافي للقراءة بس لكل تاريخ تاني غير النهاردة.
+    const extraDateCellsHtml = extraDateLabels.map(label => {
+      const text = (m.feedbackByDate && m.feedbackByDate[label]) || "";
+      return `<td><div class="rt-feedback-cell"><div class="rt-feedback-view ${text ? '' : 'rt-feedback-empty'}">${text ? escapeHtml(text) : `No feedback on ${label}`}</div></div></td>`;
+    }).join("");
     tr.innerHTML = `
       <td class="text-dim">${m.type || "-"}</td>
       <td class="font-mono text-dim">${m.productId}</td>
       <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
       <td class="font-mono text-dim">${m.merchantId}</td>
       <td class="truncate-cell" title="${m.merchant}">${m.merchant}</td>
+      <td class="text-dim">${m.acm || "-"}</td>
       <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(Math.round(m.stock))}</span></td>
       <td class="text-dim">${m.action || "-"}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.startingCogs)}</td>
@@ -1899,6 +2138,8 @@ function renderPaginatedRecommendedTrackerTable() {
       <td class="num text-dim">${fmtIntCell(Math.round(m.lockAllocatedQty))}</td>
       <td class="num text-dim">${fmtIntCell(Math.round(m.lockUsedQty))}</td>
       <td class="num font-bold ${m.lockRemainingPieces > 0 ? 'text-green' : 'text-red'}">${fmtIntCell(Math.round(m.lockRemainingPieces))}</td>
+      <td>${feedbackCellHtml}</td>
+      ${extraDateCellsHtml}
     `;
     tbody.appendChild(tr);
   });
@@ -1912,6 +2153,33 @@ function renderPaginatedRecommendedTrackerTable() {
 if ($("searchRecommendedTrackerInput")) $("searchRecommendedTrackerInput").addEventListener("input", applyRecommendedTrackerSearchAndSort);
 if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").addEventListener("click", () => { if (state.recTrackerPage > 0) { state.recTrackerPage -= 1; renderPaginatedRecommendedTrackerTable(); } });
 if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE)); if (state.recTrackerPage < totalPages - 1) { state.recTrackerPage += 1; renderPaginatedRecommendedTrackerTable(); } });
+if ($("rtAcmFilterSelect")) $("rtAcmFilterSelect").addEventListener("change", (e) => { state.rtAcmFilter = e.target.value; applyRecommendedTrackerSearchAndSort(); });
+if ($("rtFeedbackDateSelect")) $("rtFeedbackDateSelect").addEventListener("change", (e) => { state.rtFeedbackDateFilter = e.target.value; renderPaginatedRecommendedTrackerTable(); });
+
+// Event delegation لزراير "Send" بتاعة الفيدباك — الصفوف بتتعمل ديناميكيًا
+// (innerHTML) في renderPaginatedRecommendedTrackerTable، فمينفعش نربط
+// listener مباشر على كل زرار وقت الإنشاء؛ بنسمع على الـ tbody نفسه بدل كده.
+const recTrackerTbodyEl = $("recommendedTrackerTableBody");
+if (recTrackerTbodyEl) {
+  recTrackerTbodyEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".rt-feedback-send");
+    if (!btn) return;
+    const tr = btn.closest("tr");
+    if (!tr) return;
+    const input = tr.querySelector(".rt-feedback-input");
+    if (!input) return;
+    submitMatchFeedback(tr.dataset.merchantId, tr.dataset.productId, input.value, tr);
+  });
+  // Enter جوه input الفيدباك = نفس تأثير دوس على Send.
+  recTrackerTbodyEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const input = e.target.closest(".rt-feedback-input");
+    if (!input) return;
+    const tr = input.closest("tr");
+    if (!tr) return;
+    submitMatchFeedback(tr.dataset.merchantId, tr.dataset.productId, input.value, tr);
+  });
+}
 
 // =========================================================================
 // PPM ANALYST / PRODUCTS (تحت Commercial، بعد CM3 Analyst / Products) —
@@ -2120,6 +2388,237 @@ if ($("ppmAnalystFilterOp")) $("ppmAnalystFilterOp").addEventListener("change", 
 if ($("ppmAnalystFilterValue")) $("ppmAnalystFilterValue").addEventListener("input", applyPpmAnalystSearchAndSort);
 if ($("prevPagePpmAnalyst")) $("prevPagePpmAnalyst").addEventListener("click", () => { if (ppmAnalystState.page > 0) { ppmAnalystState.page -= 1; renderPaginatedPpmAnalystTable(); } });
 if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystState.filtered.length / PAGE_SIZE)); if (ppmAnalystState.page < totalPages - 1) { ppmAnalystState.page += 1; renderPaginatedPpmAnalystTable(); } });
+
+// -------------------------------------------------------------------------
+// PRODUCTS / ANALYST (منفصلة تمامًا، مش جوه PPM Analyst / Products — بس
+// متحطوطة تحتيها في القائمة الجانبية) — كل الـ Products اللي اتعملهم Inbound
+// (استلام) في أي شهر من السنة الحالية (نفس شيت الـ Inbound (GID 565878313)
+// اللي بتستخدمه لوحة الـ Sellthrough Rate Panel)، مع:
+//  • مهم جدًا: الجدول ده شغال على مستوى SINGLE SKU (SINGLE_ID من شيت
+//    الديبندلايز PRODUCTS_DEBUNDLE_MAP_GID)، مش على مستوى صف الـ Main
+//    مباشرة. أي رقم فلوس (PPM/GMV/CM3) لازم يبقى "OVERALL" — يعني نجمعه
+//    من كل البندلز (PRODUCT_ID) اللي الـ Single ده عضو فيها، مش بس البندل
+//    اللي عمل PRODUCT_ID == SINGLE_ID. التوزيع ده بيستخدم نفس منطق
+//    Commercial Plan بالظبط: كل بندل بيوزع قيمته (GMV/PPM/CM3) على الـ
+//    Singles اللي جواه بوزن الـ COGS (cogsWeight = Single Cogs ÷ Bundle
+//    Cogs)، وبيوزع القطع (Pieces/Demand) بضرب PRODUCT_QUANTITY (زي
+//    conf3dBySingleOverall في buildDebundledStockDohIndex بالظبط).
+//  • DEMAND CONFIRMED (3M) = مجموع CNF_QTY من شيت "EGY Sell-through rate
+//    needed data #2941" (SELLTHROUGH_NEEDED_GID / 548859670 — نفس مصدر
+//    state.metabaseSellthroughNeeded اللي بتستخدمه لوحة الـ Sellthrough Rate
+//    Panel)، لكل PRODUCT_ID، لآخر 3 شهور (الشهر الحالي + الشهرين اللي فاتوا
+//    — يعني شهر 8+7+6 دلوقتي). الشيت ده أصلاً سنجل SKU (مفيش بندلات)، فمفيش
+//    داعي لأي توزيع/ديبندلايز هنا (بعكس PPM/GMV/CM3 تحت اللي مصدرهم Main).
+//  • AVG CONFIRMED DAILY = DEMAND CONFIRMED (3M) ÷ إجمالي عدد أيام الـ 3
+//    شهور دول بالظبط (نفس منطق avg3dConfirmed = conf3d ÷ 3 المستخدم في
+//    Commercial Debundlized، بس هنا بتاع 3 شهور مش 3 أيام).
+//  • TOTAL PPM DELIVERED / TOTAL DELIVERED PCS / PPM/Piece / PPM% — الشهر
+//    الحالي، من غير أي كات أوف، بنفس لوجيك PPM Analyst / Products بالظبط
+//    (PPM/Piece هنا = TOTAL PPM DELIVERED ÷ TOTAL DELIVERED PCS مباشرة، زي
+//    ما اتطلب بالظبط) — لكن كل رقم منهم دلوقتي OVERALL (كل البندلز).
+//  • CM3 / CM3 per Piece / CM3% — الشهر الحالي، بنفس كات أوف الـ CM3
+//    (CM3_LAG_DAYS / getCm3LagCutoffTimestamp / isCm3RowEligible) المستخدم
+//    في أي سكشن تاني مصدره MAIN_GID (زي CM3 Analyst / Products بالظبط)،
+//    وبرضو OVERALL على كل البندلز بوزن الـ COGS.
+// -------------------------------------------------------------------------
+const prodAnState = { data: [], filtered: [], sortKey: "totalDeliveredPpm", sortDir: "desc", page: 0 };
+
+function prepareProductsAnalystData() {
+  const mainRowsAll = state.allParsedRows || [];
+
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentYear = now.getFullYear();
+
+  // آخر 3 شهور (الشهر الحالي + اتنين اللي فاتوا) — يعني شهر 8، 7، 6 دلوقتي —
+  // مع إجمالي عدد أيام الـ 3 شهور دول (لحساب AVG Confirmed Daily).
+  let last3TotalDays = 0;
+  const last3MonthYears = [0, 1, 2].map(back => {
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    last3TotalDays += new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  });
+  const last3Set = new Set(last3MonthYears);
+
+  // كل الـ SINGLE SKUs اللي اتعملهم Inbound في أي شهر من السنة الحالية.
+  const inboundThisYearSkus = new Set();
+  (state.inboundRows || []).forEach(r => {
+    if (!r.sku || !r.receivingMonthKey) return;
+    const d = new Date(r.receivingMonthKey);
+    if (!isNaN(d.getTime()) && d.getFullYear() === currentYear) inboundThisYearSkus.add(r.sku);
+  });
+
+  // خريطة PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity, cogsWeight}] —
+  // نفس الماب المستخدم في Commercial Plan/Healthy Locking بالظبط.
+  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+
+  // بيرجع mappings الصف ده: لو الـ PRODUCT_ID (r.sku) موجود في شيت الديبندلايز
+  // بيرجع mappings بتاعته زي ما هي (بوزن COGS/الكمية الحقيقية)؛ غير كده
+  // (SKU مش موجود في الديبندلايز خالص) بيترجع Fallback: الـ SKU ده نفسه
+  // "Single" لوحده بوزن/كمية = 1 (زي fallback الأصلي في conf3dBySingleOverall).
+  const mappingsFor = (sku) => {
+    const m = bundleProductMap.get(sku);
+    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
+  };
+
+  // Demand Confirmed (آخر 3 شهور) — من شيت "EGY Sell-through rate needed
+  // data #2941" (SELLTHROUGH_NEEDED_GID / 548859670)، نفس المصدر اللي
+  // بتستخدمه لوحة الـ Sellthrough Rate Panel بالظبط (state.metabaseSellthroughNeeded)
+  // — عمود CNF_QTY، مجموع لكل الصفوف اللي MONTH بتاعها من آخر 3 شهور
+  // (شهر 8 + 7 + 6)، لكل PRODUCT_ID (ده أصلاً سنجل SKU في الشيت ده، مفيش
+  // بندلات هنا، فمفيش داعي لأي توزيع/ديبندلايز).
+  const demandBySingle = new Map();
+  (state.metabaseSellthroughNeeded || []).forEach(row => {
+    const sku = row.PRODUCT_ID;
+    const mk = stMonthKeyFromValue(row.MONTH);
+    if (!sku || !mk || !last3Set.has(mk)) return;
+    demandBySingle.set(sku, (demandBySingle.get(sku) || 0) + (row.CNF_QTY || 0));
+  });
+
+  // PPM / CM3 الشهر الحالي OVERALL — نفس منطق PPM Analyst / Products بالظبط
+  // (Delivered GMV/PPM من غير كات أوف)، والـ CM3 بياخد كات أوف الـ CM3_LAG_DAYS.
+  // GMV/PPM/CM3 (فلوس) بيتوزعوا بوزن الـ COGS، والـ Pieces بيتوزعوا بضرب الكمية.
+  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
+
+  const bySingle = new Map();
+  const getBucket = (singleId) => {
+    let b = bySingle.get(singleId);
+    if (!b) { b = { ppm: 0, deliveredGmv: 0, deliveredPieces: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0 }; bySingle.set(singleId, b); }
+    return b;
+  };
+  monthRows.forEach(r => {
+    if (!r.sku) return;
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    mappingsFor(r.sku).forEach(mp => {
+      if (!inboundThisYearSkus.has(mp.singleId)) return;
+      const b = getBucket(mp.singleId);
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      // TOTAL DELIVERED PCS (العمود المستقل) — من غير كات أوف خالص، زي الـ PPM.
+      b.deliveredPieces += (r.deliveredPieces || 0) * qty;
+      b.ppm += (r.ppm || 0) * weight;
+      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      // CM3 (وCM3/Piece وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت
+      // كات أوف الـ CM3، بما فيها Delivered Pieces المستخدمة كمقام لـ CM3/Piece
+      // (cm3DeliveredPieces) — مش إجمالي Delivered Pieces الكامل فوق.
+      if (cm3Eligible) {
+        b.cm3 += (r.cm3 || 0) * weight;
+        b.cm3Gmv += (r.deliveredGmv || 0) * weight;
+        b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
+      }
+    });
+  });
+
+  // كل Single inbound السنة دي لازم يظهر في الجدول حتى لو مالوش صفوف في شهر
+  // الـ Main الحالي (PPM/CM3 هيبقوا صفر وقتها، مش هيتشال من الجدول).
+  inboundThisYearSkus.forEach(sku => getBucket(sku));
+
+  let grandDeliveredGmv = 0, grandPpm = 0, grandCm3 = 0, grandCm3Gmv = 0;
+  bySingle.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; grandCm3 += b.cm3; grandCm3Gmv += b.cm3Gmv; });
+  const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
+  const overallCm3Pct = grandCm3Gmv > 0 ? (grandCm3 / grandCm3Gmv) * 100 : 0;
+
+  const rows = [];
+  bySingle.forEach((b, singleId) => {
+    const inv = state.inventoryMap[singleId] || {};
+    const prod = state.productsMap[singleId] || {};
+    const debundleName = singlesList.get(singleId);
+    const ppmPerPiece = b.deliveredPieces > 0 ? (b.ppm / b.deliveredPieces) : 0;
+    const ppmPct = b.deliveredGmv > 0 ? (b.ppm / b.deliveredGmv) * 100 : 0;
+    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+    const demandConfirmed3m = demandBySingle.get(singleId) || 0;
+    const avgConfirmedDaily = last3TotalDays > 0 ? (demandConfirmed3m / last3TotalDays) : 0;
+
+    rows.push({
+      skuId: singleId, skuName: debundleName || inv.skuName || prod.name || singleId, category: inv.category || prod.category || "Uncategorized",
+      demandConfirmed3m: Math.round(demandConfirmed3m), avgConfirmedDaily,
+      totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
+      ppmPerPiece, ppmPct,
+      cm3: b.cm3, cm3PerPiece, cm3Pct
+    });
+  });
+
+  prodAnState.data = rows;
+  applyProdAnSearchAndSort();
+  renderProdAnSummary(rows, grandPpm, currentMonthYear, overallPpmPct, grandCm3, overallCm3Pct);
+}
+
+function renderProdAnSummary(rows, grandPpm, monthLabel, overallPpmPct, grandCm3, overallCm3Pct) {
+  if ($("prodAnTotalSkus")) $("prodAnTotalSkus").textContent = fmtInt.format(rows.length);
+  if ($("prodAnMonthLabel")) $("prodAnMonthLabel").textContent = monthLabel || "-";
+  if ($("prodAnTotalPpm")) $("prodAnTotalPpm").textContent = fmtMoneyCompact(grandPpm);
+  if ($("prodAnOverallPpmPct")) $("prodAnOverallPpmPct").textContent = fmtPct(overallPpmPct || 0);
+  if ($("prodAnTotalCm3")) $("prodAnTotalCm3").textContent = fmtMoneyCompact(grandCm3);
+  if ($("prodAnOverallCm3Pct")) $("prodAnOverallCm3Pct").textContent = fmtPct(overallCm3Pct || 0);
+}
+
+function sortProdAn(key) {
+  if (prodAnState.sortKey === key) { prodAnState.sortDir = prodAnState.sortDir === "asc" ? "desc" : "asc"; }
+  else { prodAnState.sortKey = key; prodAnState.sortDir = "desc"; }
+  applyProdAnSearchAndSort();
+}
+
+function applyProdAnSearchAndSort() {
+  const term = $("searchProdAnInput") ? $("searchProdAnInput").value.trim().toLowerCase() : "";
+  prodAnState.filtered = (prodAnState.data || []).filter(m => {
+    if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
+      (m.category && m.category.toLowerCase().includes(term)))) return false;
+    return true;
+  });
+
+  const { sortKey, sortDir } = prodAnState; const dir = sortDir === "asc" ? 1 : -1;
+  prodAnState.filtered.sort((a, b) => {
+    let av = a[sortKey]; let bv = b[sortKey];
+    if (av === null || av === undefined) av = -Infinity;
+    if (bv === null || bv === undefined) bv = -Infinity;
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+
+  prodAnState.page = 0;
+  renderPaginatedProdAnTable();
+}
+
+function renderPaginatedProdAnTable() {
+  const tbody = $("prodAnTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = prodAnState.page * PAGE_SIZE;
+  const pageRows = prodAnState.filtered.slice(start, start + PAGE_SIZE);
+
+  if (!pageRows.length) {
+    tbody.innerHTML = `<tr><td colspan="12" class="text-dim center">No products match this filter.</td></tr>`;
+  } else {
+    pageRows.forEach(m => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="font-mono text-light font-bold">${m.skuId}</td>
+        <td class="truncate-cell text-dim" title="${m.skuName || ""}">${m.skuName || '<span class="text-dim">-</span>'}</td>
+        <td class="truncate-cell text-dim">${m.category}</td>
+        <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
+        <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
+        <td class="num text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
+        <td class="num">${fmtIntCell(m.totalDeliveredPcs)}</td>
+        <td class="num">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+        <td class="num font-bold text-purple">${fmtPctCell(m.ppmPct)}</td>
+        <td class="num text-orange">${fmtMoneyCompactCell(m.cm3)}</td>
+        <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+        <td class="num font-bold text-green">${fmtPctCell(m.cm3Pct)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  const totalPages = Math.max(1, Math.ceil(prodAnState.filtered.length / PAGE_SIZE));
+  if ($("rowCountProdAn")) $("rowCountProdAn").textContent = `${fmtInt.format(prodAnState.filtered.length)} SKUs`;
+  if ($("pageIndicatorProdAn")) $("pageIndicatorProdAn").textContent = `Page ${prodAnState.page + 1} of ${totalPages}`;
+  if ($("prevPageProdAn")) $("prevPageProdAn").disabled = prodAnState.page === 0;
+  if ($("nextPageProdAn")) $("nextPageProdAn").disabled = prodAnState.page >= totalPages - 1;
+}
+
+if ($("searchProdAnInput")) $("searchProdAnInput").addEventListener("input", applyProdAnSearchAndSort);
+if ($("prevPageProdAn")) $("prevPageProdAn").addEventListener("click", () => { if (prodAnState.page > 0) { prodAnState.page -= 1; renderPaginatedProdAnTable(); } });
+if ($("nextPageProdAn")) $("nextPageProdAn").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(prodAnState.filtered.length / PAGE_SIZE)); if (prodAnState.page < totalPages - 1) { prodAnState.page += 1; renderPaginatedProdAnTable(); } });
 
 // -------------------------------------------------------------------------
 // شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
@@ -2424,6 +2923,7 @@ function updateDashboard(rows) {
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
+  if ($("viewProductsAnalyst") && $("viewProductsAnalyst").classList.contains("active-view")) prepareProductsAnalystData();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
@@ -3245,34 +3745,77 @@ function renderCm3AnalystHeaders() {
   });
 }
 
-// الصفحة دي (CM3 Analyst) كلها أصلاً مخصصة لتحليل الـ CM3، فكل رقم فيها (Placed / Confirmed /
-// Delivered / Delivered GMV / CM3) لازم يتحسب من نفس الفترة المقطوعة (بعد استبعاد آخر
-// CM3_LAG_DAYS أيام) — مش الـ CM3 لوحدها بتاخد كات أوف والباقي ماشي لحد آخر يوم في الداتا.
-// ده بالظبط زي لو حد فلتر التاريخ يدوي في الشيت وشال آخر 4 أيام قبل ما يعمل SUM.
+// الصفحة دي (CM3 Analyst) بقت شغالة بمنطق كات أوف مختلف عن قبل، بطلب صريح:
+//  • Placed / Confirmed / Delivered (أوردرات وقطع) + Delivered GMV (كعمود/
+//    كارت مستقل) = من غير أي كات أوف خالص، الفترة/الشهر المفلتر كله كامل
+//    (زي أي مكان تاني في الداشبورد بياخد Placed/Confirmed/Delivered من غير
+//    لاج). CR%/DR%/NDR% بالتبعية بقوا من غير كات أوف برضو لأنهم متبنيين
+//    على الأرقام دي.
+//  • CM3 لوحدها لسه بتاخد كات أوف الـ CM3 (CM3_LAG_DAYS) عادي زي ما هي.
+//  • CM3/Pc و CM3% — كل واحد فيهم بياخد نفس الكات أوف اللي بتاخده الـ CM3
+//    نفسها في المقام بتاعه بالظبط: CM3/Pc بيتقسم على Delivered Pcs من نفس
+//    الصفوف اللي عدت كات أوف الـ CM3 (مش إجمالي Delivered Pcs من غير كات
+//    أوف)، وCM3% بيتقسم على Delivered GMV من نفس الصفوف كمان — عشان
+//    البسط والمقام في النسبتين دول يفضلوا من نفس الفترة المقطوعة بالظبط.
 function prepareCm3AnalystData(rows) {
-  const map = new Map(); let totalGmv = 0; let totalCm3 = 0;
+  const map = new Map(); let totalGmv = 0; let totalCm3 = 0; let totalCm3Gmv = 0;
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
-  const eligibleRows = rows.filter(r => isCm3RowEligible(r, cm3Cutoff));
-  eligibleRows.forEach(r => {
-    let key = "";
-    if (analystState.scope === "merchant") key = r.merchantId; else if (analystState.scope === "category") key = r.category; else if (analystState.scope === "match") key = r.merchantId + "||" + r.sku;
+
+  const keyFor = (r) => {
+    if (analystState.scope === "merchant") return r.merchantId;
+    if (analystState.scope === "category") return r.category;
+    if (analystState.scope === "match") return r.merchantId + "||" + r.sku;
+    return "";
+  };
+  const getEntry = (key, r) => {
+    let e = map.get(key);
+    if (!e) {
+      e = {
+        id: r.merchantId, name: r.merchantName || r.merchantId, sku: r.sku,
+        skuName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown"), category: r.category,
+        placed: 0, confirmed: 0, delivered: 0, placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, deliveredGmv: 0,
+        cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0
+      };
+      map.set(key, e);
+    }
+    return e;
+  };
+
+  // Placed / Confirmed / Delivered / Delivered GMV — من غير أي كات أوف خالص.
+  rows.forEach(r => {
+    const key = keyFor(r);
     if (!key || key === "Unassigned") return;
-    if (!map.has(key)) { map.set(key, { id: r.merchantId, name: r.merchantName || r.merchantId, sku: r.sku, skuName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown"), category: r.category, placed: 0, confirmed: 0, delivered: 0, placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, deliveredGmv: 0, cm3: 0 }); }
-    const entry = map.get(key);
-    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedPieces += (r.placedPieces || r.placedOrders); entry.confirmedPieces += (r.confirmedPieces || r.confirmedOrders); entry.deliveredPieces += (r.deliveredPieces || r.deliveredOrders); entry.deliveredGmv += r.deliveredGmv; entry.cm3 += r.cm3;
-    totalGmv += r.deliveredGmv; totalCm3 += r.cm3;
+    const entry = getEntry(key, r);
+    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
+    entry.placedPieces += (r.placedPieces || r.placedOrders); entry.confirmedPieces += (r.confirmedPieces || r.confirmedOrders); entry.deliveredPieces += (r.deliveredPieces || r.deliveredOrders);
+    entry.deliveredGmv += r.deliveredGmv;
+    totalGmv += r.deliveredGmv;
   });
+
+  // CM3 (وCM3/Pc وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت كات أوف الـ CM3.
+  rows.forEach(r => {
+    if (!isCm3RowEligible(r, cm3Cutoff)) return;
+    const key = keyFor(r);
+    if (!key || key === "Unassigned") return;
+    const entry = getEntry(key, r);
+    entry.cm3 += r.cm3;
+    entry.cm3Gmv += r.deliveredGmv;
+    entry.cm3DeliveredPieces += (r.deliveredPieces || r.deliveredOrders);
+    totalCm3 += r.cm3;
+    totalCm3Gmv += r.deliveredGmv;
+  });
+
   analystState.data = Array.from(map.values()).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; 
-    const cm3Pct = m.deliveredGmv ? (m.cm3 / m.deliveredGmv) * 100 : 0; 
-    const cm3PerPiece = m.delivered ? (m.cm3 / m.delivered) : 0;
+    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr;
+    const cm3Pct = m.cm3Gmv ? (m.cm3 / m.cm3Gmv) * 100 : 0;
+    const cm3PerPiece = m.cm3DeliveredPieces ? (m.cm3 / m.cm3DeliveredPieces) : 0;
     const normalizedCategory = (m.category || "").trim().toLowerCase();
     const catTarget = state.categoryTargets[normalizedCategory] || { targetCm3: 0, targetCm3PerPiece: 0, targetCm3Pct: 0 };
     return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct, cm3PerPiece, targetCm3: catTarget.targetCm3, targetCm3PerPiece: catTarget.targetCm3PerPiece, targetCm3Pct: catTarget.targetCm3Pct };
   });
   if($("analystTotalGmv")) $("analystTotalGmv").textContent = fmtMoneyCompact(totalGmv);
   if($("analystTotalCm3")) $("analystTotalCm3").textContent = fmtMoneyCompact(totalCm3);
-  if($("analystOverallCm3Pct")) $("analystOverallCm3Pct").textContent = fmtPct(totalGmv ? (totalCm3/totalGmv)*100 : 0);
+  if($("analystOverallCm3Pct")) $("analystOverallCm3Pct").textContent = fmtPct(totalCm3Gmv ? (totalCm3/totalCm3Gmv)*100 : 0);
   let topEntity = "-";
   if(analystState.data.length > 0) {
     const sorted = [...analystState.data].sort((a,b) => b.cm3 - a.cm3);
@@ -3734,9 +4277,12 @@ function computeCommercialDebundlized() {
     const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
     const ndrPct = (crPct * drPct) / 100;
     const cm3Pct = b.cm3Gmv ? (b.cm3 / b.cm3Gmv) * 100 : 0;
-    // CM3/Piece و PPM/Piece: نفس منطق شيت الـ Single المرجعي (G2=E2/C2، H2=F2/C2)
-    // — بيتقسموا على إجمالي القطع المستلمة (DLV Pieces) بتاعة الـ SKU ده.
-    const cm3PerPiece = b.delivered ? (b.cm3 / b.delivered) : 0;
+    // PPM/Piece: على إجمالي القطع المستلمة الكامل (b.delivered، من غير كات
+    // أوف)، زي الـ PPM نفسه. CM3/Piece بقى مختلف: المقام لازم ياخد نفس كات
+    // أوف الـ CM3 بالظبط (زي CM3%) — b.drDelivered أصلاً Delivered Pieces من
+    // نفس الصفوف اللي عدت كات أوف الـ CM3 (نفس cm3CutoffTs)، فبنستخدمه هنا
+    // بدل b.delivered الكامل.
+    const cm3PerPiece = b.drDelivered ? (b.cm3 / b.drDelivered) : 0;
     const ppmPerPiece = b.delivered ? (b.ppm / b.delivered) : 0;
 
     const targetInfo = targets[productId];
@@ -7148,6 +7694,9 @@ function applySnapshotToState(snapshot) {
   state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
   state.availabilityLockingRows = snapshot.availabilityLockingRows || state.availabilityLockingRows || [];
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
+  // ترتيب أعمدة تواريخ الفيدباك (K فأكتر) زي ما هي في شيت الماتشات — معلقة
+  // على الـ array نفسه من parseProductsMatchesSheet (rows.feedbackDateLabels).
+  state.matchesFeedbackDateLabels = state.productsMatchesRows.feedbackDateLabels || state.matchesFeedbackDateLabels || [];
   // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — بس مش كل مرة اليوزر يفتح
   // اللوحة أو يرجعلها لازم نعمل reset. نقارن بصمة مصادر الـ Sellthrough بس:
   // لو نفسها زي قبل (يعني مفيش تحديث حقيقي وصل من الشيت)، نسيب
@@ -7327,18 +7876,20 @@ confirmDownloadBtn.addEventListener("click", () => {
         cdz: state.cdzPage,
         cm3ap: cm3apState.page,
         recTracker: state.recTrackerPage,
-        ppmAnalyst: ppmAnalystState.page
+        ppmAnalyst: ppmAnalystState.page,
+        prodAn: prodAnState.page
     };
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
-    state.recTrackerPage = 0; ppmAnalystState.page = 0;
+    state.recTrackerPage = 0; ppmAnalystState.page = 0; prodAnState.page = 0;
     PAGE_SIZE = 999999;
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
+    if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
@@ -7371,6 +7922,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         cm3apState.page = originalPage.cm3ap;
         state.recTrackerPage = originalPage.recTracker;
         ppmAnalystState.page = originalPage.ppmAnalyst;
+        prodAnState.page = originalPage.prodAn;
 
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -7386,6 +7938,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
         if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
         if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
+        if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
     }, 150);
 });
 

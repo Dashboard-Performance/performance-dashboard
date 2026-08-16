@@ -31,6 +31,15 @@ var SPREADSHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 var USERS_SHEET_GID = 1839838273;
 var ALLOWED_EMAIL_DOMAIN = "taager.com";
 
+// Recommended Tracker feedback — Products/Matches sheet. Columns (1-based):
+// A Type | B PRODUCT_ID | C PRODUCT_NAME | D Merchant ID | E Merchant |
+// F Stock | G Action | H Starting Cogs | I Merchant Starting AVG |
+// J SKU Starting AVG | K+ one column per calendar day of feedback, header =
+// that day's date label (e.g. "16-Aug"), each cell = that row's (match's)
+// feedback text for that day, written by the logged-in Account Manager.
+var PRODUCTS_MATCHES_GID = 1298408207;
+var MATCHES_FEEDBACK_FIRST_COL = 11; // column K, 1-based
+
 // ----------------------------------------------------------------------------
 // PRESENCE ("who's online") — only this email is allowed to read the list of
 // currently active users. Anyone else's request for the list is refused
@@ -71,7 +80,110 @@ function doPost(e) {
   if (action === "backup_chunk") return handleBackupChunk(payload);
   if (action === "heartbeat") return handleHeartbeat(payload);
   if (action === "get_online_users") return handleGetOnlineUsers(payload);
+  if (action === "save_match_feedback") return handleSaveMatchFeedback(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
+}
+
+/**
+ * ============================================================================
+ *  RECOMMENDED TRACKER — LIVE FEEDBACK WRITE-BACK
+ * ============================================================================
+ *  js/app.js (submitMatchFeedback) posts here whenever an Account Manager
+ *  writes feedback on a match (Merchant × PRODUCT_ID) row in the
+ *  Recommended Tracker. This writes it directly into the Products/Matches
+ *  sheet (PRODUCTS_MATCHES_GID), into the column for TODAY's date — creating
+ *  that date column (header = "16-Aug"-style label) the first time any
+ *  feedback comes in for that day. If a match already has feedback for that
+ *  same day, the cell is overwritten (last write wins — no history kept).
+ * ============================================================================
+ */
+function handleSaveMatchFeedback(payload) {
+  var merchantId = String(payload.merchantId || "").trim();
+  var productId = String(payload.productId || "").trim();
+  var feedback = String(payload.feedback || "").trim();
+  var acmName = String(payload.acmName || "").trim();
+
+  if (!merchantId || !productId) {
+    return jsonResponse({ success: false, error: "Missing merchantId/productId." });
+  }
+  if (!feedback) {
+    return jsonResponse({ success: false, error: "Feedback text is empty." });
+  }
+  if (!acmName) {
+    return jsonResponse({ success: false, error: "Missing logged-in user name." });
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sheet = getMatchesSheet();
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.max(sheet.getLastColumn(), MATCHES_FEEDBACK_FIRST_COL - 1);
+    if (lastRow < 2) return jsonResponse({ success: false, error: "Matches sheet has no data rows." });
+
+    // Column B = PRODUCT_ID, Column D = Merchant ID — find the row for this
+    // exact match. If the same (merchant, product) pair appears more than
+    // once, every matching row gets the feedback written (kept consistent).
+    var idsRange = sheet.getRange(2, 2, lastRow - 1, 3).getValues(); // B:D -> [PRODUCT_ID, PRODUCT_NAME, Merchant ID]
+    var matchingRows = [];
+    for (var i = 0; i < idsRange.length; i++) {
+      var rowProductId = String(idsRange[i][0] || "").trim();
+      var rowMerchantId = String(idsRange[i][2] || "").trim();
+      if (rowProductId === productId && rowMerchantId === merchantId) {
+        matchingRows.push(i + 2); // sheet row number (1-based, +1 for header)
+      }
+    }
+    if (!matchingRows.length) {
+      return jsonResponse({ success: false, error: "No matching row found for this merchant/product." });
+    }
+
+    // Find (or create) today's date column, starting from K.
+    var todayLabel = formatFeedbackDateLabel(new Date());
+    var headerRange = lastCol >= MATCHES_FEEDBACK_FIRST_COL
+      ? sheet.getRange(1, MATCHES_FEEDBACK_FIRST_COL, 1, lastCol - MATCHES_FEEDBACK_FIRST_COL + 1).getValues()[0]
+      : [];
+    var todayColIdx = -1; // 0-based within headerRange
+    for (var h = 0; h < headerRange.length; h++) {
+      if (String(headerRange[h] || "").trim() === todayLabel) { todayColIdx = h; break; }
+    }
+    var todayCol;
+    if (todayColIdx === -1) {
+      todayCol = lastCol + 1; // append a brand-new column at the end
+      sheet.getRange(1, todayCol).setValue(todayLabel);
+    } else {
+      todayCol = MATCHES_FEEDBACK_FIRST_COL + todayColIdx;
+    }
+
+    // Overwrite (no history) — last feedback of the day replaces the cell.
+    // Store the ACM name alongside the text so the cell is self-describing
+    // in the sheet even without opening the dashboard.
+    var cellValue = feedback + " — " + acmName;
+    matchingRows.forEach(function (rowNum) {
+      sheet.getRange(rowNum, todayCol).setValue(cellValue);
+    });
+
+    return jsonResponse({ success: true, dateLabel: todayLabel, rowsUpdated: matchingRows.length });
+  } catch (err) {
+    return jsonResponse({ success: false, error: err.message || String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Matches the "16-Aug" style label already used as an example column header
+// in the sheet — day-of-month (no leading zero) + "-" + 3-letter month name.
+function formatFeedbackDateLabel(d) {
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return d.getDate() + "-" + months[d.getMonth()];
+}
+
+function getMatchesSheet() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].getSheetId() === PRODUCTS_MATCHES_GID) return sheets[i];
+  }
+  throw new Error("Products/Matches sheet with GID " + PRODUCTS_MATCHES_GID + " was not found.");
 }
 
 /**
