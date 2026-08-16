@@ -99,7 +99,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .sm-value { font-size: 22px; font-weight: 800; color: #fff; }
 .summary-progress-wrapper { flex: 1; min-width: 250px; background: rgba(0,0,0,0.2); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
 .sp-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 10px; color: #fff; font-weight: 600; text-transform: uppercase; }
-.table-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.table-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; justify-content: flex-end; margin-left: auto; }
 .table-controls input { font-family: inherit; font-size: 12px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: #fff; min-width: 220px; transition: border-color 0.2s, box-shadow 0.2s; }
 .table-controls input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
 .table-controls input.filter-number { min-width: 90px; }

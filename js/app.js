@@ -75,6 +75,17 @@ const AVAILABILITY_LOCKING_GID = "2085802038";
 // -------------------------------------------------------------------------
 const PRODUCTS_MATCHES_GID = "1298408207";
 
+// شيت الميرشنت اليومي (Merchant × SKU) — بيدينا Placed/Confirmed لكل يوم من
+// آخر 32 يوم (DAY0 = النهاردة، DAY1 = امبارح، ...، DAY31). في Recommended
+// Tracker إحنا مستخدمين بس DAY0..DAY5 (Placed) — العمود المطلوب (Placed
+// Pieces اليومي لآخر 6 أيام) بعد Remaining Pieces مباشرة، متربط بنفس
+// الماتش (SKU_ID × TAGER_ID = نفس مفتاح matchKey بتاع Recommended Tracker).
+// الأعمدة (0-based): 0 SKU_ID, 1 SKU_NAME, 2 TAGER_ID, 3 FULL_NAME, 4 ACM,
+// 5 PLACED_PIECES, 6 CONFIRMED_PIECES, 7 DELIVERED_PIECES, 8 CR_2_DAY,
+// 9 DR_5_DAYS, 10 NDR_5_DAYS, 11 AVG_TOPUP, 12 ASP, 13 DAY0 .. 44 DAY31,
+// 45 DAY_0_CONFIRMED .. 76 DAY_31_CONFIRMED.
+const MERCHANT_SKU_DAILY_GID = "461854229";
+
 // -------------------------------------------------------------------------
 // DATA API (Apps Script backend) — ONE round trip for all sheets instead of
 // the old ~14 parallel gviz/JSONP calls, which Google was rate-limiting
@@ -181,6 +192,7 @@ const state = {
   debundleMap: [], singleSkuTargets: {}, cogsMap: new Map(), // Commercial Plan (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID / COGS_GID)
   availabilityLockingRows: [], // Availability Locking (تحت Poor Matches) — AVAILABILITY_LOCKING_GID
   productsMatchesRows: [], // Recommended Tracker (تحت Over View) — PRODUCTS_MATCHES_GID
+  merchantSkuDailyRows: [], // Recommended Tracker (Day0..Day5) — MERCHANT_SKU_DAILY_GID
   recTrackerDataPrepared: [], recTrackerSortKey: "skuPlacedToday", recTrackerSortDir: "desc",
   recTrackerFiltered: [], recTrackerPage: 0,
   // Match Feedback (Recommended Tracker) — كل عمود من K فأكتر في شيت الماتشات
@@ -274,6 +286,7 @@ const navCommercialDebundlized = $("navCommercialDebundlized");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
 const navProductsAnalyst = $("navProductsAnalyst");
+const navProductsMatchesAnalyst = $("navProductsMatchesAnalyst");
 const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
@@ -324,6 +337,7 @@ function switchView(viewName) {
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
   if(navProductsAnalyst) navProductsAnalyst.classList.remove("active");
+  if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.remove("active");
   if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
@@ -345,6 +359,7 @@ function switchView(viewName) {
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
   else if (viewName === "productsAnalyst") { activeSection = $("viewProductsAnalyst"); if(navProductsAnalyst) navProductsAnalyst.classList.add("active"); prepareProductsAnalystData(); }
+  else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); prepareProductsMatchesAnalystData(); }
   else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
@@ -375,6 +390,7 @@ if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", 
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
 if(navProductsAnalyst) navProductsAnalyst.addEventListener("click", () => switchView("productsAnalyst"));
+if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.addEventListener("click", () => switchView("productsMatchesAnalyst"));
 if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
@@ -1483,6 +1499,33 @@ function parseProductsMatchesSheet(payload) {
 }
 
 // -------------------------------------------------------------------------
+// شيت الميرشنت اليومي (MERCHANT_SKU_DAILY_GID / gid=461854229). إحنا بس
+// مستخدمين هنا PLACED PIECES بتاعة DAY0..DAY5 (آخر 6 أيام، DAY0 = النهاردة)
+// لنفس الماتش (SKU_ID × TAGER_ID)، عشان نعرضهم في Recommended Tracker بعد
+// عمود Remaining Pieces مباشرة — باقي أعمدة الشيت (CR_2_DAY, DR_5_DAYS,
+// AVG_TOPUP, ASP, DAY_x_CONFIRMED, ...) مش مستخدمة هنا، بنتجاهلها بالكامل.
+// الأعمدة (0-based): 0 SKU_ID, 1 SKU_NAME, 2 TAGER_ID, 3 FULL_NAME, 4 ACM,
+// 5 PLACED_PIECES, 6 CONFIRMED_PIECES, 7 DELIVERED_PIECES, 8 CR_2_DAY,
+// 9 DR_5_DAYS, 10 NDR_5_DAYS, 11 AVG_TOPUP, 12 ASP, 13 DAY0 .. 18 DAY5.
+function parseMerchantSkuDailySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const skuId = cellText(c[0]).trim();
+    if (!skuId || skuId === "SKU_ID") continue; // تخطي صف العناوين لو موجود جوه rows
+    rows.push({
+      skuId,
+      tagerId: cellText(c[2]).trim(),
+      day0: cellNumber(c[13]), day1: cellNumber(c[14]), day2: cellNumber(c[15]),
+      day3: cellNumber(c[16]), day4: cellNumber(c[17]), day5: cellNumber(c[18])
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
 // RECOMMENDED TRACKER — بيثري كل صف من parseProductsMatchesSheet() بأرقام
 // لايف محسوبة من MAIN_GID و PRODUCTS_DEBUNDLE_MAP_GID، بنفس المعادلات
 // المستخدمة في باقي الداشبورد (Commercial Debundlized / Availability
@@ -1622,6 +1665,14 @@ function buildDebundledStockDohIndex(mainRows) {
 }
 function prepareRecommendedTrackerData() {
   const mainRows = state.allParsedRows || [];
+
+  // Placed Pieces اليومية لآخر 6 أيام (DAY0..DAY5) من MERCHANT_SKU_DAILY_GID
+  // — بمفتاح (TAGER_ID||SKU_ID) نفس ترتيب matchKey (merchantId||sku) تحت.
+  const dailyByMatch = new Map();
+  (state.merchantSkuDailyRows || []).forEach(r => {
+    if (!r.skuId || !r.tagerId) return;
+    dailyByMatch.set(r.tagerId + "||" + r.skuId, r);
+  });
 
   // النهاردة هنا = التاريخ الحقيقي الفعلي (تاريخ الجهاز)، مش آخر تاريخ
   // موجود في MAIN_GID — طلب صريح عشان Placed Today/Yesterday و Current
@@ -1834,6 +1885,11 @@ function prepareRecommendedTrackerData() {
     sortedPlacedDates.forEach(([, entry]) => { placedAspGmv += entry.gmv; placedAspPieces += entry.pieces; });
     const placedAsp = placedAspPieces > 0 ? (placedAspGmv / placedAspPieces) : 0;
 
+    // Last Placed ASP — يوم واحد بس (أحدث يوم فيه Placed فعلاً لنفس الماتش،
+    // مش متوسط آخر 3 أيام زي Placed ASP فوق) — أول عنصر في sortedPlacedDates
+    // أصلاً هو أحدث يوم (مرتبين من الأحدث للأقدم).
+    const lastPlacedAsp = sortedPlacedDates.length ? (sortedPlacedDates[0][1].pieces > 0 ? (sortedPlacedDates[0][1].gmv / sortedPlacedDates[0][1].pieces) : 0) : 0;
+
     const cm3PerMerchant = b.cm3;
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
 
@@ -1843,6 +1899,9 @@ function prepareRecommendedTrackerData() {
     const prodInfo = state.productsMap[sku] || { price: 0, profit: 0 };
     const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
     const skuPpm = (prodInfo.price || 0) - (prodInfo.profit || 0) - cogsCost;
+    // PPM% (بعد SKU PPM مباشرة) = SKU PPM ÷ Last Placed ASP (آخر يوم فيه
+    // Placed فعلاً، مش المتوسط) — بيدي نسبة الـ PPM من آخر سعر بيع فعلي.
+    const skuPpmPct = lastPlacedAsp > 0 ? (skuPpm / lastPlacedAsp) * 100 : 0;
 
     // Allocated Qty / Used Qty / Remaining Pieces (Availability Locking) —
     // على مستوى (التاجر × SKU) بتاع الصف ده تحديدًا (m.merchantId)، مش كل
@@ -1863,6 +1922,10 @@ function prepareRecommendedTrackerData() {
     // عشان الأكاونت مانجر يقدر يفلتر ويشوف بس الماتشات بتاعته.
     const acmName = ((state.merchantInfoMap || new Map()).get(m.merchantId) || {}).acmName || "Unassigned";
 
+    // Placed Pieces اليومية آخر 6 أيام (DAY0..DAY5) لنفس الماتش، من
+    // MERCHANT_SKU_DAILY_GID — "-" (0) لو الماتش ده مش موجود في الشيت ده.
+    const daily = dailyByMatch.get(matchKey) || { day0: 0, day1: 0, day2: 0, day3: 0, day4: 0, day5: 0 };
+
     return {
       type: m.type, productId: m.productId, productName: m.productName,
       merchantId: m.merchantId, merchant: m.merchant, stock: m.stock, action: m.action,
@@ -1874,8 +1937,10 @@ function prepareRecommendedTrackerData() {
       currentInventory: Math.round(currentInventory || 0),
       currentInventoryDoh: Math.round(currentInventoryDoh),
       avgSkuLast3d,
-      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm,
+      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm, lastPlacedAsp, skuPpmPct,
       lockAllocatedQty, lockUsedQty, lockRemainingPieces,
+      day0: daily.day0 || 0, day1: daily.day1 || 0, day2: daily.day2 || 0,
+      day3: daily.day3 || 0, day4: daily.day4 || 0, day5: daily.day5 || 0,
       acm: acmName, matchKey, feedbackByDate: m.feedbackByDate || {}
     };
   });
@@ -2135,9 +2200,16 @@ function renderPaginatedRecommendedTrackerTable() {
       <td class="num font-bold ${m.cm3PerMerchant >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3PerMerchant)}</td>
       <td class="num font-bold">${fmtPctCell(m.cm3Pct)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.skuPpm)}</td>
+      <td class="num font-bold text-purple">${fmtPctCell(m.skuPpmPct)}</td>
       <td class="num text-dim">${fmtIntCell(Math.round(m.lockAllocatedQty))}</td>
       <td class="num text-dim">${fmtIntCell(Math.round(m.lockUsedQty))}</td>
       <td class="num font-bold ${m.lockRemainingPieces > 0 ? 'text-green' : 'text-red'}">${fmtIntCell(Math.round(m.lockRemainingPieces))}</td>
+      <td class="num text-light font-bold">${fmtIntCell(Math.round(m.day0))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.day1))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.day2))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.day3))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.day4))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.day5))}</td>
       <td>${feedbackCellHtml}</td>
       ${extraDateCellsHtml}
     `;
@@ -2440,12 +2512,17 @@ function prepareProductsAnalystData() {
   });
   const last3Set = new Set(last3MonthYears);
 
-  // كل الـ SINGLE SKUs اللي اتعملهم Inbound في أي شهر من السنة الحالية.
+  // كل الـ SINGLE SKUs اللي اتعملهم Inbound في أي شهر من السنة الحالية، +
+  // Last Inbound Date بتاع كل SKU (آخر تاريخ استلام فعلي ليه — من كل
+  // صفوف الـ Inbound مش بس السنة الحالية، عشان لو نفس الـ SKU اتستلم قبل
+  // كده وبعدين تاني السنة دي، يفضل ياخد أحدث تاريخ استلام حقيقي عنده).
   const inboundThisYearSkus = new Set();
+  const lastInboundTsBySku = new Map();
   (state.inboundRows || []).forEach(r => {
     if (!r.sku || !r.receivingMonthKey) return;
     const d = new Date(r.receivingMonthKey);
     if (!isNaN(d.getTime()) && d.getFullYear() === currentYear) inboundThisYearSkus.add(r.sku);
+    if (r.rcvTs && r.rcvTs > (lastInboundTsBySku.get(r.sku) || 0)) lastInboundTsBySku.set(r.sku, r.rcvTs);
   });
 
   // خريطة PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity, cogsWeight}] —
@@ -2480,16 +2557,28 @@ function prepareProductsAnalystData() {
   // GMV/PPM/CM3 (فلوس) بيتوزعوا بوزن الـ COGS، والـ Pieces بيتوزعوا بضرب الكمية.
   const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
+  // CR% (Confirmed/Placed) بيرجع يومين (CR_LAG_DAYS)، DR% (Delivered/
+  // Confirmed) بيرجع نفس كات أوف الـ CM3 (CM3_LAG_DAYS) — بالظبط زي باقي
+  // الداشبورد كله (computeCommercialActuals/Products Matches Analyst).
+  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
 
   const bySingle = new Map();
   const getBucket = (singleId) => {
     let b = bySingle.get(singleId);
-    if (!b) { b = { ppm: 0, deliveredGmv: 0, deliveredPieces: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0 }; bySingle.set(singleId, b); }
+    if (!b) {
+      b = {
+        ppm: 0, deliveredGmv: 0, deliveredPieces: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0
+      };
+      bySingle.set(singleId, b);
+    }
     return b;
   };
   monthRows.forEach(r => {
     if (!r.sku) return;
     const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    const crEligible = isRowEligibleForLag(r, crCutoffTs);
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
     mappingsFor(r.sku).forEach(mp => {
       if (!inboundThisYearSkus.has(mp.singleId)) return;
       const b = getBucket(mp.singleId);
@@ -2507,6 +2596,11 @@ function prepareProductsAnalystData() {
         b.cm3Gmv += (r.deliveredGmv || 0) * weight;
         b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
       }
+      // CR%/DR%/NDR% — Overall على مستوى الـ Single (مجموع كل البندلات
+      // اللي بتحتويه + طلبه المباشر لو Single أصلاً)، بالكمية الفعلية
+      // (qty) نفس منطق Placed/Delivered Pieces فوق.
+      if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
+      if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
     });
   });
 
@@ -2530,11 +2624,17 @@ function prepareProductsAnalystData() {
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
     const demandConfirmed3m = demandBySingle.get(singleId) || 0;
     const avgConfirmedDaily = last3TotalDays > 0 ? (demandConfirmed3m / last3TotalDays) : 0;
+    const lastInboundTs = lastInboundTsBySku.get(singleId) || 0;
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
 
     rows.push({
       skuId: singleId, skuName: debundleName || inv.skuName || prod.name || singleId, category: inv.category || prod.category || "Uncategorized",
+      lastInboundTs, lastInboundDate: lastInboundTs ? new Date(lastInboundTs).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "-",
       demandConfirmed3m: Math.round(demandConfirmed3m), avgConfirmedDaily,
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
+      crPct, drPct, ndrPct,
       ppmPerPiece, ppmPct,
       cm3: b.cm3, cm3PerPiece, cm3Pct
     });
@@ -2587,7 +2687,7 @@ function renderPaginatedProdAnTable() {
   const pageRows = prodAnState.filtered.slice(start, start + PAGE_SIZE);
 
   if (!pageRows.length) {
-    tbody.innerHTML = `<tr><td colspan="12" class="text-dim center">No products match this filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="text-dim center">No products match this filter.</td></tr>`;
   } else {
     pageRows.forEach(m => {
       const tr = document.createElement("tr");
@@ -2595,8 +2695,12 @@ function renderPaginatedProdAnTable() {
         <td class="font-mono text-light font-bold">${m.skuId}</td>
         <td class="truncate-cell text-dim" title="${m.skuName || ""}">${m.skuName || '<span class="text-dim">-</span>'}</td>
         <td class="truncate-cell text-dim">${m.category}</td>
+        <td class="text-dim">${m.lastInboundDate || "-"}</td>
         <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
         <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
+        <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+        <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+        <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
         <td class="num text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
         <td class="num">${fmtIntCell(m.totalDeliveredPcs)}</td>
         <td class="num">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
@@ -2619,6 +2723,284 @@ function renderPaginatedProdAnTable() {
 if ($("searchProdAnInput")) $("searchProdAnInput").addEventListener("input", applyProdAnSearchAndSort);
 if ($("prevPageProdAn")) $("prevPageProdAn").addEventListener("click", () => { if (prodAnState.page > 0) { prodAnState.page -= 1; renderPaginatedProdAnTable(); } });
 if ($("nextPageProdAn")) $("nextPageProdAn").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(prodAnState.filtered.length / PAGE_SIZE)); if (prodAnState.page < totalPages - 1) { prodAnState.page += 1; renderPaginatedProdAnTable(); } });
+
+// =========================================================================
+// PRODUCTS MATCHES / ANALYST — جوه Products / Analyst بالظبط: بدل ما نجمع
+// كل الميرشنتس مع بعض على مستوى الـ Single SKU (زي Products / Analyst)،
+// هنا كل صف هو (Merchant × Single SKU) لوحده — يعني كل ميرشنت شغال على
+// المنتج ده (حتى لو شغال على بندل فيه المنتج ده) بيظهر بصفه لوحده، بنفس
+// منطق التوزيع (debundle apportionment) المستخدم في كل مكان تاني بالظبط:
+//   • فلوس (PPM/GMV/CM3) بتتوزع بوزن الـ COGS (cogsWeight).
+//   • قطع فعلية (Placed/Confirmed/Delivered Pieces) بتتوزع بضرب الكمية
+//     (PRODUCT_QUANTITY).
+// النطاق (Scope) هنا نفس نطاق Products / Analyst بالظبط: بس الـ Single
+// SKUs اللي اتعملهم Inbound السنة دي (inboundThisYearSkus)، عشان الجدولين
+// يفضلوا متسقين مع بعض (نفس الـ "مصدر" اللي طلبه اليوزر).
+//
+// CR%/DR%/NDR%/CM3 بتاخد نفس منطق الكات أوف المستخدم في Targets Commercial/
+// Commercial Debundlized (computeCommercialActuals/tcFinalizeBucket):
+//   • CR% (Confirmed/Placed): كات أوف يومين (CR_LAG_DAYS).
+//   • DR% (Delivered/Confirmed) وCM3 وCM3/Piece وCM3%: كات أوف الـ 4 أيام
+//     بتاع CM3 (CM3_LAG_DAYS) — ونفس القاعدة العامة اللي اتفقنا عليها قبل
+//     كده: أي عمود لوحده (زي Delivered Pcs) بيفضل من غير كات أوف، لكن لما
+//     يتستخدم كمقام جوه حاجة زي CM3/Piece أو CM3% بياخد نفس كات أوف الـ CM3
+//     بالظبط (عشان كده cm3DeliveredPieces منفصلة عن deliveredPieces الأساسية).
+//   • PPM/Piece وPPM% من غير أي كات أوف خالص (بطلب صريح، زي كل مكان تاني).
+//
+// STATUS — بيجاوب سؤالين: هل الماتش ده (نفس التاجر × نفس الـ Single) كان
+// شغال الشهر اللي فات ولا لأ (أي نشاط خالص في كل الشهر اللي فات، من غير أي
+// قيد على الرينج)، ولو كان شغال، بنقارن "Avg Daily Confirmed" بتاعه في نفس
+// الـ Date Range (يوم 1 لحد نفس رقم اليوم النهاردة) في الشهرين — عشان
+// المقارنة تبقى Apples-to-apples (نفس عدد الأيام بالظبط) مش الشهر كله ضد
+// جزء من الشهر الحالي. لو مفيش أي نشاط خالص الشهر اللي فات → Status = "New".
+// =========================================================================
+const pmaState = { data: [], filtered: [], sortKey: "confirmedPieces", sortDir: "desc", page: 0 };
+
+function prepareProductsMatchesAnalystData() {
+  const mainRowsAll = state.allParsedRows || [];
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentYear = now.getFullYear();
+  const currentDay = now.getDate();
+
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthYear = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const daysInPrevMonth = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0).getDate();
+  const clampedPrevDay = Math.min(currentDay, daysInPrevMonth);
+
+  // نفس تعريف "Inbound السنة دي" ونفس ماب الديبندلايز المستخدمين في
+  // Products / Analyst بالظبط — عشان النطاق (أي Single SKUs) يفضل متطابق.
+  const inboundThisYearSkus = new Set();
+  (state.inboundRows || []).forEach(r => {
+    if (!r.sku || !r.receivingMonthKey) return;
+    const d = new Date(r.receivingMonthKey);
+    if (!isNaN(d.getTime()) && d.getFullYear() === currentYear) inboundThisYearSkus.add(r.sku);
+  });
+
+  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const mappingsFor = (sku) => {
+    const m = bundleProductMap.get(sku);
+    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
+  };
+
+  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows); // 4 أيام (DR%/CM3/CM3-Piece/CM3%)
+  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS); // يومين (CR% بس)
+
+  const byMatch = new Map(); // "merchantId||singleId" -> bucket
+  const getBucket = (key) => {
+    let b = byMatch.get(key);
+    if (!b) {
+      b = {
+        placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, ppm: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0, dateSet: new Set(),
+        merchantId: "", merchantName: "", skuId: ""
+      };
+      byMatch.set(key, b);
+    }
+    return b;
+  };
+
+  monthRows.forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    const crEligible = isRowEligibleForLag(r, crCutoffTs);
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    mappingsFor(r.sku).forEach(mp => {
+      if (!inboundThisYearSkus.has(mp.singleId)) return;
+      const key = r.merchantId + "||" + mp.singleId;
+      const b = getBucket(key);
+      b.merchantId = r.merchantId; b.merchantName = r.merchantName || r.merchantId; b.skuId = mp.singleId;
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      b.placed += (r.placedPieces || 0) * qty;
+      b.confirmed += (r.confirmedPieces || 0) * qty;
+      // TOTAL DELIVERED PCS (عمود لوحده) — من غير كات أوف خالص، زي PPM.
+      b.delivered += (r.deliveredPieces || 0) * qty;
+      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      b.ppm += (r.ppm || 0) * weight;
+      if (r.date) b.dateSet.add(r.date);
+      if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
+      if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
+      if (cm3Eligible) {
+        b.cm3 += (r.cm3 || 0) * weight; b.cm3Gmv += (r.deliveredGmv || 0) * weight;
+        b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
+      }
+    });
+  });
+
+  // --- الشهر اللي فات: هل الماتش اشتغل خالص (أي نشاط طول الشهر)، وConfirmed
+  // Pcs بتاعه في نفس الـ Date Range (يوم 1 لحد currentDay) عشان نقارنها. ---
+  const prevMonthAnyActivity = new Set();
+  const prevMonthSameRangeConfirmed = new Map();
+  const prevMonthRows = mainRowsAll.filter(r => r.monthYear === prevMonthYear);
+  prevMonthRows.forEach(r => {
+    if (!r.sku || !r.merchantId || !r.timestamp) return;
+    mappingsFor(r.sku).forEach(mp => {
+      if (!inboundThisYearSkus.has(mp.singleId)) return;
+      const key = r.merchantId + "||" + mp.singleId;
+      prevMonthAnyActivity.add(key);
+      const rDay = new Date(r.timestamp).getDate();
+      if (rDay <= clampedPrevDay) {
+        const qty = mp.quantity || 1;
+        prevMonthSameRangeConfirmed.set(key, (prevMonthSameRangeConfirmed.get(key) || 0) + (r.confirmedPieces || 0) * qty);
+      }
+    });
+  });
+
+  let grandPpm = 0, grandDeliveredGmv = 0, grandCm3 = 0, grandCm3Gmv = 0, newCount = 0;
+  const rows = [];
+  byMatch.forEach((b, key) => {
+    const inv = state.inventoryMap[b.skuId] || {};
+    const prod = state.productsMap[b.skuId] || {};
+    const debundleName = singlesList.get(b.skuId);
+    const acmName = ((state.merchantInfoMap || new Map()).get(b.merchantId) || {}).acmName || "Unassigned";
+
+    // Avg Daily Confirmed (This Month) — بتقسم على currentDay (يوم 1 لحد
+    // النهاردة، تقويميًا) مش على عدد الأيام اللي فيها داتا فعليًا بس
+    // (activeDays)، عشان تفضل بالظبط على نفس أساس عدد الأيام المستخدم في
+    // Prev Avg Daily Confirmed (clampedPrevDay) — المقارنة تبقى Apples-to-
+    // apples 100%: نفس عدد الأيام بالظبط في الشهرين (إلا لو الشهر اللي فات
+    // عدد أيامه أقل من currentDay، زي لو النهاردة يوم 31 والشهر اللي فات 28
+    // يوم بس — وقتها clampedPrevDay بيتقص لأقصى يوم متاح فعلاً في الشهر اللي
+    // فات، وهي أدق مقارنة ممكنة في الحالة دي).
+    const avgDailyConfirmed = currentDay > 0 ? (b.confirmed / currentDay) : 0;
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const ppmPerPiece = b.delivered > 0 ? (b.ppm / b.delivered) : 0;
+    const ppmPct = b.deliveredGmv > 0 ? (b.ppm / b.deliveredGmv) * 100 : 0;
+    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+
+    const workedLastMonth = prevMonthAnyActivity.has(key);
+    const status = workedLastMonth ? "Active" : "New";
+    const prevAvgDailyConfirmed = workedLastMonth && clampedPrevDay > 0 ? ((prevMonthSameRangeConfirmed.get(key) || 0) / clampedPrevDay) : null;
+    if (!workedLastMonth) newCount++;
+
+    // MoM Trend — بيقارن avgDailyConfirmed (الشهر ده) بـ prevAvgDailyConfirmed
+    // (نفس الرينج من الشهر اللي فات) — طالما الاتنين على نفس أساس عدد
+    // الأيام بالظبط (فوق)، الفرق ده بيعبر فعلاً عن "بيطلع ولا بيقع" حقيقي،
+    // مش بس اختلاف في عدد الأيام. null لو الماتش New (مفيش حاجة تتقارن بيها).
+    let trendPct = null;
+    if (prevAvgDailyConfirmed !== null) {
+      trendPct = prevAvgDailyConfirmed > 0
+        ? ((avgDailyConfirmed - prevAvgDailyConfirmed) / prevAvgDailyConfirmed) * 100
+        : (avgDailyConfirmed > 0 ? 100 : 0);
+    }
+
+    grandPpm += b.ppm; grandDeliveredGmv += b.deliveredGmv; grandCm3 += b.cm3; grandCm3Gmv += b.cm3Gmv;
+
+    rows.push({
+      skuId: b.skuId, skuName: debundleName || inv.skuName || prod.name || b.skuId, category: inv.category || prod.category || "Uncategorized",
+      merchantId: b.merchantId, merchantName: b.merchantName, acm: acmName,
+      status, placedPieces: Math.round(b.placed), confirmedPieces: Math.round(b.confirmed), deliveredPieces: Math.round(b.delivered),
+      avgDailyConfirmed, prevAvgDailyConfirmed, trendPct,
+      crPct, drPct, ndrPct, ppmPerPiece, ppmPct, cm3: b.cm3, cm3PerPiece, cm3Pct
+    });
+  });
+
+  const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
+  const overallCm3Pct = grandCm3Gmv > 0 ? (grandCm3 / grandCm3Gmv) * 100 : 0;
+
+  pmaState.data = rows;
+  applyPmaSearchAndSort();
+  renderPmaSummary(rows, grandPpm, currentMonthYear, overallPpmPct, grandCm3, overallCm3Pct, newCount);
+}
+
+function renderPmaSummary(rows, grandPpm, monthLabel, overallPpmPct, grandCm3, overallCm3Pct, newCount) {
+  if ($("pmaTotalRows")) $("pmaTotalRows").textContent = fmtInt.format(rows.length);
+  if ($("pmaMonthLabel")) $("pmaMonthLabel").textContent = monthLabel || "-";
+  if ($("pmaNewCount")) $("pmaNewCount").textContent = fmtInt.format(newCount || 0);
+  if ($("pmaTotalPpm")) $("pmaTotalPpm").textContent = fmtMoneyCompact(grandPpm);
+  if ($("pmaTotalCm3")) $("pmaTotalCm3").textContent = fmtMoneyCompact(grandCm3);
+}
+
+function sortPma(key) {
+  if (pmaState.sortKey === key) { pmaState.sortDir = pmaState.sortDir === "asc" ? "desc" : "asc"; }
+  else { pmaState.sortKey = key; pmaState.sortDir = "desc"; }
+  applyPmaSearchAndSort();
+}
+
+function applyPmaSearchAndSort() {
+  const term = $("searchPmaInput") ? $("searchPmaInput").value.trim().toLowerCase() : "";
+  pmaState.filtered = (pmaState.data || []).filter(m => {
+    if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
+      (m.merchantName && m.merchantName.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
+      (m.acm && m.acm.toLowerCase().includes(term)) || (m.category && m.category.toLowerCase().includes(term)))) return false;
+    return true;
+  });
+
+  const { sortKey, sortDir } = pmaState; const dir = sortDir === "asc" ? 1 : -1;
+  pmaState.filtered.sort((a, b) => {
+    let av = a[sortKey]; let bv = b[sortKey];
+    if (av === null || av === undefined) av = -Infinity;
+    if (bv === null || bv === undefined) bv = -Infinity;
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+
+  pmaState.page = 0;
+  renderPaginatedPmaTable();
+}
+
+function renderPaginatedPmaTable() {
+  const tbody = $("pmaTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = pmaState.page * PAGE_SIZE;
+  const pageRows = pmaState.filtered.slice(start, start + PAGE_SIZE);
+
+  if (!pageRows.length) {
+    tbody.innerHTML = `<tr><td colspan="21" class="text-dim center">No matches found.</td></tr>`;
+  } else {
+    pageRows.forEach(m => {
+      const tr = document.createElement("tr");
+      // MoM Trend — سهم لفوق (أخضر) لو الأداء بيطلع، سهم لتحت (أحمر) لو
+      // بيقع، سهم يمين (رمادي) لو شبه ثابت (±1%)، "-" لو الماتش New.
+      let trendHtml = '<span class="text-dim">-</span>';
+      if (m.trendPct !== null && m.trendPct !== undefined) {
+        const isUp = m.trendPct > 1, isDown = m.trendPct < -1;
+        const arrow = isUp ? "▲" : (isDown ? "▼" : "▶");
+        const cls = isUp ? "text-green" : (isDown ? "text-red" : "text-dim");
+        trendHtml = `<span class="${cls} font-bold">${arrow} ${m.trendPct >= 0 ? "+" : ""}${fmtPctCell(m.trendPct)}</span>`;
+      }
+      tr.innerHTML = `
+        <td class="font-mono text-light font-bold">${m.skuId}</td>
+        <td class="truncate-cell text-dim" title="${m.skuName || ""}">${m.skuName || '<span class="text-dim">-</span>'}</td>
+        <td class="truncate-cell text-dim">${m.category}</td>
+        <td class="font-mono text-dim">${m.merchantId}</td>
+        <td class="truncate-cell text-dim" title="${m.merchantName || ""}">${m.merchantName || "-"}</td>
+        <td class="text-dim">${m.acm || "-"}</td>
+        <td><span class="badge-outline ${m.status === "New" ? "blue" : "green"}">${m.status}</span></td>
+        <td class="num">${fmtIntCell(m.placedPieces)}</td>
+        <td class="num">${fmtIntCell(m.confirmedPieces)}</td>
+        <td class="num">${fmtIntCell(m.deliveredPieces)}</td>
+        <td class="num text-light font-bold">${fmtIntCell(Math.round(m.avgDailyConfirmed))}</td>
+        <td class="num text-dim">${m.prevAvgDailyConfirmed === null ? '<span class="text-dim">-</span>' : fmtIntCell(Math.round(m.prevAvgDailyConfirmed))}</td>
+        <td class="num">${trendHtml}</td>
+        <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+        <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+        <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+        <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+        <td class="num font-bold text-purple">${fmtPctCell(m.ppmPct)}</td>
+        <td class="num text-orange">${fmtMoneyCompactCell(m.cm3)}</td>
+        <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+        <td class="num font-bold text-green">${fmtPctCell(m.cm3Pct)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  const totalPages = Math.max(1, Math.ceil(pmaState.filtered.length / PAGE_SIZE));
+  if ($("rowCountPma")) $("rowCountPma").textContent = `${fmtInt.format(pmaState.filtered.length)} Matches`;
+  if ($("pageIndicatorPma")) $("pageIndicatorPma").textContent = `Page ${pmaState.page + 1} of ${totalPages}`;
+  if ($("prevPagePma")) $("prevPagePma").disabled = pmaState.page === 0;
+  if ($("nextPagePma")) $("nextPagePma").disabled = pmaState.page >= totalPages - 1;
+}
+
+if ($("searchPmaInput")) $("searchPmaInput").addEventListener("input", applyPmaSearchAndSort);
+if ($("prevPagePma")) $("prevPagePma").addEventListener("click", () => { if (pmaState.page > 0) { pmaState.page -= 1; renderPaginatedPmaTable(); } });
+if ($("nextPagePma")) $("nextPagePma").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(pmaState.filtered.length / PAGE_SIZE)); if (pmaState.page < totalPages - 1) { pmaState.page += 1; renderPaginatedPmaTable(); } });
 
 // -------------------------------------------------------------------------
 // شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
@@ -2924,6 +3306,7 @@ function updateDashboard(rows) {
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
   if ($("viewProductsAnalyst") && $("viewProductsAnalyst").classList.contains("active-view")) prepareProductsAnalystData();
+  if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
@@ -7493,7 +7876,7 @@ const ALL_SHEET_GIDS = [
   NEW_SEGMENTATION_GID, INBOUND_GID,
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
-  PRODUCTS_MATCHES_GID
+  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -7554,7 +7937,7 @@ async function fetchAllSheetsSnapshot() {
       newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
       debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
-      productsMatchesPayload
+      productsMatchesPayload, merchantSkuDailyPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -7573,7 +7956,8 @@ async function fetchAllSheetsSnapshot() {
       SINGLE_SKU_TARGETS_GID ? loadSheetWithRetry(SINGLE_SKU_TARGETS_GID).catch(track(SINGLE_SKU_TARGETS_GID)) : Promise.resolve(null),
       COGS_GID ? loadSheetWithRetry(COGS_GID).catch(track(COGS_GID)) : Promise.resolve(null),
       AVAILABILITY_LOCKING_GID ? loadSheetWithRetry(AVAILABILITY_LOCKING_GID).catch(track(AVAILABILITY_LOCKING_GID)) : Promise.resolve(null),
-      PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null)
+      PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null),
+      MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -7584,7 +7968,7 @@ async function fetchAllSheetsSnapshot() {
       [BEGIN_INV_GID]: begInvPayload, [SELLTHROUGH_NEEDED_GID]: sellthroughNeededPayload,
       [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload,
       [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload,
-      [PRODUCTS_MATCHES_GID]: productsMatchesPayload
+      [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -7607,6 +7991,7 @@ async function fetchAllSheetsSnapshot() {
   const cogsPayload = sheets[COGS_GID];
   const availabilityLockingPayload = sheets[AVAILABILITY_LOCKING_GID];
   const productsMatchesPayload = sheets[PRODUCTS_MATCHES_GID];
+  const merchantSkuDailyPayload = sheets[MERCHANT_SKU_DAILY_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -7637,6 +8022,7 @@ async function fetchAllSheetsSnapshot() {
     cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
+    merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
     staleGids // sheets that failed every retry and are still showing old data
   };
 }
@@ -7694,6 +8080,7 @@ function applySnapshotToState(snapshot) {
   state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
   state.availabilityLockingRows = snapshot.availabilityLockingRows || state.availabilityLockingRows || [];
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
+  state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   // ترتيب أعمدة تواريخ الفيدباك (K فأكتر) زي ما هي في شيت الماتشات — معلقة
   // على الـ array نفسه من parseProductsMatchesSheet (rows.feedbackDateLabels).
   state.matchesFeedbackDateLabels = state.productsMatchesRows.feedbackDateLabels || state.matchesFeedbackDateLabels || [];
@@ -7877,19 +8264,21 @@ confirmDownloadBtn.addEventListener("click", () => {
         cm3ap: cm3apState.page,
         recTracker: state.recTrackerPage,
         ppmAnalyst: ppmAnalystState.page,
-        prodAn: prodAnState.page
+        prodAn: prodAnState.page,
+        pma: pmaState.page
     };
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
-    state.recTrackerPage = 0; ppmAnalystState.page = 0; prodAnState.page = 0;
+    state.recTrackerPage = 0; ppmAnalystState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     PAGE_SIZE = 999999;
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
     if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
+    if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
@@ -7923,6 +8312,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.recTrackerPage = originalPage.recTracker;
         ppmAnalystState.page = originalPage.ppmAnalyst;
         prodAnState.page = originalPage.prodAn;
+        pmaState.page = originalPage.pma;
 
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -7939,6 +8329,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
         if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
         if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
+        if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     }, 150);
 });
 

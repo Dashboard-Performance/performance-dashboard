@@ -42,6 +42,7 @@
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystProducts">PPM Analyst / Products</a>
             <a class="nav-item-sub" id="navProductsAnalyst">Products / Analyst</a>
+            <a class="nav-item-sub" id="navProductsMatchesAnalyst">Products Matches / Analyst</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -194,17 +195,17 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
                 <div class="metric-value" id="rtTotalRows">0</div>
-                <div class="metric-sub text-dim">Product × Merchant</div>
+                <div class="metric-sub text-dim">Product × Merchant rows from the matches sheet</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
                 <div class="metric-value text-blue" id="rtTotalSkus">0</div>
-                <div class="metric-sub text-dim">Count Products Tracker</div>
+                <div class="metric-sub text-dim">Unique PRODUCT_IDs in this tracker</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
                 <div class="metric-value text-orange" id="rtTotalInventory">0</div>
-                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map)</div>
+                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map, column H)</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
@@ -219,7 +220,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Recommended Tracker</h2>
-                  <p>Products &amp; Matches — live Starting vs Current</p>
+                  <p>Products &amp; Matches (GID 1298408207) — live Starting vs Current, placed history, inventory/DOH and CR/DR/NDR/CM3</p>
                 </div>
                 <div class="table-controls">
                   <select id="rtAcmFilterSelect" class="filter-select">
@@ -262,9 +263,16 @@
                       <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;">CM3 Per Merchant</th>
                       <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
                       <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;">SKU PPM</th>
+                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="SKU PPM ÷ Last Placed ASP (most recent single day with Placed data)">PPM%</th>
                       <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;">Allocated Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;">Used Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('day0')" class="num" style="cursor:pointer;" title="Placed Pieces — Day 0 (today), from the Merchant Daily sheet (GID 461854229)">DAY 0</th>
+                      <th onclick="sortRecommendedTracker('day1')" class="num" style="cursor:pointer;" title="Placed Pieces — Day 1 (yesterday)">DAY 1</th>
+                      <th onclick="sortRecommendedTracker('day2')" class="num" style="cursor:pointer;">DAY 2</th>
+                      <th onclick="sortRecommendedTracker('day3')" class="num" style="cursor:pointer;">DAY 3</th>
+                      <th onclick="sortRecommendedTracker('day4')" class="num" style="cursor:pointer;">DAY 4</th>
+                      <th onclick="sortRecommendedTracker('day5')" class="num" style="cursor:pointer;">DAY 5</th>
                       <th id="rtFeedbackTh" style="min-width: 220px;">Feedback</th>
                     </tr>
                   </thead>
@@ -1253,8 +1261,12 @@
                       <th onclick="sortProdAn('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
                       <th onclick="sortProdAn('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
                       <th onclick="sortProdAn('category')" style="cursor:pointer;">CATEGORY</th>
+                      <th onclick="sortProdAn('lastInboundTs')" style="cursor:pointer;" title="Most recent inbound receipt date for this Single SKU (Inbound sheet, GID 565878313)">LAST INBOUND DATE</th>
                       <th onclick="sortProdAn('demandConfirmed3m')" class="num" style="cursor:pointer;" title="Sum of CNF_QTY from EGY Sell-through rate needed data (GID 548859670) for the last 3 months">DEMAND CONFIRMED (3M)</th>
                       <th onclick="sortProdAn('avgConfirmedDaily')" class="num" style="cursor:pointer;" title="Demand Confirmed (3M) ÷ total days across the last 3 months">AVG CONFIRMED DAILY</th>
+                      <th onclick="sortProdAn('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, overall across all bundles this Single SKU is part of (2-day cutoff)">CR%</th>
+                      <th onclick="sortProdAn('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, overall across all bundles this Single SKU is part of (CM3 cutoff)">DR%</th>
+                      <th onclick="sortProdAn('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%">NDR%</th>
                       <th onclick="sortProdAn('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Overall across all bundles this Single SKU is part of">TOTAL PPM DELIVERED</th>
                       <th onclick="sortProdAn('totalDeliveredPcs')" class="num" style="cursor:pointer;">TOTAL DELIVERED PCS</th>
                       <th onclick="sortProdAn('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/PIECE</th>
@@ -1273,6 +1285,85 @@
                   <button id="prevPageProdAn" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorProdAn">Page 1 of 1</span>
                   <button id="nextPageProdAn" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- PRODUCTS MATCHES / ANALYST (under Products / Analyst) -->
+        <div id="viewProductsMatchesAnalyst" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Matches (Merchant × Single SKU) <span class="icon-box"></span></div>
+                <div class="metric-value" id="pmaTotalRows">0</div>
+                <div class="metric-sub text-dim" id="pmaMonthLabel">-</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">New Matches <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="pmaNewCount">0</div>
+                <div class="metric-sub text-dim">Didn't work on this SKU last month</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total PPM Delivered <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="pmaTotalPpm">0</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Total CM3 <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="pmaTotalCm3">0</div>
+                <div class="metric-sub text-dim">This month, CM3 cutoff</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Products Matches / Analyst</h2>
+                  <p>Every Merchant working on a Single SKU this month — even via a Bundle, apportioned down to Single SKU level (same debundle logic as Products / Analyst). Status compares this match's activity to last month over the same date range.</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchPmaInput" type="search" placeholder="Search SKU, Merchant or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="pmaTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortPma('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortPma('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
+                      <th onclick="sortPma('category')" style="cursor:pointer;">CATEGORY</th>
+                      <th onclick="sortPma('merchantId')" class="font-mono" style="cursor:pointer;">MERCHANT ID</th>
+                      <th onclick="sortPma('merchantName')" class="truncate-cell" style="cursor:pointer;">MERCHANT</th>
+                      <th onclick="sortPma('acm')" style="cursor:pointer;">ACM</th>
+                      <th onclick="sortPma('status')" style="cursor:pointer;">STATUS</th>
+                      <th onclick="sortPma('placedPieces')" class="num" style="cursor:pointer;">PLACED PCS</th>
+                      <th onclick="sortPma('confirmedPieces')" class="num" style="cursor:pointer;">CONFIRMED PCS</th>
+                      <th onclick="sortPma('deliveredPieces')" class="num" style="cursor:pointer;">DELIVERED PCS</th>
+                      <th onclick="sortPma('avgDailyConfirmed')" class="num" style="cursor:pointer;" title="This month's Confirmed Pcs ÷ days 1 to today (same day-count basis as Prev Avg Daily Confirmed)">AVG DAILY CONFIRMED</th>
+                      <th onclick="sortPma('prevAvgDailyConfirmed')" class="num" style="cursor:pointer;" title="Last month's Confirmed Pcs ÷ same date range (day 1 to the same day-of-month) — same day-count as this month's Avg Daily Confirmed. '-' if this match is New.">PREV AVG DAILY CONFIRMED</th>
+                      <th onclick="sortPma('trendPct')" class="num" style="cursor:pointer;" title="This month's Avg Daily Confirmed vs last month's, same date range">MoM TREND</th>
+                      <th onclick="sortPma('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th onclick="sortPma('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th onclick="sortPma('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortPma('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/PCS</th>
+                      <th onclick="sortPma('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
+                      <th onclick="sortPma('cm3')" class="num" style="cursor:pointer;">CM3</th>
+                      <th onclick="sortPma('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/PCS</th>
+                      <th onclick="sortPma('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pmaTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountPma">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPagePma" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorPma">Page 1 of 1</span>
+                  <button id="nextPagePma" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>
