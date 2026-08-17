@@ -58,6 +58,7 @@
             <a class="nav-item-sub" id="navAvailabilityLocking">Availability Locking</a>
             <a class="nav-item-sub" id="navHealthyLocking">Healthy Locking</a>
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
+            <a class="nav-item-sub" id="navMpNewMatches">New Matches</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -1600,6 +1601,82 @@
                   <button id="prevPageMpMatches" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorMpMatches">Page 1 of 1</span>
                   <button id="nextPageMpMatches" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- NEW MATCHES (under Marketplace, after Performance-Matches) -->
+        <div id="viewMpNewMatches" class="view-section hidden">
+          <section class="mb-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-purple">
+                <h2>New Matches</h2>
+                <p>Matches (Merchant × SKU) that first placed from Day 7 of this month up to today — with no activity earlier this month (Day 1-6) and no activity at all last month</p>
+              </div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total New Matches <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpNewMatchesTotal">0</div>
+                <div class="metric-sub text-dim" id="mpNewMatchesRangeLabel">Day 7 → Today</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4 mt-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-orange">
+                <h2>New Matches by Category</h2>
+                <p>Count of new matches per category (Day 7 → Today)</p>
+              </div>
+            </div>
+            <div class="metrics-grid" id="mpNewMatchesCategoryGrid"></div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>New Matches</h2>
+                  <p>SKU × Merchant details (Day 7 → Today, CM3 at Cutoff D-4)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMpNewMatchesInput" type="search" placeholder="Search SKU, Merchant, or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="mpNewMatchesTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortMpNewMatches('sku')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortMpNewMatches('skuName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
+                      <th onclick="sortMpNewMatches('category')" style="cursor:pointer;">Category</th>
+                      <th onclick="sortMpNewMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortMpNewMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
+                      <th onclick="sortMpNewMatches('placed')" class="num" style="cursor:pointer;">Total Placed Pcs</th>
+                      <th onclick="sortMpNewMatches('confirmed')" class="num text-blue" style="cursor:pointer;">Total Confirmed Pcs</th>
+                      <th onclick="sortMpNewMatches('delivered')" class="num text-green" style="cursor:pointer;">Total Delivered Pcs</th>
+                      <th onclick="sortMpNewMatches('crPct')" class="num" style="cursor:pointer;">CR%</th>
+                      <th onclick="sortMpNewMatches('drPct')" class="num" style="cursor:pointer;">DR%</th>
+                      <th onclick="sortMpNewMatches('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
+                      <th onclick="sortMpNewMatches('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Pieces</th>
+                      <th onclick="sortMpNewMatches('cm3')" class="num" style="cursor:pointer;">CM3</th>
+                      <th onclick="sortMpNewMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;">CM3%</th>
+                      <th onclick="sortMpNewMatches('placedAsp')" class="num text-dim" style="cursor:pointer;">Placed ASP</th>
+                      <th onclick="sortMpNewMatches('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
+                      <th onclick="sortMpNewMatches('matchStartTs')" class="text-dim" style="cursor:pointer;">Match Start</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mpNewMatchesTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMpNewMatches">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPageMpNewMatches" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMpNewMatches">Page 1 of 1</span>
+                  <button id="nextPageMpNewMatches" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

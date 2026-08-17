@@ -233,6 +233,12 @@ const analystState = {
 const mpMatchesState = {
   data: [], filtered: [], sortKey: "cm3", sortDir: "desc", page: 0
 };
+// New Matches (تحت Performance-Matches): ماتشات (Merchant × SKU) جديدة
+// خالص — ظهرت أول مرة من يوم 7 الشهر ده لحد النهاردة، ومعندهاش أي نشاط
+// خالص في الشهر ده قبل يوم 7 ولا في الشهر اللي فات كله.
+const mpNewMatchesState = {
+  data: [], filtered: [], sortKey: "placed", sortDir: "desc", page: 0
+};
 // Poor Matches (تحت CM3 Analyst): نفس منطق شيت "Matches" + "NDR_Summary" —
 // ماتشات (Merchant × SKU) أداؤها في الـ NDR% أقل بشكل ملحوظ من باقي نفس
 // الساب-كاتيجوري بتاعتها، وبالتالي مسؤولة عن جزء من الـ "Missed Deliveries".
@@ -294,6 +300,7 @@ const navAvailabilityLocking = $("navAvailabilityLocking");
 const navHealthyLocking = $("navHealthyLocking");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navMpMatches = $("navMpMatches");
+const navMpNewMatches = $("navMpNewMatches");
 const navAdminToggle = $("navAdminToggle");
 const adminSubmenu = $("adminSubmenu");
 const navAdminCaret = $("navAdminCaret");
@@ -345,6 +352,7 @@ function switchView(viewName) {
   if(navHealthyLocking) navHealthyLocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
+  if(navMpNewMatches) navMpNewMatches.classList.remove("active");
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
 
@@ -367,6 +375,7 @@ function switchView(viewName) {
   else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
+  else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); prepareMpNewMatchesData(); }
   else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); renderSegmentationPanel(); }
   else if (viewName === "sellthrough") {      
       activeSection = $("viewSellthroughPanel");      
@@ -398,6 +407,7 @@ if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () =
 if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
+if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 
@@ -558,6 +568,11 @@ const searchMpMatchesInput = $("searchMpMatchesInput");
 if (searchMpMatchesInput) searchMpMatchesInput.addEventListener("input", applyMpMatchesSearchAndSort);
 if($("prevPageMpMatches")) $("prevPageMpMatches").addEventListener("click", () => { if (mpMatchesState.page > 0) { mpMatchesState.page -= 1; renderPaginatedMpMatchesTable(); } });
 if($("nextPageMpMatches")) $("nextPageMpMatches").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(mpMatchesState.filtered.length / PAGE_SIZE)); if (mpMatchesState.page < totalPages - 1) { mpMatchesState.page += 1; renderPaginatedMpMatchesTable(); } });
+
+const searchMpNewMatchesInput = $("searchMpNewMatchesInput");
+if (searchMpNewMatchesInput) searchMpNewMatchesInput.addEventListener("input", applyMpNewMatchesSearchAndSort);
+if($("prevPageMpNewMatches")) $("prevPageMpNewMatches").addEventListener("click", () => { if (mpNewMatchesState.page > 0) { mpNewMatchesState.page -= 1; renderPaginatedMpNewMatchesTable(); } });
+if($("nextPageMpNewMatches")) $("nextPageMpNewMatches").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(mpNewMatchesState.filtered.length / PAGE_SIZE)); if (mpNewMatchesState.page < totalPages - 1) { mpNewMatchesState.page += 1; renderPaginatedMpNewMatchesTable(); } });
 
 const searchPoorMatchesInput = $("searchPoorMatchesInput");
 if (searchPoorMatchesInput) searchPoorMatchesInput.addEventListener("input", applyPoorMatchesSearchAndSort);
@@ -3310,6 +3325,7 @@ function updateDashboard(rows) {
   if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
+  if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
@@ -6743,6 +6759,194 @@ function renderPaginatedMpMatchesTable() {
   if ($("nextPageMpMatches")) $("nextPageMpMatches").disabled = mpMatchesState.page >= totalPages - 1;
 }
 
+// =====================================================================
+// NEW MATCHES (تحت Marketplace، بعد Performance-Matches مباشرة) — ماتشات
+// (Merchant × SKU) "جديدة" بمعنى حرفي: أول ظهور ليها هو من يوم
+// NEW_MATCH_START_DAY الشهر الحالي لحد النهاردة، ومعندهاش أي نشاط خالص:
+//   1) في نفس الشهر الحالي قبل يوم NEW_MATCH_START_DAY، ولا
+//   2) في الشهر اللي فات كله (بنستخدم بيانات شيت الـ Main بتاعة الشهر اللي
+//      فات كاملة — مش بس جزء منه — عشان نتأكد إن الماتش فعلاً معندوش أي
+//      نشاط في الشهر ده خالص).
+// لو الماتش ظهر في أي واحدة من الفترتين دول، مبيبقاش "جديد" حتى لو كمان
+// ظهر من يوم NEW_MATCH_START_DAY لحد النهاردة — بيتستبعد خالص.
+// كل match (مفتاح Merchant×SKU) بيتجمّع مرة واحدة بس (Map)، فالعدّ في
+// كروت الكاتيجوري تحت مش ممكن يبقى فيه تكرار لنفس الماتش.
+//
+// كاتيجوريز "Fashion" و"Taager Gomla" مستبعدة بالكامل من السكشن ده (مش
+// كاتيجوريز حقيقية معتمدة هنا) — لا في الكروت ولا في الجدول.
+//
+// الأرقام:
+//   - Total Placed/Confirmed/Delivered Pcs, Placed ASP, PPM%: من غير أي
+//     لاج، من كل صفوف الفترة يوم NEW_MATCH_START_DAY -> النهاردة.
+//   - CR% (Confirmed/Placed): كات أوف يومين (CR_LAG_DAYS)، على نفس فترة
+//     يوم NEW_MATCH_START_DAY -> النهاردة.
+//   - DR% (Delivered/Confirmed): كات أوف 4 أيام، على نفس الفترة.
+//   - NDR% = CR% × DR%.
+//   - CM3/CM3-Per-Piece/CM3%: نفس كات أوف الـ CM3_LAG_DAYS المطبق في أي
+//     حتة تانية مصدرها MAIN_GID (Performance-Matches وغيره).
+//   - Match Start: أقدم تاريخ ظهر فيه الماتش ده (من يوم
+//     NEW_MATCH_START_DAY -> النهاردة، لأنه أصلاً معندوش نشاط قبل كده).
+// =====================================================================
+const NEW_MATCH_START_DAY = 10;
+const NEW_MATCH_DR_LAG_DAYS = 4;
+const NEW_MATCH_EXCLUDED_CATEGORIES = new Set(["fashion", "taager gomla"]);
+
+function prepareMpNewMatchesData() {
+  const mainRowsAll = state.allParsedRows || [];
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthYear = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  const thisMonthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const prevMonthRows = mainRowsAll.filter(r => r.monthYear === prevMonthYear);
+
+  // ماتشات ظهرت في نفس الشهر الحالي قبل يوم NEW_MATCH_START_DAY — مستبعدة.
+  const beforeStartKeys = new Set();
+  // صفوف من يوم NEW_MATCH_START_DAY لحد النهاردة (البيانات أصلاً بتتسحب لحد
+  // النهاردة، فمفيش داعي لقيد إضافي على "آخر تاريخ").
+  const startDayRows = [];
+  thisMonthRows.forEach(r => {
+    if (!r.merchantId || !r.sku || !r.timestamp) return;
+    const day = new Date(r.timestamp).getDate();
+    const key = r.merchantId + "||" + r.sku;
+    if (day < NEW_MATCH_START_DAY) beforeStartKeys.add(key);
+    else startDayRows.push(r);
+  });
+
+  // ماتشات ظهرت في الشهر اللي فات (أي نشاط خالص، من كل بيانات الشهر اللي
+  // فات المتاحة في شيت الـ Main، من غير أي قيد على الرينج) — مستبعدة.
+  const prevMonthKeys = new Set();
+  prevMonthRows.forEach(r => {
+    if (!r.merchantId || !r.sku) return;
+    prevMonthKeys.add(r.merchantId + "||" + r.sku);
+  });
+
+  const cm3Cutoff = getCm3LagCutoffTimestamp(startDayRows);
+  const crCutoff = getLagCutoffTimestamp(startDayRows, CR_LAG_DAYS); // يومين
+  const drCutoff = getLagCutoffTimestamp(startDayRows, NEW_MATCH_DR_LAG_DAYS); // 4 أيام
+
+  const map = new Map();
+  startDayRows.forEach(r => {
+    const key = r.merchantId + "||" + r.sku;
+    if (beforeStartKeys.has(key) || prevMonthKeys.has(key)) return; // مش ماتش جديد
+    const inv = state.inventoryMap[r.sku];
+    const category = (inv ? inv.category : "") || r.category || "Uncategorized";
+    if (NEW_MATCH_EXCLUDED_CATEGORIES.has(category.trim().toLowerCase())) return; // Fashion / Taager Gomla مستبعدين
+
+    if (!map.has(key)) {
+      map.set(key, {
+        sku: r.sku,
+        skuName: (inv ? inv.skuName : "") || "Unknown",
+        category,
+        merchantId: r.merchantId, merchantName: r.merchantName || r.merchantId,
+        placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, ppm: 0, cm3: 0, cm3Gmv: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        matchStartTs: r.timestamp, matchStartDate: r.date
+      });
+    }
+    const e = map.get(key);
+    e.placed += r.placedPieces || 0; e.confirmed += r.confirmedPieces || 0; e.delivered += r.deliveredPieces || 0;
+    e.placedGmv += r.placedGmv || 0; e.deliveredGmv += r.deliveredGmv || 0; e.ppm += r.ppm || 0;
+    if (isRowEligibleForLag(r, crCutoff)) { e.crPlaced += r.placedPieces || 0; e.crConfirmed += r.confirmedPieces || 0; }
+    if (isRowEligibleForLag(r, drCutoff)) { e.drConfirmed += r.confirmedPieces || 0; e.drDelivered += r.deliveredPieces || 0; }
+    if (isCm3RowEligible(r, cm3Cutoff)) { e.cm3 += r.cm3 || 0; e.cm3Gmv += r.deliveredGmv || 0; }
+    if (r.timestamp && r.timestamp < e.matchStartTs) { e.matchStartTs = r.timestamp; e.matchStartDate = r.date; } // أقدم ظهور للماتش
+  });
+
+  mpNewMatchesState.data = Array.from(map.values()).map(e => {
+    const crPct = e.crPlaced ? (e.crConfirmed / e.crPlaced) * 100 : 0;
+    const drPct = e.drConfirmed ? (e.drDelivered / e.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const cm3PerPiece = e.delivered ? (e.cm3 / e.delivered) : 0;
+    const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
+    const placedAsp = e.placed ? (e.placedGmv / e.placed) : 0;
+    const ppmPct = e.deliveredGmv ? (e.ppm / e.deliveredGmv) * 100 : 0;
+    return { ...e, crPct, drPct, ndrPct, cm3PerPiece, cm3Pct, placedAsp, ppmPct };
+  });
+
+  if ($("mpNewMatchesTotal")) $("mpNewMatchesTotal").textContent = fmtInt.format(mpNewMatchesState.data.length);
+  if ($("mpNewMatchesRangeLabel")) $("mpNewMatchesRangeLabel").textContent = `Day ${NEW_MATCH_START_DAY} - ${now.getDate()} ${currentMonthYear}`;
+
+  renderMpNewMatchesCategoryBoxes();
+  applyMpNewMatchesSearchAndSort();
+}
+
+// كارت لكل كاتيجوري فيها ماتش جديد واحد على الأقل، بعدد الماتشات الجديدة
+// بتاعتها. العد هنا مبني على mpNewMatchesState.data اللي هي أصلاً مبنية من
+// Map مفتاحها Merchant×SKU (سطر واحد بس لكل ماتش) — فمفيش أي تكرار ممكن
+// يحصل هنا، كل ماتش بيتحسب مرة واحدة في الكاتيجوري بتاعته بالظبط.
+function renderMpNewMatchesCategoryBoxes() {
+  const grid = $("mpNewMatchesCategoryGrid"); if (!grid) return;
+  const catCounts = new Map();
+  mpNewMatchesState.data.forEach(m => { catCounts.set(m.category, (catCounts.get(m.category) || 0) + 1); });
+  const cats = Array.from(catCounts.entries()).sort((a, b) => b[1] - a[1]);
+  if (!cats.length) {
+    grid.innerHTML = `<div class="metric-card hover-glow"><div class="metric-title">No New Matches</div><div class="metric-value">0</div><div class="metric-sub text-dim">In the selected range</div></div>`;
+    return;
+  }
+  grid.innerHTML = cats.map(([cat, count]) => `
+    <div class="metric-card hover-glow">
+      <div class="metric-title truncate-cell" title="${cat}">${cat} <span class="icon-box"></span></div>
+      <div class="metric-value">${fmtInt.format(count)}</div>
+      <div class="metric-sub text-dim">New Matches</div>
+    </div>
+  `).join("");
+}
+
+function sortMpNewMatches(key) {
+  if (mpNewMatchesState.sortKey === key) { mpNewMatchesState.sortDir = mpNewMatchesState.sortDir === "asc" ? "desc" : "asc"; } else { mpNewMatchesState.sortKey = key; mpNewMatchesState.sortDir = "desc"; }
+  applyMpNewMatchesSearchAndSort();
+}
+
+function applyMpNewMatchesSearchAndSort() {
+  const term = $("searchMpNewMatchesInput") ? $("searchMpNewMatchesInput").value.trim().toLowerCase() : "";
+  mpNewMatchesState.filtered = mpNewMatchesState.data.filter(m => {
+    if (!term) return true;
+    return (m.skuName && m.skuName.toLowerCase().includes(term)) || (m.sku && String(m.sku).toLowerCase().includes(term)) ||
+      (m.merchantName && m.merchantName.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
+      (m.category && m.category.toLowerCase().includes(term));
+  });
+  const { sortKey, sortDir } = mpNewMatchesState; const dir = sortDir === "asc" ? 1 : -1;
+  mpNewMatchesState.filtered.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  mpNewMatchesState.page = 0;
+  renderPaginatedMpNewMatchesTable();
+}
+
+function renderPaginatedMpNewMatchesTable() {
+  const tbody = $("mpNewMatchesTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = mpNewMatchesState.page * PAGE_SIZE;
+  const pageRows = mpNewMatchesState.filtered.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.sku}</td>
+      <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
+      <td class="truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="font-mono text-dim">${m.merchantId}</td>
+      <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
+      <td class="num font-bold">${fmtIntCell(m.placed)}</td>
+      <td class="num text-blue">${fmtIntCell(m.confirmed)}</td>
+      <td class="num text-green">${fmtIntCell(m.delivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num text-purple">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="text-dim">${m.matchStartDate || "-"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(mpNewMatchesState.filtered.length / PAGE_SIZE));
+  if ($("rowCountMpNewMatches")) $("rowCountMpNewMatches").textContent = `${fmtInt.format(mpNewMatchesState.filtered.length)} Matches`;
+  if ($("pageIndicatorMpNewMatches")) $("pageIndicatorMpNewMatches").textContent = `Page ${mpNewMatchesState.page + 1} of ${totalPages}`;
+  if ($("prevPageMpNewMatches")) $("prevPageMpNewMatches").disabled = mpNewMatchesState.page === 0;
+  if ($("nextPageMpNewMatches")) $("nextPageMpNewMatches").disabled = mpNewMatchesState.page >= totalPages - 1;
+}
+
 // ---- Poor Matches: ترتيب / بحث / رسم (نفس باترن Performance-Matches بالظبط) ----
 function sortPoorMatches(key) {
   if (poorMatchesState.sortKey === key) { poorMatchesState.sortDir = poorMatchesState.sortDir === "asc" ? "desc" : "asc"; } else { poorMatchesState.sortKey = key; poorMatchesState.sortDir = "desc"; }
@@ -8257,6 +8461,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         analyst: analystState.page,
         sellthrough: state.sellthroughPage,
         mpMatches: mpMatchesState.page,
+        mpNewMatches: mpNewMatchesState.page,
         poorMatches: poorMatchesState.page,
         availabilityLocking: availabilityLockingState.page,
         mpSalesPlan: state.mpSalesPlanPage,
@@ -8270,7 +8475,7 @@ confirmDownloadBtn.addEventListener("click", () => {
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
-    state.sellthroughPage = 0; mpMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
+    state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
     state.recTrackerPage = 0; ppmAnalystState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     PAGE_SIZE = 999999;
 
@@ -8285,6 +8490,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
     if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
     if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
+    if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
     if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
     if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
     if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
@@ -8304,6 +8510,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         analystState.page = originalPage.analyst;
         state.sellthroughPage = originalPage.sellthrough;
         mpMatchesState.page = originalPage.mpMatches;
+        mpNewMatchesState.page = originalPage.mpNewMatches;
         poorMatchesState.page = originalPage.poorMatches;
         availabilityLockingState.page = originalPage.availabilityLocking;
         state.mpSalesPlanPage = originalPage.mpSalesPlan;
@@ -8321,6 +8528,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
         if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
         if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
+        if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
         if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
         if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
         if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
