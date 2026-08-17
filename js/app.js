@@ -293,7 +293,6 @@ const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
 const navProductsAnalyst = $("navProductsAnalyst");
 const navProductsMatchesAnalyst = $("navProductsMatchesAnalyst");
-const navCm3Target = $("navCm3Target");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
 const navAvailabilityLocking = $("navAvailabilityLocking");
@@ -345,7 +344,6 @@ function switchView(viewName) {
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
   if(navProductsAnalyst) navProductsAnalyst.classList.remove("active");
   if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.remove("active");
-  if(navCm3Target) navCm3Target.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
   if(navAvailabilityLocking) navAvailabilityLocking.classList.remove("active");
@@ -368,8 +366,9 @@ function switchView(viewName) {
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
   else if (viewName === "productsAnalyst") { activeSection = $("viewProductsAnalyst"); if(navProductsAnalyst) navProductsAnalyst.classList.add("active"); prepareProductsAnalystData(); }
   else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); prepareProductsMatchesAnalystData(); }
-  else if (viewName === "cm3Target") { activeSection = $("viewCm3Target"); if(navCm3Target) navCm3Target.classList.add("active"); renderCm3TargetView(); } 
-  else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3AnalystView(); }
+  // CM3 Target اتدمجت جوه صفحة CM3 Analyst نفسها (بطلب صريح) — بدل ما تبقى
+  // صفحة لوحدها، دلوقتي هي أول سكشن في viewCm3Analyst، فبنرندر الاتنين مع بعض.
+  else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3TargetView(); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
   else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
   else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
@@ -400,7 +399,6 @@ if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => 
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
 if(navProductsAnalyst) navProductsAnalyst.addEventListener("click", () => switchView("productsAnalyst"));
 if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.addEventListener("click", () => switchView("productsMatchesAnalyst"));
-if(navCm3Target) navCm3Target.addEventListener("click", () => switchView("cm3Target"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
 if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () => switchView("availabilityLocking"));
@@ -3322,8 +3320,8 @@ function updateDashboard(rows) {
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
   if ($("viewProductsAnalyst") && $("viewProductsAnalyst").classList.contains("active-view")) prepareProductsAnalystData();
   if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
-  if ($("viewCm3Target") && $("viewCm3Target").classList.contains("active-view")) renderCm3TargetView();
-  if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) renderCm3AnalystView();
+  // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
+  if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) { renderCm3TargetView(); renderCm3AnalystView(); }
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
@@ -3855,7 +3853,11 @@ function cm3BuildEntityMatrix(qualifying, scope) {
   if (scope === "match") {
     qualifying.forEach(c => {
       const key = `${c.merchantId}||${c.sku}`;
-      if (!matrix.has(key)) matrix.set(key, { label: `${c.merchantName || c.merchantId} - ${c.sku}`, periods: new Map() });
+      if (!matrix.has(key)) matrix.set(key, {
+        label: `${c.merchantName || c.merchantId} - ${c.sku}`,
+        merchantId: c.merchantId, merchantName: c.merchantName || c.merchantId, sku: c.sku, category: c.category,
+        periods: new Map()
+      });
       const entry = matrix.get(key); entry.periods.set(c.period, (entry.periods.get(c.period) || 0) + c.cm3);
     });
   } else {
@@ -3868,17 +3870,37 @@ function cm3BuildEntityMatrix(qualifying, scope) {
   return matrix;
 }
 
+// ---------------------------------------------------------------------
+// خريطة اسم الستاتس -> اسم مفتاح details (مستخدمة في cm3ComputeTransitionRows
+// وفي الدريل داون تحت الجدول). موجودة هنا فوق عشان تتشارك بين الاتنين.
+// ---------------------------------------------------------------------
+const CM3_STATUS_DETAIL_KEY = {
+  "Turned Positive": "turnedPositive", "Turned Negative": "turnedNegative", "Became Zero": "becameZero",
+  "Stayed Negative": "stayedNegative", "Stayed Positive": "stayedPositive", "New Match": "newMatch"
+};
+
 function cm3ComputeTransitionRows(matrix, allPeriodsSorted, displayPeriods) {
   return displayPeriods.map(period => {
     const periodIdx = allPeriodsSorted.indexOf(period); const prevPeriod = periodIdx > 0 ? allPeriodsSorted[periodIdx - 1] : null;
     let turnedPositive = 0, turnedNegative = 0, becameZero = 0, stayedNegative = 0, stayedPositive = 0, newMatch = 0;
     let totalNegLastPeriod = 0, cm3NegLast = 0, cm3NegThis = 0, cm3PosThisRaw = 0, cm3NegThisRaw = 0;
+    // details: عشان الدريل داون تحت الجدول — لكل ستاتس، الـ entities (matches/
+    // categories/products حسب الـ scope) اللي وقعت جواه في الفترة دي بالظبط،
+    // بهويتهم الكاملة (Merchant/SKU/Category) وقيم الـ CM3 قبل وبعد.
+    const details = { turnedPositive: [], turnedNegative: [], becameZero: [], stayedNegative: [], stayedPositive: [], newMatch: [] };
     matrix.forEach(entity => {
       const prev = prevPeriod !== null ? (entity.periods.get(prevPeriod) || 0) : 0;
       const curr = entity.periods.get(period) || 0;
       let status;
       if (prev === 0) status = "New Match"; else if (prev < 0 && curr > 0) status = "Turned Positive"; else if (prev < 0 && curr === 0) status = "Became Zero"; else if (prev < 0 && curr < 0) status = "Stayed Negative"; else if (prev >= 0 && curr >= 0) status = "Stayed Positive"; else if (prev >= 0 && curr < 0) status = "Turned Negative"; else status = "";
       if (status === "Turned Positive") turnedPositive++; else if (status === "Turned Negative") turnedNegative++; else if (status === "Became Zero") becameZero++; else if (status === "Stayed Negative") stayedNegative++; else if (status === "Stayed Positive") stayedPositive++; else if (status === "New Match") newMatch++;
+      const detailKey = CM3_STATUS_DETAIL_KEY[status];
+      if (detailKey) {
+        details[detailKey].push({
+          label: entity.label, merchantId: entity.merchantId, merchantName: entity.merchantName,
+          sku: entity.sku, category: entity.category, prevCm3: prev, currCm3: curr
+        });
+      }
       if (prev < 0) { totalNegLastPeriod++; cm3NegLast += prev; }
       if (curr < 0 && prev !== 0) cm3NegThis += curr;
       if (curr > 0) cm3PosThisRaw += curr; if (curr < 0) cm3NegThisRaw += curr;
@@ -3886,7 +3908,7 @@ function cm3ComputeTransitionRows(matrix, allPeriodsSorted, displayPeriods) {
     const actionRate = totalNegLastPeriod ? ((turnedPositive + becameZero) / totalNegLastPeriod) * 100 : null;
     const recoveryRate = totalNegLastPeriod ? (turnedPositive / totalNegLastPeriod) * 100 : null;
     const contrNeg = cm3PosThisRaw ? Math.abs(cm3NegThisRaw / cm3PosThisRaw) * 100 : 0;
-    return { period, turnedPositive, turnedNegative, becameZero, stayedNegative, stayedPositive, newMatch, totalNegLastPeriod, actionRate, recoveryRate, cm3NegLast, cm3NegThis, cm3PositiveTotal: cm3PosThisRaw, cm3NegativeTotal: cm3NegThisRaw, contrNeg };
+    return { period, turnedPositive, turnedNegative, becameZero, stayedNegative, stayedPositive, newMatch, totalNegLastPeriod, actionRate, recoveryRate, cm3NegLast, cm3NegThis, cm3PositiveTotal: cm3PosThisRaw, cm3NegativeTotal: cm3NegThisRaw, contrNeg, details };
   });
 }
 
@@ -3924,21 +3946,39 @@ const CM3_TABLE_COLUMNS = [
 
 const SCOPE_TITLES = { overall: "Overall Performance", category: "Performance by Category", product: "Performance by Product", match: "Performance by Match (Product per Merchant)" };
 
+// ---------------------------------------------------------------------
+// DRILL-DOWN — بيسمح للمستخدم يدوس على أي رقم من أعمدة الستاتس (Turned
+// Positive/Negative, Became Zero, Stayed Negative/Positive, New Match) في
+// جدول CM3 Target ويشوف تفاصيل الـ Matches (أو الكاتيجوريز/المنتجات حسب
+// الـ Grouping المختار) اللي مكوّنة الرقم ده بالظبط، في قسم منفصل تحت
+// الجدول (مش Modal ولا صف بيتفتح) — cm3TableRowsCache بتحتفظ بآخر صفوف
+// اتعرضت عشان الدريل داون يقدر يرجعلها لما المستخدم يدوس على رقم.
+// ---------------------------------------------------------------------
+let cm3TableRowsCache = [];
+let cm3DrilldownState = { periodIdx: null, statusKey: null, items: [] };
+
 function renderCm3TargetTable(rows) {
   const head = $("cm3TargetTableHead"); const body = $("cm3TargetTableBody"); if (!head || !body) return;
+  cm3TableRowsCache = rows || [];
+  hideCm3Drilldown();
   head.innerHTML = CM3_TABLE_COLUMNS.map(c => `<th class="${c.key === "period" ? "" : "num"}">${c.label}</th>`).join("");
   body.innerHTML = "";
   if (!rows || rows.length === 0) { body.innerHTML = `<tr><td colspan="${CM3_TABLE_COLUMNS.length}" class="text-dim center">No qualifying data for this range.</td></tr>`; return; }
-  rows.forEach(r => {
+  // بادج قابل للدوس عليه — بيحمل data-status (مفتاح details) + data-period-idx
+  // (انديكس الصف في cm3TableRowsCache) عشان cm3TargetBodyClickHandler يعرف
+  // يجيب التفاصيل الصح لما يتدوس عليه.
+  const clickableBadge = (periodIdx, statusKey, cls, value) =>
+    `<span class="badge-status ${cls} cm3-badge-clickable" data-period-idx="${periodIdx}" data-status="${statusKey}" title="اضغط لعرض تفاصيل الـ Matches">${fmtIntCell(value)}</span>`;
+  rows.forEach((r, idx) => {
     const tr = document.createElement("tr"); const contrClass = cm3ContrBadgeClass(r.contrNeg);
     tr.innerHTML = `
       <td class="cm3-period-cell">${r.period}</td>
-      <td class="num"><span class="badge-status turned-positive">${fmtIntCell(r.turnedPositive)}</span></td>
-      <td class="num"><span class="badge-status turned-negative">${fmtIntCell(r.turnedNegative)}</span></td>
-      <td class="num"><span class="badge-status became-zero">${fmtIntCell(r.becameZero)}</span></td>
-      <td class="num"><span class="badge-status stayed-negative">${fmtIntCell(r.stayedNegative)}</span></td>
-      <td class="num"><span class="badge-status stayed-positive">${fmtIntCell(r.stayedPositive)}</span></td>
-      <td class="num"><span class="badge-status new-match">${fmtIntCell(r.newMatch)}</span></td>
+      <td class="num">${clickableBadge(idx, "turnedPositive", "turned-positive", r.turnedPositive)}</td>
+      <td class="num">${clickableBadge(idx, "turnedNegative", "turned-negative", r.turnedNegative)}</td>
+      <td class="num">${clickableBadge(idx, "becameZero", "became-zero", r.becameZero)}</td>
+      <td class="num">${clickableBadge(idx, "stayedNegative", "stayed-negative", r.stayedNegative)}</td>
+      <td class="num">${clickableBadge(idx, "stayedPositive", "stayed-positive", r.stayedPositive)}</td>
+      <td class="num">${clickableBadge(idx, "newMatch", "new-match", r.newMatch)}</td>
       <td class="num text-dim font-bold">${fmtIntCell(r.totalNegLastPeriod)}</td>
       <td class="num font-bold ${r.actionRate === null ? "text-dim" : "text-blue"}">${r.actionRate === null ? "-" : fmtPctCell(r.actionRate)}</td>
       <td class="num font-bold ${r.recoveryRate === null ? "text-dim" : "text-green"}">${r.recoveryRate === null ? "-" : fmtPctCell(r.recoveryRate)}</td>
@@ -3948,6 +3988,76 @@ function renderCm3TargetTable(rows) {
     `;
     body.appendChild(tr);
   });
+}
+
+const CM3_STATUS_LABELS = {
+  turnedPositive: "Turned Positive", turnedNegative: "Turned Negative", becameZero: "Became Zero",
+  stayedNegative: "Stayed Negative", stayedPositive: "Stayed Positive", newMatch: "New Match"
+};
+
+function hideCm3Drilldown() {
+  cm3DrilldownState = { periodIdx: null, statusKey: null, items: [] };
+  const section = $("cm3DrilldownSection");
+  if (section) section.classList.add("hidden");
+}
+
+function showCm3Drilldown(periodIdx, statusKey) {
+  const row = cm3TableRowsCache[periodIdx];
+  const section = $("cm3DrilldownSection");
+  if (!row || !row.details || !section) return;
+  const items = row.details[statusKey] || [];
+  cm3DrilldownState = { periodIdx, statusKey, items };
+  if ($("cm3DrilldownTitle")) $("cm3DrilldownTitle").textContent = `${CM3_STATUS_LABELS[statusKey] || statusKey} — ${row.period}`;
+  if ($("cm3DrilldownSub")) $("cm3DrilldownSub").textContent = `${fmtInt.format(items.length)} match(es) — دي التفاصيل اللي مكوّنة الرقم ده في جدول CM3 Target`;
+  if ($("cm3DrilldownSearch")) $("cm3DrilldownSearch").value = "";
+  renderCm3DrilldownTable(items);
+  section.classList.remove("hidden");
+  section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderCm3DrilldownTable(items) {
+  const body = $("cm3DrilldownTableBody"); if (!body) return;
+  if (!items || items.length === 0) { body.innerHTML = `<tr><td colspan="5" class="text-dim center">No matches for this status in this period.</td></tr>`; return; }
+  body.innerHTML = items.map(it => `
+    <tr>
+      <td>${it.merchantName || it.label || "-"}</td>
+      <td class="font-mono text-dim">${it.sku || "-"}</td>
+      <td>${it.category || "-"}</td>
+      <td class="num text-red">${fmtCm3MoneyCell(it.prevCm3)}</td>
+      <td class="num ${it.currCm3 >= 0 ? "text-green" : "text-red"}">${fmtCm3MoneyCell(it.currCm3)}</td>
+    </tr>
+  `).join("");
+}
+
+function applyCm3DrilldownSearch() {
+  const q = $("cm3DrilldownSearch") ? $("cm3DrilldownSearch").value.trim().toLowerCase() : "";
+  const items = cm3DrilldownState.items || [];
+  if (!q) { renderCm3DrilldownTable(items); return; }
+  const filtered = items.filter(it =>
+    (it.merchantName && it.merchantName.toLowerCase().includes(q)) ||
+    (it.sku && it.sku.toLowerCase().includes(q)) ||
+    (it.category && it.category.toLowerCase().includes(q)) ||
+    (it.label && it.label.toLowerCase().includes(q))
+  );
+  renderCm3DrilldownTable(filtered);
+}
+
+let cm3DrilldownWired = false;
+function cm3WireDrilldownOnce() {
+  if (cm3DrilldownWired) return; cm3DrilldownWired = true;
+  const body = $("cm3TargetTableBody");
+  if (body) {
+    body.addEventListener("click", (e) => {
+      const el = e.target.closest(".cm3-badge-clickable");
+      if (!el) return;
+      const periodIdx = Number(el.dataset.periodIdx);
+      const statusKey = el.dataset.status;
+      if (Number.isNaN(periodIdx) || !statusKey) return;
+      showCm3Drilldown(periodIdx, statusKey);
+    });
+  }
+  if ($("cm3DrilldownClose")) $("cm3DrilldownClose").addEventListener("click", hideCm3Drilldown);
+  if ($("cm3DrilldownSearch")) $("cm3DrilldownSearch").addEventListener("input", applyCm3DrilldownSearch);
 }
 
 function renderCm3Charts(overallRows) {
@@ -4117,11 +4227,13 @@ function renderCm3TargetView() {
   const analysis = computeCm3Analysis(cm3State.period, cm3State.scope);
   if ($("cm3TableTitle")) $("cm3TableTitle").textContent = `CM3 Target - ${SCOPE_TITLES[cm3State.scope]}`;
   if ($("cm3TableSub")) { $("cm3TableSub").textContent = cm3State.scope === "overall" ? "Total qualifying CM3 (Positive vs Negative) per period" : "Period-over-period status transitions"; }
+  hideCm3Drilldown();
   if (!analysis) { renderCm3TargetTable([]); return; }
   renderCm3Cards(analysis.matchLevelRows, cm3State.period, analysis.displayPeriods);
   renderCm3Charts(analysis.matchLevelRows);
   if (cm3State.scope === "overall") renderCm3OverallTable(analysis.scopedRows); else renderCm3TargetTable(analysis.scopedRows);
   cm3WireControlsOnce();
+  cm3WireDrilldownOnce();
 }
 
 function cm3WireControlsOnce() {
@@ -6306,16 +6418,19 @@ function getSellthroughIndices() {
   });
 
   // ---------------------------------------------------------------------
-  // STOCK & DOH — بنفس مصدر ونفس معادلة Commercial Debundlized بالظبط:
-  // STOCK من عمود G في شيت الديبندلايز (PRODUCTS_DEBUNDLE_MAP_GID)، وDOH =
-  // Stock ÷ متوسط آخر 3 أيام Confirmed. هنا مفيش داعي لأي ديبندلايز/بندل
-  // لأن الداتا في لوحة الـ Sellthrough سينجل SKU أصلاً، فبنقرأ الاستوك
-  // والكونفيرمد على مستوى نفس الـ SKU مباشرة.
+  // STOCK & DOH — بنفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) المستخدم
+  // في Current Inventory DOH بتاع Recommended Tracker/PPM Analyst
+  // (buildDebundledStockDohIndex، الشير هيلبر فوق):
+  //   • STOCK: بيتقرا مباشرة من شيت الديبندلايز (PRODUCTS_DEBUNDLE_MAP_GID)
+  //     بمطابقة عمود A (PRODUCT_ID) مع الـ SKU — مش عمود D (SINGLE_ID) زي
+  //     الأول — والقيمة من عمود H (STOCK).
+  //   • DOH: الديماند (Confirmed آخر 3 أيام) بتتجمع "Overall" — يعني ديماند
+  //     الـ Single SKU وهو بيتباع لوحده + ديماند كل البندلز اللي هو مكوّن
+  //     جواها (كل بندل بيتضرب في PRODUCT_QUANTITY بتاعه فيه)، مش بس
+  //     الديماند اللي طالع على نفس الـ SKU ده لوحده كسطر في MAIN_GID.
   // ---------------------------------------------------------------------
-  const stockBySingle = new Map();
-  (state.debundleMap || []).forEach(r => {
-    if (r.singleId && r.stock && !stockBySingle.has(r.singleId)) stockBySingle.set(r.singleId, r.stock);
-  });
+  const mainRows = state.allParsedRows || [];
+  const { stockByProductId, singleOverallStats } = buildDebundledStockDohIndex(mainRows);
 
   // ---------------------------------------------------------------------
   // Availability (WEBSITE_STATUS) / Is_Locked (IS_LOCKED) — من شيت Products
@@ -6331,23 +6446,12 @@ function getSellthroughIndices() {
     if (norm && !productsBySkuNormalized.has(norm)) productsBySkuNormalized.set(norm, state.productsMap[sku]);
   });
 
-  const mainRows = state.allParsedRows || [];
-  let mainLatestTs = 0;
-  mainRows.forEach(r => { if (r.timestamp > mainLatestTs) mainLatestTs = r.timestamp; });
-  const mainToday = new Date(mainLatestTs); mainToday.setHours(0, 0, 0, 0);
-  const mainD3Ms = mainToday.getTime() - (3 * 86400000);
-  const conf3dBySku = new Map();
-  mainRows.forEach(r => {
-    if (!r.sku || r.timestamp < mainD3Ms) return;
-    conf3dBySku.set(r.sku, (conf3dBySku.get(r.sku) || 0) + (r.confirmedPieces || 0));
-  });
-
   _stIndexCache = {
     _fp: fp,
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec, inboundNameCat,
     beginInvBySkuMonth, beginInvNameCat, needBySkuMonth, needNameCat,
     skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
-    stockBySingle, conf3dBySku, productsBySkuNormalized, stNormalizeSku
+    stockByProductId, singleOverallStats, productsBySkuNormalized, stNormalizeSku
   };
   return _stIndexCache;
 }
@@ -6368,7 +6472,7 @@ function recomputeSellthroughRows() {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec,
     inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
     needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
-    stockBySingle, conf3dBySku, productsBySkuNormalized, stNormalizeSku
+    stockByProductId, singleOverallStats, productsBySkuNormalized, stNormalizeSku
   } = idx;
 
   // مجموعة الـ SKU الأساسية = اتحاد الموجودين في الثلاث مصادر عند begInvKey
@@ -6412,10 +6516,12 @@ function recomputeSellthroughRows() {
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
 
-    // Stock/DOH: نفس المصدر بتاع Commercial Debundlized (عمود G في شيت
-    // الديبندلايز)، وDOH = Stock ÷ متوسط آخر 3 أيام Confirmed من MAIN_GID.
-    const stock = stockBySingle.has(sku) ? stockBySingle.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
-    const avg3dConfirmed = (conf3dBySku.get(sku) || 0) / 3;
+    // Stock/DOH: نفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) — STOCK
+    // بيتقرا من عمود A (PRODUCT_ID) في شيت الديبندلايز (عمود H)، والـ DOH
+    // بيتحسب من ديماند الـ SKU ده Overall: هو لوحده + كل البندلز اللي هو
+    // مكوّن جواها (كل بندل × الكمية بتاعته فيه) — نفس getSellthroughIndices فوق.
+    const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
+    const avg3dConfirmed = singleOverallStats(sku).avg;
     const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
 
     // Availability / Is_Locked: من شيت Products (PRODUCTS_GID) عن طريق SKU —
@@ -6572,9 +6678,121 @@ function simulateSellthroughProgress() {
   });
 }
 
+// ---------------------------------------------------------------------
+// SELLTHROUGH TREND CHART — فوق جدول "Sellthrough & Inbound" مباشرة، نفس
+// ستايل شارت "Pipeline Velocity" اللي في الـ Overview بالظبط بس بمقياس
+// شهري. بتاخد كل شهور السنة الحالية اللي فيها بيانات Sellthrough فعلاً (من
+// أي مصدر من التلاتة: Inbound/Beginning Inventory/Sellthrough Needed)،
+// ولكل شهر M بتحسب (باعتبار M هو نفسه الـ Beginning Inventory Month
+// وStart/End Sale Month مع بعض — يعني أداء الشهر ده في حد ذاته):
+//   • Total Purchases = مجموع كميات الـ Inbound (RCV_QTY) في الشهر M
+//   • Total Delivered/Confirmed = مجموع DLV_QTY أو CNF_QTY (حسب التوجل) في M
+//   • Sellthrough % = مجموع DLV_QTY أو CNF_QTY ÷ (Beginning Inventory +
+//     Total Purchases + RTOS) × 100 — نفس معادلة عمود O بالظبط بس Weighted
+//     على مستوى الشهر ككل، مش لكل SKU لوحده.
+// الشارت ده مستقل تمامًا عن فلاتر اللوحة فوق (Beginning Inventory/Start
+// Sale Month/End Sale Month) — بيعرض الترند الشهري لكل السنة الحالية دايمًا.
+// ---------------------------------------------------------------------
+let sellthroughTrendMetric = "delivered"; // "delivered" | "confirmed"
+let sellthroughTrendChartInst = null;
+
+function buildSellthroughTrendData() {
+  const idx = getSellthroughIndices();
+  const { skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed, beginInvBySkuMonth, inboundBySkuMonth, needBySkuMonth } = idx;
+
+  const currentYear = new Date().getFullYear();
+  const monthKeys = new Set();
+  [skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed].forEach(map => {
+    Array.from((map || new Map()).keys()).forEach(mk => {
+      const d = new Date(mk);
+      if (!isNaN(d.getTime()) && d.getFullYear() === currentYear) monthKeys.add(mk);
+    });
+  });
+  const sortedMonths = Array.from(monthKeys).sort((a, b) => new Date(a) - new Date(b));
+
+  return sortedMonths.map(mk => {
+    const skuSet = new Set();
+    (skuByMonthInbound.get(mk) || []).forEach(sku => skuSet.add(sku));
+    (skuByMonthNeed.get(mk) || []).forEach(sku => skuSet.add(sku));
+    (skuByMonthBegInv.get(mk) || []).forEach(sku => skuSet.add(sku));
+
+    let sumBegInv = 0, sumTotPur = 0, sumRtos = 0, sumDlv = 0, sumCnf = 0;
+    skuSet.forEach(sku => {
+      sumBegInv += beginInvBySkuMonth.get(sku + "|" + mk) || 0;
+      sumTotPur += inboundBySkuMonth.get(sku + "|" + mk) || 0;
+      const need = needBySkuMonth.get(sku + "|" + mk);
+      if (need) { sumDlv += need.dlv || 0; sumCnf += need.cnf || 0; sumRtos += need.rto || 0; }
+    });
+    const denom = sumBegInv + sumTotPur + sumRtos;
+    const stRateDelivered = denom > 0 ? (sumDlv / denom) * 100 : 0;
+    const stRateConfirmed = denom > 0 ? (sumCnf / denom) * 100 : 0;
+    return { month: mk, totalPurchases: sumTotPur, totalDelivered: sumDlv, totalConfirmed: sumCnf, stRateDelivered, stRateConfirmed };
+  });
+}
+
+let sellthroughTrendWired = false;
+function sellthroughTrendWireControlsOnce() {
+  if (sellthroughTrendWired) return; sellthroughTrendWired = true;
+  document.querySelectorAll("#sellthroughTrendMetricToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.classList.contains("active")) return;
+      document.querySelectorAll("#sellthroughTrendMetricToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      sellthroughTrendMetric = btn.dataset.metric;
+      renderSellthroughTrendChart();
+    });
+  });
+}
+
+function renderSellthroughTrendChart() {
+  sellthroughTrendWireControlsOnce();
+  const canvas = document.getElementById("sellthroughTrendChart");
+  if (!canvas || typeof Chart === "undefined") return;
+  const data = buildSellthroughTrendData();
+  const isConfirmed = sellthroughTrendMetric === "confirmed";
+  const piecesLabel = isConfirmed ? "Total Confirmed" : "Total Delivered";
+  if ($("sellthroughTrendSubtitle")) $("sellthroughTrendSubtitle").textContent = `Total Purchases vs ${piecesLabel} vs Sellthrough % — every month this year`;
+
+  if (sellthroughTrendChartInst) { sellthroughTrendChartInst.destroy(); sellthroughTrendChartInst = null; }
+  if (!data.length) return;
+
+  const labels = data.map(d => { const dt = new Date(d.month); return isNaN(dt.getTime()) ? d.month : dt.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }); });
+  const purchasesValues = data.map(d => d.totalPurchases);
+  const piecesValues = data.map(d => isConfirmed ? d.totalConfirmed : d.totalDelivered);
+  const stRateValues = data.map(d => isConfirmed ? d.stRateConfirmed : d.stRateDelivered);
+
+  sellthroughTrendChartInst = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Total Purchases", data: purchasesValues, borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#3b82f6", yAxisID: "y" },
+        { label: piecesLabel, data: piecesValues, borderColor: "#10b981", backgroundColor: "rgba(16,185,129,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#10b981", yAxisID: "y" },
+        { label: "Sellthrough %", data: stRateValues, borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#f59e0b", yAxisID: "y1", borderDash: [4, 3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: {
+          backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#cbd5e1", borderColor: "#334155", borderWidth: 1, padding: 10,
+          callbacks: { label: (ctx) => ctx.dataset.yAxisID === "y1" ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%` : `${ctx.dataset.label}: ${fmtInt.format(Math.round(ctx.parsed.y))}` }
+        }
+      },
+      scales: {
+        x: { grid: { display: false, drawBorder: false } },
+        y: { beginAtZero: true, position: "left", grid: { color: "#1e293b", borderDash: [4, 4], drawBorder: false }, ticks: { callback: v => v >= 1000 ? (v / 1000) + "k" : v } },
+        y1: { beginAtZero: true, position: "right", grid: { display: false, drawBorder: false }, ticks: { callback: v => v + "%" } }
+      }
+    }
+  });
+}
+
 function prepareSellthroughData() {
   populateSellthroughFilters();
   recomputeSellthroughRows();
+  renderSellthroughTrendChart();
 }
 
 function sortSellthrough(key) {
@@ -8251,6 +8469,8 @@ function computeSellthroughSourceFingerprint() {
   const begInv = state.metabaseBeginningInventory || [];
   const need = state.metabaseSellthroughNeeded || [];
   const prodInfo = state.metabaseProductsInfo || [];
+  const debundle = state.debundleMap || [];
+  const mainRows = state.allParsedRows || [];
 
   let sumRcvQty = 0, maxRcvTs = 0;
   inbound.forEach(r => { sumRcvQty += r.rcvQty || 0; if (r.rcvTs > maxRcvTs) maxRcvTs = r.rcvTs; });
@@ -8261,11 +8481,20 @@ function computeSellthroughSourceFingerprint() {
   let sumCnf = 0, sumDlv = 0, sumRto = 0;
   need.forEach(r => { sumCnf += r.CNF_QTY || 0; sumDlv += r.DLV_QTY || 0; sumRto += r.RTO_QTY || 0; });
 
+  // STOCK/DOH بقوا معتمدين على شيت الديبندلايز (debundleMap) وعلى MAIN_GID
+  // (allParsedRows) — لازم أي تغيير فيهم (ريفريش جديد) يبطل الكاش، وإلا
+  // هيفضل الـ Stock/DOH زي ما هو القديم من غير ما يتحدث.
+  let sumStock = 0, maxMainTs = 0;
+  debundle.forEach(r => { sumStock += r.stock || 0; });
+  mainRows.forEach(r => { if (r.timestamp > maxMainTs) maxMainTs = r.timestamp; });
+
   return [
     inbound.length, Math.round(sumRcvQty), maxRcvTs,
     begInv.length, Math.round(sumBegQty),
     need.length, Math.round(sumCnf), Math.round(sumDlv), Math.round(sumRto),
-    prodInfo.length
+    prodInfo.length,
+    debundle.length, Math.round(sumStock),
+    mainRows.length, maxMainTs
   ].join("|");
 }
 
@@ -8424,7 +8653,13 @@ let selectedTableForDownload = null;
 $("downloadBtn").addEventListener("click", () => {
     const activeView = document.querySelector(".view-section.active-view") || document.querySelector(".view-section:not(.hidden)");
     if (!activeView) return;
-    const tables = activeView.querySelectorAll(".data-table");
+    // كان بيدور بس على ".data-table" — فجداول الـ Summary (زي Confirmed/
+    // Delivered Category Breakdown في Sellthrough، وPlaced/Confirmed — Status
+    // في Commercial Plan) اللي بتستخدم كلاس ".st-summary-table" مختلف (للشكل
+    // بتاعها المختلف عن الجداول العادية) كانت مش بتظهر في مودال الداونلود
+    // خالص. دلوقتي بيدور على النوعين مع بعض في أي سكشن/جروب، عشان أي جدول
+    // Summary زي ده يبقى قابل للتحميل زي أي جدول تاني.
+    const tables = activeView.querySelectorAll(".data-table, .st-summary-table");
     downloadOptions.innerHTML = "";
     
     tables.forEach((t, index) => {

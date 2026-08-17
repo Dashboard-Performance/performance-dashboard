@@ -52,7 +52,7 @@
           </a>
           <div class="nav-submenu hidden" id="marketplaceSubmenu">
             <a class="nav-item-sub" id="navInventory">Inventory</a>
-            <a class="nav-item-sub" id="navCm3Target">CM3 Target</a>
+            <!-- CM3 Target اتدمجت جوه CM3 Analyst (بطلب صريح) بدل ما تبقى صفحة لوحدها -->
             <a class="nav-item-sub" id="navCm3Analyst">CM3 Analyst</a>
             <a class="nav-item-sub" id="navPoorMatches">Poor Matches</a>
             <a class="nav-item-sub" id="navAvailabilityLocking">Availability Locking</a>
@@ -977,7 +977,11 @@
           </section>
         </div>
         <!-- CM3 TARGET SECTION -->
-        <div id="viewCm3Target" class="view-section hidden">
+        <!-- CM3 ANALYST SECTION — بيبدأ بـ"CM3 Target" (Grouping/Period toggles + KPIs
+             + الشارتس + جدول الـ Status Transitions) اللي كانت صفحة لوحدها قبل كده،
+             ودلوقتي بقت أول سكشن هنا بطلب صريح، وبعدها قسم الدريل داون، وتحته
+             سكشن "Deep Dive CM3 Analysis & Targets" الأصلي بتاع الصفحة دي. -->
+        <div id="viewCm3Analyst" class="view-section hidden">
           <section class="cm3-toolbar hover-glow">
             <div class="cm3-toolbar-group">
               <span class="cm3-toolbar-label">Grouping</span>
@@ -1000,7 +1004,7 @@
               <span class="icon-calendar"></span> <span id="cm3RangeLabel"> </span>
             </div>
           </section>
-          
+
           <section class="metrics-grid cm3-metrics-grid">
             <div class="metric-card hover-glow">
               <div class="metric-title">Total CM3 (Range) <span class="icon-dollar"></span></div>
@@ -1023,7 +1027,7 @@
               </div>
             </div>
           </section>
-          
+
           <section class="charts-grid">
             <div class="panel chart-panel hover-glow">
               <div class="panel-head-modern">
@@ -1048,7 +1052,7 @@
               </div>
             </div>
           </section>
-          
+
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
@@ -1067,9 +1071,41 @@
               </div>
             </div>
           </section>
-        </div>
-        <!-- CM3 ANALYST SECTION -->
-        <div id="viewCm3Analyst" class="view-section hidden">
+
+          <!-- DRILL-DOWN — بيظهر لما تدوس على أي رقم من أعمدة الستاتس فوق (Turned
+               Positive/Negative, Became Zero, Stayed Negative/Positive, New Match).
+               قسم منفصل تحت الجدول (مش Modal)، بيوريك بالظبط مين الـ Matches اللي
+               مكوّنة الرقم اللي دوست عليه، بهويتهم الكاملة (Merchant/SKU/Category)
+               وقيمة الـ CM3 بتاعتهم في الفترة اللي فاتت والفترة الحالية. -->
+          <section class="table-section mt-4 hidden" id="cm3DrilldownSection">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2 id="cm3DrilldownTitle">Match Details</h2>
+                  <p id="cm3DrilldownSub"></p>
+                </div>
+                <div class="table-controls">
+                  <input id="cm3DrilldownSearch" type="search" placeholder="Search Merchant, SKU, or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <button type="button" class="btn btn-outline small" id="cm3DrilldownClose">Close</button>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="cm3DrilldownTable">
+                  <thead>
+                    <tr>
+                      <th>Merchant</th>
+                      <th>SKU</th>
+                      <th>Category</th>
+                      <th class="num">CM3 (Previous Period)</th>
+                      <th class="num">CM3 (This Period)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cm3DrilldownTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <section class="cm3-toolbar hover-glow">
             <div class="cm3-toolbar-group">
               <span class="cm3-toolbar-label">Analysis Scope</span>
@@ -2193,7 +2229,6 @@
                   <div class="panel-title-wrapper border-green">
                     <h2>Delivered</h2>
                     <p>Category Breakdown Analysis</p>
-                    <pCBy categorDataMetabase query</p>
                   </div>
                 </div>
                 <div class="table-responsive">
@@ -2216,6 +2251,31 @@
                     <tbody id="stDeliveredSummaryBody"></tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Sellthrough Trend Chart — نفس ستايل "Pipeline Velocity" في الـ Overview
+               بالظبط، بس بمقياس شهري: كل شهور السنة الحالية اللي فيها بيانات
+               Sellthrough، وفيها Total Purchases / Total Delivered (أو Confirmed
+               حسب التوجل) / Sellthrough % كـ lines. مستقلة تمامًا عن فلاتر
+               اللوحة فوق (Beginning Inventory/Start/End Sale Month). -->
+          <section class="mb-4">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Sellthrough Trend (This Year)</h2>
+                  <p id="sellthroughTrendSubtitle">Total Purchases vs Total Delivered vs Sellthrough % — every month this year</p>
+                </div>
+                <div class="table-controls">
+                  <div class="segmented" id="sellthroughTrendMetricToggle">
+                    <button type="button" class="segmented-btn active" data-metric="delivered">Delivered</button>
+                    <button type="button" class="segmented-btn" data-metric="confirmed">Confirmed</button>
+                  </div>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="sellthroughTrendChart"></canvas>
               </div>
             </div>
           </section>

@@ -229,6 +229,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .badge-status.became-zero { background: rgba(148,163,184,0.15); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.2); }
 .badge-status.new-match { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
 .cm3-period-cell { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+/* بادجات الستاتس القابلة للدوس عليها في جدول CM3 Target — بتفتح قسم الدريل
+   داون تحت الجدول (cm3DrilldownSection) بتفاصيل الـ Matches اللي مكوّنة الرقم. */
+.cm3-badge-clickable { cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.cm3-badge-clickable:hover { transform: translateY(-1px) scale(1.05); box-shadow: 0 0 0 1px currentColor; }
+#cm3DrilldownSection .panel-title-wrapper h2 { color: #fbbf24; }
 .contr-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
 .contr-pill.ok { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
 .contr-pill.warn { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.25); }
