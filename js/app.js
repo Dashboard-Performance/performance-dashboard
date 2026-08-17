@@ -3341,17 +3341,21 @@ function computeMetrics(rows) {
     if(r.merchantId && r.placedOrders > 0) merchants.add(r.merchantId);
   });
 
-  // CR% / DR% / NDR% في الأوفرفيو: بتاخد كات أوف الـ 4 أيام (CM3_LAG_DAYS) —
-  // نفس الكات أوف المستخدم في أي سكشن تاني مصدره MAIN_GID (Commercial Plan،
-  // Performance-Matches...). الأوردرات اللي اتحطت في آخر 4 أيام لسه مالهاش
-  // وقت كافي تتأكد/تتسلم، فلو دخلناها في الحساب هتوهم إن الـ Rate واطي وهو
-  // مش كده فعلاً. باقي الأرقام (Placed/Confirmed Orders, GMV) فاضلة زي ما
-  // هي من غير أي لاج.
-  const cutoffTs = getCm3LagCutoffTimestamp(rows);
+  // CR% / DR% / NDR% في الأوفرفيو: زي باقي أي سكشن تاني مصدره MAIN_GID —
+  // CR% (Confirmed/Placed) بياخد كات أوف يومين بس (CR_LAG_DAYS)، والـ DR%
+  // (Delivered/Confirmed) بياخد كات أوف الـ 5 أيام (CM3_LAG_DAYS) — كل واحد
+  // بالكات أوف الخاص بيه لوحده، مش كات أوف واحد مشترك بينهم. الأوردرات اللي
+  // لسه في نطاق الـ لاج بتاعها لسه مالهاش وقت كافي تتأكد/تتسلم، فلو دخلناها
+  // في الحساب هتوهم إن الـ Rate واطي وهو مش كده فعلاً. NDR% = CR% × DR%.
+  // باقي الأرقام (Placed/Confirmed Orders, GMV) فاضلة زي ما هي من غير أي لاج.
+  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
+  const drCutoffTs = getCm3LagCutoffTimestamp(rows);
   let crPlaced = 0, crConfirmed = 0, drConfirmed = 0, drDelivered = 0;
   rows.forEach(r => {
-    if (isCm3RowEligible(r, cutoffTs)) {
+    if (isRowEligibleForLag(r, crCutoffTs)) {
       crPlaced += r.placedOrders; crConfirmed += r.confirmedOrders;
+    }
+    if (isCm3RowEligible(r, drCutoffTs)) {
       drConfirmed += r.confirmedOrders; drDelivered += r.deliveredOrders;
     }
   });
@@ -3380,21 +3384,24 @@ function computeMetrics(rows) {
 }
 
 function computeLeaderboard(rows) {
-  // بنفس كات أوف الـ4 أيام المستخدم في كروت CR/DR/NDR فوق في نفس الصفحة —
-  // عشان الـ Leaderboard يبقى متسق معاهم (كان قبل كده بيحسب من غير كات أوف خالص).
-  const cutoffTs = getCm3LagCutoffTimestamp(rows);
+  // نفس منطق كروت CR/DR/NDR فوق في نفس الصفحة — عشان الـ Leaderboard يبقى
+  // متسق معاهم: CR% (Confirmed/Placed) بكات أوف يومين (CR_LAG_DAYS) لوحده،
+  // و DR% (Delivered/Confirmed) بكات أوف 5 أيام (CM3_LAG_DAYS) لوحده، كل
+  // واحد بالكات أوف بتاعه، مش كات أوف واحد مشترك بينهم.
+  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
+  const drCutoffTs = getCm3LagCutoffTimestamp(rows);
   const map = new Map();
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
-    if (!isCm3RowEligible(r, cutoffTs)) return;
-    const entry = map.get(r.acmName) || { name: r.acmName, placed: 0, confirmed: 0, delivered: 0 };
-    entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
+    const entry = map.get(r.acmName) || { name: r.acmName, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0 };
+    if (isRowEligibleForLag(r, crCutoffTs)) { entry.crPlaced += r.placedOrders; entry.crConfirmed += r.confirmedOrders; }
+    if (isCm3RowEligible(r, drCutoffTs)) { entry.drConfirmed += r.confirmedOrders; entry.drDelivered += r.deliveredOrders; }
     map.set(r.acmName, entry);
   });
-  return Array.from(map.values()).filter(m => m.placed > 0).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0;
-    const dr = m.confirmed ? (m.delivered / m.confirmed) : 0;
-    return { name: m.name, orders: m.confirmed, ndr: (dr * cr) * 100 };
+  return Array.from(map.values()).filter(m => m.crPlaced > 0).map(m => {
+    const cr = m.crPlaced ? (m.crConfirmed / m.crPlaced) : 0;
+    const dr = m.drConfirmed ? (m.drDelivered / m.drConfirmed) : 0;
+    return { name: m.name, orders: m.crConfirmed, ndr: (dr * cr) * 100 };
   }).sort((a, b) => b.ndr - a.ndr).slice(0, 6);
 }
 
