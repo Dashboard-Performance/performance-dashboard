@@ -1113,6 +1113,8 @@
                 <button type="button" class="segmented-btn active" data-scope="merchant">Merchant</button>
                 <button type="button" class="segmented-btn" data-scope="category">Category</button>
                 <button type="button" class="segmented-btn" data-scope="match">Match (Merchant x Product)</button>
+                <button type="button" class="segmented-btn" data-scope="top10neg" title="Top 10 matches with the most negative CM3 — the biggest drivers of CONTR% -VE">Top 10 Impact -VE</button>
+                <button type="button" class="segmented-btn" data-scope="top10pos" title="Top 10 matches with the most positive CM3 — the biggest drivers of CONTR% +VE">Top 10 Impact +VE</button>
               </div>
             </div>
           </section>
@@ -2323,6 +2325,10 @@
                       <th data-stkey="avg3d" class="num text-blue" title="Average daily confirmed pieces over the last 3 days — the same figure used to compute DOH, pooled across this SKU standalone and every bundle it's part of.">AVG 3D</th>
                       <th data-stkey="avg15d" class="num text-purple" title="Average daily confirmed pieces over the last 15 days, computed the same way as AVG 3D but over a wider window.">AVG 15D</th>
                       <th data-stkey="doh15d" class="num text-dim font-bold" title="Stock ÷ AVG 15D — days of stock on hand based on the last 15 days of demand instead of 3.">DOH(15D)</th>
+                      <th data-stkey="sellingPrice" class="num text-blue" title="Listed selling price for this SKU, from product data.">Selling Price</th>
+                      <th data-stkey="profit" class="num text-green" title="Per-unit profit figure for this SKU, from product data.">Profit</th>
+                      <th data-stkey="cogs" class="num text-red" title="Cost of goods for this SKU, from the cost data.">Cogs</th>
+                      <th data-stkey="ppmSku" class="num text-orange" title="Selling Price − Profit − Cogs for this SKU (same formula used as SKU PPM elsewhere in the dashboard).">PPM SKU</th>
                     </tr>
                   </thead>
                   <tbody id="sellthroughTableBody"></tbody>

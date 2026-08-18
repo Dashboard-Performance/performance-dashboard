@@ -4394,7 +4394,7 @@ function renderCm3AnalystHeaders() {
     html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="id" title="Unique merchant identifier.">Merchant ID</th><th data-akey="name" title="Merchant's display name.">Merchant Name</th><th data-akey="placedPieces" class="num" title="Total pieces placed by this merchant. No cutoff applied.">Total Placed</th><th data-akey="confirmedPieces" class="num" title="Total pieces confirmed by this merchant. No cutoff applied.">Total Confirmed</th><th data-akey="deliveredPieces" class="num" title="Total pieces delivered by this merchant. No cutoff applied.">Total Delivered</th><th data-akey="cr" class="num" title="Confirmed ÷ Placed for this merchant. No cutoff applied.">CR%</th><th data-akey="dr" class="num" title="Delivered ÷ Confirmed for this merchant. No cutoff applied.">DR%</th><th data-akey="ndr" class="num" title="CR% × DR% combined delivery rate for this merchant.">NDR%</th><th data-akey="deliveredGmv" class="num" title="Total delivered order value for this merchant. No cutoff applied.">Delivered GMV</th><th data-akey="cm3" class="num" title="Merchant's total CM3, excluding the most recent 5 days of data.">Total CM3</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="CM3 as a share of Delivered GMV; both use the 5-day CM3 cutoff.">CM3 %</th><th class="center" title="Profitability badge derived from CM3 %, so it reflects the same 5-day cutoff.">Status</th>`;
   } else if(analystState.scope === "category") {
     html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="category" title="Product category name.">Category</th><th data-akey="targetCm3" class="num text-dim" title="Planned CM3 target for this category.">Target CM3</th><th data-akey="cm3" class="num" title="Actual CM3 for this category, excluding the most recent 5 days of data.">Actual CM3</th><th data-akey="targetCm3PerPiece" class="num text-dim" title="Planned CM3-per-delivered-piece target for this category.">Target CM3/Pc</th><th data-akey="cm3PerPiece" class="num" title="Actual CM3 per delivered piece; both use the 5-day cutoff so they line up.">Actual CM3/Pc</th><th data-akey="targetCm3Pct" class="num text-dim" title="Planned CM3 margin target for this category.">Target CM3 %</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="Actual CM3 as a share of Delivered GMV, using the 5-day CM3 cutoff.">Actual CM3 %</th><th class="center" title="Profitability badge derived from Actual CM3 %, reflecting the same 5-day cutoff.">Status</th>`;
-  } else if(analystState.scope === "match") {
+  } else if(analystState.scope === "match" || analystState.scope === "top10neg" || analystState.scope === "top10pos") {
     html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="id" title="Unique merchant identifier.">Merchant ID</th><th data-akey="name" class="truncate-cell" title="Merchant's display name.">Merchant Name</th><th data-akey="sku" title="SKU code for this merchant-product match.">Product ID</th><th data-akey="skuName" class="truncate-cell" title="SKU display name.">Product Name</th><th data-akey="category" class="text-dim" title="Product category for this match.">Category</th><th data-akey="placedPieces" class="num" title="Total pieces placed for this match. No cutoff applied.">Total Placed</th><th data-akey="confirmed" class="num" title="Total pieces confirmed for this match. No cutoff applied.">Total Confirmed</th><th data-akey="delivered" class="num" title="Total pieces delivered for this match. No cutoff applied.">Total Delivered</th><th data-akey="cm3" class="num" title="This match's total CM3, excluding the most recent 5 days of data.">Total CM3</th><th data-akey="cm3PerPiece" class="num" title="CM3 per delivered piece; both figures use the same 5-day CM3 cutoff.">CM3 / Pc</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="CM3 as a share of Delivered GMV, both using the 5-day CM3 cutoff.">CM3 %</th><th class="center" title="Profitability badge derived from CM3 %, reflecting the same 5-day cutoff.">Status</th>`;
   }
   html += "</tr>";
@@ -4427,7 +4427,7 @@ function prepareCm3AnalystData(rows) {
   const keyFor = (r) => {
     if (analystState.scope === "merchant") return r.merchantId;
     if (analystState.scope === "category") return r.category;
-    if (analystState.scope === "match") return r.merchantId + "||" + r.sku;
+    if (analystState.scope === "match" || analystState.scope === "top10neg" || analystState.scope === "top10pos") return r.merchantId + "||" + r.sku;
     return "";
   };
   const getEntry = (key, r) => {
@@ -4476,13 +4476,25 @@ function prepareCm3AnalystData(rows) {
     const catTarget = state.categoryTargets[normalizedCategory] || { targetCm3: 0, targetCm3PerPiece: 0, targetCm3Pct: 0 };
     return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct, cm3PerPiece, targetCm3: catTarget.targetCm3, targetCm3PerPiece: catTarget.targetCm3PerPiece, targetCm3Pct: catTarget.targetCm3Pct };
   });
+
+  // "Top 10 Impact -VE/+VE" — نفس تجميع الـ Match (Merchant x Product) فوق،
+  // بس بنقصّها لأعلى 10 ماتشز الأكتر تأثير على CONTR% -VE (أكبر CM3 سالب،
+  // Impact الأكبر على الجزء السالب) أو CONTR% +VE (أكبر CM3 موجب، الأكتر
+  // مساهمة في الجزء الموجب). بنستبعد الماتشز اللي CM3 بتاعها في الاتجاه
+  // العكسي (مثلاً match موجب في تبويب -VE) عشان الليست تفضل فعلاً "Impact".
+  if (analystState.scope === "top10neg") {
+    analystState.data = analystState.data.filter(m => m.cm3 < 0).sort((a, b) => a.cm3 - b.cm3).slice(0, 10);
+  } else if (analystState.scope === "top10pos") {
+    analystState.data = analystState.data.filter(m => m.cm3 > 0).sort((a, b) => b.cm3 - a.cm3).slice(0, 10);
+  }
+
   if($("analystTotalGmv")) $("analystTotalGmv").textContent = fmtMoneyCompact(totalGmv);
   if($("analystTotalCm3")) $("analystTotalCm3").textContent = fmtMoneyCompact(totalCm3);
   if($("analystOverallCm3Pct")) $("analystOverallCm3Pct").textContent = fmtPct(totalCm3Gmv ? (totalCm3/totalCm3Gmv)*100 : 0);
   let topEntity = "-";
   if(analystState.data.length > 0) {
     const sorted = [...analystState.data].sort((a,b) => b.cm3 - a.cm3);
-    if(analystState.scope === "merchant") topEntity = sorted[0].name; else if(analystState.scope === "category") topEntity = sorted[0].category; else if(analystState.scope === "match") topEntity = sorted[0].name + " - " + sorted[0].skuName;
+    if(analystState.scope === "merchant") topEntity = sorted[0].name; else if(analystState.scope === "category") topEntity = sorted[0].category; else if(analystState.scope === "match" || analystState.scope === "top10neg" || analystState.scope === "top10pos") topEntity = sorted[0].name + " - " + sorted[0].skuName;
   }
   if($("analystTopEntity")) $("analystTopEntity").textContent = topEntity;
   renderCm3AnalystHeaders(); applyCm3AnalystSearchAndSort();
@@ -4525,7 +4537,7 @@ function renderPaginatedCm3AnalystTable() {
         <td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPctCell(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td>
         <td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>
       `;
-    } else if(analystState.scope === "match") {
+    } else if(analystState.scope === "match" || analystState.scope === "top10neg" || analystState.scope === "top10pos") {
       tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id}</td><td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td><td class="font-mono text-dim">${m.sku}</td><td class="text-dim truncate-cell" title="${m.skuName}">${m.skuName}</td><td class="text-dim">${m.category}</td><td class="num font-bold">${fmtIntCell(m.placedPieces)}</td><td class="num text-blue">${fmtIntCell(m.confirmed)}</td><td class="num text-green">${fmtIntCell(m.delivered)}</td><td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${fmtPctCell(m.cm3Pct)}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${barWidth}%"></div></div></td><td class="center">${getCm3ProfitBadge(m.cm3Pct)}</td>`;
     }
     tbody.appendChild(tr);
@@ -4551,7 +4563,16 @@ function renderCm3AnalystView() {
 
 function analystWireControlsOnce() {
   if (analystState.wired) return; analystState.wired = true;
-  document.querySelectorAll("#analystScopeToggle .segmented-btn").forEach(btn => { btn.addEventListener("click", () => { document.querySelectorAll("#analystScopeToggle .segmented-btn").forEach(b => b.classList.remove("active")); btn.classList.add("active"); analystState.scope = btn.dataset.scope; renderCm3AnalystView(); }); });
+  document.querySelectorAll("#analystScopeToggle .segmented-btn").forEach(btn => { btn.addEventListener("click", () => {
+    document.querySelectorAll("#analystScopeToggle .segmented-btn").forEach(b => b.classList.remove("active")); btn.classList.add("active");
+    analystState.scope = btn.dataset.scope;
+    // "Top 10 Impact -VE/+VE" مفيدهم يفضلوا مرتبين بالـ CM3 نفسه (الأكتر
+    // سالب فوق في -VE، الأكتر موجب فوق في +VE) عشان الليست تعرض الـ Impact
+    // بالترتيب الصح من غير ما اليوزر يضطر يدوس Sort بنفسه.
+    if (analystState.scope === "top10neg") { analystState.sortKey = "cm3"; analystState.sortDir = "asc"; }
+    else if (analystState.scope === "top10pos") { analystState.sortKey = "cm3"; analystState.sortDir = "desc"; }
+    renderCm3AnalystView();
+  }); });
   if($("searchAnalystInput")) { $("searchAnalystInput").addEventListener("input", applyCm3AnalystSearchAndSort); }
   if($("prevPageAnalyst")) { $("prevPageAnalyst").addEventListener("click", () => { if (analystState.page > 0) { analystState.page -= 1; renderPaginatedCm3AnalystTable(); } }); }
   if($("nextPageAnalyst")) { $("nextPageAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(analystState.filtered.length / PAGE_SIZE)); if (analystState.page < totalPages - 1) { analystState.page += 1; renderPaginatedCm3AnalystTable(); } }); }
@@ -6637,48 +6658,12 @@ function stLastInboundBucketLabel(bucket) {
   return bucket;
 }
 
-function recomputeSellthroughRows() {
-  let { begInv: begInvKey, startSale: startKey, endSale: endKey } = state.stFilters;
-
-  // لو المستخدم مختار "Last Inbound Status" بس لسه مايختارش الشهور التلاتة
-  // (Beginning Inventory / Start Sale / End Sale) بنفسه، بنبني تلقائيًا رينج
-  // يغطي كل الشهور المتاحة في الداتا (من أقدم شهر لأحدث شهر) عشان الفلتر
-  // يجيب "داتا الشهور كلها" زي ما اتطلب، من غير ما يستنى اختيار يدوي. لو
-  // المستخدم اختار أي واحد من التلاتة فلاتر دول بنفسه، بناخد اختياره زي ما هو
-  // (بيبقى أولوية على الرينج التلقائي).
-  let stAutoFullRangeApplied = false;
-  if (state.stFilters.lastInboundStatus && (!begInvKey || !startKey || !endKey)) {
-    const monthOpts = (state.sellthroughMonthOptions && state.sellthroughMonthOptions.length)
-      ? state.sellthroughMonthOptions
-      : computeSellthroughMonthOptions();
-    if (monthOpts.length) {
-      const sortedAsc = [...monthOpts].sort((a, b) => a.date - b.date);
-      const earliestKey = sortedAsc[0].key;
-      const latestKey = sortedAsc[sortedAsc.length - 1].key;
-      begInvKey = begInvKey || earliestKey;
-      startKey = startKey || earliestKey;
-      endKey = endKey || latestKey;
-      stAutoFullRangeApplied = true;
-    }
-  }
-
-  const stSubtitleEl = $("stFiltersSubtitle");
-  if (stSubtitleEl) {
-    stSubtitleEl.textContent = stAutoFullRangeApplied
-      ? `Apply filters to update the Sellthrough data — showing all available months (${begInvKey} → ${endKey}), narrowed by Last Inbound Status`
-      : "Apply filters to update the Sellthrough data";
-  }
-
-  if (!begInvKey || !startKey || !endKey) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
-
-  // ---------------------------------------------------------------------
-  // PERFORMANCE FIX: كل الخطوات اللي بتلف على الداتا الخام (inboundRows,
-  // metabaseBeginningInventory, metabaseSellthroughNeeded, metabaseProductsInfo)
-  // كانت بتتعمل من الصفر في كل مرة اليوزر يغيّر فلتر شهر — وده اللي كان
-  // بيسبب الهنج. دلوقتي بنبنيها مرة واحدة بس (أول ما تفتح اللوحة أو لما
-  // الداتا الخام نفسها تتغيّر بعد ريفريش)، ونخزنها في كاش. تغيير الفلاتر
-  // بعد كده بيستخدم الكاش على طول من غير ما يعيد لف الآلاف من الصفوف.
-  const idx = getSellthroughIndices();
+// بيبني صفوف الـ Sellthrough (نفس معادلات الشيت بالظبط) لشهر "بيجيننج
+// إنفنتوري" واحد (begInvKey) + رينج مبيعات (startKey..endKey) — دي نفس
+// المعادلة الأصلية اللي كانت جوه recomputeSellthroughRows قبل كده، اتقلعت
+// لدالة لوحدها عشان تتنادى مرة واحدة (الاختيار اليدوي للفلاتر) أو أكتر من
+// مرة، مرة لكل شهر متاح، لما "Last Inbound Status" يكون شغال (تحت).
+function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
   const {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec,
     inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
@@ -6686,9 +6671,6 @@ function recomputeSellthroughRows() {
     stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku
   } = idx;
 
-  // مجموعة الـ SKU الأساسية = اتحاد الموجودين في الثلاث مصادر عند begInvKey
-  // (زي عمود A بالظبط) — دلوقتي بنعمل lookup على set محسوبة مسبقاً بدل ما
-  // نلف على كل الصفوف الخام في كل مرة.
   const skuSet = new Set();
   (skuByMonthInbound.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
   (skuByMonthNeed.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
@@ -6744,6 +6726,15 @@ function recomputeSellthroughRows() {
     // لو الـ SKU في شيت الـ Metabase مكتوب بشكل مختلف شوية عن SKU_ID.
     const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
 
+    // Selling Price / Profit: من نفس شيت الـ Products (PRODUCTS_GID) بتاع
+    // الـ SKU ده. Cogs: من شيت الـ COGS (COGS_GID) بمطابقة الـ SKU. PPM SKU:
+    // نفس معادلة "SKU PPM" المستخدمة في Recommended Tracker بالظبط —
+    // Selling Price - Profit - Cogs.
+    const sellingPrice = prodInfo.price || 0;
+    const profit = prodInfo.profit || 0;
+    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    const ppmSku = sellingPrice - profit - cogsCost;
+
     rows.push({
       sku,
       name: info.name || "Unknown",
@@ -6756,22 +6747,105 @@ function recomputeSellthroughRows() {
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
+      sellingPrice, profit, cogs: cogsCost, ppmSku,
       websiteStatus: prodInfo.websiteStatus || "-", isLocked: prodInfo.isLocked || "-"
     });
   });
 
-  // "Last inbound status" فلتر — لو المستخدم مختار قيمة (Before <year> أو
-  // Quarter معين)، بنفلتر الصفوف هنا قبل ما تتخزن، عشان الفلتر يعكس صح في
-  // الجدول الرئيسي وفي جداول الـ Summary (Confirmed/Delivered) مع بعض، مش
-  // بس في الجدول — الاتنين بياخدوا نفس الـ rows المفلترة دي.
-  const lastInboundStatusFilter = state.stFilters.lastInboundStatus;
-  const filteredRows = lastInboundStatusFilter
-    ? rows.filter(r => stLastInboundBucket(r.lastRecTs) === lastInboundStatusFilter)
-    : rows;
+  return rows;
+}
 
-  state.sellthroughDataPrepared = filteredRows;
+// بتجمع صفوف أكتر من شهر (كل واحد اتحسب لوحده بمعادلته الصح، begInv=start=end
+// لنفس الشهر — زي "Quick Month Select" بالظبط) في صف واحد لكل SKU، بجمع
+// أرقام الـ Flow (Confirmed/Delivered/Beginning Inventory/RTOS/Purchases..)،
+// وإعادة حساب SELLTHROUGH_RATE و SOLD_FROM_INBOUND من الإجمالي المجموع (مش
+// جمع النسب نفسها). الحقول التانية (Stock/DOH/AVG3D/AVG15D/Availability/
+// Is_Locked/Last Receiving Date) قيمتها واحدة ثابتة مهما اختلف الشهر (بتتقرا
+// live مش بشهر معين)، فبناخدها من أي شهر عنده صف للـ SKU ده.
+function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
+  const merged = new Map(); // sku -> merged row
+  rowsByMonth.forEach(rows => {
+    rows.forEach(r => {
+      let m = merged.get(r.sku);
+      if (!m) {
+        m = {
+          sku: r.sku, name: r.name, cat: r.cat,
+          lastRecDate: r.lastRecDate, lastRecTs: r.lastRecTs,
+          cnfQty: 0, dlvQty: 0, begInv: 0, begSales: 0, remBeg: 0,
+          rtos: 0, retSales: 0, remPurSales: 0, totPur: 0, purSales: 0,
+          firstBuy: "No",
+          cBegSales: 0, cRemBeg: 0, cRetSales: 0, cRemPurSales: 0, cPurSales: 0,
+          stock: r.stock, doh: r.doh, avg3d: r.avg3d, avg15d: r.avg15d, doh15d: r.doh15d,
+          sellingPrice: r.sellingPrice, profit: r.profit, cogs: r.cogs, ppmSku: r.ppmSku,
+          websiteStatus: r.websiteStatus, isLocked: r.isLocked
+        };
+        merged.set(r.sku, m);
+      }
+      m.cnfQty += r.cnfQty; m.dlvQty += r.dlvQty; m.begInv += r.begInv; m.begSales += r.begSales; m.remBeg += r.remBeg;
+      m.rtos += r.rtos; m.retSales += r.retSales; m.remPurSales += r.remPurSales; m.totPur += r.totPur; m.purSales += r.purSales;
+      m.cBegSales += r.cBegSales; m.cRemBeg += r.cRemBeg; m.cRetSales += r.cRetSales; m.cRemPurSales += r.cRemPurSales; m.cPurSales += r.cPurSales;
+      if (r.firstBuy === "Yes") m.firstBuy = "Yes";
+    });
+  });
+
+  const out = [];
+  merged.forEach(m => {
+    const denom = m.begInv + m.totPur + m.rtos;
+    m.stRate = denom > 0 ? (m.dlvQty / denom) * 100 : 0;
+    m.soldInb = m.totPur > 0 ? (m.purSales / m.totPur) * 100 : 0;
+    out.push(m);
+  });
+  return out;
+}
+
+function recomputeSellthroughRows() {
+  const { begInv: begInvKey, startSale: startKey, endSale: endKey, lastInboundStatus } = state.stFilters;
+  const stSubtitleEl = $("stFiltersSubtitle");
+
+  const idx = getSellthroughIndices();
+
+  // ---------------------------------------------------------------------
+  // "Last Inbound Status" مختار (مش "All"): الفلتر ده بيشتغل لوحده تمامًا،
+  // مستقل خالص عن Beginning Inventory / Start Sale / End Sale — بيتجاهلهم
+  // خالص حتى لو متحطين قيمة، وبيجيب داتا كل الشهور المتاحة أوتوماتيك (كل
+  // شهر بيتحسب لوحده بمعادلته الصح، زي ما هو Quick-Select، وبعدين بيتجمعوا
+  // كلهم في صف واحد لكل SKU)، وبعدين بيفلتر بس الـ SKUs اللي آخر تاريخ
+  // إنباوند بتاعتها واقع جوه الـ bucket المختار.
+  // ---------------------------------------------------------------------
+  if (lastInboundStatus) {
+    const monthOpts = (state.sellthroughMonthOptions && state.sellthroughMonthOptions.length)
+      ? state.sellthroughMonthOptions
+      : computeSellthroughMonthOptions();
+
+    if (!monthOpts.length) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
+
+    const rowsByMonth = monthOpts.map(o => computeSellthroughRowsForQuery(o.key, o.key, o.key, idx));
+    const merged = mergeSellthroughRowsAcrossMonths(rowsByMonth);
+    const filteredRows = merged.filter(r => stLastInboundBucket(r.lastRecTs) === lastInboundStatus);
+
+    if (stSubtitleEl) {
+      stSubtitleEl.textContent = `Apply filters to update the Sellthrough data — "${stLastInboundBucketLabel(lastInboundStatus)}" is active and reads all months automatically, independent of the other filters`;
+    }
+
+    state.sellthroughDataPrepared = filteredRows;
+    applySellthroughFiltersAndSort();
+    renderSellthroughSummaries(filteredRows);
+    return;
+  }
+
+  if (stSubtitleEl) stSubtitleEl.textContent = "Apply filters to update the Sellthrough data";
+
+  // ---------------------------------------------------------------------
+  // "Last Inbound Status" = All: بيرجع للسلوك العادي بالظبط — بيعتمد على
+  // الفلاتر التلاتة اليدوية (لازم الثلاثة يكونوا متحددين).
+  // ---------------------------------------------------------------------
+  if (!begInvKey || !startKey || !endKey) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
+
+  const rows = computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx);
+
+  state.sellthroughDataPrepared = rows;
   applySellthroughFiltersAndSort();
-  renderSellthroughSummaries(filteredRows);
+  renderSellthroughSummaries(rows);
 }
 
 // =====================================================================
@@ -7099,6 +7173,10 @@ function renderPaginatedSellthroughTable() {
       <td class="num text-blue">${fmtIntCell(Math.round(m.avg3d))}</td>
       <td class="num text-purple">${fmtIntCell(Math.round(m.avg15d))}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh15d))}</td>
+      <td class="num text-blue">${fmtMoneyCompactCell(m.sellingPrice)}</td>
+      <td class="num text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num text-red">${fmtMoneyCompactCell(m.cogs)}</td>
+      <td class="num text-orange font-bold">${fmtMoneyCompactCell(m.ppmSku)}</td>
     `;
     tbody.appendChild(tr);
   });
