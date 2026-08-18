@@ -6720,6 +6720,10 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     const cRetSales = Math.min(cRemBeg, rtos);
     const cRemPurSales = cnfQty - (cBegSales + cRetSales);
     const cPurSales = Math.min(cRemPurSales, totPur);
+    // SELLTHROUGH_RATE (Confirmed): نفس معادلة SELLTHROUGH_RATE بالظبط (O)
+    // بس بـ CNF_QTY بدل DLV_QTY في البسط — نفس المقام (Beginning Inventory +
+    // Total Purchases + RTOS).
+    const cStRate = denom > 0 ? (cnfQty / denom) * 100 : 0;
 
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
@@ -6758,7 +6762,7 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
       lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
-      stRate, soldInb, firstBuy,
+      stRate, cStRate, soldInb, firstBuy,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
@@ -6807,6 +6811,7 @@ function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
   merged.forEach(m => {
     const denom = m.begInv + m.totPur + m.rtos;
     m.stRate = denom > 0 ? (m.dlvQty / denom) * 100 : 0;
+    m.cStRate = denom > 0 ? (m.cnfQty / denom) * 100 : 0;
     m.soldInb = m.totPur > 0 ? (m.purSales / m.totPur) * 100 : 0;
     out.push(m);
   });
@@ -7180,6 +7185,7 @@ function renderPaginatedSellthroughTable() {
       <td class="num text-blue">${fmtIntCell(m.totPur)}</td>
       <td class="num text-green">${fmtIntCell(m.purSales)}</td>
       <td class="num text-purple font-bold">${m.stRate.toFixed(1)}%</td>
+      <td class="num text-blue font-bold">${m.cStRate.toFixed(1)}%</td>
       <td class="num font-bold">${m.soldInb.toFixed(1)}%</td>
       <td class="center"><span class="badge-outline ${m.firstBuy === 'Yes' ? 'green' : 'dim'}">${m.firstBuy}</span></td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
