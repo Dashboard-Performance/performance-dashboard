@@ -2463,7 +2463,7 @@ function preparePpmAnalystProductsData() {
   const getBucket = (sku) => {
     let b = bySku.get(sku);
     if (!b) {
-      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0 };
+      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, placedGmv: 0, placedPieces: 0 };
       bySku.set(sku, b);
     }
     return b;
@@ -2481,6 +2481,10 @@ function preparePpmAnalystProductsData() {
     // الـ 4 أيام لاج يتشال من الأعمدة دي في الجدول نفسه (مش بس الكروت فوق).
     b.ppm += (r.ppm || 0);
     b.deliveredGmv += (r.deliveredGmv || 0);
+    // LAST ASP PLACED — بنفس حسبة عمود ASP في Inventory بالظبط: مجموع
+    // GMV ÷ مجموع Pieces، من غير أي منطق "آخر يوم" أو كات أوف.
+    b.placedGmv += (r.placedGmv || 0);
+    b.placedPieces += (r.placedPieces || 0);
     if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
     if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
     // PPM/Piece — من غير أي كات أوف خالص كمان دلوقتي (بطلب صريح إن كل حاجة
@@ -2495,36 +2499,6 @@ function preparePpmAnalystProductsData() {
   let grandDeliveredGmv = 0, grandPpm = 0;
   bySku.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
   const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
-
-  // LAST DAY AVG PLACED ASP — بنقراها جاهزة من عمود PLACED_ASP (عمود X) في
-  // شيت الـ Main نفسه، من غير أي حساب زيادة من عندنا. بندور على أحدث تاريخ
-  // فيه Placed activity في كل MAIN_GID (نفس اليوم لكل الـ SKUs)، وبعدين لكل
-  // SKU بناخد متوسط قيمة العمود ده لصفوفه في اليوم ده بالظبط (متوزّن بعدد
-  // الـ Placed Pieces بتاعت كل صف، بنفس أسلوب DELIVERED_ASP في الشيت). لو
-  // الـ SKU مالوش أي Placed في اليوم ده تحديدًا، الرقم بيبقى صفر.
-  let globalLastPlacedDayTs = 0;
-  mainRowsAll.forEach(r => {
-    if (!(r.placedPieces > 0) || !r.timestamp) return;
-    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-    const rTime = rDate.getTime();
-    if (rTime > globalLastPlacedDayTs) globalLastPlacedDayTs = rTime;
-  });
-  const lastPlacedAspBySku = new Map();
-  if (globalLastPlacedDayTs > 0) {
-    mainRowsAll.forEach(r => {
-      if (!r.sku || !(r.placedPieces > 0)) return;
-      const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-      if (rDate.getTime() !== globalLastPlacedDayTs) return;
-      const entry = lastPlacedAspBySku.get(r.sku) || { weighted: 0, weight: 0 };
-      entry.weighted += (r.placedAsp || 0) * (r.placedPieces || 0);
-      entry.weight += (r.placedPieces || 0);
-      lastPlacedAspBySku.set(r.sku, entry);
-    });
-  }
-  const getLastAspPlaced = (sku) => {
-    const entry = lastPlacedAspBySku.get(sku);
-    return (entry && entry.weight > 0) ? (entry.weighted / entry.weight) : 0;
-  };
 
   const rows = [];
   bySku.forEach((b, sku) => {
@@ -2545,12 +2519,12 @@ function preparePpmAnalystProductsData() {
     // ASP = DELIVERED_GMV ÷ DELIVERED_PIECES من غير أي كات أوف — بنفس
     // أرقام Delivered GMV/TOTAL DELIVERED PCS اللي أصلاً من غير كات أوف فوق.
     const asp = b.deliveredPieces > 0 ? (b.deliveredGmv / b.deliveredPieces) : 0;
-    // PPM_SKU = Selling Price − Profit − Cogs، وLAST ASP PLACED = آخر سعر بيع
-    // من آخر يوم Placed فعلي — وPPM% = PPM_SKU ÷ LAST ASP PLACED (بنفس منطق
-    // PPM Analyst / Single بالظبط، مش Total Delivered PPM ÷ Delivered GMV).
+    // PPM_SKU = Selling Price − Profit − Cogs، وLAST ASP PLACED = نفس حسبة
+    // عمود ASP في Inventory بالظبط (مجموع GMV ÷ مجموع Pieces)، بس على الـ
+    // Placed مش الـ Delivered — وPPM% = PPM_SKU ÷ LAST ASP PLACED.
     const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
     const ppmSku = sellingPrice - profit - cogs;
-    const lastAspPlaced = getLastAspPlaced(sku);
+    const lastAspPlaced = b.placedPieces > 0 ? (b.placedGmv / b.placedPieces) : 0;
     const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
 
     rows.push({
@@ -2691,7 +2665,7 @@ function preparePpmAnalystSingleData() {
     let b = bySingle.get(singleId);
     if (!b) {
       b = {
-        placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0,
+        placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, placedGmv: 0,
         crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
         ppm: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0
       };
@@ -2716,6 +2690,9 @@ function preparePpmAnalystSingleData() {
       // Delivered GMV / TOTAL DELIVERED PPM — من غير أي كات أوف برضو.
       b.ppm += (r.ppm || 0) * weight;
       b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      // LAST ASP PLACED — بنفس حسبة عمود ASP في Inventory بالظبط: مجموع
+      // Placed GMV ÷ مجموع Placed Pieces، من غير أي منطق "آخر يوم".
+      b.placedGmv += (r.placedGmv || 0) * weight;
       // CR%/DR%/NDR% — Overall، بكات أوف الـ CR (يومين) والـ CM3/DR (5 أيام).
       if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
       if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
@@ -2727,40 +2704,6 @@ function preparePpmAnalystSingleData() {
       }
     });
   });
-
-  // LAST DAY AVG PLACED ASP — بنقراها جاهزة من عمود PLACED_ASP (عمود X) في
-  // شيت الـ Main نفسه، من غير أي حساب زيادة من عندنا. بندور على أحدث تاريخ
-  // فيه Placed activity في كل MAIN_GID (نفس اليوم لكل الـ Single SKUs)،
-  // وبعدين لكل Single (Overall، مع تجميع البندل) بناخد متوسط قيمة العمود ده
-  // لصفوفه في اليوم ده بالظبط (متوزّن بعدد الـ Placed Pieces بعد ضرب كمية
-  // البندل). لو الـ Single مالوش أي Placed في اليوم ده تحديدًا، الرقم بيبقى صفر.
-  let globalLastPlacedDayTs = 0;
-  mainRowsAll.forEach(r => {
-    if (!(r.placedPieces > 0) || !r.timestamp) return;
-    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-    const rTime = rDate.getTime();
-    if (rTime > globalLastPlacedDayTs) globalLastPlacedDayTs = rTime;
-  });
-  const lastPlacedAspBySingle = new Map();
-  if (globalLastPlacedDayTs > 0) {
-    mainRowsAll.forEach(r => {
-      if (!r.sku || !(r.placedPieces > 0)) return;
-      const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-      if (rDate.getTime() !== globalLastPlacedDayTs) return;
-      mappingsFor(r.sku).forEach(mp => {
-        const qty = mp.quantity || 1;
-        const entry = lastPlacedAspBySingle.get(mp.singleId) || { weighted: 0, weight: 0 };
-        const pieces = (r.placedPieces || 0) * qty;
-        entry.weighted += (r.placedAsp || 0) * pieces;
-        entry.weight += pieces;
-        lastPlacedAspBySingle.set(mp.singleId, entry);
-      });
-    });
-  }
-  const getLastAspPlaced = (singleId) => {
-    const entry = lastPlacedAspBySingle.get(singleId);
-    return (entry && entry.weight > 0) ? (entry.weighted / entry.weight) : 0;
-  };
 
   // كل الـ Single SKUs الموجودة في شيت الديبندلايز لازم تظهر، حتى لو من غير أي نشاط الشهر ده.
   singlesList.forEach((name, singleId) => getBucket(singleId));
@@ -2790,10 +2733,14 @@ function preparePpmAnalystSingleData() {
     const profit = prod.profit || 0;
     const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(singleId) || 0) : 0;
     const ppmSku = sellingPrice - profit - cogs;
-    const lastAspPlaced = getLastAspPlaced(singleId);
+    // LAST ASP PLACED — نفس حسبة عمود ASP في Inventory بالظبط (مجموع GMV ÷
+    // مجموع Pieces)، بس على الـ Placed مش الـ Delivered.
+    const lastAspPlaced = b.placedPieces > 0 ? (b.placedGmv / b.placedPieces) : 0;
     // PPM% = PPM_SKU ÷ LAST ASP PLACED (بطلب صريح) — مش Total Delivered PPM
     // ÷ Delivered GMV زي أماكن تانية، نفس منطق "PPM%" في Recommended Tracker بالظبط.
     const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
+    // PPM SUGGEST PPM_SKU = LAST ASP PLACED × 25% — قيمة مقترحة لـ PPM_SKU مبنية على آخر سعر بيع Placed.
+    const ppmSuggestPpmSku = lastAspPlaced * 0.25;
 
     rows.push({
       skuId: singleId, skuName: singlesList.get(singleId) || inv.skuName || prod.name || singleId,
@@ -2804,7 +2751,7 @@ function preparePpmAnalystSingleData() {
       lastAspPlaced,
       sellingPrice, profit, asp, cogs,
       deliveredGmv: b.deliveredGmv, contrGmvPct,
-      ppmSku, ppmPct, totalDeliveredPpm: b.ppm,
+      ppmSku, ppmPct, ppmSuggestPpmSku, totalDeliveredPpm: b.ppm,
       cm3: b.cm3, cm3PerPiece, cm3Pct,
       contrPpmPct
     });
@@ -2882,6 +2829,7 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="num font-bold">${fmtPctCell(m.contrGmvPct)}</td>
       <td class="num text-orange font-bold">${fmtMoneyCompactCell(m.ppmSku)}</td>
       <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="num font-bold text-purple">${fmtMoneyCompactCell(m.ppmSuggestPpmSku)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
