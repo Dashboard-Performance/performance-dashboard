@@ -1226,13 +1226,14 @@
                       <th onclick="sortPpmAnalyst('sellingPrice')" class="num" style="cursor:pointer;" title="Listed selling price for this SKU.">Selling Price</th>
                       <th onclick="sortPpmAnalyst('profit')" class="num" style="cursor:pointer;" title="Per-unit profit figure for this SKU.">Profit</th>
                       <th onclick="sortPpmAnalyst('asp')" class="num" style="cursor:pointer;" title="Average selling price = Delivered GMV ÷ Delivered Pieces. No cutoff applied.">ASP</th>
+                      <th onclick="sortPpmAnalyst('lastAspPlaced')" class="num" style="cursor:pointer;" title="Placed ASP for this SKU on the most recent day with Placed activity across all SKUs, read directly from the source Placed ASP column and weighted by that day's Placed Pieces. 0 if this SKU had no Placed activity that day.">LAST ASP PLACED</th>
                       <th onclick="sortPpmAnalyst('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month. No cutoff applied.">Delivered GMV</th>
                       <th onclick="sortPpmAnalyst('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
                       <th onclick="sortPpmAnalyst('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed this month, excluding the most recent 2 days.">CR%</th>
                       <th onclick="sortPpmAnalyst('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed this month, excluding the most recent 5 days.">DR%</th>
                       <th onclick="sortPpmAnalyst('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
                       <th onclick="sortPpmAnalyst('ppmPerPiece')" class="num" style="cursor:pointer;" title="Average profit per delivered piece this month. No cutoff applied.">PPM/Piece</th>
-                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;" title="PPM as a share of Delivered GMV this month. No cutoff applied.">PPM%</th>
+                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;" title="PPM_SKU ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
                       <th onclick="sortPpmAnalyst('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month. No cutoff applied.">TOTAL DELIVERED PPM</th>
                       <th onclick="sortPpmAnalyst('totalDeliveredPcs')" class="num" style="cursor:pointer;" title="Total pieces delivered this month. No cutoff applied.">TOTAL DELIVERED PCS</th>
                       <th onclick="sortPpmAnalyst('contrPpmPct')" class="num" style="cursor:pointer;" title="This SKU's share of total PPM delivered this month.">CONTR PPM%</th>
@@ -1316,7 +1317,7 @@
                       <th onclick="sortPpmAnalystSingle('sellingPrice')" class="num" style="cursor:pointer;" title="Listed selling price for this SKU.">SELLING PRICE</th>
                       <th onclick="sortPpmAnalystSingle('profit')" class="num" style="cursor:pointer;" title="Per-unit profit figure for this SKU.">PROFIT</th>
                       <th onclick="sortPpmAnalystSingle('asp')" class="num" style="cursor:pointer;" title="Average selling price = Delivered GMV ÷ Delivered Pieces, Overall. No cutoff applied.">ASP</th>
-                      <th onclick="sortPpmAnalystSingle('lastAspPlaced')" class="num" style="cursor:pointer;" title="Selling price from the most recent single day with Placed activity for this SKU (Overall) — not limited to this month, looks back further if needed.">LAST ASP PLACED</th>
+                      <th onclick="sortPpmAnalystSingle('lastAspPlaced')" class="num" style="cursor:pointer;" title="Placed ASP for this Single SKU (Overall) on the most recent day with Placed activity across all Singles, read directly from the source Placed ASP column and weighted by that day's Placed Pieces. 0 if this Single had no Placed activity that day.">LAST ASP PLACED</th>
                       <th onclick="sortPpmAnalystSingle('cogs')" class="num" style="cursor:pointer;" title="Cost of goods for this SKU, from the cost data.">COGS</th>
                       <th onclick="sortPpmAnalystSingle('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month, Overall. No cutoff applied.">DELIVERED GMV</th>
                       <th onclick="sortPpmAnalystSingle('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
