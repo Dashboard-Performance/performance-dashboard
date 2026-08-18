@@ -6636,7 +6636,9 @@ function getSellthroughIndices() {
 const ST_LAST_INBOUND_YEAR = new Date().getFullYear();
 
 function stLastInboundBucket(ts) {
-  if (ts === null || ts === undefined || isNaN(ts)) return null;
+  // مفيش تاريخ استلام إنباوند خالص للـ SKU ده (بلانك) — بنحطها تحت "Before
+  // <year>" بدل ما تفضل "-" من غير Status، بناء على طلب صريح.
+  if (ts === null || ts === undefined || isNaN(ts)) return "before";
   const d = new Date(ts);
   const y = d.getFullYear();
   if (y < ST_LAST_INBOUND_YEAR) return "before";
@@ -6656,6 +6658,19 @@ function stLastInboundBucketLabel(bucket) {
   if (bucket === "q3") return `Q3 ${y} (Jul-Sep)`;
   if (bucket === "q4") return `Q4 ${y} (Oct-Dec)`;
   return bucket;
+}
+
+// نسخة مختصرة من نفس اللابل، من غير الشهور بين قوسين — عشان تتظهر كـ "فلاج"
+// (Badge) صغير جمب Last Receiving Date في جدول الـ Sellthrough من غير ما
+// تاخد مساحة كبيرة.
+function stLastInboundBucketShortLabel(bucket) {
+  const y = ST_LAST_INBOUND_YEAR;
+  if (bucket === "before") return `Before ${y}`;
+  if (bucket === "q1") return `Q1 ${y}`;
+  if (bucket === "q2") return `Q2 ${y}`;
+  if (bucket === "q3") return `Q3 ${y}`;
+  if (bucket === "q4") return `Q4 ${y}`;
+  return "-";
 }
 
 // بيبني صفوف الـ Sellthrough (نفس معادلات الشيت بالظبط) لشهر "بيجيننج
@@ -7153,6 +7168,7 @@ function renderPaginatedSellthroughTable() {
       <td class="font-bold text-light truncate-cell" title="${m.name}">${m.name}</td>
       <td class="text-dim">${m.cat}</td>
       <td class="text-dim">${m.lastRecDate}</td>
+      <td class="center">${(() => { const b = stLastInboundBucket(m.lastRecTs); return b ? `<span class="badge-outline ${b === "before" ? "dim" : "blue"}">${stLastInboundBucketLabel(b)}</span>` : '<span class="text-dim">-</span>'; })()}</td>
       <td class="num text-blue font-bold">${fmtIntCell(m.cnfQty)}</td>
       <td class="num text-green font-bold">${fmtIntCell(m.dlvQty)}</td>
       <td class="num text-light">${fmtIntCell(m.begInv)}</td>
