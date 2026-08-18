@@ -1693,7 +1693,9 @@ function buildDebundledStockDohIndex(mainRows, windowDays) {
 
   const singleOverallStats = (singleId) => {
     const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
-    const avg = (confWindowBySingleOverall.get(singleId) || 0) / windowDays;
+    // بنقرّب الـ Avg Confirmed لأقرب رقم صحيح (0 أو 1 أو...) قبل ما نستخدمه في
+    // معادلة الـ DOH، عشان الـ DOH متطلعش برقم كسور بسبب كسر بسيط في الـ Avg.
+    const avg = Math.round((confWindowBySingleOverall.get(singleId) || 0) / windowDays);
     const doh = avg > 0 ? (stock / avg) : (stock || 0);
     return { avg, doh };
   };
@@ -1892,7 +1894,9 @@ function prepareRecommendedTrackerData() {
   // avg، من عمود H بتاع نفس صف الـ Single في شيت الديبندلايز).
   const singleOverallStats = (singleId) => {
     const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
-    const avg = (conf3dBySingleOverall.get(singleId) || 0) / 3;
+    // بنقرّب الـ Avg Confirmed لأقرب رقم صحيح قبل معادلة الـ DOH، بنفس منطق
+    // buildDebundledStockDohIndex بالظبط — عشان الـ DOH متطلعش رقم كسور.
+    const avg = Math.round((conf3dBySingleOverall.get(singleId) || 0) / 3);
     const doh = avg > 0 ? (stock / avg) : (stock || 0);
     return { avg, doh };
   };
@@ -5253,7 +5257,9 @@ function computeCommercialDebundlized() {
     // بالظبط (عمود A)، من غير أي تجميع مع SKUs تانية.
     // DOH = Stock ÷ Avg Last 3 Days Confirmed.
     const stock = skuInfo.stock;
-    const avg3dConfirmed = b.conf3d / 3;
+    // بنقرّب الـ Avg Confirmed لأقرب رقم صحيح قبل معادلة الـ DOH، عشان
+    // متطلعش برقم كسور.
+    const avg3dConfirmed = Math.round(b.conf3d / 3);
     const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
 
     result.push({
