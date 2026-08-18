@@ -41,6 +41,7 @@
             <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystProducts">PPM Analyst / Products</a>
+            <a class="nav-item-sub" id="navPpmAnalystSingle">PPM Analyst / Single</a>
             <a class="nav-item-sub" id="navProductsAnalyst">Products / Analyst</a>
             <a class="nav-item-sub" id="navProductsMatchesAnalyst">Products Matches / Analyst</a>
           </div>
@@ -312,11 +313,12 @@
                       <th data-ikey="skuId" title="The product's unique ID.">SKU ID</th>
                       <th data-ikey="skuName" style="min-width: 180px;" title="The product's name.">SKU Name</th>
                       <th data-ikey="stock" class="num text-blue" title="Current stock for this SKU, from the inventory data.">Stock</th>
-                      <th data-ikey="doh" class="num" title="Days of stock on hand, read directly from the inventory data.">DOH</th>
+                      <th data-ikey="doh" class="num" title="Days of stock on hand, computed from SKU total demand overall (Debundled). For bundle SKUs, shows the minimum DOH among its constituent Single SKUs.">DOH</th>
                       <th data-ikey="category" title="Product category.">Category</th>
                       <th data-ikey="availability" title="Current availability status for this SKU.">Availability</th>
                       <th data-ikey="price" class="num" title="Selling price, from product data.">Price</th>
                       <th data-ikey="profit" class="num text-green" title="Profit margin, from product data.">Profit</th>
+                      <th data-ikey="asp" class="num text-purple" title="Average selling price: Delivered GMV ÷ Delivered Pieces.">ASP</th>
                       <th data-ikey="cr" class="num" title="Confirmed ÷ Placed, all-time totals. No cutoff applied.">CR%</th>
                       <th data-ikey="dr" class="num" title="Delivered ÷ Confirmed, all-time totals. No cutoff applied.">DR%</th>
                       <th data-ikey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
@@ -1245,6 +1247,97 @@
                   <button id="prevPagePpmAnalyst" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorPpmAnalyst">Page 1 of 1</span>
                   <button id="nextPagePpmAnalyst" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- PPM ANALYST / SINGLE — نفس PPM Analyst / Products بالظبط، بس على مستوى
+             الـ Single SKU Overall (مجمّع فيها كل البندلز اللي بتحتوي عليه)، وبتغطي
+             كل الـ Single SKUs الموجودة (مش بس اللي عندها Inbound السنة دي). -->
+        <div id="viewPpmAnalystSingle" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Single SKUs Analyzed <span class="icon-box"></span></div>
+                <div class="metric-value" id="ppmApSingleTotalSkus">0</div>
+                <div class="metric-sub text-dim" id="ppmApSingleMonthLabel">-</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-light">Total Delivered GMV <span class="icon-box"></span></div>
+                <div class="metric-value text-light" id="ppmApSingleTotalGmv">0</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Total Delivered PPM <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="ppmApSingleTotalPpm">0</div>
+                <div class="metric-sub text-dim">This month, no cutoff</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">PPM% Overall <span class="icon-box"></span></div>
+                <div class="metric-value text-purple" id="ppmApSingleOverallPpmPct">0%</div>
+                <div class="metric-sub text-dim">Total Delivered PPM ÷ Total Delivered GMV, no cutoff</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>PPM Analyst / Single</h2>
+                  <p>Single SKU level (all its bundles combined) — every Single SKU from the debundle map, this month's PPM &amp; CM3 (CM3 respects the standard lag cutoff)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchPpmAnalystSingleInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <select id="ppmAnalystSingleFilterOp" class="filter-select">
+                    <option value="">PPM% Filter</option>
+                    <option value="gte">PPM% more than</option>
+                    <option value="lte">PPM% less than</option>
+                  </select>
+                  <input id="ppmAnalystSingleFilterValue" class="filter-number" type="number" step="0.1" placeholder="e.g. 20" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="ppmAnalystSingleTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortPpmAnalystSingle('skuId')" class="font-mono" style="cursor:pointer;" title="Single SKU identifier (from the debundle map).">SKU ID</th>
+                      <th onclick="sortPpmAnalystSingle('skuName')" class="truncate-cell" style="cursor:pointer;" title="Single SKU display name.">SKU NAME</th>
+                      <th onclick="sortPpmAnalystSingle('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
+                      <th onclick="sortPpmAnalystSingle('placedPieces')" class="num" style="cursor:pointer;" title="Total pieces placed this month, Overall (this Single SKU standalone + every bundle containing it). No cutoff applied.">TOTAL PLACED PCS</th>
+                      <th onclick="sortPpmAnalystSingle('confirmedPieces')" class="num" style="cursor:pointer;" title="Total pieces confirmed this month, Overall. No cutoff applied.">TOTAL CONFIRMED PCS</th>
+                      <th onclick="sortPpmAnalystSingle('deliveredPieces')" class="num" style="cursor:pointer;" title="Total pieces delivered this month, Overall. No cutoff applied.">DELIVERED PCS</th>
+                      <th onclick="sortPpmAnalystSingle('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed this month, Overall, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortPpmAnalystSingle('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed this month, Overall, excluding the most recent 5 days.">DR%</th>
+                      <th onclick="sortPpmAnalystSingle('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
+                      <th onclick="sortPpmAnalystSingle('stock')" class="num" style="cursor:pointer;" title="Current stock for this Single SKU, read directly by SKU ID.">STOCK</th>
+                      <th onclick="sortPpmAnalystSingle('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand: Stock ÷ average daily demand (last 3 days), pooled across this SKU standalone and every bundle it's part of.">DOH</th>
+                      <th onclick="sortPpmAnalystSingle('sellingPrice')" class="num" style="cursor:pointer;" title="Listed selling price for this SKU.">SELLING PRICE</th>
+                      <th onclick="sortPpmAnalystSingle('profit')" class="num" style="cursor:pointer;" title="Per-unit profit figure for this SKU.">PROFIT</th>
+                      <th onclick="sortPpmAnalystSingle('asp')" class="num" style="cursor:pointer;" title="Average selling price = Delivered GMV ÷ Delivered Pieces, Overall. No cutoff applied.">ASP</th>
+                      <th onclick="sortPpmAnalystSingle('lastAspPlaced')" class="num" style="cursor:pointer;" title="Selling price from the most recent single day with Placed activity for this SKU (Overall) — not limited to this month, looks back further if needed.">LAST ASP PLACED</th>
+                      <th onclick="sortPpmAnalystSingle('cogs')" class="num" style="cursor:pointer;" title="Cost of goods for this SKU, from the cost data.">COGS</th>
+                      <th onclick="sortPpmAnalystSingle('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month, Overall. No cutoff applied.">DELIVERED GMV</th>
+                      <th onclick="sortPpmAnalystSingle('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
+                      <th onclick="sortPpmAnalystSingle('ppmSku')" class="num" style="cursor:pointer;" title="Selling Price − Profit − Cogs for this SKU (same formula used as SKU PPM elsewhere in the dashboard).">PPM_SKU</th>
+                      <th onclick="sortPpmAnalystSingle('ppmPct')" class="num" style="cursor:pointer;" title="PPM_SKU ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
+                      <th onclick="sortPpmAnalystSingle('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month, Overall. No cutoff applied.">TOTAL DELIVERED PPM</th>
+                      <th onclick="sortPpmAnalystSingle('cm3')" class="num" style="cursor:pointer;" title="This SKU's total CM3 this month, Overall, excluding the most recent 5 days of data.">CM3</th>
+                      <th onclick="sortPpmAnalystSingle('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 per delivered piece; both figures use the same 5-day CM3 cutoff.">CM3/PCS</th>
+                      <th onclick="sortPpmAnalystSingle('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 as a share of Delivered GMV, both using the 5-day CM3 cutoff.">CM3%</th>
+                      <th onclick="sortPpmAnalystSingle('contrPpmPct')" class="num" style="cursor:pointer;" title="This SKU's share of total PPM delivered this month.">CONTR PPM%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ppmAnalystSingleTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountPpmAnalystSingle">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPagePpmAnalystSingle" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorPpmAnalystSingle">Page 1 of 1</span>
+                  <button id="nextPagePpmAnalystSingle" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

@@ -329,6 +329,7 @@ const navTargetsCommercial = $("navTargetsCommercial");
 const navCommercialDebundlized = $("navCommercialDebundlized");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
+const navPpmAnalystSingle = $("navPpmAnalystSingle");
 const navProductsAnalyst = $("navProductsAnalyst");
 const navProductsMatchesAnalyst = $("navProductsMatchesAnalyst");
 const navCm3Analyst = $("navCm3Analyst");
@@ -380,6 +381,7 @@ function switchView(viewName) {
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
+  if(navPpmAnalystSingle) navPpmAnalystSingle.classList.remove("active");
   if(navProductsAnalyst) navProductsAnalyst.classList.remove("active");
   if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
@@ -402,6 +404,7 @@ function switchView(viewName) {
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
+  else if (viewName === "ppmAnalystSingle") { activeSection = $("viewPpmAnalystSingle"); if(navPpmAnalystSingle) navPpmAnalystSingle.classList.add("active"); preparePpmAnalystSingleData(); }
   else if (viewName === "productsAnalyst") { activeSection = $("viewProductsAnalyst"); if(navProductsAnalyst) navProductsAnalyst.classList.add("active"); prepareProductsAnalystData(); }
   else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); prepareProductsMatchesAnalystData(); }
   // CM3 Target اتدمجت جوه صفحة CM3 Analyst نفسها (بطلب صريح) — بدل ما تبقى
@@ -435,6 +438,7 @@ if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => sw
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
+if(navPpmAnalystSingle) navPpmAnalystSingle.addEventListener("click", () => switchView("ppmAnalystSingle"));
 if(navProductsAnalyst) navProductsAnalyst.addEventListener("click", () => switchView("productsAnalyst"));
 if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.addEventListener("click", () => switchView("productsMatchesAnalyst"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
@@ -2612,6 +2616,250 @@ if ($("prevPagePpmAnalyst")) $("prevPagePpmAnalyst").addEventListener("click", (
 if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystState.filtered.length / PAGE_SIZE)); if (ppmAnalystState.page < totalPages - 1) { ppmAnalystState.page += 1; renderPaginatedPpmAnalystTable(); } });
 
 // -------------------------------------------------------------------------
+// PPM ANALYST / SINGLE — نفس PPM Analyst / Products بالظبط بس على مستوى
+// الـ Single SKU "Overall" (بيقرا كل الـ Single SKUs من شيت الديبندلايز
+// عمود D SINGLE_ID، بدون أي فلترة بـ Inbound، ومجمّع فيها ديماند الـ Single
+// وهو بيتباع لوحده + كل البندلز اللي هو مكوّن جواها، بنفس منطق
+// buildDebundleProductMap/mappingsFor المستخدم في Products / Analyst
+// بالظبط). فيها كمان أعمدة زيادة عن PPM Analyst / Products: TOTAL PLACED
+// PCS، COGS، وPPM_SKU (Selling Price − Profit − Cogs).
+// -------------------------------------------------------------------------
+const ppmAnalystSingleState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
+
+function preparePpmAnalystSingleData() {
+  const mainRowsAll = state.allParsedRows || [];
+
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
+  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
+
+  // خريطة PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity, cogsWeight}]، وخريطة
+  // كل الـ Single SKUs الموجودة في شيت الديبندلايز (SINGLE_ID -> SINGLE_NAME) —
+  // ده الكون (Universe) بتاع الجدول ده: كل الـ Single SKUs دي بالظبط، حتى لو
+  // مالهاش أي نشاط الشهر ده (هتظهر بأصفار).
+  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const { getStockDoh } = buildDebundledStockDohIndex(mainRowsAll);
+
+  const mappingsFor = (sku) => {
+    const m = bundleProductMap.get(sku);
+    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
+  };
+
+  const bySingle = new Map();
+  const getBucket = (singleId) => {
+    let b = bySingle.get(singleId);
+    if (!b) {
+      b = {
+        placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        ppm: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0
+      };
+      bySingle.set(singleId, b);
+    }
+    return b;
+  };
+
+  monthRows.forEach(r => {
+    if (!r.sku) return;
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    const crEligible = isRowEligibleForLag(r, crCutoffTs);
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    mappingsFor(r.sku).forEach(mp => {
+      const b = getBucket(mp.singleId);
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      // TOTAL PLACED/CONFIRMED/DELIVERED PCS — من غير أي كات أوف خالص (زي ما اتطلب بالظبط).
+      b.placedPieces += (r.placedPieces || 0) * qty;
+      b.confirmedPieces += (r.confirmedPieces || 0) * qty;
+      b.deliveredPieces += (r.deliveredPieces || 0) * qty;
+      // Delivered GMV / TOTAL DELIVERED PPM — من غير أي كات أوف برضو.
+      b.ppm += (r.ppm || 0) * weight;
+      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      // CR%/DR%/NDR% — Overall، بكات أوف الـ CR (يومين) والـ CM3/DR (5 أيام).
+      if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
+      if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
+      // CM3 (وCM3/PCS وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت كات أوف الـ CM3.
+      if (cm3Eligible) {
+        b.cm3 += (r.cm3 || 0) * weight;
+        b.cm3Gmv += (r.deliveredGmv || 0) * weight;
+        b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
+      }
+    });
+  });
+
+  // LAST ASP PLACED — آخر يوم فيه Placed فعلاً لنفس الـ Single (Overall)، مش
+  // بس شهر الحالة الحالي — بنلف على كل تاريخ MAIN_GID زي ما بالظبط
+  // Recommended Tracker بيعمل ("Last Placed ASP")، عشان لو مفيش Placed خالص
+  // الشهر ده، الرقم يرجع تلقائيًا لآخر يوم Placed حقيقي حتى لو قبل كده.
+  const placedByDateBySingle = new Map(); // singleId -> Map(rTime -> {gmv, pieces})
+  mainRowsAll.forEach(r => {
+    if (!r.sku || !(r.placedPieces > 0)) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    mappingsFor(r.sku).forEach(mp => {
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      let m = placedByDateBySingle.get(mp.singleId);
+      if (!m) { m = new Map(); placedByDateBySingle.set(mp.singleId, m); }
+      const dEntry = m.get(rTime) || { gmv: 0, pieces: 0 };
+      dEntry.gmv += (r.placedGmv || 0) * weight;
+      dEntry.pieces += (r.placedPieces || 0) * qty;
+      m.set(rTime, dEntry);
+    });
+  });
+  const getLastAspPlaced = (singleId) => {
+    const m = placedByDateBySingle.get(singleId);
+    if (!m || !m.size) return 0;
+    const lastDate = Math.max(...m.keys());
+    const entry = m.get(lastDate);
+    return entry.pieces > 0 ? (entry.gmv / entry.pieces) : 0;
+  };
+
+  // كل الـ Single SKUs الموجودة في شيت الديبندلايز لازم تظهر، حتى لو من غير أي نشاط الشهر ده.
+  singlesList.forEach((name, singleId) => getBucket(singleId));
+
+  let grandDeliveredGmv = 0, grandPpm = 0;
+  bySingle.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
+  const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
+
+  const rows = [];
+  bySingle.forEach((b, singleId) => {
+    const inv = state.inventoryMap[singleId] || {};
+    const prod = state.productsMap[singleId] || {};
+    const { stock, doh } = getStockDoh(singleId);
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const asp = b.deliveredPieces > 0 ? (b.deliveredGmv / b.deliveredPieces) : 0;
+    const contrGmvPct = grandDeliveredGmv > 0 ? (b.deliveredGmv / grandDeliveredGmv) * 100 : 0;
+    const contrPpmPct = grandPpm > 0 ? (b.ppm / grandPpm) * 100 : 0;
+    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+
+    // Selling Price / Profit من شيت الـ Products، Cogs من شيت الـ COGS —
+    // نفس المصادر المستخدمة في Sellthrough & Inbound بالظبط. PPM_SKU = نفس
+    // معادلة "SKU PPM" في Recommended Tracker: Selling Price − Profit − Cogs.
+    const sellingPrice = prod.price || 0;
+    const profit = prod.profit || 0;
+    const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(singleId) || 0) : 0;
+    const ppmSku = sellingPrice - profit - cogs;
+    const lastAspPlaced = getLastAspPlaced(singleId);
+    // PPM% = PPM_SKU ÷ LAST ASP PLACED (بطلب صريح) — مش Total Delivered PPM
+    // ÷ Delivered GMV زي أماكن تانية، نفس منطق "PPM%" في Recommended Tracker بالظبط.
+    const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
+
+    rows.push({
+      skuId: singleId, skuName: singlesList.get(singleId) || inv.skuName || prod.name || singleId,
+      category: inv.category || prod.category || "Uncategorized",
+      placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0), deliveredPieces: Math.round(b.deliveredPieces || 0),
+      crPct, drPct, ndrPct,
+      stock: Math.round(stock || 0), doh: Math.round(doh),
+      lastAspPlaced,
+      sellingPrice, profit, asp, cogs,
+      deliveredGmv: b.deliveredGmv, contrGmvPct,
+      ppmSku, ppmPct, totalDeliveredPpm: b.ppm,
+      cm3: b.cm3, cm3PerPiece, cm3Pct,
+      contrPpmPct
+    });
+  });
+
+  ppmAnalystSingleState.data = rows;
+  applyPpmAnalystSingleSearchAndSort();
+  renderPpmAnalystSingleSummary(rows, grandDeliveredGmv, grandPpm, currentMonthYear, overallPpmPct);
+}
+
+function renderPpmAnalystSingleSummary(rows, grandDeliveredGmv, grandPpm, monthLabel, overallPpmPct) {
+  if ($("ppmApSingleTotalSkus")) $("ppmApSingleTotalSkus").textContent = fmtInt.format(rows.length);
+  if ($("ppmApSingleOverallPpmPct")) $("ppmApSingleOverallPpmPct").textContent = fmtPct(overallPpmPct || 0);
+  if ($("ppmApSingleTotalGmv")) $("ppmApSingleTotalGmv").textContent = fmtMoneyCompact(grandDeliveredGmv);
+  if ($("ppmApSingleTotalPpm")) $("ppmApSingleTotalPpm").textContent = fmtMoneyCompact(grandPpm);
+  if ($("ppmApSingleMonthLabel")) $("ppmApSingleMonthLabel").textContent = monthLabel || "-";
+}
+
+function sortPpmAnalystSingle(key) {
+  if (ppmAnalystSingleState.sortKey === key) { ppmAnalystSingleState.sortDir = ppmAnalystSingleState.sortDir === "asc" ? "desc" : "asc"; }
+  else { ppmAnalystSingleState.sortKey = key; ppmAnalystSingleState.sortDir = "desc"; }
+  applyPpmAnalystSingleSearchAndSort();
+}
+
+function applyPpmAnalystSingleSearchAndSort() {
+  const term = $("searchPpmAnalystSingleInput") ? $("searchPpmAnalystSingleInput").value.trim().toLowerCase() : "";
+  const filterOp = $("ppmAnalystSingleFilterOp") ? $("ppmAnalystSingleFilterOp").value : "";
+  const filterValueRaw = $("ppmAnalystSingleFilterValue") ? $("ppmAnalystSingleFilterValue").value : "";
+  const filterValue = filterValueRaw === "" ? null : parseFloat(filterValueRaw);
+  const hasFilter = filterOp && filterValue !== null && !Number.isNaN(filterValue);
+
+  ppmAnalystSingleState.filtered = (ppmAnalystSingleState.data || []).filter(m => {
+    if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
+      (m.category && m.category.toLowerCase().includes(term)))) return false;
+    if (hasFilter) {
+      if (filterOp === "gte" && !(m.ppmPct > filterValue)) return false;
+      if (filterOp === "lte" && !(m.ppmPct < filterValue)) return false;
+    }
+    return true;
+  });
+  const { sortKey, sortDir } = ppmAnalystSingleState; const dir = sortDir === "asc" ? 1 : -1;
+  ppmAnalystSingleState.filtered.sort((a, b) => {
+    const av = a[sortKey]; const bv = b[sortKey];
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return ((av || 0) - (bv || 0)) * dir;
+  });
+  ppmAnalystSingleState.page = 0;
+  renderPaginatedPpmAnalystSingleTable();
+}
+
+function renderPaginatedPpmAnalystSingleTable() {
+  const tbody = $("ppmAnalystSingleTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = ppmAnalystSingleState.page * PAGE_SIZE;
+  const pageRows = ppmAnalystSingleState.filtered.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.skuId}</td>
+      <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
+      <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
+      <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
+      <td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(m.stock)}</span></td>
+      <td class="num font-bold text-purple">${fmtIntCell(m.doh)}</td>
+      <td class="num text-blue">${fmtMoneyCompactCell(m.sellingPrice)}</td>
+      <td class="num text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num font-bold">${fmtMoneyCompactCell(m.asp)}</td>
+      <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.lastAspPlaced)}</td>
+      <td class="num text-red">${fmtMoneyCompactCell(m.cogs)}</td>
+      <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num font-bold">${fmtPctCell(m.contrGmvPct)}</td>
+      <td class="num text-orange font-bold">${fmtMoneyCompactCell(m.ppmSku)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num font-bold">${fmtPctCell(m.contrPpmPct)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(ppmAnalystSingleState.filtered.length / PAGE_SIZE));
+  if ($("rowCountPpmAnalystSingle")) $("rowCountPpmAnalystSingle").textContent = `${fmtInt.format(ppmAnalystSingleState.filtered.length)} SKUs`;
+  if ($("pageIndicatorPpmAnalystSingle")) $("pageIndicatorPpmAnalystSingle").textContent = `Page ${ppmAnalystSingleState.page + 1} of ${totalPages}`;
+  if ($("prevPagePpmAnalystSingle")) $("prevPagePpmAnalystSingle").disabled = ppmAnalystSingleState.page === 0;
+  if ($("nextPagePpmAnalystSingle")) $("nextPagePpmAnalystSingle").disabled = ppmAnalystSingleState.page >= totalPages - 1;
+}
+
+if ($("searchPpmAnalystSingleInput")) $("searchPpmAnalystSingleInput").addEventListener("input", applyPpmAnalystSingleSearchAndSort);
+if ($("ppmAnalystSingleFilterOp")) $("ppmAnalystSingleFilterOp").addEventListener("change", applyPpmAnalystSingleSearchAndSort);
+if ($("ppmAnalystSingleFilterValue")) $("ppmAnalystSingleFilterValue").addEventListener("input", applyPpmAnalystSingleSearchAndSort);
+if ($("prevPagePpmAnalystSingle")) $("prevPagePpmAnalystSingle").addEventListener("click", () => { if (ppmAnalystSingleState.page > 0) { ppmAnalystSingleState.page -= 1; renderPaginatedPpmAnalystSingleTable(); } });
+if ($("nextPagePpmAnalystSingle")) $("nextPagePpmAnalystSingle").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystSingleState.filtered.length / PAGE_SIZE)); if (ppmAnalystSingleState.page < totalPages - 1) { ppmAnalystSingleState.page += 1; renderPaginatedPpmAnalystSingleTable(); } });
+
+// -------------------------------------------------------------------------
 // PRODUCTS / ANALYST (منفصلة تمامًا، مش جوه PPM Analyst / Products — بس
 // متحطوطة تحتيها في القائمة الجانبية) — كل الـ Products اللي اتعملهم Inbound
 // (استلام) في أي شهر من السنة الحالية (نفس شيت الـ Inbound (GID 565878313)
@@ -3455,6 +3703,7 @@ function updateDashboard(rows) {
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
+  if ($("viewPpmAnalystSingle") && $("viewPpmAnalystSingle").classList.contains("active-view")) preparePpmAnalystSingleData();
   if ($("viewProductsAnalyst") && $("viewProductsAnalyst").classList.contains("active-view")) prepareProductsAnalystData();
   if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
   // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
@@ -3555,22 +3804,27 @@ function prepareInventoryTableData(rows) {
   const today = new Date(latestTs); today.setHours(0,0,0,0); const todayMs = today.getTime();
   const ydayMs = todayMs - 86400000; const d3Ms = todayMs - (3 * 86400000); const d5Ms = todayMs - (5 * 86400000); const d15Ms = todayMs - (15 * 86400000);
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
+  const { getStockDoh } = buildDebundledStockDohIndex(state.allParsedRows || rows);
   const map = new Map();
   for (let sku in state.inventoryMap) {
     const inv = state.inventoryMap[sku]; const prod = state.productsMap[sku] || { price: 0, profit: 0 };
-    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: inv.doh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set() });
+    const dohInfo = getStockDoh(sku);
+    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: dohInfo.doh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
   }
   rows.forEach(r => {
     const sku = r.sku; if (!sku) return;
     if (!map.has(sku)) {
       const prod = state.productsMap[sku] || { price: 0, profit: 0 };
-      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: 0, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set() });
+      const dohInfo = getStockDoh(sku);
+      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: dohInfo.doh, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
     }
     const entry = map.get(sku);
     entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
     // deliveredGmv هنا مستخدم فقط لحساب نسبة الـ CM3%، فلازم يبقى بنفس الكات أوف بتاع الـ CM3 بالظبط
     // (متكونش الـ CM3 واقفة عند يوم والـ GMV ماشية لحد آخر يوم في الداتا)
     if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.deliveredGmv += r.deliveredGmv; }
+    // ASP = Delivered GMV ÷ Delivered Pieces، من غير أي كات أوف
+    entry.aspGmv += (r.deliveredGmv || 0); entry.aspPieces += (r.deliveredPieces || 0);
     const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0); const rTime = rDate.getTime();
     if(r.placedOrders > 0) entry.totalActiveDays.add(rTime);
     if (rTime === ydayMs) { entry.placedYday += r.placedOrders; entry.confYday += r.confirmedOrders; }
@@ -3581,13 +3835,14 @@ function prepareInventoryTableData(rows) {
   state.inventoryTableData = Array.from(map.values()).map(m => {
     const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; const cm3Pct = m.deliveredGmv ? (m.cm3 / m.deliveredGmv) : 0;
     const avg3d = m.conf3d / 3; const avg15d = m.conf15d / 15; const avgPlacedDaily = m.totalActiveDays.size ? (m.placed / m.totalActiveDays.size) : 0;
+    const asp = m.aspPieces > 0 ? (m.aspGmv / m.aspPieces) : 0;
     let topMerch = "-"; let topMerchConf = 0;
     for (const [merch, conf] of Object.entries(m.merchants5d)) { if (conf > topMerchConf) { topMerchConf = conf; topMerch = merch; } }
     const contr5d = m.conf5d ? (topMerchConf / m.conf5d) : 0;
     const trendRatio = avg15d > 0 ? avg3d / avg15d : (avg3d > 0 ? 2 : 1);
     let trendStatus = "Stable"; let trendColor = "stable";
     if (trendRatio > 1.2) { trendStatus = "Hot  "; trendColor = "spike"; } else if (trendRatio < 0.8) { trendStatus = "Cooling  "; trendColor = "decline"; }
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, avg3d, avg15d, avgPlacedDaily, topMerch, contr5d: contr5d * 100, trendStatus, trendColor };
+    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, avg3d, avg15d, avgPlacedDaily, asp, topMerch, contr5d: contr5d * 100, trendStatus, trendColor };
   });
 }
 
@@ -3614,6 +3869,7 @@ function renderPaginatedInventoryTable() {
       <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.price)}</td>
       <td class="num font-bold text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.asp)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.dr)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>
@@ -9059,6 +9315,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         cm3ap: cm3apState.page,
         recTracker: state.recTrackerPage,
         ppmAnalyst: ppmAnalystState.page,
+        ppmAnalystSingle: ppmAnalystSingleState.page,
         prodAn: prodAnState.page,
         pma: pmaState.page
     };
@@ -9066,12 +9323,13 @@ confirmDownloadBtn.addEventListener("click", () => {
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
-    state.recTrackerPage = 0; ppmAnalystState.page = 0; prodAnState.page = 0; pmaState.page = 0;
+    state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     PAGE_SIZE = 999999;
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
+    if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
     if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
     if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -9108,6 +9366,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         cm3apState.page = originalPage.cm3ap;
         state.recTrackerPage = originalPage.recTracker;
         ppmAnalystState.page = originalPage.ppmAnalyst;
+        ppmAnalystSingleState.page = originalPage.ppmAnalystSingle;
         prodAnState.page = originalPage.prodAn;
         pmaState.page = originalPage.pma;
 
@@ -9126,6 +9385,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
         if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
         if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
+        if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
         if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
         if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     }, 150);
