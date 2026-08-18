@@ -31,12 +31,15 @@ var SPREADSHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 var USERS_SHEET_GID = 1839838273;
 var ALLOWED_EMAIL_DOMAIN = "taager.com";
 
-// Recommended Tracker feedback — Products/Matches sheet. Columns (1-based):
+// Recommended Tracker — Products/Matches sheet. Columns (1-based):
 // A Type | B PRODUCT_ID | C PRODUCT_NAME | D Merchant ID | E Merchant |
 // F Stock | G Action | H Starting Cogs | I Merchant Starting AVG |
 // J SKU Starting AVG | K+ one column per calendar day of feedback, header =
 // that day's date label (e.g. "16-Aug"), each cell = that row's (match's)
-// feedback text for that day, written by the logged-in Account Manager.
+// feedback text for that day, written by the logged-in Account Manager
+// (handleSaveMatchFeedback). New rows also get appended here automatically
+// with Type = "New Locked" whenever a Merchant × SKU has an active
+// Availability Locking lock but no row yet (handleAddNewLockedMatches).
 var PRODUCTS_MATCHES_GID = 1298408207;
 var MATCHES_FEEDBACK_FIRST_COL = 11; // column K, 1-based
 
@@ -81,6 +84,7 @@ function doPost(e) {
   if (action === "heartbeat") return handleHeartbeat(payload);
   if (action === "get_online_users") return handleGetOnlineUsers(payload);
   if (action === "save_match_feedback") return handleSaveMatchFeedback(payload);
+  if (action === "add_new_locked_matches") return handleAddNewLockedMatches(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
@@ -175,6 +179,80 @@ function handleSaveMatchFeedback(payload) {
 function formatFeedbackDateLabel(d) {
   var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return d.getDate() + "-" + months[d.getMonth()];
+}
+
+/**
+ * ============================================================================
+ *  RECOMMENDED TRACKER — AUTO-ADD NEW LOCKED MATCHES
+ * ============================================================================
+ *  js/app.js (syncNewLockedMatchesToSheet, called from prepareRecommendedTrackerData)
+ *  posts here whenever it finds a (Merchant × Single SKU) pair that has an
+ *  active Availability Locking lock but no matching row in this sheet yet —
+ *  i.e. someone locked a merchant/SKU but never added it as a tracked match.
+ *  Each one gets appended as a brand-new row so it shows up in the sheet from
+ *  then on exactly like any manually-added match, with:
+ *    A Type = "New Locked"  B PRODUCT_ID  C PRODUCT_NAME  D Merchant ID
+ *    E Merchant  F Stock  G Action (left blank)  H Starting Cogs
+ *    I Merchant Starting AVG  J SKU Starting AVG
+ *  Any (PRODUCT_ID, Merchant ID) pair that already exists in the sheet is
+ *  skipped — checked server-side too (not just client-side), so two tabs/
+ *  users racing to add the same one can't create a duplicate row.
+ * ============================================================================
+ */
+function handleAddNewLockedMatches(payload) {
+  var rows = payload.rows;
+  if (!rows || !rows.length) return jsonResponse({ success: false, error: "No rows provided." });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sheet = getMatchesSheet();
+    var lastRow = sheet.getLastRow();
+
+    // Existing (PRODUCT_ID, Merchant ID) pairs already in the sheet.
+    var existingKeys = {};
+    if (lastRow >= 2) {
+      var idsRange = sheet.getRange(2, 2, lastRow - 1, 3).getValues(); // B:D -> [PRODUCT_ID, PRODUCT_NAME, Merchant ID]
+      for (var i = 0; i < idsRange.length; i++) {
+        var pid = String(idsRange[i][0] || "").trim();
+        var mid = String(idsRange[i][2] || "").trim();
+        if (pid && mid) existingKeys[pid + "||" + mid] = true;
+      }
+    }
+
+    var toAppend = [];
+    rows.forEach(function (r) {
+      var productId = String(r.productId || "").trim();
+      var merchantId = String(r.merchantId || "").trim();
+      if (!productId || !merchantId) return;
+      var key = productId + "||" + merchantId;
+      if (existingKeys[key]) return; // already tracked — skip
+      existingKeys[key] = true; // also guards against duplicates within this same request
+
+      toAppend.push([
+        "New Locked",                        // A Type
+        productId,                           // B PRODUCT_ID
+        String(r.productName || ""),         // C PRODUCT_NAME
+        merchantId,                          // D Merchant ID
+        String(r.merchant || ""),            // E Merchant
+        Number(r.stock) || 0,                // F Stock
+        "",                                  // G Action — left blank for an ACM to fill in
+        Number(r.startingCogs) || 0,         // H Starting Cogs
+        Number(r.merchantStartingAvg) || 0,  // I Merchant Starting AVG
+        Number(r.skuStartingAvg) || 0        // J SKU Starting AVG
+      ]);
+    });
+
+    if (toAppend.length) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length, 10).setValues(toAppend);
+    }
+
+    return jsonResponse({ success: true, added: toAppend.length, skipped: rows.length - toAppend.length });
+  } catch (err) {
+    return jsonResponse({ success: false, error: err.message || String(err) });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getMatchesSheet() {

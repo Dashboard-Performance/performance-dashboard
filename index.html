@@ -238,43 +238,43 @@
                 <table class="data-table" id="recommendedTrackerTable">
                   <thead>
                     <tr id="rtTableHeaderRow">
-                      <th onclick="sortRecommendedTracker('type')" style="cursor:pointer;">Type</th>
-                      <th onclick="sortRecommendedTracker('productId')" class="font-mono" style="cursor:pointer;">PRODUCT_ID</th>
-                      <th onclick="sortRecommendedTracker('productName')" class="truncate-cell" style="cursor:pointer;">PRODUCT_NAME</th>
-                      <th onclick="sortRecommendedTracker('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortRecommendedTracker('merchant')" class="truncate-cell" style="cursor:pointer;">Merchant</th>
-                      <th onclick="sortRecommendedTracker('acm')" style="cursor:pointer;">ACM</th>
-                      <th onclick="sortRecommendedTracker('stock')" class="num" style="cursor:pointer;">Stock</th>
-                      <th onclick="sortRecommendedTracker('action')" style="cursor:pointer;">Action</th>
-                      <th onclick="sortRecommendedTracker('startingCogs')" class="num" style="cursor:pointer;">Starting Cogs</th>
-                      <th onclick="sortRecommendedTracker('merchantStartingAvg')" class="num" style="cursor:pointer;">Merchant Starting AVG</th>
-                      <th onclick="sortRecommendedTracker('merchantCurrentAvg')" class="num" style="cursor:pointer;">Merchant Current AVG</th>
-                      <th onclick="sortRecommendedTracker('skuStartingAvg')" class="num" style="cursor:pointer;">SKU Starting AVG</th>
-                      <th onclick="sortRecommendedTracker('skuCurrentAvg')" class="num" style="cursor:pointer;">SKU Current AVG</th>
-                      <th onclick="sortRecommendedTracker('skuPlacedToday')" class="num" style="cursor:pointer;">SKU Placed today</th>
-                      <th onclick="sortRecommendedTracker('skuPlacedYday')" class="num" style="cursor:pointer;">SKU Placed Yesterday</th>
-                      <th onclick="sortRecommendedTracker('currentInventory')" class="num" style="cursor:pointer;">Current Inventory</th>
-                      <th onclick="sortRecommendedTracker('currentInventoryDoh')" class="num" style="cursor:pointer;">Current Inventory DOH</th>
-                      <th onclick="sortRecommendedTracker('avgSkuLast3d')" class="num" style="cursor:pointer;">Avg SKU Last 3D</th>
-                      <th onclick="sortRecommendedTracker('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortRecommendedTracker('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortRecommendedTracker('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortRecommendedTracker('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
-                      <th onclick="sortRecommendedTracker('placedAsp')" class="num" style="cursor:pointer;">Placed ASP</th>
-                      <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;">CM3 Per Merchant</th>
-                      <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
-                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;">SKU PPM</th>
-                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="SKU PPM ÷ Last Placed ASP (most recent single day with Placed data)">PPM%</th>
-                      <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;">Allocated Qty (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;">Used Qty (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('day0')" class="num" style="cursor:pointer;" title="Placed Pieces — Day 0 (today), from the Merchant Daily sheet (GID 461854229)">DAY 0</th>
-                      <th onclick="sortRecommendedTracker('day1')" class="num" style="cursor:pointer;" title="Placed Pieces — Day 1 (yesterday)">DAY 1</th>
-                      <th onclick="sortRecommendedTracker('day2')" class="num" style="cursor:pointer;">DAY 2</th>
-                      <th onclick="sortRecommendedTracker('day3')" class="num" style="cursor:pointer;">DAY 3</th>
-                      <th onclick="sortRecommendedTracker('day4')" class="num" style="cursor:pointer;">DAY 4</th>
-                      <th onclick="sortRecommendedTracker('day5')" class="num" style="cursor:pointer;">DAY 5</th>
-                      <th id="rtFeedbackTh" style="min-width: 220px;">Feedback</th>
+                      <th onclick="sortRecommendedTracker('type')" style="cursor:pointer;" title="Existing tracked match, or a newly detected locked match added automatically.">Type</th>
+                      <th onclick="sortRecommendedTracker('productId')" class="font-mono" style="cursor:pointer;" title="The product's unique ID.">PRODUCT_ID</th>
+                      <th onclick="sortRecommendedTracker('productName')" class="truncate-cell" style="cursor:pointer;" title="The product's name.">PRODUCT_NAME</th>
+                      <th onclick="sortRecommendedTracker('merchantId')" class="font-mono" style="cursor:pointer;" title="The merchant's unique ID.">Merchant ID</th>
+                      <th onclick="sortRecommendedTracker('merchant')" class="truncate-cell" style="cursor:pointer;" title="The merchant's name.">Merchant</th>
+                      <th onclick="sortRecommendedTracker('acm')" style="cursor:pointer;" title="Account manager assigned to this merchant.">ACM</th>
+                      <th onclick="sortRecommendedTracker('stock')" class="num" style="cursor:pointer;" title="Current stock for this SKU, read from the inventory data.">Stock</th>
+                      <th onclick="sortRecommendedTracker('action')" style="cursor:pointer;" title="Recommended action recorded for this match.">Action</th>
+                      <th onclick="sortRecommendedTracker('startingCogs')" class="num" style="cursor:pointer;" title="Cost of goods when this match was first tracked (fixed baseline, does not update).">Starting Cogs</th>
+                      <th onclick="sortRecommendedTracker('merchantStartingAvg')" class="num" style="cursor:pointer;" title="Merchant's average daily placed pieces for this SKU when tracking started (fixed baseline).">Merchant Starting AVG</th>
+                      <th onclick="sortRecommendedTracker('merchantCurrentAvg')" class="num" style="cursor:pointer;" title="Average daily pieces placed by this merchant for this SKU over the last 3 full days.">Merchant Current AVG</th>
+                      <th onclick="sortRecommendedTracker('skuStartingAvg')" class="num" style="cursor:pointer;" title="SKU's average daily placed pieces when tracking started (fixed baseline).">SKU Starting AVG</th>
+                      <th onclick="sortRecommendedTracker('skuCurrentAvg')" class="num" style="cursor:pointer;" title="SKU's average daily placed pieces across all merchants, over the last 3 full days.">SKU Current AVG</th>
+                      <th onclick="sortRecommendedTracker('skuPlacedToday')" class="num" style="cursor:pointer;" title="Pieces placed for this SKU today. No cutoff applied.">SKU Placed today</th>
+                      <th onclick="sortRecommendedTracker('skuPlacedYday')" class="num" style="cursor:pointer;" title="Pieces placed for this SKU yesterday. No cutoff applied.">SKU Placed Yesterday</th>
+                      <th onclick="sortRecommendedTracker('currentInventory')" class="num" style="cursor:pointer;" title="Latest stock figure for this product. No cutoff applied.">Current Inventory</th>
+                      <th onclick="sortRecommendedTracker('currentInventoryDoh')" class="num" style="cursor:pointer;" title="Days of stock on hand: current stock ÷ average daily demand (last 3 days, pooled across this SKU and any bundles containing it).">Current Inventory DOH</th>
+                      <th onclick="sortRecommendedTracker('avgSkuLast3d')" class="num" style="cursor:pointer;" title="Average daily demand over the last 3 days, used to compute DOH.">Avg SKU Last 3D</th>
+                      <th onclick="sortRecommendedTracker('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days so orders have time to finish confirming.">CR%</th>
+                      <th onclick="sortRecommendedTracker('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, excluding the most recent 5 days so orders have time to finish delivering.">DR%</th>
+                      <th onclick="sortRecommendedTracker('ndrPct')" class="num" style="cursor:pointer;" title="Net Delivery Rate = CR% × DR%, carrying both the 2-day and 5-day cutoffs above.">NDR%</th>
+                      <th onclick="sortRecommendedTracker('ppmPerPiece')" class="num" style="cursor:pointer;" title="Profit per piece delivered. Unlike CM3 below, this does not apply any cutoff.">PPM/Piece</th>
+                      <th onclick="sortRecommendedTracker('placedAsp')" class="num" style="cursor:pointer;" title="Average selling price from the last 3 days that had placed orders.">Placed ASP</th>
+                      <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;" title="Contribution margin for this match, excluding the most recent 4 days.">CM3 Per Merchant</th>
+                      <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, using the same 4-day cutoff as CM3 Per Merchant.">CM3%</th>
+                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;" title="Price minus cost minus profit for this SKU, read from product/cost data.">SKU PPM</th>
+                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="SKU PPM ÷ the most recent single day's Placed ASP (not a 3-day average).">PPM%</th>
+                      <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;" title="Pieces allocated to this merchant for this SKU under the active stock lock.">Allocated Qty (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;" title="Pieces already used from this merchant's allocated lock.">Used Qty (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;" title="Pieces still available from this merchant's lock allocation.">Remaining Pieces (Merchant)</th>
+                      <th onclick="sortRecommendedTracker('day0')" class="num" style="cursor:pointer;" title="Pieces placed today, from the merchant/SKU daily data.">DAY 0</th>
+                      <th onclick="sortRecommendedTracker('day1')" class="num" style="cursor:pointer;" title="Pieces placed yesterday.">DAY 1</th>
+                      <th onclick="sortRecommendedTracker('day2')" class="num" style="cursor:pointer;" title="Pieces placed 2 days ago.">DAY 2</th>
+                      <th onclick="sortRecommendedTracker('day3')" class="num" style="cursor:pointer;" title="Pieces placed 3 days ago.">DAY 3</th>
+                      <th onclick="sortRecommendedTracker('day4')" class="num" style="cursor:pointer;" title="Pieces placed 4 days ago.">DAY 4</th>
+                      <th onclick="sortRecommendedTracker('day5')" class="num" style="cursor:pointer;" title="Pieces placed 5 days ago.">DAY 5</th>
+                      <th id="rtFeedbackTh" style="min-width: 220px;" title="Account manager's written note for this match, editable for today's date.">Feedback</th>
                     </tr>
                   </thead>
                   <tbody id="recommendedTrackerTableBody"></tbody>
@@ -308,27 +308,27 @@
                 <table class="data-table" id="inventoryTable">
                   <thead>
                     <tr>
-                      <th data-ikey="index">#</th>
-                      <th data-ikey="skuId">SKU ID</th>
-                      <th data-ikey="skuName" style="min-width: 180px;">SKU Name</th>
-                      <th data-ikey="stock" class="num text-blue">Stock</th>
-                      <th data-ikey="doh" class="num">DOH</th>
-                      <th data-ikey="category">Category</th>
-                      <th data-ikey="availability">Availability</th>
-                      <th data-ikey="price" class="num">Price</th>
-                      <th data-ikey="profit" class="num text-green">Profit</th>
-                      <th data-ikey="cr" class="num">CR%</th>
-                      <th data-ikey="dr" class="num">DR%</th>
-                      <th data-ikey="ndr" class="num">NDR%</th>
-                      <th data-ikey="cm3" class="num">Total CM3</th>
-                      <th data-ikey="avgPlacedDaily" class="num">Avg Placed/Day</th>
-                      <th data-ikey="placedYday" class="num text-dim">Placed YDay</th>
-                      <th data-ikey="confYday" class="num">Conf YDay</th>
-                      <th data-ikey="avg3d" class="num text-orange">Avg Conf 3D</th>
-                      <th data-ikey="avg15d" class="num text-purple">Avg Conf 15D</th>
-                      <th data-ikey="trend">Trend</th>
-                      <th data-ikey="topMerch">Top Merch (5D)</th>
-                      <th data-ikey="contr5d" class="num">Contr% (5D)</th>
+                      <th data-ikey="index" title="Row number in the current sort/filter order.">#</th>
+                      <th data-ikey="skuId" title="The product's unique ID.">SKU ID</th>
+                      <th data-ikey="skuName" style="min-width: 180px;" title="The product's name.">SKU Name</th>
+                      <th data-ikey="stock" class="num text-blue" title="Current stock for this SKU, from the inventory data.">Stock</th>
+                      <th data-ikey="doh" class="num" title="Days of stock on hand, read directly from the inventory data.">DOH</th>
+                      <th data-ikey="category" title="Product category.">Category</th>
+                      <th data-ikey="availability" title="Current availability status for this SKU.">Availability</th>
+                      <th data-ikey="price" class="num" title="Selling price, from product data.">Price</th>
+                      <th data-ikey="profit" class="num text-green" title="Profit margin, from product data.">Profit</th>
+                      <th data-ikey="cr" class="num" title="Confirmed ÷ Placed, all-time totals. No cutoff applied.">CR%</th>
+                      <th data-ikey="dr" class="num" title="Delivered ÷ Confirmed, all-time totals. No cutoff applied.">DR%</th>
+                      <th data-ikey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th data-ikey="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
+                      <th data-ikey="avgPlacedDaily" class="num" title="Total placed pieces ÷ number of days with placed activity.">Avg Placed/Day</th>
+                      <th data-ikey="placedYday" class="num text-dim" title="Pieces placed yesterday.">Placed YDay</th>
+                      <th data-ikey="confYday" class="num" title="Orders confirmed yesterday.">Conf YDay</th>
+                      <th data-ikey="avg3d" class="num text-orange" title="Average confirmed orders per day over the last 3 days.">Avg Conf 3D</th>
+                      <th data-ikey="avg15d" class="num text-purple" title="Average confirmed orders per day over the last 15 days.">Avg Conf 15D</th>
+                      <th data-ikey="trend" title="Compares 3-day vs 15-day confirmed averages to flag Hot/Cooling/Stable.">Trend</th>
+                      <th data-ikey="topMerch" title="Merchant with the most confirmed orders for this SKU in the last 5 days.">Top Merch (5D)</th>
+                      <th data-ikey="contr5d" class="num" title="Top merchant's share of this SKU's total 5-day confirmed orders.">Contr% (5D)</th>
                     </tr>
                   </thead>
                   <tbody id="inventoryTableBody"></tbody>
@@ -394,22 +394,22 @@
                 <table class="data-table" id="acmTable">
                   <thead>
                     <tr>
-                      <th data-key="index">#</th>
-                      <th data-key="name">Account Manager</th>
-                      <th data-key="finalScorePct" class="num" style="min-width: 120px; color: var(--blue);">Final Weight %</th>
-                      <th data-key="targetGmv" class="num text-dim">Target GMV</th>
-                      <th data-key="deliveredGmv" class="num">Delivered GMV</th>
-                      <th data-key="achievedPct" class="num" style="min-width: 110px;">GMV Achieved %</th>
-                      <th data-key="runRate" class="num text-blue">Run Rate (EOM)</th>
-                      <th data-key="targetNdr" class="num text-dim">Target NDR%</th>
-                      <th data-key="ndr" class="num">Actual NDR%</th>
-                      <th data-key="targetCm3" class="num text-dim">Target CM3%</th>
-                      <th data-key="cm3Pct" class="num">Actual CM3%</th>
-                      <th data-key="targetRetention" class="num text-dim">Target Retention</th>
-                      <th data-key="actualRetention" class="num">Actual Retention</th>
-                      <th data-key="placed" class="num text-dim">Placed</th>
-                      <th data-key="confirmed" class="num">Confirmed</th>
-                      <th data-key="delivered" class="num text-dim">Delivered</th>
+                      <th data-key="index" title="Row number.">#</th>
+                      <th data-key="name" title="Account manager's name.">Account Manager</th>
+                      <th data-key="finalScorePct" class="num" style="min-width: 120px; color: var(--blue);" title="Weighted score combining GMV, NDR, CM3% (5-day cutoff) and Retention vs targets.">Final Weight %</th>
+                      <th data-key="targetGmv" class="num text-dim" title="GMV target assigned to this account manager.">Target GMV</th>
+                      <th data-key="deliveredGmv" class="num" title="Total delivered GMV. No cutoff applied.">Delivered GMV</th>
+                      <th data-key="achievedPct" class="num" style="min-width: 110px;" title="Delivered GMV ÷ Target GMV.">GMV Achieved %</th>
+                      <th data-key="runRate" class="num text-blue" title="Projected end-of-month GMV based on the current daily pace.">Run Rate (EOM)</th>
+                      <th data-key="targetNdr" class="num text-dim" title="NDR% target assigned to this account manager.">Target NDR%</th>
+                      <th data-key="ndr" class="num" title="CR% × DR%. No cutoff applied.">Actual NDR%</th>
+                      <th data-key="targetCm3" class="num text-dim" title="CM3% target assigned to this account manager.">Target CM3%</th>
+                      <th data-key="cm3Pct" class="num" title="CM3 ÷ Delivered GMV, excluding the most recent 5 days.">Actual CM3%</th>
+                      <th data-key="targetRetention" class="num text-dim" title="Retention target (merchants expected to move up a segment).">Target Retention</th>
+                      <th data-key="actualRetention" class="num" title="Count of merchants under this account manager whose projected segment improved.">Actual Retention</th>
+                      <th data-key="placed" class="num text-dim" title="Total placed orders. No cutoff applied.">Placed</th>
+                      <th data-key="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
+                      <th data-key="delivered" class="num text-dim" title="Total delivered orders. No cutoff applied.">Delivered</th>
                     </tr>
                   </thead>
                   <tbody id="acmTableBody"></tbody>
@@ -438,13 +438,13 @@
                 <table class="data-table">
                   <thead>
                     <tr>
-                      <th>#</th>
-                      <th>Account Manager</th>
-                      <th class="num">This Week</th>
-                      <th class="num">Last Week</th>
-                      <th class="num">Change</th>
-                      <th>Status</th>
-                      <th class="center">Spark</th>
+                      <th title="Rank by week-over-week % change.">#</th>
+                      <th title="Account manager's name.">Account Manager</th>
+                      <th class="num" title="Confirmed orders for the last 7 days (days 0-6). No cutoff applied.">This Week</th>
+                      <th class="num" title="Confirmed orders for the prior 7 days (days 7-13). No cutoff applied.">Last Week</th>
+                      <th class="num" title="This Week minus Last Week.">Change</th>
+                      <th title="Spike / Decline / Stable, based on the % change vs last week.">Status</th>
+                      <th class="center" title="Visual indicator matching the Status column.">Spark</th>
                     </tr>
                   </thead>
                   <tbody id="wowTableBody"></tbody>
@@ -465,13 +465,13 @@
                 <table class="data-table">
                   <thead>
                     <tr>
-                      <th>#</th>
-                      <th>Account Manager</th>
-                      <th class="num">Current (Avg/Day)</th>
-                      <th class="num">Last (Avg/Day)</th>
-                      <th class="num">Change</th>
-                      <th>Status</th>
-                      <th class="center">Spark</th>
+                      <th title="Rank by month-over-month % change.">#</th>
+                      <th title="Account manager's name.">Account Manager</th>
+                      <th class="num" title="This month's confirmed orders ÷ days elapsed so far this month.">Current (Avg/Day)</th>
+                      <th class="num" title="Last month's confirmed orders (same day-count as this month) ÷ that day count.">Last (Avg/Day)</th>
+                      <th class="num" title="Current Avg/Day minus Last Avg/Day.">Change</th>
+                      <th title="Spike / Decline / Stable, based on the % change vs last month.">Status</th>
+                      <th class="center" title="Visual indicator matching the Status column.">Spark</th>
                     </tr>
                   </thead>
                   <tbody id="avgDailyTableBody"></tbody>
@@ -494,19 +494,19 @@
                 <table class="data-table">
                   <thead>
                     <tr>
-                      <th>#</th>
-                      <th>ID</th>
-                      <th>Merchant Name</th>
-                      <th>ACM</th>
-                      <th class="num">Confirmed</th>
-                      <th class="num">Placed</th>
-                      <th class="num">Delivered</th>
-                      <th class="num">CR%</th>
-                      <th class="num">DR%</th>
-                      <th class="num">NDR%</th>
-                      <th class="num">Delivered GMV</th>
-                      <th class="num">Confirmed GMV</th>
-                      <th class="num">SKUs</th>
+                      <th title="Rank by Delivered GMV, highest first.">#</th>
+                      <th title="Merchant's unique ID.">ID</th>
+                      <th title="Merchant's name.">Merchant Name</th>
+                      <th title="Account manager assigned to this merchant.">ACM</th>
+                      <th class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
+                      <th class="num" title="Total placed orders. No cutoff applied.">Placed</th>
+                      <th class="num" title="Total delivered orders. No cutoff applied.">Delivered</th>
+                      <th class="num" title="Confirmed ÷ Placed. No cutoff applied.">CR%</th>
+                      <th class="num" title="Delivered ÷ Confirmed. No cutoff applied.">DR%</th>
+                      <th class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th class="num" title="Total delivered GMV. Ranking basis for this table.">Delivered GMV</th>
+                      <th class="num" title="Total confirmed GMV. No cutoff applied.">Confirmed GMV</th>
+                      <th class="num" title="Count of distinct SKUs this merchant has placed orders for.">SKUs</th>
                     </tr>
                   </thead>
                   <tbody id="top10MerchantBody"></tbody>
@@ -562,22 +562,22 @@
                 <table class="data-table" id="merchantTable">
                   <thead>
                     <tr>
-                      <th data-mkey="index">#</th>
-                      <th data-mkey="id">ID</th>
-                      <th data-mkey="name">Merchant Name</th>
-                      <th data-mkey="acm">ACM</th>
-                      <th data-mkey="targetPlaced" class="num">Target Placed</th>
-                      <th data-mkey="targetGmv" class="num">Target GMV</th>
-                      <th data-mkey="deliveredGmv" class="num">Delivered GMV</th>
-                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;">Achieved %</th>
-                      <th data-mkey="runRate" class="num">Run Rate (EOM)</th>
-                      <th data-mkey="placed" class="num">Placed</th>
-                      <th data-mkey="confirmed" class="num">Confirmed</th>
-                      <th data-mkey="delivered" class="num">Delivered</th>
-                      <th data-mkey="cm3" class="num">Total CM3</th>
-                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 / Delivered GMV">CM3 / GMV %</th>
-                      <th data-mkey="ndr" class="num">NDR%</th>
-                      <th data-mkey="cm3Pct" class="num">CM3 %</th>
+                      <th data-mkey="index" title="Row number.">#</th>
+                      <th data-mkey="id" title="Merchant's unique ID.">ID</th>
+                      <th data-mkey="name" title="Merchant's name.">Merchant Name</th>
+                      <th data-mkey="acm" title="Account manager assigned to this merchant.">ACM</th>
+                      <th data-mkey="targetPlaced" class="num" title="Placed-orders target assigned to this merchant.">Target Placed</th>
+                      <th data-mkey="targetGmv" class="num" title="GMV target assigned to this merchant.">Target GMV</th>
+                      <th data-mkey="deliveredGmv" class="num" title="Total delivered GMV. No cutoff applied.">Delivered GMV</th>
+                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;" title="Delivered GMV ÷ Target GMV.">Achieved %</th>
+                      <th data-mkey="runRate" class="num" title="Projected end-of-month GMV based on the current daily pace.">Run Rate (EOM)</th>
+                      <th data-mkey="placed" class="num" title="Total placed orders. No cutoff applied.">Placed</th>
+                      <th data-mkey="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
+                      <th data-mkey="delivered" class="num" title="Total delivered orders. No cutoff applied.">Delivered</th>
+                      <th data-mkey="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
+                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3 / GMV %</th>
+                      <th data-mkey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th data-mkey="cm3Pct" class="num" title="Same figure as CM3 / GMV % — contribution margin as a share of delivered GMV, 5-day cutoff.">CM3 %</th>
                     </tr>
                   </thead>
                   <tbody id="merchantTableBody"></tbody>
@@ -609,14 +609,14 @@
                 <table class="data-table" id="segTable">
                   <thead>
                     <tr>
-                      <th data-skey="index">#</th>
-                      <th data-skey="id">ID</th>
-                      <th data-skey="name">Merchant Name</th>
-                      <th data-skey="acm">ACM</th>
-                      <th data-skey="currentSegment">Current Segment</th>
-                      <th data-skey="confirmed" class="num">Confirmed Orders</th>
-                      <th data-skey="rrConfirmed" class="num">RR Confirmed (EOM)</th>
-                      <th data-skey="projectedSegment">Projected Segment</th>
+                      <th data-skey="index" title="Row number.">#</th>
+                      <th data-skey="id" title="Merchant's unique ID.">ID</th>
+                      <th data-skey="name" title="Merchant's name.">Merchant Name</th>
+                      <th data-skey="acm" title="Account manager assigned to this merchant.">ACM</th>
+                      <th data-skey="currentSegment" title="Merchant's segment, from the merchant classification data.">Current Segment</th>
+                      <th data-skey="confirmed" class="num" title="Total confirmed orders this month. No cutoff applied.">Confirmed Orders</th>
+                      <th data-skey="rrConfirmed" class="num" title="Projected month-end confirmed orders, extrapolated from the daily average so far this month.">RR Confirmed (EOM)</th>
+                      <th data-skey="projectedSegment" title="Segment the merchant would land in if the projected month-end run rate holds.">Projected Segment</th>
                     </tr>
                   </thead>
                   <tbody id="segTableBody"></tbody>
@@ -687,11 +687,11 @@
                 <table class="data-table" id="tcTable">
                   <thead>
                     <tr>
-                      <th>Metric</th>
-                      <th class="num">Target</th>
-                      <th class="num">Actual</th>
-                      <th class="num">Achievement %</th>
-                      <th class="center">Status</th>
+                      <th title="Commercial KPI being compared (e.g. Placed Pieces, CR%, CM3).">Metric</th>
+                      <th class="num" title="Planned goal for this metric, from the category targets.">Target</th>
+                      <th class="num" title="Live value from order data. Cutoff varies by metric: none for Pieces/PPM, 2 days for CR%, 5 days for DR%/CM3/CM3%.">Actual</th>
+                      <th class="num" title="Actual ÷ Target, as a percentage.">Achievement %</th>
+                      <th class="center" title="On Target (≥100%), Near Target (85-99%), or Below Target, based on Achievement %.">Status</th>
                     </tr>
                   </thead>
                   <tbody id="tcTableBody"></tbody>
@@ -737,13 +737,13 @@
                   <table class="st-summary-table" id="cdzPlacedBucketTable">
                     <thead>
                       <tr>
-                        <th>Status</th>
-                        <th>Placed Count</th>
-                        <th>Total Placed Daily Target</th>
-                        <th>Total Placed AVG</th>
-                        <th>Total Placed Target MTD</th>
-                        <th>Total Placed MTD</th>
-                        <th>AVG ACH</th>
+                        <th title="Achievement tier SKUs fall into, based on Placed Ach% vs its month-to-date target.">Status</th>
+                        <th title="Number of SKUs in this achievement tier.">Placed Count</th>
+                        <th title="Sum of each SKU's daily placed-pieces target within this tier.">Total Placed Daily Target</th>
+                        <th title="Group's placed pieces so far this month ÷ days elapsed through yesterday.">Total Placed AVG</th>
+                        <th title="Sum of each SKU's month-to-date placed target within this tier.">Total Placed Target MTD</th>
+                        <th title="Actual placed pieces so far this month for SKUs in this tier. No cutoff applied.">Total Placed MTD</th>
+                        <th title="Total Placed MTD ÷ Total Placed Target MTD, as a percentage.">AVG ACH</th>
                       </tr>
                     </thead>
                     <tbody id="cdzPlacedBucketBody"></tbody>
@@ -761,13 +761,13 @@
                   <table class="st-summary-table" id="cdzConfirmedBucketTable">
                     <thead>
                       <tr>
-                        <th>Status</th>
-                        <th>Confirmed Count</th>
-                        <th>Total Confirmed Daily Target</th>
-                        <th>Total Confirmed AVG</th>
-                        <th>Total Confirmed Target MTD</th>
-                        <th>Total Confirmed MTD</th>
-                        <th>AVG ACH</th>
+                        <th title="Achievement tier SKUs fall into, based on Confirmed Ach% vs its month-to-date target.">Status</th>
+                        <th title="Number of SKUs in this achievement tier.">Confirmed Count</th>
+                        <th title="Sum of each SKU's daily confirmed-pieces target within this tier.">Total Confirmed Daily Target</th>
+                        <th title="Group's confirmed pieces so far this month ÷ days elapsed through yesterday.">Total Confirmed AVG</th>
+                        <th title="Sum of each SKU's month-to-date confirmed target within this tier.">Total Confirmed Target MTD</th>
+                        <th title="Actual confirmed pieces so far this month for SKUs in this tier. No cutoff applied.">Total Confirmed MTD</th>
+                        <th title="Total Confirmed MTD ÷ Total Confirmed Target MTD, as a percentage.">AVG ACH</th>
                       </tr>
                     </thead>
                     <tbody id="cdzConfirmedBucketBody"></tbody>
@@ -792,42 +792,42 @@
                 <table class="data-table" id="cdzTable">
                   <thead>
                     <tr>
-                      <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Click to sort">Product_ID</th>
-                      <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product_Name</th>
-                      <th rowspan="2" onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Click to sort">Category</th>
-                      <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Click to sort">Stock</th>
-                      <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Click to sort">DOH</th>
-                      <th colspan="4" class="center">Placed Pieces</th>
-                      <th colspan="4" class="center">Confirmed Pieces</th>
-                      <th colspan="4" class="center">Delivered Pieces</th>
-                      <th colspan="4" class="center">Delivered GMV</th>
-                      <th rowspan="2" onclick="sortCdz('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th rowspan="2" onclick="sortCdz('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th rowspan="2" onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th rowspan="2" onclick="sortCdz('cm3')" class="num" style="cursor:pointer;">Total CM3</th>
-                      <th rowspan="2" onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Piece</th>
-                      <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;">Total PPM</th>
-                      <th rowspan="2" onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
-                      <th rowspan="2" onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
-                      <th rowspan="2" onclick="sortCdz('mtdAchPct')" class="center" style="cursor:pointer;" title="Click to sort">Status</th>
+                      <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Unique identifier for this SKU. Click to sort.">Product_ID</th>
+                      <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Product's display name. Click to sort.">Product_Name</th>
+                      <th rowspan="2" onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Product category this SKU belongs to. Click to sort.">Category</th>
+                      <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Current stock quantity on hand. Click to sort.">Stock</th>
+                      <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand: Stock ÷ average confirmed pieces over the last 3 days. Click to sort.">DOH</th>
+                      <th colspan="4" class="center" title="Pieces placed on orders for this SKU. No cutoff applied.">Placed Pieces</th>
+                      <th colspan="4" class="center" title="Pieces confirmed for this SKU. No cutoff applied.">Confirmed Pieces</th>
+                      <th colspan="4" class="center" title="Pieces delivered for this SKU. No cutoff applied.">Delivered Pieces</th>
+                      <th colspan="4" class="center" title="Delivered revenue for this SKU, only counting rows at least 5 days old.">Delivered GMV</th>
+                      <th rowspan="2" onclick="sortCdz('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces, excluding the most recent 2 days.">CR%</th>
+                      <th rowspan="2" onclick="sortCdz('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces, excluding the most recent 5 days.">DR%</th>
+                      <th rowspan="2" onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%, carrying both the 2-day and 5-day cutoffs.">NDR%</th>
+                      <th rowspan="2" onclick="sortCdz('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin for this SKU, excluding the most recent 5 days.">Total CM3</th>
+                      <th rowspan="2" onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;" title="Total CM3 ÷ delivered pieces, both under the 5-day cutoff.">CM3/Piece</th>
+                      <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;" title="Total promotional spend (PPM) for this SKU. No cutoff applied.">Total PPM</th>
+                      <th rowspan="2" onclick="sortCdz('ppmPerPiece')" class="num" style="cursor:pointer;" title="Total PPM ÷ all delivered pieces. No cutoff applied.">PPM/Piece</th>
+                      <th rowspan="2" onclick="sortCdz('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 as a % of delivered GMV, both under the 5-day cutoff.">CM3%</th>
+                      <th rowspan="2" onclick="sortCdz('mtdAchPct')" class="center" style="cursor:pointer;" title="Achievement tier based on Confirmed Ach% vs its MTD target. Click to sort.">Status</th>
                     </tr>
                     <tr>
-                      <th onclick="sortCdz('placedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortCdz('placedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortCdz('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortCdz('placedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortCdz('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortCdz('confirmedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortCdz('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortCdz('confirmedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortCdz('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortCdz('deliveredMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortCdz('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortCdz('deliveredAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortCdz('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortCdz('gmvMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortCdz('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortCdz('gmvAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortCdz('placedMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Placed-pieces target accumulated up to today.">MTD Target</th>
+                      <th onclick="sortCdz('placedMtdActual')" class="num" style="cursor:pointer;" title="Actual placed pieces so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortCdz('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortCdz('placedAchievedPct')" class="num" style="cursor:pointer;" title="Actual placed MTD as a % of the MTD target.">Ach%</th>
+                      <th onclick="sortCdz('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Confirmed-pieces target accumulated up to today.">MTD Target</th>
+                      <th onclick="sortCdz('confirmedMtdActual')" class="num" style="cursor:pointer;" title="Actual confirmed pieces so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortCdz('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortCdz('confirmedAchievedPct')" class="num" style="cursor:pointer;" title="Actual confirmed MTD as a % of the MTD target.">Ach%</th>
+                      <th onclick="sortCdz('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Delivered-pieces target accumulated up to today.">MTD Target</th>
+                      <th onclick="sortCdz('deliveredMtdActual')" class="num" style="cursor:pointer;" title="Actual delivered pieces so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortCdz('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortCdz('deliveredAchievedPct')" class="num" style="cursor:pointer;" title="Actual delivered pieces MTD as a % of the MTD target.">Ach%</th>
+                      <th onclick="sortCdz('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Delivered-GMV target, comparable to the 5-day-cutoff actuals below it.">MTD Target</th>
+                      <th onclick="sortCdz('gmvMtdActual')" class="num" style="cursor:pointer;" title="Actual delivered revenue so far this month, only counting rows at least 5 days old.">Actual</th>
+                      <th onclick="sortCdz('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end delivered GMV, based on the 5-day-cutoff actuals so far.">Run Rate</th>
+                      <th onclick="sortCdz('gmvAchievedPct')" class="num" style="cursor:pointer;" title="Actual delivered GMV MTD (5-day cutoff) as a % of the MTD target.">Ach%</th>
                     </tr>
                   </thead>
                   <tbody id="cdzTableBody"></tbody>
@@ -928,26 +928,26 @@
                 <table class="data-table" id="cm3apTable">
                   <thead>
                     <tr>
-                      <th onclick="sortCm3ap('sku')" style="cursor:pointer;" title="Click to sort">SKU</th>
-                      <th onclick="sortCm3ap('skuName')" class="truncate-cell" style="cursor:pointer;" title="Click to sort">SKU Name</th>
-                      <th onclick="sortCm3ap('category')" class="truncate-cell" style="cursor:pointer; max-width:110px;" title="Click to sort">Category</th>
-                      <th onclick="sortCm3ap('placed')" class="num" style="cursor:pointer;" title="Click to sort">Placed Pcs</th>
-                      <th onclick="sortCm3ap('confirmed')" class="num" style="cursor:pointer;" title="Click to sort">Confirmed Pcs</th>
-                      <th onclick="sortCm3ap('delivered')" class="num" style="cursor:pointer;" title="Click to sort">Delivered Pcs</th>
-                      <th onclick="sortCm3ap('crPct')" class="num" style="cursor:pointer;" title="Click to sort">CR%</th>
-                      <th onclick="sortCm3ap('drPct')" class="num" style="cursor:pointer;" title="Click to sort">DR%</th>
-                      <th onclick="sortCm3ap('ndrPct')" class="num" style="cursor:pointer;" title="Click to sort">NDR%</th>
-                      <th onclick="sortCm3ap('deliveredAsp')" class="num" style="cursor:pointer;" title="Click to sort">Delivered ASP</th>
-                      <th onclick="sortCm3ap('deliveredGmv')" class="num text-green" style="cursor:pointer;" title="Click to sort">Delivered GMV</th>
-                      <th onclick="sortCm3ap('cm3')" class="num" style="cursor:pointer;" title="Click to sort">CM3</th>
-                      <th onclick="sortCm3ap('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="Click to sort">CM3%</th>
-                      <th onclick="sortCm3ap('deltaCm3Pct')" class="num" style="cursor:pointer;" title="Click to sort">&Delta; vs Prev Period</th>
-                      <th onclick="sortCm3ap('ppm')" class="num" style="cursor:pointer;" title="Click to sort">Total PPM</th>
-                      <th onclick="sortCm3ap('ppmPerPiece')" class="num" style="cursor:pointer;" title="Click to sort">PPM/Piece</th>
-                      <th onclick="sortCm3ap('targetPpm')" class="num text-orange" style="cursor:pointer;" title="Click to sort">Target PPM</th>
-                      <th onclick="sortCm3ap('ppmActualPct')" class="num" style="cursor:pointer;" title="Click to sort">PPM Actual%</th>
-                      <th onclick="sortCm3ap('ppmGmvRatio')" class="num" style="cursor:pointer;" title="Click to sort">PPM/GMV%</th>
-                      <th class="center">Status</th>
+                      <th onclick="sortCm3ap('sku')" style="cursor:pointer;" title="Unique product identifier. Click to sort.">SKU</th>
+                      <th onclick="sortCm3ap('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product's display name. Click to sort.">SKU Name</th>
+                      <th onclick="sortCm3ap('category')" class="truncate-cell" style="cursor:pointer; max-width:110px;" title="Product category this SKU belongs to. Click to sort.">Category</th>
+                      <th onclick="sortCm3ap('placed')" class="num" style="cursor:pointer;" title="Total pieces placed for this SKU. No cutoff applied. Click to sort.">Placed Pcs</th>
+                      <th onclick="sortCm3ap('confirmed')" class="num" style="cursor:pointer;" title="Total pieces confirmed for this SKU. No cutoff applied. Click to sort.">Confirmed Pcs</th>
+                      <th onclick="sortCm3ap('delivered')" class="num" style="cursor:pointer;" title="Total pieces delivered for this SKU. No cutoff applied. Click to sort.">Delivered Pcs</th>
+                      <th onclick="sortCm3ap('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces. Unlike some other tables, no lag is applied here. Click to sort.">CR%</th>
+                      <th onclick="sortCm3ap('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces. Unlike some other tables, no lag is applied here. Click to sort.">DR%</th>
+                      <th onclick="sortCm3ap('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%. No lag applied, since neither input is lagged here. Click to sort.">NDR%</th>
+                      <th onclick="sortCm3ap('deliveredAsp')" class="num" style="cursor:pointer;" title="Average delivered selling price per piece, weighted by delivered pieces. Click to sort.">Delivered ASP</th>
+                      <th onclick="sortCm3ap('deliveredGmv')" class="num text-green" style="cursor:pointer;" title="Total delivered revenue for this SKU. No cutoff applied. Click to sort.">Delivered GMV</th>
+                      <th onclick="sortCm3ap('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin, excluding the most recent 5 days. Click to sort.">CM3</th>
+                      <th onclick="sortCm3ap('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="CM3 as a % of delivered GMV, both under the 5-day cutoff. Click to sort.">CM3%</th>
+                      <th onclick="sortCm3ap('deltaCm3Pct')" class="num" style="cursor:pointer;" title="Change in CM3% between the last two periods that had a delivery. Blank if not enough history. Click to sort.">&Delta; vs Prev Period</th>
+                      <th onclick="sortCm3ap('ppm')" class="num" style="cursor:pointer;" title="Total promotional spend (PPM) for this SKU. No cutoff applied. Click to sort.">Total PPM</th>
+                      <th onclick="sortCm3ap('ppmPerPiece')" class="num" style="cursor:pointer;" title="Promotional spend per piece delivered. Click to sort.">PPM/Piece</th>
+                      <th onclick="sortCm3ap('targetPpm')" class="num text-orange" style="cursor:pointer;" title="Target promotional spend per piece for this SKU's category. Click to sort.">Target PPM</th>
+                      <th onclick="sortCm3ap('ppmActualPct')" class="num" style="cursor:pointer;" title="PPM/Piece actual as a % of Target PPM. Click to sort.">PPM Actual%</th>
+                      <th onclick="sortCm3ap('ppmGmvRatio')" class="num" style="cursor:pointer;" title="Total PPM as a % of Delivered GMV. Click to sort.">PPM/GMV%</th>
+                      <th class="center" title="&quot;Fix PPM&quot; if PPM Actual% is under 80%, &quot;No Target&quot; if no target exists, else &quot;OK&quot;.">Status</th>
                     </tr>
                   </thead>
                   <tbody id="cm3apTableBody"></tbody>
@@ -1093,11 +1093,11 @@
                 <table class="data-table" id="cm3DrilldownTable">
                   <thead>
                     <tr>
-                      <th>Merchant</th>
-                      <th>SKU</th>
-                      <th>Category</th>
-                      <th class="num">CM3 (Previous Period)</th>
-                      <th class="num">CM3 (This Period)</th>
+                      <th title="Merchant name for this match.">Merchant</th>
+                      <th title="Product SKU code for this match.">SKU</th>
+                      <th title="Product category this SKU belongs to.">Category</th>
+                      <th class="num" title="This match's CM3 in the prior period, excluding the most recent 5 days.">CM3 (Previous Period)</th>
+                      <th class="num" title="This match's CM3 in the current period, excluding the most recent 5 days.">CM3 (This Period)</th>
                     </tr>
                   </thead>
                   <tbody id="cm3DrilldownTableBody"></tbody>
@@ -1214,24 +1214,24 @@
                 <table class="data-table" id="ppmAnalystTable">
                   <thead>
                     <tr>
-                      <th onclick="sortPpmAnalyst('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortPpmAnalyst('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
-                      <th onclick="sortPpmAnalyst('category')" style="cursor:pointer;">CATEGORY</th>
-                      <th onclick="sortPpmAnalyst('stock')" class="num" style="cursor:pointer;">STOCK</th>
-                      <th onclick="sortPpmAnalyst('doh')" class="num" style="cursor:pointer;">DOH</th>
-                      <th onclick="sortPpmAnalyst('sellingPrice')" class="num" style="cursor:pointer;">Selling Price</th>
-                      <th onclick="sortPpmAnalyst('profit')" class="num" style="cursor:pointer;">Profit</th>
-                      <th onclick="sortPpmAnalyst('asp')" class="num" style="cursor:pointer;">ASP</th>
-                      <th onclick="sortPpmAnalyst('deliveredGmv')" class="num" style="cursor:pointer;">Delivered GMV</th>
-                      <th onclick="sortPpmAnalyst('contrGmvPct')" class="num" style="cursor:pointer;">CONTR GMV%</th>
-                      <th onclick="sortPpmAnalyst('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortPpmAnalyst('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortPpmAnalyst('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortPpmAnalyst('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/Piece</th>
-                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
-                      <th onclick="sortPpmAnalyst('totalDeliveredPpm')" class="num" style="cursor:pointer;">TOTAL DELIVERED PPM</th>
-                      <th onclick="sortPpmAnalyst('totalDeliveredPcs')" class="num" style="cursor:pointer;">TOTAL DELIVERED PCS</th>
-                      <th onclick="sortPpmAnalyst('contrPpmPct')" class="num" style="cursor:pointer;">CONTR PPM%</th>
+                      <th onclick="sortPpmAnalyst('skuId')" class="font-mono" style="cursor:pointer;" title="Product SKU identifier.">SKU ID</th>
+                      <th onclick="sortPpmAnalyst('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product display name.">SKU NAME</th>
+                      <th onclick="sortPpmAnalyst('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
+                      <th onclick="sortPpmAnalyst('stock')" class="num" style="cursor:pointer;" title="Current stock quantity for this SKU.">STOCK</th>
+                      <th onclick="sortPpmAnalyst('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand, estimated from the last 3 actual sales days.">DOH</th>
+                      <th onclick="sortPpmAnalyst('sellingPrice')" class="num" style="cursor:pointer;" title="Listed selling price for this SKU.">Selling Price</th>
+                      <th onclick="sortPpmAnalyst('profit')" class="num" style="cursor:pointer;" title="Per-unit profit figure for this SKU.">Profit</th>
+                      <th onclick="sortPpmAnalyst('asp')" class="num" style="cursor:pointer;" title="Average selling price = Delivered GMV ÷ Delivered Pieces. No cutoff applied.">ASP</th>
+                      <th onclick="sortPpmAnalyst('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month. No cutoff applied.">Delivered GMV</th>
+                      <th onclick="sortPpmAnalyst('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
+                      <th onclick="sortPpmAnalyst('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed this month, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortPpmAnalyst('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed this month, excluding the most recent 5 days.">DR%</th>
+                      <th onclick="sortPpmAnalyst('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
+                      <th onclick="sortPpmAnalyst('ppmPerPiece')" class="num" style="cursor:pointer;" title="Average profit per delivered piece this month. No cutoff applied.">PPM/Piece</th>
+                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;" title="PPM as a share of Delivered GMV this month. No cutoff applied.">PPM%</th>
+                      <th onclick="sortPpmAnalyst('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month. No cutoff applied.">TOTAL DELIVERED PPM</th>
+                      <th onclick="sortPpmAnalyst('totalDeliveredPcs')" class="num" style="cursor:pointer;" title="Total pieces delivered this month. No cutoff applied.">TOTAL DELIVERED PCS</th>
+                      <th onclick="sortPpmAnalyst('contrPpmPct')" class="num" style="cursor:pointer;" title="This SKU's share of total PPM delivered this month.">CONTR PPM%</th>
                     </tr>
                   </thead>
                   <tbody id="ppmAnalystTableBody"></tbody>
@@ -1295,22 +1295,22 @@
                 <table class="data-table" id="prodAnTable">
                   <thead>
                     <tr>
-                      <th onclick="sortProdAn('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortProdAn('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
-                      <th onclick="sortProdAn('category')" style="cursor:pointer;">CATEGORY</th>
-                      <th onclick="sortProdAn('lastInboundTs')" style="cursor:pointer;" title="Most recent inbound receipt date for this Single SKU (Inbound sheet, GID 565878313)">LAST INBOUND DATE</th>
-                      <th onclick="sortProdAn('demandConfirmed3m')" class="num" style="cursor:pointer;" title="Sum of CNF_QTY from EGY Sell-through rate needed data (GID 548859670) for the last 3 months">DEMAND CONFIRMED (3M)</th>
-                      <th onclick="sortProdAn('avgConfirmedDaily')" class="num" style="cursor:pointer;" title="Demand Confirmed (3M) ÷ total days across the last 3 months">AVG CONFIRMED DAILY</th>
-                      <th onclick="sortProdAn('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, overall across all bundles this Single SKU is part of (2-day cutoff)">CR%</th>
-                      <th onclick="sortProdAn('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, overall across all bundles this Single SKU is part of (CM3 cutoff)">DR%</th>
-                      <th onclick="sortProdAn('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%">NDR%</th>
-                      <th onclick="sortProdAn('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Overall across all bundles this Single SKU is part of">TOTAL PPM DELIVERED</th>
-                      <th onclick="sortProdAn('totalDeliveredPcs')" class="num" style="cursor:pointer;">TOTAL DELIVERED PCS</th>
-                      <th onclick="sortProdAn('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/PIECE</th>
-                      <th onclick="sortProdAn('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
-                      <th onclick="sortProdAn('cm3')" class="num" style="cursor:pointer;">CM3</th>
-                      <th onclick="sortProdAn('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/PIECE</th>
-                      <th onclick="sortProdAn('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                      <th onclick="sortProdAn('skuId')" class="font-mono" style="cursor:pointer;" title="Product SKU identifier.">SKU ID</th>
+                      <th onclick="sortProdAn('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product display name.">SKU NAME</th>
+                      <th onclick="sortProdAn('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
+                      <th onclick="sortProdAn('lastInboundTs')" style="cursor:pointer;" title="Most recent date this SKU was received into inventory.">LAST INBOUND DATE</th>
+                      <th onclick="sortProdAn('demandConfirmed3m')" class="num" style="cursor:pointer;" title="Total confirmed demand for this SKU over the last 3 months, from demand-planning data.">DEMAND CONFIRMED (3M)</th>
+                      <th onclick="sortProdAn('avgConfirmedDaily')" class="num" style="cursor:pointer;" title="Demand Confirmed (3M) divided by the number of days in that 3-month window.">AVG CONFIRMED DAILY</th>
+                      <th onclick="sortProdAn('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed across all bundles this SKU is part of, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortProdAn('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed across all bundles this SKU is part of, excluding the most recent 5 days.">DR%</th>
+                      <th onclick="sortProdAn('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
+                      <th onclick="sortProdAn('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit delivered this month across all bundles this SKU is part of. No cutoff applied.">TOTAL PPM DELIVERED</th>
+                      <th onclick="sortProdAn('totalDeliveredPcs')" class="num" style="cursor:pointer;" title="Total pieces delivered this month. No cutoff applied.">TOTAL DELIVERED PCS</th>
+                      <th onclick="sortProdAn('ppmPerPiece')" class="num" style="cursor:pointer;" title="Average profit per delivered piece. No cutoff applied.">PPM/PIECE</th>
+                      <th onclick="sortProdAn('ppmPct')" class="num" style="cursor:pointer;" title="PPM as a share of Delivered GMV. No cutoff applied.">PPM%</th>
+                      <th onclick="sortProdAn('cm3')" class="num" style="cursor:pointer;" title="This SKU's total contribution margin this month, excluding the most recent 5 days.">CM3</th>
+                      <th onclick="sortProdAn('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 per delivered piece, both under the 5-day cutoff.">CM3/PIECE</th>
+                      <th onclick="sortProdAn('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 as a share of Delivered GMV, both under the 5-day cutoff.">CM3%</th>
                     </tr>
                   </thead>
                   <tbody id="prodAnTableBody"></tbody>
@@ -1369,27 +1369,27 @@
                 <table class="data-table" id="pmaTable">
                   <thead>
                     <tr>
-                      <th onclick="sortPma('skuId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortPma('skuName')" class="truncate-cell" style="cursor:pointer;">SKU NAME</th>
-                      <th onclick="sortPma('category')" style="cursor:pointer;">CATEGORY</th>
-                      <th onclick="sortPma('merchantId')" class="font-mono" style="cursor:pointer;">MERCHANT ID</th>
-                      <th onclick="sortPma('merchantName')" class="truncate-cell" style="cursor:pointer;">MERCHANT</th>
-                      <th onclick="sortPma('acm')" style="cursor:pointer;">ACM</th>
-                      <th onclick="sortPma('status')" style="cursor:pointer;">STATUS</th>
-                      <th onclick="sortPma('placedPieces')" class="num" style="cursor:pointer;">PLACED PCS</th>
-                      <th onclick="sortPma('confirmedPieces')" class="num" style="cursor:pointer;">CONFIRMED PCS</th>
-                      <th onclick="sortPma('deliveredPieces')" class="num" style="cursor:pointer;">DELIVERED PCS</th>
-                      <th onclick="sortPma('avgDailyConfirmed')" class="num" style="cursor:pointer;" title="This month's Confirmed Pcs ÷ days 1 to today (same day-count basis as Prev Avg Daily Confirmed)">AVG DAILY CONFIRMED</th>
-                      <th onclick="sortPma('prevAvgDailyConfirmed')" class="num" style="cursor:pointer;" title="Last month's Confirmed Pcs ÷ same date range (day 1 to the same day-of-month) — same day-count as this month's Avg Daily Confirmed. '-' if this match is New.">PREV AVG DAILY CONFIRMED</th>
-                      <th onclick="sortPma('trendPct')" class="num" style="cursor:pointer;" title="This month's Avg Daily Confirmed vs last month's, same date range">MoM TREND</th>
-                      <th onclick="sortPma('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortPma('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortPma('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortPma('ppmPerPiece')" class="num" style="cursor:pointer;">PPM/PCS</th>
-                      <th onclick="sortPma('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
-                      <th onclick="sortPma('cm3')" class="num" style="cursor:pointer;">CM3</th>
-                      <th onclick="sortPma('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/PCS</th>
-                      <th onclick="sortPma('cm3Pct')" class="num" style="cursor:pointer;">CM3%</th>
+                      <th onclick="sortPma('skuId')" class="font-mono" style="cursor:pointer;" title="The tracked product's ID, from the product catalog.">SKU ID</th>
+                      <th onclick="sortPma('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">SKU NAME</th>
+                      <th onclick="sortPma('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
+                      <th onclick="sortPma('merchantId')" class="font-mono" style="cursor:pointer;" title="The merchant's ID.">MERCHANT ID</th>
+                      <th onclick="sortPma('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant name.">MERCHANT</th>
+                      <th onclick="sortPma('acm')" style="cursor:pointer;" title="Account/Category Manager owning this merchant.">ACM</th>
+                      <th onclick="sortPma('status')" style="cursor:pointer;" title="&quot;New&quot; if this merchant and SKU had zero activity last month; otherwise &quot;Active&quot;.">STATUS</th>
+                      <th onclick="sortPma('placedPieces')" class="num" style="cursor:pointer;" title="Total pieces placed this month for this merchant × SKU. No cutoff applied.">PLACED PCS</th>
+                      <th onclick="sortPma('confirmedPieces')" class="num" style="cursor:pointer;" title="Total pieces confirmed this month. No cutoff applied.">CONFIRMED PCS</th>
+                      <th onclick="sortPma('deliveredPieces')" class="num" style="cursor:pointer;" title="Total pieces delivered this month. No cutoff applied.">DELIVERED PCS</th>
+                      <th onclick="sortPma('avgDailyConfirmed')" class="num" style="cursor:pointer;" title="Confirmed Pcs ÷ days elapsed this month.">AVG DAILY CONFIRMED</th>
+                      <th onclick="sortPma('prevAvgDailyConfirmed')" class="num" style="cursor:pointer;" title="Same formula as Avg Daily Confirmed, for last month over the same day range.">PREV AVG DAILY CONFIRMED</th>
+                      <th onclick="sortPma('trendPct')" class="num" style="cursor:pointer;" title="% change vs last month's Avg Daily Confirmed, same day range.">MoM TREND</th>
+                      <th onclick="sortPma('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortPma('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, excluding the most recent 5 days.">DR%</th>
+                      <th onclick="sortPma('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
+                      <th onclick="sortPma('ppmPerPiece')" class="num" style="cursor:pointer;" title="Total PPM ÷ Total Delivered Pcs. No cutoff applied.">PPM/PCS</th>
+                      <th onclick="sortPma('ppmPct')" class="num" style="cursor:pointer;" title="Total PPM ÷ Delivered GMV. No cutoff applied.">PPM%</th>
+                      <th onclick="sortPma('cm3')" class="num" style="cursor:pointer;" title="Contribution margin, excluding the most recent 5 days.">CM3</th>
+                      <th onclick="sortPma('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered Pcs, both under the 5-day cutoff.">CM3/PCS</th>
+                      <th onclick="sortPma('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, both under the 5-day cutoff.">CM3%</th>
                     </tr>
                   </thead>
                   <tbody id="pmaTableBody"></tbody>
@@ -1470,36 +1470,36 @@
                 <table class="data-table" id="mpSalesPlanTable">
                   <thead>
                     <tr>
-                      <th rowspan="2" onclick="sortMpSalesPlan('productId')" style="cursor:pointer;">Product ID</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('productName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Click to sort">Product Name</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('tagerId')" style="cursor:pointer;">Merchant ID</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;">Merchant Name</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('category')" style="cursor:pointer;">Category</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('acm')" style="cursor:pointer;">ACM (Owner)</th>
-                      <th colspan="4" class="center">Placed Pieces</th>
-                      <th colspan="4" class="center">Confirmed Pieces</th>
-                      <th colspan="4" class="center">Delivered Pieces</th>
-                      <th colspan="4" class="center">Delivered GMV</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;">WoW (Confirmed)</th>
-                      <th rowspan="2" onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;">Status</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('productId')" style="cursor:pointer;" title="Product identifier. Click to sort.">Product ID</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('productName')" style="cursor:pointer; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Product name. Click to sort.">Product Name</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('tagerId')" style="cursor:pointer;" title="Merchant identifier. Click to sort.">Merchant ID</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;" title="Merchant's display name. Click to sort.">Merchant Name</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('category')" style="cursor:pointer;" title="Product category. Click to sort.">Category</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('acm')" style="cursor:pointer;" title="Account/Category Manager owning this SKU × Merchant target. Click to sort.">ACM (Owner)</th>
+                      <th colspan="4" class="center" title="Pieces placed on orders for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Placed Pieces</th>
+                      <th colspan="4" class="center" title="Pieces confirmed for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Confirmed Pieces</th>
+                      <th colspan="4" class="center" title="Pieces delivered for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered Pieces</th>
+                      <th colspan="4" class="center" title="Delivered revenue for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered GMV</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;" title="Change in Confirmed Pieces this week vs last week. Click to sort.">WoW (Confirmed)</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;" title="Overall performance tier based on Confirmed Pieces achievement %. Click to sort.">Status</th>
                     </tr>
                     <tr>
-                      <th onclick="sortMpSalesPlan('placedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortMpSalesPlan('placedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortMpSalesPlan('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortMpSalesPlan('placedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortMpSalesPlan('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortMpSalesPlan('confirmedMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortMpSalesPlan('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortMpSalesPlan('confirmedAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortMpSalesPlan('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortMpSalesPlan('deliveredMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortMpSalesPlan('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortMpSalesPlan('deliveredAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
-                      <th onclick="sortMpSalesPlan('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;">MTD Target</th>
-                      <th onclick="sortMpSalesPlan('gmvMtdActual')" class="num" style="cursor:pointer;">Actual</th>
-                      <th onclick="sortMpSalesPlan('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close">Run Rate</th>
-                      <th onclick="sortMpSalesPlan('gmvAchievedPct')" class="num" style="cursor:pointer;">Ach%</th>
+                      <th onclick="sortMpSalesPlan('placedMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Month-to-date target, prorated from the monthly target by elapsed days.">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('placedMtdActual')" class="num" style="cursor:pointer;" title="Actual pieces achieved so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortMpSalesPlan('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('placedAchievedPct')" class="num" style="cursor:pointer;" title="Actual ÷ MTD Target, as a percentage.">Ach%</th>
+                      <th onclick="sortMpSalesPlan('confirmedMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Month-to-date target, prorated from the monthly target by elapsed days.">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('confirmedMtdActual')" class="num" style="cursor:pointer;" title="Actual pieces achieved so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortMpSalesPlan('confirmedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('confirmedAchievedPct')" class="num" style="cursor:pointer;" title="Actual ÷ MTD Target, as a percentage.">Ach%</th>
+                      <th onclick="sortMpSalesPlan('deliveredMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Month-to-date target, prorated from the monthly target by elapsed days.">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('deliveredMtdActual')" class="num" style="cursor:pointer;" title="Actual pieces achieved so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortMpSalesPlan('deliveredRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('deliveredAchievedPct')" class="num" style="cursor:pointer;" title="Actual ÷ MTD Target, as a percentage.">Ach%</th>
+                      <th onclick="sortMpSalesPlan('gmvMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Month-to-date GMV target, prorated by elapsed days.">MTD Target</th>
+                      <th onclick="sortMpSalesPlan('gmvMtdActual')" class="num" style="cursor:pointer;" title="Actual GMV achieved so far this month. No cutoff applied.">Actual</th>
+                      <th onclick="sortMpSalesPlan('gmvRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
+                      <th onclick="sortMpSalesPlan('gmvAchievedPct')" class="num" style="cursor:pointer;" title="Actual ÷ MTD Target, as a percentage.">Ach%</th>
                     </tr>
                   </thead>
                   <tbody id="mpSalesPlanTableBody"></tbody>
@@ -1609,23 +1609,23 @@
                 <table class="data-table" id="mpMatchesTable">
                   <thead>
                     <tr>
-                      <th onclick="sortMpMatches('productId')" class="font-mono" style="cursor:pointer;">Product ID</th>
-                      <th onclick="sortMpMatches('productName')" class="truncate-cell" style="cursor:pointer;">Product Name</th>
-                      <th onclick="sortMpMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortMpMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortMpMatches('acm')" style="cursor:pointer; max-width:120px;">ACM</th>
-                      <th onclick="sortMpMatches('totalPlaced')" class="num" style="cursor:pointer;">Total Placed</th>
-                      <th onclick="sortMpMatches('totalConfirmed')" class="num text-blue" style="cursor:pointer;">Total Confirmed</th>
-                      <th onclick="sortMpMatches('totalDelivered')" class="num text-green" style="cursor:pointer;">Total Delivered</th>
-                      <th onclick="sortMpMatches('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortMpMatches('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortMpMatches('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortMpMatches('deliveredGmv')" class="num" style="cursor:pointer;">Delivered GMV</th>
-                      <th onclick="sortMpMatches('contrPct')" class="num" style="cursor:pointer;">CONTR%</th>
-                      <th onclick="sortMpMatches('placedAsp')" class="num text-dim" style="cursor:pointer;">Placed ASP</th>
-                      <th onclick="sortMpMatches('cm3')" class="num" style="cursor:pointer;">CM3</th>
-                      <th onclick="sortMpMatches('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Per Piece</th>
-                      <th onclick="sortMpMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;">CM3%</th>
+                      <th onclick="sortMpMatches('productId')" class="font-mono" style="cursor:pointer;" title="Product identifier.">Product ID</th>
+                      <th onclick="sortMpMatches('productName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">Product Name</th>
+                      <th onclick="sortMpMatches('merchantId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier.">Merchant ID</th>
+                      <th onclick="sortMpMatches('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">Merchant Name</th>
+                      <th onclick="sortMpMatches('acm')" style="cursor:pointer; max-width:120px;" title="Account/Category Manager for this SKU.">ACM</th>
+                      <th onclick="sortMpMatches('totalPlaced')" class="num" style="cursor:pointer;" title="Total placed pieces for this merchant × product. No cutoff applied.">Total Placed</th>
+                      <th onclick="sortMpMatches('totalConfirmed')" class="num text-blue" style="cursor:pointer;" title="Total confirmed pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Confirmed</th>
+                      <th onclick="sortMpMatches('totalDelivered')" class="num text-green" style="cursor:pointer;" title="Total delivered pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Delivered</th>
+                      <th onclick="sortMpMatches('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces. No cutoff applied.">CR%</th>
+                      <th onclick="sortMpMatches('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces. No cutoff applied.">DR%</th>
+                      <th onclick="sortMpMatches('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th onclick="sortMpMatches('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value. No cutoff applied.">Delivered GMV</th>
+                      <th onclick="sortMpMatches('contrPct')" class="num" style="cursor:pointer;" title="This merchant's share of the SKU's total confirmed pieces across all merchants.">CONTR%</th>
+                      <th onclick="sortMpMatches('placedAsp')" class="num text-dim" style="cursor:pointer;" title="Average selling price on placed orders (Placed GMV ÷ Placed Pieces). No cutoff applied.">Placed ASP</th>
+                      <th onclick="sortMpMatches('cm3')" class="num" style="cursor:pointer;" title="Contribution margin, excluding the most recent 5 days — this column (and CM3/Per Piece, CM3% below) is the only one on this row that applies the cutoff shown in the panel subtitle.">CM3</th>
+                      <th onclick="sortMpMatches('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ Total Delivered pieces, same 5-day cutoff as CM3.">CM3/Per Piece</th>
+                      <th onclick="sortMpMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, computed only from data outside the last 5 days.">CM3%</th>
                     </tr>
                   </thead>
                   <tbody id="mpMatchesTableBody"></tbody>
@@ -1685,23 +1685,23 @@
                 <table class="data-table" id="mpNewMatchesTable">
                   <thead>
                     <tr>
-                      <th onclick="sortMpNewMatches('sku')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortMpNewMatches('skuName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
-                      <th onclick="sortMpNewMatches('category')" style="cursor:pointer;">Category</th>
-                      <th onclick="sortMpNewMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortMpNewMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortMpNewMatches('placed')" class="num" style="cursor:pointer;">Total Placed Pcs</th>
-                      <th onclick="sortMpNewMatches('confirmed')" class="num text-blue" style="cursor:pointer;">Total Confirmed Pcs</th>
-                      <th onclick="sortMpNewMatches('delivered')" class="num text-green" style="cursor:pointer;">Total Delivered Pcs</th>
-                      <th onclick="sortMpNewMatches('crPct')" class="num" style="cursor:pointer;">CR%</th>
-                      <th onclick="sortMpNewMatches('drPct')" class="num" style="cursor:pointer;">DR%</th>
-                      <th onclick="sortMpNewMatches('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortMpNewMatches('cm3PerPiece')" class="num" style="cursor:pointer;">CM3/Pieces</th>
-                      <th onclick="sortMpNewMatches('cm3')" class="num" style="cursor:pointer;">CM3</th>
-                      <th onclick="sortMpNewMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;">CM3%</th>
-                      <th onclick="sortMpNewMatches('placedAsp')" class="num text-dim" style="cursor:pointer;">Placed ASP</th>
-                      <th onclick="sortMpNewMatches('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
-                      <th onclick="sortMpNewMatches('matchStartTs')" class="text-dim" style="cursor:pointer;">Match Start</th>
+                      <th onclick="sortMpNewMatches('sku')" class="font-mono" style="cursor:pointer;" title="Product identifier.">SKU ID</th>
+                      <th onclick="sortMpNewMatches('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">SKU Name</th>
+                      <th onclick="sortMpNewMatches('category')" style="cursor:pointer;" title="Product category.">Category</th>
+                      <th onclick="sortMpNewMatches('merchantId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier.">Merchant ID</th>
+                      <th onclick="sortMpNewMatches('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">Merchant Name</th>
+                      <th onclick="sortMpNewMatches('placed')" class="num" style="cursor:pointer;" title="Total placed pieces since this match started. No cutoff applied.">Total Placed Pcs</th>
+                      <th onclick="sortMpNewMatches('confirmed')" class="num text-blue" style="cursor:pointer;" title="Total confirmed pieces since this match started. No cutoff applied.">Total Confirmed Pcs</th>
+                      <th onclick="sortMpNewMatches('delivered')" class="num text-green" style="cursor:pointer;" title="Total delivered pieces since this match started. No cutoff applied.">Total Delivered Pcs</th>
+                      <th onclick="sortMpNewMatches('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortMpNewMatches('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, excluding the most recent 4 days (a different window than CM3 below).">DR%</th>
+                      <th onclick="sortMpNewMatches('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 4-day DR cutoffs from each component.">NDR%</th>
+                      <th onclick="sortMpNewMatches('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered pieces, excluding the most recent 5 days.">CM3/Pieces</th>
+                      <th onclick="sortMpNewMatches('cm3')" class="num" style="cursor:pointer;" title="Contribution margin, excluding the most recent 5 days.">CM3</th>
+                      <th onclick="sortMpNewMatches('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, excluding the most recent 5 days.">CM3%</th>
+                      <th onclick="sortMpNewMatches('placedAsp')" class="num text-dim" style="cursor:pointer;" title="Average selling price on placed orders. No cutoff applied.">Placed ASP</th>
+                      <th onclick="sortMpNewMatches('ppmPct')" class="num" style="cursor:pointer;" title="Promo margin as a share of Delivered GMV. No cutoff applied.">PPM%</th>
+                      <th onclick="sortMpNewMatches('matchStartTs')" class="text-dim" style="cursor:pointer;" title="Earliest date this merchant × SKU pairing showed activity this month.">Match Start</th>
                     </tr>
                   </thead>
                   <tbody id="mpNewMatchesTableBody"></tbody>
@@ -1757,18 +1757,18 @@
                 <table class="data-table">
                   <thead>
                     <tr>
-                      <th rowspan="2">Status</th>
-                      <th rowspan="2" class="num">Count</th>
-                      <th colspan="3" class="center">Current Period</th>
-                      <th colspan="3" class="center">Same Days Last Month</th>
+                      <th rowspan="2" title="&quot;Bad&quot; if this match's NDR% is more than 3 points below its sub-category peers; otherwise &quot;Good&quot;. Based on the 5-day-cutoff figures below.">Status</th>
+                      <th rowspan="2" class="num" title="Number of matches in this Good/Bad group, from data eligible under the 5-day cutoff.">Count</th>
+                      <th colspan="3" class="center" title="This period's figures, using the 5-day CM3/NDR cutoff.">Current Period</th>
+                      <th colspan="3" class="center" title="Last month's figures over the same matched day range (not a rolling lag).">Same Days Last Month</th>
                     </tr>
                     <tr>
-                      <th class="num">Placed Pieces</th>
-                      <th class="num">Total NDR%</th>
-                      <th class="num">Contribution%</th>
-                      <th class="num text-dim">Placed Pieces</th>
-                      <th class="num text-dim">Total NDR%</th>
-                      <th class="num">Δ NDR</th>
+                      <th class="num" title="Sum of Placed Pieces for this group, only rows within 5 days of the latest data.">Placed Pieces</th>
+                      <th class="num" title="Group's Delivered ÷ Placed, same 5-day cutoff.">Total NDR%</th>
+                      <th class="num" title="This group's Placed Pieces ÷ all matches' Placed Pieces, same 5-day cutoff.">Contribution%</th>
+                      <th class="num text-dim" title="Last month's Placed Pieces for the same group, matched to the same calendar day range.">Placed Pieces</th>
+                      <th class="num text-dim" title="Last month's NDR% over that same matched day range.">Total NDR%</th>
+                      <th class="num" title="Current period NDR% minus last month's same-range NDR%, in percentage points.">Δ NDR</th>
                     </tr>
                   </thead>
                   <tbody id="pmStatusTableBody"></tbody>
@@ -1792,18 +1792,18 @@
                 <table class="data-table" id="poorMatchesTable">
                   <thead>
                     <tr>
-                      <th onclick="sortPoorMatches('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortPoorMatches('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortPoorMatches('sku')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortPoorMatches('productName')" class="truncate-cell" style="cursor:pointer;">Product Name</th>
-                      <th onclick="sortPoorMatches('category')" style="cursor:pointer;">Category</th>
-                      <th onclick="sortPoorMatches('subCategory')" style="cursor:pointer;">Sub-Category</th>
-                      <th onclick="sortPoorMatches('acm')" style="cursor:pointer; max-width:120px;">ACM</th>
-                      <th onclick="sortPoorMatches('placed')" class="num" style="cursor:pointer;">Placed Pieces</th>
-                      <th onclick="sortPoorMatches('ndrPct')" class="num" style="cursor:pointer;">NDR%</th>
-                      <th onclick="sortPoorMatches('ndrBenchmark')" class="num" style="cursor:pointer;">Benchmark NDR%</th>
-                      <th onclick="sortPoorMatches('impactPieces')" class="num" style="cursor:pointer;">Impact Pieces</th>
-                      <th class="center">Status</th>
+                      <th onclick="sortPoorMatches('merchantId')" class="font-mono" style="cursor:pointer;" title="The merchant's ID. From a match eligible under the 5-day cutoff.">Merchant ID</th>
+                      <th onclick="sortPoorMatches('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's name.">Merchant Name</th>
+                      <th onclick="sortPoorMatches('sku')" class="font-mono" style="cursor:pointer;" title="Product identifier.">SKU ID</th>
+                      <th onclick="sortPoorMatches('productName')" class="truncate-cell" style="cursor:pointer;" title="Product name, from the catalog.">Product Name</th>
+                      <th onclick="sortPoorMatches('category')" style="cursor:pointer;" title="Product category.">Category</th>
+                      <th onclick="sortPoorMatches('subCategory')" style="cursor:pointer;" title="Product sub-category — the group NDR% is benchmarked against.">Sub-Category</th>
+                      <th onclick="sortPoorMatches('acm')" style="cursor:pointer; max-width:120px;" title="Owning account/category manager.">ACM</th>
+                      <th onclick="sortPoorMatches('placed')" class="num" style="cursor:pointer;" title="Total pieces placed by this merchant × SKU, rows within 5 days of the latest data only.">Placed Pieces</th>
+                      <th onclick="sortPoorMatches('ndrPct')" class="num" style="cursor:pointer;" title="This match's own Delivered ÷ Placed, 5-day cutoff.">NDR%</th>
+                      <th onclick="sortPoorMatches('ndrBenchmark')" class="num" style="cursor:pointer;" title="NDR% of every other match in the same sub-category (this match excluded), 5-day cutoff.">Benchmark NDR%</th>
+                      <th onclick="sortPoorMatches('impactPieces')" class="num" style="cursor:pointer;" title="Placed Pieces × (Benchmark NDR% − own NDR%) — extra pieces that would've delivered at the sub-category's rate.">Impact Pieces</th>
+                      <th class="center" title="Always &quot;Bad&quot; here — this table only lists matches more than 3 points below benchmark.">Status</th>
                     </tr>
                   </thead>
                   <tbody id="poorMatchesTableBody"></tbody>
@@ -1859,15 +1859,15 @@
                 <table class="data-table" id="alCategoryTable">
                   <thead>
                     <tr>
-                      <th>Category</th>
-                      <th class="num">IN Stock SKUs</th>
-                      <th class="num">Total AVB SKUs</th>
-                      <th class="num text-orange">locked SKUs</th>
-                      <th class="num text-red">solo locked SKUs</th>
-                      <th class="num">Placed Yesterday</th>
-                      <th class="num text-orange">locked demand</th>
-                      <th class="num text-red">solo locked demand</th>
-                      <th class="num">Stock at Risk%</th>
+                      <th title="Product category, grouped.">Category</th>
+                      <th class="num" title="Count of single SKUs in this category with stock greater than zero, as of the latest data.">IN Stock SKUs</th>
+                      <th class="num" title="Count of single SKUs marked &quot;Available&quot; on the site.">Total AVB SKUs</th>
+                      <th class="num text-orange" title="Count of single SKUs in this category with at least one active lock right now.">locked SKUs</th>
+                      <th class="num text-red" title="Count of single SKUs locked exclusively to one merchant right now.">solo locked SKUs</th>
+                      <th class="num" title="Total demand placed yesterday for every SKU in this category, locked or not.">Placed Yesterday</th>
+                      <th class="num text-orange" title="Yesterday's demand, counted only for the SKUs that are locked.">locked demand</th>
+                      <th class="num text-red" title="Yesterday's demand, counted only for SKUs locked to a single merchant.">solo locked demand</th>
+                      <th class="num" title="Remaining locked pieces ÷ total stock for the category — how much stock is currently reserved and unused.">Stock at Risk%</th>
                     </tr>
                   </thead>
                   <tbody id="alCategoryTableBody"></tbody>
@@ -1891,21 +1891,21 @@
                 <table class="data-table" id="alLockTable">
                   <thead>
                     <tr>
-                      <th onclick="sortAvailabilityLocking('singleId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortAvailabilityLocking('singleName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
-                      <th onclick="sortAvailabilityLocking('category')" style="cursor:pointer;">Category</th>
-                      <th onclick="sortAvailabilityLocking('tagerId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortAvailabilityLocking('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortAvailabilityLocking('lockingType')" class="center" style="cursor:pointer;">Locking Type</th>
-                      <th onclick="sortAvailabilityLocking('allocatedQty')" class="num" style="cursor:pointer;">Allocated Qty</th>
-                      <th onclick="sortAvailabilityLocking('usedQty')" class="num" style="cursor:pointer;">Used Qty</th>
-                      <th onclick="sortAvailabilityLocking('remainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces</th>
-                      <th onclick="sortAvailabilityLocking('stock')" class="num" style="cursor:pointer;">Stock</th>
-                      <th onclick="sortAvailabilityLocking('placedYday')" class="num" style="cursor:pointer;" title="Total Placed Yesterday for this SKU, all merchants combined">Placed Yesterday</th>
-                      <th onclick="sortAvailabilityLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="How much THIS merchant placed on this SKU yesterday (single or via bundles, overall)">Placed Yesterday per Merchant</th>
-                      <th>Expiry Date</th>
-                      <th onclick="sortAvailabilityLocking('daysToExpiry')" class="num" style="cursor:pointer;">Days to Expiry</th>
-                      <th class="center">Status</th>
+                      <th onclick="sortAvailabilityLocking('singleId')" class="font-mono" style="cursor:pointer;" title="The single SKU under lock.">SKU ID</th>
+                      <th onclick="sortAvailabilityLocking('singleName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">SKU Name</th>
+                      <th onclick="sortAvailabilityLocking('category')" style="cursor:pointer;" title="Product category.">Category</th>
+                      <th onclick="sortAvailabilityLocking('tagerId')" class="font-mono" style="cursor:pointer;" title="The merchant holding this lock.">Merchant ID</th>
+                      <th onclick="sortAvailabilityLocking('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's name.">Merchant Name</th>
+                      <th onclick="sortAvailabilityLocking('lockingType')" class="center" style="cursor:pointer;" title="Whether the lock is exclusive to this merchant (&quot;Solo&quot;) or shared.">Locking Type</th>
+                      <th onclick="sortAvailabilityLocking('allocatedQty')" class="num" style="cursor:pointer;" title="Pieces originally reserved for this merchant × SKU lock.">Allocated Qty</th>
+                      <th onclick="sortAvailabilityLocking('usedQty')" class="num" style="cursor:pointer;" title="Pieces already consumed against the allocation.">Used Qty</th>
+                      <th onclick="sortAvailabilityLocking('remainingPieces')" class="num" style="cursor:pointer;" title="Allocated minus Used — pieces still reserved and unused.">Remaining Pieces</th>
+                      <th onclick="sortAvailabilityLocking('stock')" class="num" style="cursor:pointer;" title="Current total stock for this SKU, across all merchants.">Stock</th>
+                      <th onclick="sortAvailabilityLocking('placedYday')" class="num" style="cursor:pointer;" title="Yesterday's total demand for this SKU, all merchants combined.">Placed Yesterday</th>
+                      <th onclick="sortAvailabilityLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="Yesterday's demand for this SKU from this specific merchant only.">Placed Yesterday per Merchant</th>
+                      <th title="The date this lock expires. Blank if it doesn't expire.">Expiry Date</th>
+                      <th onclick="sortAvailabilityLocking('daysToExpiry')" class="num" style="cursor:pointer;" title="Days remaining until the lock expires.">Days to Expiry</th>
+                      <th class="center" title="&quot;Expiring Soon&quot; if the lock expires within 3 days, else &quot;Active&quot;.">Status</th>
                     </tr>
                   </thead>
                   <tbody id="alLockTableBody"></tbody>
@@ -1983,14 +1983,14 @@
                 <table class="data-table" id="hlCategoryTable">
                   <thead>
                     <tr>
-                      <th>Category</th>
-                      <th class="num">Active Locks</th>
-                      <th class="num text-green">Healthy</th>
-                      <th class="num text-orange">At Risk</th>
-                      <th class="num text-red">Unhealthy</th>
-                      <th class="num">Avg Utilization%</th>
-                      <th class="num">Locked Pieces</th>
-                      <th class="num text-red">Idle Pieces</th>
+                      <th title="Product category this row summarizes locks for.">Category</th>
+                      <th class="num" title="Count of currently active merchant × SKU locks in this category.">Active Locks</th>
+                      <th class="num text-green" title="Locks with at least 50% utilization and no near-term expiry risk.">Healthy</th>
+                      <th class="num text-orange" title="Locks with 20-50% utilization, or expiring within 3 days with stock left.">At Risk</th>
+                      <th class="num text-red" title="Locks under 20% utilization with zero demand from that merchant yesterday.">Unhealthy</th>
+                      <th class="num" title="Average of Used Qty ÷ Allocated Qty across this category's active locks.">Avg Utilization%</th>
+                      <th class="num" title="Total remaining (unused) pieces still tied up in active locks here.">Locked Pieces</th>
+                      <th class="num text-red" title="Remaining pieces sitting in Unhealthy locks — stock with no real use.">Idle Pieces</th>
                     </tr>
                   </thead>
                   <tbody id="hlCategoryTableBody"></tbody>
@@ -2011,15 +2011,15 @@
                 <table class="data-table" id="hlMerchantTable">
                   <thead>
                     <tr>
-                      <th>Merchant ID</th>
-                      <th>Merchant Name</th>
-                      <th class="num">Active Locks</th>
-                      <th class="num text-green">Healthy</th>
-                      <th class="num text-orange">At Risk</th>
-                      <th class="num text-red">Unhealthy</th>
-                      <th class="num">Avg Utilization%</th>
-                      <th class="num">Locked Pieces</th>
-                      <th class="num text-red">Idle Pieces</th>
+                      <th title="Identifier of the merchant holding the locks.">Merchant ID</th>
+                      <th title="Merchant's display name.">Merchant Name</th>
+                      <th class="num" title="Count of this merchant's currently active locks.">Active Locks</th>
+                      <th class="num text-green" title="This merchant's locks with at least 50% utilization and no near-term expiry risk.">Healthy</th>
+                      <th class="num text-orange" title="This merchant's locks with low usage (20-50%) or expiring within 3 days.">At Risk</th>
+                      <th class="num text-red" title="This merchant's locks under 20% utilization with zero demand yesterday.">Unhealthy</th>
+                      <th class="num" title="Average Used ÷ Allocated across this merchant's active locks.">Avg Utilization%</th>
+                      <th class="num" title="Total remaining pieces still tied up across this merchant's locks.">Locked Pieces</th>
+                      <th class="num text-red" title="Remaining pieces in this merchant's Unhealthy (idle) locks.">Idle Pieces</th>
                     </tr>
                   </thead>
                   <tbody id="hlMerchantTableBody"></tbody>
@@ -2051,19 +2051,19 @@
                 <table class="data-table" id="hlMatchesTable">
                   <thead>
                     <tr>
-                      <th onclick="sortHealthyLocking('singleId')" class="font-mono" style="cursor:pointer;">SKU ID</th>
-                      <th onclick="sortHealthyLocking('singleName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
-                      <th onclick="sortHealthyLocking('category')" style="cursor:pointer;">Category</th>
-                      <th onclick="sortHealthyLocking('tagerId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
-                      <th onclick="sortHealthyLocking('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortHealthyLocking('lockingType')" class="center" style="cursor:pointer;">Locking Type</th>
-                      <th onclick="sortHealthyLocking('allocatedQty')" class="num" style="cursor:pointer;">Allocated Qty</th>
-                      <th onclick="sortHealthyLocking('usedQty')" class="num" style="cursor:pointer;">Used Qty</th>
-                      <th onclick="sortHealthyLocking('utilizationPct')" class="num" style="cursor:pointer;">Utilization%</th>
-                      <th onclick="sortHealthyLocking('remainingPieces')" class="num" style="cursor:pointer;">Remaining Pieces</th>
-                      <th onclick="sortHealthyLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="How much this merchant placed on this SKU yesterday">Placed Yesterday</th>
-                      <th onclick="sortHealthyLocking('daysToExpiry')" class="num" style="cursor:pointer;">Days to Expiry</th>
-                      <th class="center">Health Status</th>
+                      <th onclick="sortHealthyLocking('singleId')" class="font-mono" style="cursor:pointer;" title="Product identifier for the locked SKU.">SKU ID</th>
+                      <th onclick="sortHealthyLocking('singleName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">SKU Name</th>
+                      <th onclick="sortHealthyLocking('category')" style="cursor:pointer;" title="Product category.">Category</th>
+                      <th onclick="sortHealthyLocking('tagerId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier holding this lock.">Merchant ID</th>
+                      <th onclick="sortHealthyLocking('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">Merchant Name</th>
+                      <th onclick="sortHealthyLocking('lockingType')" class="center" style="cursor:pointer;" title="How the lock was granted (e.g. Solo vs shared).">Locking Type</th>
+                      <th onclick="sortHealthyLocking('allocatedQty')" class="num" style="cursor:pointer;" title="Total pieces originally allocated to this lock.">Allocated Qty</th>
+                      <th onclick="sortHealthyLocking('usedQty')" class="num" style="cursor:pointer;" title="Pieces from the lock already consumed by orders.">Used Qty</th>
+                      <th onclick="sortHealthyLocking('utilizationPct')" class="num" style="cursor:pointer;" title="Used Qty ÷ Allocated Qty for this lock.">Utilization%</th>
+                      <th onclick="sortHealthyLocking('remainingPieces')" class="num" style="cursor:pointer;" title="Pieces still left unused in this lock.">Remaining Pieces</th>
+                      <th onclick="sortHealthyLocking('placedYdayMerchant')" class="num text-purple" style="cursor:pointer;" title="Pieces this merchant placed on this SKU yesterday.">Placed Yesterday</th>
+                      <th onclick="sortHealthyLocking('daysToExpiry')" class="num" style="cursor:pointer;" title="Days left until this lock expires. Blank if the lock has no expiry date.">Days to Expiry</th>
+                      <th class="center" title="Healthy / At Risk / Unhealthy, based on utilization and expiry.">Health Status</th>
                     </tr>
                   </thead>
                   <tbody id="hlMatchesTableBody"></tbody>
@@ -2092,15 +2092,15 @@
                 <table class="data-table" id="hlReleaseTable">
                   <thead>
                     <tr>
-                      <th>SKU ID</th>
-                      <th>SKU Name</th>
-                      <th>Category</th>
-                      <th>Merchant</th>
-                      <th class="num">Allocated Qty</th>
-                      <th class="num">Used Qty</th>
-                      <th class="num">Utilization%</th>
-                      <th class="num text-red">Remaining Pieces</th>
-                      <th class="num">Days to Expiry</th>
+                      <th title="Product identifier.">SKU ID</th>
+                      <th title="Product name.">SKU Name</th>
+                      <th title="Product category.">Category</th>
+                      <th title="Merchant holding this idle lock.">Merchant</th>
+                      <th class="num" title="Total pieces originally allocated.">Allocated Qty</th>
+                      <th class="num" title="Pieces consumed so far — near zero for release candidates.">Used Qty</th>
+                      <th class="num" title="Used ÷ Allocated — under 20% and no recent demand, hence idle.">Utilization%</th>
+                      <th class="num text-red" title="Pieces still locked away with no usage — the release opportunity size.">Remaining Pieces</th>
+                      <th class="num" title="Days left until this lock auto-expires. Blank if no expiry set.">Days to Expiry</th>
                     </tr>
                   </thead>
                   <tbody id="hlReleaseTableBody"></tbody>
@@ -2121,19 +2121,19 @@
                 <table class="data-table" id="hlRenewTable">
                   <thead>
                     <tr>
-                      <th>SKU ID</th>
-                      <th>SKU Name</th>
-                      <th>Category</th>
-                      <th>Merchant ID</th>
-                      <th>Merchant</th>
-                      <th class="num text-purple">CONTR% (Delivered GMV)</th>
-                      <th class="num">Remaining Pieces</th>
-                      <th class="num text-dim">Allocated Qty</th>
-                      <th class="num" title="Placed Pieces yesterday, this merchant on this SKU">Placed Yesterday (Pieces)</th>
-                      <th class="num" title="Remaining Pieces ÷ Avg Last 3 Days Placed Pieces — how many days the remaining lock will last at the merchant's recent pace">DOH</th>
-                      <th class="num">Days to Expiry</th>
-                      <th class="num" title="Current SKU stock — is there stock to top up the lock with, or is it out of stock?">Stock</th>
-                      <th class="center">Reason</th>
+                      <th title="Product identifier.">SKU ID</th>
+                      <th title="Product name.">SKU Name</th>
+                      <th title="Product category.">Category</th>
+                      <th title="Merchant identifier.">Merchant ID</th>
+                      <th title="Merchant's display name.">Merchant</th>
+                      <th class="num text-purple" title="This merchant/SKU's share of total Delivered GMV. No cutoff applied.">CONTR% (Delivered GMV)</th>
+                      <th class="num" title="Pieces still left in this soon-to-expire or low-quantity lock.">Remaining Pieces</th>
+                      <th class="num text-dim" title="Total pieces originally allocated to this lock.">Allocated Qty</th>
+                      <th class="num" title="Pieces this merchant placed on this SKU yesterday.">Placed Yesterday (Pieces)</th>
+                      <th class="num" title="Remaining Pieces ÷ this merchant's average placed pieces over the last 3 days — days left before the lock runs dry at current pace.">DOH</th>
+                      <th class="num" title="Days left until this lock expires. Blank if no expiry set.">Days to Expiry</th>
+                      <th class="num" title="Current SKU stock level — shows if there's stock available to top up the lock.">Stock</th>
+                      <th class="center" title="Why it's a renew candidate: Expiring Soon, Low Quantity, or both.">Reason</th>
                     </tr>
                   </thead>
                   <tbody id="hlRenewTableBody"></tbody>
@@ -2173,7 +2173,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Sellthrough Rate Filters</h2>
-                  <p>Apply filters to update the Sellthrough data</p>
+                  <p id="stFiltersSubtitle">Apply filters to update the Sellthrough data</p>
                 </div>
               </div>
               <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; margin-left: 0; justify-content: flex-start; width: 100%;">
@@ -2188,6 +2188,9 @@
                 </select>
                 <select id="stEndSaleMonthSelect" class="st-filter-select">
                   <option value="">End Sale Month</option>
+                </select>
+                <select id="stLastInboundStatusSelect" class="st-filter-select" title="Filters SKUs by their last inbound receiving date. Also updates the Confirmed/Delivered summary tables below.">
+                  <option value="">Last Inbound Status: All</option>
                 </select>
               </div>
             </div>
@@ -2207,17 +2210,17 @@
                   <table class="st-summary-table" id="stConfirmedSummaryTable">
                     <thead>
                       <tr>
-                        <th>CAT</th>
-                        <th>CONFIRMED_PIECES</th>
-                        <th>BEGINNING_INVENTORY</th>
-                        <th>BEGINNING_SALES</th>
-                        <th>RETURNS</th>
-                        <th>RETURN_SALES</th>
-                        <th>TOTAL_PURCHASES</th>
-                        <th>PURCHASES_SALES</th>
-                        <th>OVERFLOW</th>
-                        <th>SELLTHROUGH%</th>
-                        <th>INBOUND VS SOLD</th>
+                        <th title="Product category.">CAT</th>
+                        <th title="Sum of Beginning + Return + Purchase sales pieces confirmed for this category, selected month.">CONFIRMED_PIECES</th>
+                        <th title="Total beginning inventory pieces for this category, selected month.">BEGINNING_INVENTORY</th>
+                        <th title="Portion of pieces sold that came from beginning inventory.">BEGINNING_SALES</th>
+                        <th title="Total returned-to-stock pieces for this category.">RETURNS</th>
+                        <th title="Portion of pieces sold that came from returned stock.">RETURN_SALES</th>
+                        <th title="Total inbound purchase pieces received for this category.">TOTAL_PURCHASES</th>
+                        <th title="Portion of pieces sold that came from new purchases.">PURCHASES_SALES</th>
+                        <th title="Raw pieces total minus the beginning + return + purchase breakdown — reconciliation gap.">OVERFLOW</th>
+                        <th title="Pieces sold ÷ (beginning inventory + purchases + returns), this category.">SELLTHROUGH%</th>
+                        <th title="Purchase-sourced sales ÷ total purchases — how fast new stock sells through.">INBOUND VS SOLD</th>
                       </tr>
                     </thead>
                     <tbody id="stConfirmedSummaryBody"></tbody>
@@ -2235,17 +2238,17 @@
                   <table class="st-summary-table" id="stDeliveredSummaryTable">
                     <thead>
                       <tr>
-                        <th>CAT</th>
-                        <th>DELIVERED_PIECES</th>
-                        <th>BEGINNING_INVENTORY</th>
-                        <th>BEGINNING_SALES</th>
-                        <th>RETURNS</th>
-                        <th>RETURN_SALES</th>
-                        <th>TOTAL_PURCHASES</th>
-                        <th>PURCHASES_SALES</th>
-                        <th>OVERFLOW</th>
-                        <th>SELLTHROUGH%</th>
-                        <th>INBOUND VS SOLD</th>
+                        <th title="Product category.">CAT</th>
+                        <th title="Sum of Beginning + Return + Purchase sales pieces delivered for this category, selected month.">DELIVERED_PIECES</th>
+                        <th title="Total beginning inventory pieces for this category, selected month.">BEGINNING_INVENTORY</th>
+                        <th title="Portion of pieces sold that came from beginning inventory.">BEGINNING_SALES</th>
+                        <th title="Total returned-to-stock pieces for this category.">RETURNS</th>
+                        <th title="Portion of pieces sold that came from returned stock.">RETURN_SALES</th>
+                        <th title="Total inbound purchase pieces received for this category.">TOTAL_PURCHASES</th>
+                        <th title="Portion of pieces sold that came from new purchases.">PURCHASES_SALES</th>
+                        <th title="Raw pieces total minus the beginning + return + purchase breakdown — reconciliation gap.">OVERFLOW</th>
+                        <th title="Pieces sold ÷ (beginning inventory + purchases + returns), this category.">SELLTHROUGH%</th>
+                        <th title="Purchase-sourced sales ÷ total purchases — how fast new stock sells through.">INBOUND VS SOLD</th>
                       </tr>
                     </thead>
                     <tbody id="stDeliveredSummaryBody"></tbody>
@@ -2296,27 +2299,30 @@
                 <table class="data-table" id="sellthroughTable">
                   <thead>
                     <tr>
-                      <th data-stkey="sku">SKU</th>
-                      <th data-stkey="name" style="min-width: 180px;">NAME</th>
-                      <th data-stkey="cat">CAT</th>
-                      <th data-stkey="lastRecDate">Last receiving date</th>
-                      <th data-stkey="cnfQty" class="num text-blue">CNF_QTY</th>
-                      <th data-stkey="dlvQty" class="num text-green">DLV_QTY</th>
-                      <th data-stkey="begInv" class="num">Beginning_Inventory</th>
-                      <th data-stkey="begSales" class="num">BEGINNING_SALES</th>
-                      <th data-stkey="remBeg" class="num text-orange">Remaining from beginning</th>
-                      <th data-stkey="rtos" class="num text-red">RTOS</th>
-                      <th data-stkey="retSales" class="num text-red">RETURN_SALES</th>
-                      <th data-stkey="remPurSales" class="num text-dim">Remaining from purchase sales</th>
-                      <th data-stkey="totPur" class="num text-blue">TOTAL_PURCHASES</th>
-                      <th data-stkey="purSales" class="num text-green">PURCHASES_SALES</th>
-                      <th data-stkey="stRate" class="num text-purple font-bold">SELLTHROUGH_RATE</th>
-                      <th data-stkey="soldInb" class="num font-bold">SOLD_FROM_INBOUND</th>
-                      <th data-stkey="firstBuy" class="center">First buy?</th>
-                      <th data-stkey="stock" class="num text-dim font-bold">STOCK</th>
-                      <th data-stkey="doh" class="num text-dim font-bold">DOH</th>
-                      <th data-stkey="websiteStatus" class="center">Availability</th>
-                      <th data-stkey="isLocked" class="center">Is_Locked</th>
+                      <th data-stkey="sku" title="Product identifier.">SKU</th>
+                      <th data-stkey="name" style="min-width: 180px;" title="Product name.">NAME</th>
+                      <th data-stkey="cat" title="Product category.">CAT</th>
+                      <th data-stkey="lastRecDate" title="Most recent inbound receiving date for this SKU.">Last receiving date</th>
+                      <th data-stkey="cnfQty" class="num text-blue" title="Total confirmed pieces for this SKU, selected month.">CNF_QTY</th>
+                      <th data-stkey="dlvQty" class="num text-green" title="Total delivered pieces for this SKU, selected month.">DLV_QTY</th>
+                      <th data-stkey="begInv" class="num" title="Stock on hand at the start of the selected month.">Beginning_Inventory</th>
+                      <th data-stkey="begSales" class="num" title="Delivered pieces sourced from beginning inventory.">BEGINNING_SALES</th>
+                      <th data-stkey="remBeg" class="num text-orange" title="Beginning inventory left after covering delivered sales.">Remaining from beginning</th>
+                      <th data-stkey="rtos" class="num text-red" title="Returned-to-stock pieces for this SKU.">RTOS</th>
+                      <th data-stkey="retSales" class="num text-red" title="Delivered pieces sourced from returned stock.">RETURN_SALES</th>
+                      <th data-stkey="remPurSales" class="num text-dim" title="Delivered pieces still needing coverage after beginning + returns.">Remaining from purchase sales</th>
+                      <th data-stkey="totPur" class="num text-blue" title="Inbound purchase pieces received this month.">TOTAL_PURCHASES</th>
+                      <th data-stkey="purSales" class="num text-green" title="Delivered pieces sourced from new purchases.">PURCHASES_SALES</th>
+                      <th data-stkey="stRate" class="num text-purple font-bold" title="Delivered pieces ÷ (beginning inventory + purchases + returns).">SELLTHROUGH_RATE</th>
+                      <th data-stkey="soldInb" class="num font-bold" title="Share of this month's purchases that have already sold through.">SOLD_FROM_INBOUND</th>
+                      <th data-stkey="firstBuy" class="center" title="Whether this is the SKU's first purchase month on record.">First buy?</th>
+                      <th data-stkey="stock" class="num text-dim font-bold" title="Current stock, looked up directly by product ID.">STOCK</th>
+                      <th data-stkey="doh" class="num text-dim font-bold" title="Stock ÷ average daily confirmed pieces (last 3 days), demand pooled across this SKU standalone and every bundle it's part of.">DOH</th>
+                      <th data-stkey="websiteStatus" class="center" title="Current website availability status for this SKU.">Availability</th>
+                      <th data-stkey="isLocked" class="center" title="Whether this SKU currently has an active merchant lock.">Is_Locked</th>
+                      <th data-stkey="avg3d" class="num text-blue" title="Average daily confirmed pieces over the last 3 days — the same figure used to compute DOH, pooled across this SKU standalone and every bundle it's part of.">AVG 3D</th>
+                      <th data-stkey="avg15d" class="num text-purple" title="Average daily confirmed pieces over the last 15 days, computed the same way as AVG 3D but over a wider window.">AVG 15D</th>
+                      <th data-stkey="doh15d" class="num text-dim font-bold" title="Stock ÷ AVG 15D — days of stock on hand based on the last 15 days of demand instead of 3.">DOH(15D)</th>
                     </tr>
                   </thead>
                   <tbody id="sellthroughTableBody"></tbody>

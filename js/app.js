@@ -220,7 +220,7 @@ const state = {
   sellthroughPage: 0,
   // فلاتر شهور لوحة الـ Sellthrough: begInv (شهر المخزون الافتتاحي/المشتريات),
   // startSale/endSale (مدى شهور المبيعات) — بالظبط زي Summary!D1 و H1/H2 في الشيت الأصلي.
-  stFilters: { begInv: null, startSale: null, endSale: null },
+  stFilters: { begInv: null, startSale: null, endSale: null, lastInboundStatus: "" },
   sellthroughMonthOptions: [],
   // true لما تتجهز الداتا مرة، يبقى فاتح البانل تاني (نفس الجلسة) مايعملش
   // لودينج ولا يعيد الحساب تاني — إلا لو الداتا الخام اتغيرت (applySnapshotToState
@@ -262,6 +262,44 @@ let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشا
 let categoryChartInst = null;
 const $ = (id) => document.getElementById(id);
 let jsonpCounter = 0;
+
+// ---------------------------------------------------------------------
+// منع المتصفح من اقتراح/كتابة الإيميلات المحفوظة (Chrome Autofill/Account
+// Chooser) جوه أي مربع سيرش في الداشبورد كله — بطلب صريح إن الحقل يفضل
+// نضيف بس السيرش الفعلي اللي المستخدم بيكتبه، مش إيميل حساب متسجل على
+// المتصفح. الـ autocomplete="off" اللي كان موجود على كل مربعات السيرش
+// (data-lpignore/data-1p-ignore كمان) مش كفاية لوحدها — كروم بيتجاهلها في
+// حالات كتير، خصوصًا لو عندك أكتر من إيميل محفوظ على البروفايل.
+//
+// الحل الأضمن المعروف لتعطيل الـ Autofill dropdown بتاع كروم نهائيًا: الحقل
+// يبدأ بـ readonly (يعني كروم مايعتبروش حقل قابل للتعبئة أصلاً وقت ما بيقرر
+// يعرض الاقتراحات)، وبيتشال الـ readonly أول ما المستخدم يدوس عليه (focus/
+// mousedown/touchstart) — قبل ما يكتب أي حرف، فيقدر يكتب عادي جدًا من غير
+// ما يفضل حاسس إن فيه حاجة اتقفلت. شغالة على كل input[type="search"]
+// الموجودين دلوقتي، وأي واحد جديد هيتضاف بعد كده (بتتنادى live وقت الحاجة
+// كمان — مش مرة واحدة بس عند تحميل الصفحة).
+// ---------------------------------------------------------------------
+function preventSearchInputAutofill(root) {
+  (root || document).querySelectorAll('input[type="search"]').forEach(input => {
+    if (input.dataset.noAutofillWired) return;
+    input.dataset.noAutofillWired = "1";
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("readonly", "readonly");
+    // بيتشال الـ readonly أول ما يتدوس على الحقل (قبل أي حرف يتكتب)، وبيترجع
+    // يتحط تاني لما الحقل يفقد الفوكس — عشان الحماية تفضل شغالة كل مرة
+    // اليوزر يدوس على الحقل تاني، مش أول مرة بس.
+    const unlock = () => input.removeAttribute("readonly");
+    const relock = () => input.setAttribute("readonly", "readonly");
+    input.addEventListener("focus", unlock);
+    input.addEventListener("mousedown", unlock);
+    input.addEventListener("touchstart", unlock);
+    input.addEventListener("blur", relock);
+  });
+}
+// السكريبت متحط آخر حاجة قبل </body>، فكل مربعات السيرش الأصلية في الـ HTML
+// موجودة أصلاً في الـ DOM وقت ما السطر ده بيتنفذ — مفيش داعي ننتظر
+// DOMContentLoaded.
+preventSearchInputAutofill();
 
 document.addEventListener("mousemove", (e) => {
   document.querySelectorAll('.hover-glow').forEach(card => {
@@ -1614,10 +1652,11 @@ function parseMerchantSkuDailySheet(payload) {
 // غير ما يكرر نفس الـ 40 سطر. الشرح الكامل موجود فوق جوه تعليق
 // prepareRecommendedTrackerData (Current Inventory DOH).
 // -------------------------------------------------------------------------
-function buildDebundledStockDohIndex(mainRows) {
+function buildDebundledStockDohIndex(mainRows, windowDays) {
+  windowDays = windowDays || 3;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const d3Start = todayMs - (3 * 86400000);
+  const dWindowStart = todayMs - (windowDays * 86400000);
 
   const stockByProductId = new Map();
   (state.debundleMap || []).forEach(r => {
@@ -1631,25 +1670,25 @@ function buildDebundledStockDohIndex(mainRows) {
     isBundleByProductId.set(r.productId, /^(true|yes|1)$/i.test(String(r.isBundle || "").trim()));
   });
 
-  const conf3dBySingleOverall = new Map();
+  const confWindowBySingleOverall = new Map();
   (mainRows || []).forEach(r => {
     if (!r.sku) return;
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
     const rTime = rDate.getTime();
-    if (rTime < d3Start || rTime >= todayMs) return;
+    if (rTime < dWindowStart || rTime >= todayMs) return;
     const mappings = bundleProductMap.get(r.sku);
     if (mappings && mappings.length) {
       mappings.forEach(mp => {
-        conf3dBySingleOverall.set(mp.singleId, (conf3dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+        confWindowBySingleOverall.set(mp.singleId, (confWindowBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
       });
     } else {
-      conf3dBySingleOverall.set(r.sku, (conf3dBySingleOverall.get(r.sku) || 0) + (r.confirmedPieces || 0));
+      confWindowBySingleOverall.set(r.sku, (confWindowBySingleOverall.get(r.sku) || 0) + (r.confirmedPieces || 0));
     }
   });
 
   const singleOverallStats = (singleId) => {
     const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
-    const avg = (conf3dBySingleOverall.get(singleId) || 0) / 3;
+    const avg = (confWindowBySingleOverall.get(singleId) || 0) / windowDays;
     const doh = avg > 0 ? (stock / avg) : (stock || 0);
     return { avg, doh };
   };
@@ -1853,7 +1892,56 @@ function prepareRecommendedTrackerData() {
     return { avg, doh };
   };
 
-  const rows = (state.productsMatchesRows || []).map(m => {
+  // ---------------------------------------------------------------------
+  // NEW LOCKED MATCHES — بطلب صريح: بنقتصر بس على الـ SKUs (PRODUCT_ID)
+  // الموجودين أصلاً في شيت الماتشات (PRODUCTS_MATCHES_GID) — يعني منتجات
+  // متتبعة فعلاً في الـ Recommended Tracker لتاجر واحد أو أكتر. مش أي SKU
+  // عليه قفل في الدنيا، بس اللي هو أصلاً موجود في الشيت ده. من جوه الـ SKUs
+  // دي بس، بندور على أي (تاجر × نفس الـ SKU) عليه قفل نشط (Availability
+  // Locking) بس مفيش ليه صف في الشيت لنفس التاجر ده تحديدًا — يعني SKU
+  // متتبع، بس التاجر ده بالذات ناقص منه. بنلاقيهم هنا (مقارنة على مستوى
+  // Merchant ID + PRODUCT_ID)، وبنضمهم لنفس الـ array اللي بيتعمله .map()
+  // تحت — يعني بياخدوا بالظبط نفس حسبة الأداء (Stock/DOH/CR%/DR%/NDR%/PPM/
+  // CM3/ASP/Allocated/Used/Remaining Pieces) اللي أي ماتش عادي بياخدها، من
+  // غير ما نكرر أي منطق. وبعدين syncNewLockedMatchesToSheet بتبعتهم لل
+  // backend عشان يتكتبوا فعليًا كصفوف جديدة في الشيت نفسه (Type = "New
+  // Locked")، فالمرة الجاية هيوصلوا عادي من الشيت زي أي ماتش تاني ومش
+  // هيتكرر إضافتهم تاني (مفيش تكرار للداتا خالص).
+  // ---------------------------------------------------------------------
+  const existingMatchKeys = new Set((state.productsMatchesRows || []).map(m => m.merchantId + "||" + m.productId));
+  const existingProductIds = new Set((state.productsMatchesRows || []).map(m => m.productId));
+  const seenMissingLockedKeys = new Set();
+  const missingLockedMatches = [];
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
+    // الشرط الجديد: الـ SKU (Single ID) لازم يكون أصلاً موجود كـ PRODUCT_ID
+    // في شيت الماتشات — مش أي SKU عليه قفل في أي مكان.
+    if (!existingProductIds.has(l.singleId)) return;
+    const key = l.tagerId + "||" + l.singleId;
+    if (existingMatchKeys.has(key) || seenMissingLockedKeys.has(key)) return;
+    seenMissingLockedKeys.add(key);
+    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(l.singleId) || 0) : 0;
+    // Starting AVGs لماتش جديد = نفس الـ Current AVG بتاعه دلوقتي (أول لحظة
+    // بيتضاف فيها للتراكر بيبقى هو نفسه نقطة البداية بطبيعة الحال).
+    const skuAvgStart = (placed3dBySku.get(l.singleId) || 0) / 3;
+    const merchantAvgStart = (placed3dByMerchantSku.get(key) || 0) / 3;
+    missingLockedMatches.push({
+      type: "New Locked",
+      productId: l.singleId,
+      productName: l.skuName || l.singleId,
+      merchantId: l.tagerId,
+      merchant: l.merchantName || l.tagerId,
+      stock: stockByProductId.has(l.singleId) ? stockByProductId.get(l.singleId) : 0,
+      action: "",
+      startingCogs: cogsCost,
+      merchantStartingAvg: merchantAvgStart,
+      skuStartingAvg: skuAvgStart,
+      feedbackByDate: {}
+    });
+  });
+  if (missingLockedMatches.length) syncNewLockedMatchesToSheet(missingLockedMatches);
+
+  const rows = (state.productsMatchesRows || []).concat(missingLockedMatches).map(m => {
     const sku = m.productId;
     const matchKey = m.merchantId + "||" + sku;
     const skuCurrentAvg = (placed3dBySku.get(sku) || 0) / 3;
@@ -2026,6 +2114,55 @@ function escapeHtml(str) {
 }
 
 // -------------------------------------------------------------------------
+// بتبعت أي match جديد لقيناه Locked (Availability Locking) بس مش موجود في
+// شيت الماتشات لسه (missingLockedMatches جوه prepareRecommendedTrackerData
+// فوق) لل backend، عشان يتضاف كصف جديد فعلي في الشيت (PRODUCTS_MATCHES_GID)،
+// Type = "New Locked"، وباقي الأعمدة (Stock/Starting Cogs/Merchant & SKU
+// Starting AVG) بالقيم المحسوبة دلوقتي زي ما هي.
+//
+// state.addedNewLockedMatchKeys بيمنع إعادة إرسال نفس الماتش أكتر من مرة في
+// نفس الجلسة (مثلاً لو الـ Refresh التلقائي نادى prepareRecommendedTrackerData
+// تاني قبل ما الشيت يتحدّث فعليًا) — لحد ما الريفريش الجاي يجيب الماتش ده من
+// الشيت نفسه بعد ما يتضاف، فوقتها هيبقى موجود في existingMatchKeys تلقائيًا
+// ومش هيتحسب "missing" تاني من الأساس.
+// -------------------------------------------------------------------------
+async function syncNewLockedMatchesToSheet(missingMatches) {
+  if (!MATCHES_FEEDBACK_API_URL || !missingMatches || !missingMatches.length) return;
+  if (!state.addedNewLockedMatchKeys) state.addedNewLockedMatchKeys = new Set();
+
+  const toSend = missingMatches.filter(m => !state.addedNewLockedMatchKeys.has(m.merchantId + "||" + m.productId));
+  if (!toSend.length) return;
+  // بنعلّمهم كـ "اتبعتوا" فورًا (متفائل) قبل ما نستنى رد الـ backend، عشان لو
+  // الفانكشن دي اتنادت تاني بسرعة (Refresh تلقائي مثلاً) قبل ما الأول يخلص،
+  // منبعتش نفس الماتشات مرتين مع بعض.
+  toSend.forEach(m => state.addedNewLockedMatchKeys.add(m.merchantId + "||" + m.productId));
+
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي submitMatchFeedback بالظبط — نتفادى CORS preflight مع Apps Script
+      body: JSON.stringify({
+        action: "add_new_locked_matches",
+        rows: toSend.map(m => ({
+          productId: m.productId, productName: m.productName,
+          merchantId: m.merchantId, merchant: m.merchant,
+          stock: m.stock, startingCogs: m.startingCogs,
+          merchantStartingAvg: m.merchantStartingAvg, skuStartingAvg: m.skuStartingAvg
+        }))
+      })
+    });
+    const data = await resp.json();
+    if (!data || data.success === false) throw new Error((data && data.error) || "Failed to add new locked matches");
+  } catch (err) {
+    // فشل البعت — نشيلهم من set الـ "اتبعتوا" عشان يتحاول تاني في أقرب فرصة
+    // (مرة جاية يتنادى فيها prepareRecommendedTrackerData) بدل ما يفضلوا
+    // ناقصين من الشيت للأبد.
+    toSend.forEach(m => state.addedNewLockedMatchKeys.delete(m.merchantId + "||" + m.productId));
+    console.error("syncNewLockedMatchesToSheet error:", err);
+  }
+}
+
+// -------------------------------------------------------------------------
 // بيبعت فيدباك الأكاونت مانجر على ماتش معين (Merchant × PRODUCT_ID) لل
 // backend (Code.gs) عشان يتكتب لايف في شيت الماتشات (PRODUCTS_MATCHES_GID)،
 // في عمود تاريخ النهاردة (K فأكتر) — لو حصل أكتر من فيدباك في نفس اليوم
@@ -2187,7 +2324,7 @@ function renderPaginatedRecommendedTrackerTable() {
       return `<td><div class="rt-feedback-cell"><div class="rt-feedback-view ${text ? '' : 'rt-feedback-empty'}">${text ? escapeHtml(text) : `No feedback on ${label}`}</div></div></td>`;
     }).join("");
     tr.innerHTML = `
-      <td class="text-dim">${m.type || "-"}</td>
+      <td class="${m.type === "New Locked" ? "text-orange font-bold" : "text-dim"}">${m.type || "-"}</td>
       <td class="font-mono text-dim">${m.productId}</td>
       <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
       <td class="font-mono text-dim">${m.merchantId}</td>
@@ -3937,11 +4074,19 @@ function cm3ContrBadgeClass(pct) {
 }
 
 const CM3_TABLE_COLUMNS = [
-  { key: "period", label: "Period" }, { key: "turnedPositive", label: "Turned Positive" }, { key: "turnedNegative", label: "Turned Negative" },
-  { key: "becameZero", label: "Became Zero" }, { key: "stayedNegative", label: "Stayed Negative" }, { key: "stayedPositive", label: "Stayed Positive" },
-  { key: "newMatch", label: "New Match" }, { key: "totalNegLastPeriod", label: "Total Negative in Last Period" }, { key: "actionRate", label: "Action Rate" },
-  { key: "recoveryRate", label: "Recovery Rate" }, { key: "cm3NegLast", label: "Total CM3 Negative last period" }, { key: "cm3NegThis", label: "Total CM3 Negative this period" },
-  { key: "contrNeg", label: `CONTR% -VE (Target ${CM3_NEGATIVE_CONTRIBUTION_TARGET}%)` }
+  { key: "period", label: "Period", tip: "The day/week/month being compared. Only matches with at least 10 placed pieces in the period are counted." },
+  { key: "turnedPositive", label: "Turned Positive", tip: "Matches whose CM3 flipped from negative to positive vs. the prior period. CM3 excludes the most recent 5 days." },
+  { key: "turnedNegative", label: "Turned Negative", tip: "Matches whose CM3 flipped from positive to negative vs. the prior period. CM3 excludes the most recent 5 days." },
+  { key: "becameZero", label: "Became Zero", tip: "Matches whose CM3 went from negative to exactly zero vs. the prior period. CM3 excludes the most recent 5 days." },
+  { key: "stayedNegative", label: "Stayed Negative", tip: "Matches that were negative in both the prior and current period. CM3 excludes the most recent 5 days." },
+  { key: "stayedPositive", label: "Stayed Positive", tip: "Matches that stayed at zero or positive CM3 in both periods. CM3 excludes the most recent 5 days." },
+  { key: "newMatch", label: "New Match", tip: "Matches with no CM3 recorded in the prior period, so they're new this period. CM3 excludes the most recent 5 days." },
+  { key: "totalNegLastPeriod", label: "Total Negative in Last Period", tip: "How many matches were CM3-negative in the prior period — the base used for Action/Recovery Rate." },
+  { key: "actionRate", label: "Action Rate", tip: "Share of last period's negative matches that turned positive or reached zero this period." },
+  { key: "recoveryRate", label: "Recovery Rate", tip: "Share of last period's negative matches that fully turned positive this period." },
+  { key: "cm3NegLast", label: "Total CM3 Negative last period", tip: "Sum of CM3 for matches that were negative in the prior period, excluding the most recent 5 days." },
+  { key: "cm3NegThis", label: "Total CM3 Negative this period", tip: "Sum of CM3 for matches still negative this period (excludes matches that reached zero), 5-day cutoff applied." },
+  { key: "contrNeg", label: `CONTR% -VE (Target ${CM3_NEGATIVE_CONTRIBUTION_TARGET}%)`, tip: "Negative CM3 as a share of positive CM3 this period; both figures use the 5-day CM3 cutoff." }
 ];
 
 const SCOPE_TITLES = { overall: "Overall Performance", category: "Performance by Category", product: "Performance by Product", match: "Performance by Match (Product per Merchant)" };
@@ -3961,7 +4106,7 @@ function renderCm3TargetTable(rows) {
   const head = $("cm3TargetTableHead"); const body = $("cm3TargetTableBody"); if (!head || !body) return;
   cm3TableRowsCache = rows || [];
   hideCm3Drilldown();
-  head.innerHTML = CM3_TABLE_COLUMNS.map(c => `<th class="${c.key === "period" ? "" : "num"}">${c.label}</th>`).join("");
+  head.innerHTML = CM3_TABLE_COLUMNS.map(c => `<th class="${c.key === "period" ? "" : "num"}" title="${(c.tip || "").replace(/"/g, "&quot;")}">${c.label}</th>`).join("");
   body.innerHTML = "";
   if (!rows || rows.length === 0) { body.innerHTML = `<tr><td colspan="${CM3_TABLE_COLUMNS.length}" class="text-dim center">No qualifying data for this range.</td></tr>`; return; }
   // بادج قابل للدوس عليه — بيحمل data-status (مفتاح details) + data-period-idx
@@ -4246,11 +4391,11 @@ function renderCm3AnalystHeaders() {
   const thead = $("analystTableHead"); if(!thead) return;
   let html = "<tr>";
   if(analystState.scope === "merchant") {
-    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name">Merchant Name</th><th data-akey="placedPieces" class="num">Total Placed</th><th data-akey="confirmedPieces" class="num">Total Confirmed</th><th data-akey="deliveredPieces" class="num">Total Delivered</th><th data-akey="cr" class="num">CR%</th><th data-akey="dr" class="num">DR%</th><th data-akey="ndr" class="num">NDR%</th><th data-akey="deliveredGmv" class="num">Delivered GMV</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
+    html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="id" title="Unique merchant identifier.">Merchant ID</th><th data-akey="name" title="Merchant's display name.">Merchant Name</th><th data-akey="placedPieces" class="num" title="Total pieces placed by this merchant. No cutoff applied.">Total Placed</th><th data-akey="confirmedPieces" class="num" title="Total pieces confirmed by this merchant. No cutoff applied.">Total Confirmed</th><th data-akey="deliveredPieces" class="num" title="Total pieces delivered by this merchant. No cutoff applied.">Total Delivered</th><th data-akey="cr" class="num" title="Confirmed ÷ Placed for this merchant. No cutoff applied.">CR%</th><th data-akey="dr" class="num" title="Delivered ÷ Confirmed for this merchant. No cutoff applied.">DR%</th><th data-akey="ndr" class="num" title="CR% × DR% combined delivery rate for this merchant.">NDR%</th><th data-akey="deliveredGmv" class="num" title="Total delivered order value for this merchant. No cutoff applied.">Delivered GMV</th><th data-akey="cm3" class="num" title="Merchant's total CM3, excluding the most recent 5 days of data.">Total CM3</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="CM3 as a share of Delivered GMV; both use the 5-day CM3 cutoff.">CM3 %</th><th class="center" title="Profitability badge derived from CM3 %, so it reflects the same 5-day cutoff.">Status</th>`;
   } else if(analystState.scope === "category") {
-    html += `<th data-akey="index">#</th><th data-akey="category">Category</th><th data-akey="targetCm3" class="num text-dim">Target CM3</th><th data-akey="cm3" class="num">Actual CM3</th><th data-akey="targetCm3PerPiece" class="num text-dim">Target CM3/Pc</th><th data-akey="cm3PerPiece" class="num">Actual CM3/Pc</th><th data-akey="targetCm3Pct" class="num text-dim">Target CM3 %</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">Actual CM3 %</th><th class="center">Status</th>`;
+    html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="category" title="Product category name.">Category</th><th data-akey="targetCm3" class="num text-dim" title="Planned CM3 target for this category.">Target CM3</th><th data-akey="cm3" class="num" title="Actual CM3 for this category, excluding the most recent 5 days of data.">Actual CM3</th><th data-akey="targetCm3PerPiece" class="num text-dim" title="Planned CM3-per-delivered-piece target for this category.">Target CM3/Pc</th><th data-akey="cm3PerPiece" class="num" title="Actual CM3 per delivered piece; both use the 5-day cutoff so they line up.">Actual CM3/Pc</th><th data-akey="targetCm3Pct" class="num text-dim" title="Planned CM3 margin target for this category.">Target CM3 %</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="Actual CM3 as a share of Delivered GMV, using the 5-day CM3 cutoff.">Actual CM3 %</th><th class="center" title="Profitability badge derived from Actual CM3 %, reflecting the same 5-day cutoff.">Status</th>`;
   } else if(analystState.scope === "match") {
-    html += `<th data-akey="index">#</th><th data-akey="id">Merchant ID</th><th data-akey="name" class="truncate-cell">Merchant Name</th><th data-akey="sku">Product ID</th><th data-akey="skuName" class="truncate-cell">Product Name</th><th data-akey="category" class="text-dim">Category</th><th data-akey="placedPieces" class="num">Total Placed</th><th data-akey="confirmed" class="num">Total Confirmed</th><th data-akey="delivered" class="num">Total Delivered</th><th data-akey="cm3" class="num">Total CM3</th><th data-akey="cm3PerPiece" class="num">CM3 / Pc</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;">CM3 %</th><th class="center">Status</th>`;
+    html += `<th data-akey="index" title="Row number in the current sort order.">#</th><th data-akey="id" title="Unique merchant identifier.">Merchant ID</th><th data-akey="name" class="truncate-cell" title="Merchant's display name.">Merchant Name</th><th data-akey="sku" title="SKU code for this merchant-product match.">Product ID</th><th data-akey="skuName" class="truncate-cell" title="SKU display name.">Product Name</th><th data-akey="category" class="text-dim" title="Product category for this match.">Category</th><th data-akey="placedPieces" class="num" title="Total pieces placed for this match. No cutoff applied.">Total Placed</th><th data-akey="confirmed" class="num" title="Total pieces confirmed for this match. No cutoff applied.">Total Confirmed</th><th data-akey="delivered" class="num" title="Total pieces delivered for this match. No cutoff applied.">Total Delivered</th><th data-akey="cm3" class="num" title="This match's total CM3, excluding the most recent 5 days of data.">Total CM3</th><th data-akey="cm3PerPiece" class="num" title="CM3 per delivered piece; both figures use the same 5-day CM3 cutoff.">CM3 / Pc</th><th data-akey="cm3Pct" class="num" style="min-width: 120px;" title="CM3 as a share of Delivered GMV, both using the 5-day CM3 cutoff.">CM3 %</th><th class="center" title="Profitability badge derived from CM3 %, reflecting the same 5-day cutoff.">Status</th>`;
   }
   html += "</tr>";
   thead.innerHTML = html;
@@ -5144,20 +5289,20 @@ function cm3apTargetPpmFor(category) {
 // لآخر كذا يوم لسه الـ CM3 متأخر عليهم فعلاً — ده مش باج.
 // =========================================================================
 const CM3AP_SERIES_METRICS = [
-  { key: "placed", label: "Placed PCS", fmt: "int" },
-  { key: "confirmed", label: "Confirmed PCS", fmt: "int" },
-  { key: "delivered", label: "Delivered PCS", fmt: "int" },
-  { key: "crPct", label: "CR%", fmt: "pct" },
-  { key: "drPct", label: "DR%", fmt: "pct" },
-  { key: "ndrPct", label: "NDR%", fmt: "pct" },
-  { key: "deliveredAsp", label: "Delivered ASP", fmt: "money" },
-  { key: "deliveredGmv", label: "Delivered GMV", fmt: "money" },
-  { key: "cm3", label: "CM3", fmt: "money" },
-  { key: "cm3Pct", label: "CM3%", fmt: "pct" },
-  { key: "ppm", label: "Total PPM", fmt: "money" },
-  { key: "ppmPerPiece", label: "PPM/Piece", fmt: "money" },
-  { key: "ppmActualPct", label: "PPM Actual%", fmt: "pct" },
-  { key: "ppmGmvRatio", label: "PPM/GMV%", fmt: "pct" }
+  { key: "placed", label: "Placed PCS", fmt: "int", tip: "Pieces placed for this SKU in this period. No cutoff applied." },
+  { key: "confirmed", label: "Confirmed PCS", fmt: "int", tip: "Pieces confirmed for this SKU in this period. No cutoff applied." },
+  { key: "delivered", label: "Delivered PCS", fmt: "int", tip: "Pieces delivered for this SKU in this period. No cutoff applied." },
+  { key: "crPct", label: "CR%", fmt: "pct", tip: "Confirmed ÷ Placed pieces for this period. No lag applied." },
+  { key: "drPct", label: "DR%", fmt: "pct", tip: "Delivered ÷ Confirmed pieces for this period. No lag applied." },
+  { key: "ndrPct", label: "NDR%", fmt: "pct", tip: "CR% × DR% for this period. No lag applied." },
+  { key: "deliveredAsp", label: "Delivered ASP", fmt: "money", tip: "Average delivered selling price per piece in this period." },
+  { key: "deliveredGmv", label: "Delivered GMV", fmt: "money", tip: "Delivered revenue for this SKU in this period. No cutoff applied." },
+  { key: "cm3", label: "CM3", fmt: "money", tip: "Contribution margin for this period, excluding the most recent 5 days — recent periods can show zero until they clear the cutoff." },
+  { key: "cm3Pct", label: "CM3%", fmt: "pct", tip: "CM3 as a % of delivered GMV for this period, under the 5-day cutoff." },
+  { key: "ppm", label: "Total PPM", fmt: "money", tip: "Promotional spend for this SKU in this period. No cutoff applied." },
+  { key: "ppmPerPiece", label: "PPM/Piece", fmt: "money", tip: "Promotional spend per delivered piece in this period." },
+  { key: "ppmActualPct", label: "PPM Actual%", fmt: "pct", tip: "PPM/Piece actual as a % of Target PPM for this period." },
+  { key: "ppmGmvRatio", label: "PPM/GMV%", fmt: "pct", tip: "Promotional spend as a % of delivered GMV for this period." }
 ];
 
 function cm3apSeriesFmtCell(v, fmt) {
@@ -5474,13 +5619,13 @@ function renderCm3apSeriesTable() {
   if (cm3apStaticTheadHtml === null) cm3apStaticTheadHtml = theadRow.innerHTML;
 
   const periodLabels = cm3apSeriesAll.periodLabels || [];
-  const th = (key, label, extraClass) => `<th class="${extraClass || ""}" style="cursor:pointer;" title="Click to sort" onclick="sortCm3apSeries('${key}')">${label}${cm3apSeriesSortArrow(key)}</th>`;
-  let headHtml = th("sku", "SKU") + th("skuName", "SKU Name", "truncate-cell") + th("category", "Category", "truncate-cell");
+  const th = (key, label, extraClass, tip) => `<th class="${extraClass || ""}" style="cursor:pointer;" title="${((tip ? tip + " " : "") + "Click to sort").replace(/"/g, "&quot;")}" onclick="sortCm3apSeries('${key}')">${label}${cm3apSeriesSortArrow(key)}</th>`;
+  let headHtml = th("sku", "SKU", "", "Unique product identifier.") + th("skuName", "SKU Name", "truncate-cell", "Product's display name.") + th("category", "Category", "truncate-cell", "Product category this SKU belongs to.");
   periodLabels.forEach((label, pIdx) => {
     const pColClass = `cm3ap-pcol-${pIdx % 4}`;
-    CM3AP_SERIES_METRICS.forEach(m => { headHtml += th(`${pIdx}|${m.key}`, `${m.label} ${label}`, `num ${pColClass}`); });
+    CM3AP_SERIES_METRICS.forEach(m => { headHtml += th(`${pIdx}|${m.key}`, `${m.label} ${label}`, `num ${pColClass}`, m.tip); });
   });
-  headHtml += th("targetPpm", "Target PPM", "num text-orange");
+  headHtml += th("targetPpm", "Target PPM", "num text-orange", "Target promotional spend per piece for this SKU's category (single column, not per-period).");
   theadRow.innerHTML = headHtml;
 
   const totalCols = 3 + periodLabels.length * CM3AP_SERIES_METRICS.length + 1;
@@ -6431,6 +6576,10 @@ function getSellthroughIndices() {
   // ---------------------------------------------------------------------
   const mainRows = state.allParsedRows || [];
   const { stockByProductId, singleOverallStats } = buildDebundledStockDohIndex(mainRows);
+  // AVG 15D / DOH_15D — نفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) فوق،
+  // بس على شباك 15 يوم بدل 3 أيام (buildDebundledStockDohIndex بقت بتاخد
+  // windowDays كباراميتر تاني اختياري).
+  const { singleOverallStats: singleOverallStats15d } = buildDebundledStockDohIndex(mainRows, 15);
 
   // ---------------------------------------------------------------------
   // Availability (WEBSITE_STATUS) / Is_Locked (IS_LOCKED) — من شيت Products
@@ -6451,13 +6600,75 @@ function getSellthroughIndices() {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec, inboundNameCat,
     beginInvBySkuMonth, beginInvNameCat, needBySkuMonth, needNameCat,
     skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
-    stockByProductId, singleOverallStats, productsBySkuNormalized, stNormalizeSku
+    stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku
   };
   return _stIndexCache;
 }
 
+// ---------------------------------------------------------------------
+// "Last inbound status" فلتر — بيقسّم الـ SKUs حسب تاريخ آخر استلام إنباوند
+// بتاعها (lastRecTs) لـ: "Before <current year>" (أي حاجة قبل السنة الحالية)،
+// وبعدين رباعيات (Quarters) جوه السنة الحالية نفسها — Q1 = يناير..مارس،
+// Q2 = أبريل..يونيو، Q3 = يوليو..سبتمبر، Q4 = أكتوبر..ديسمبر. السنة بتتحدد
+// ديناميكيًا من تاريخ النهاردة (مش مكتوبة ثابتة) عشان تفضل صح مع الوقت.
+// ---------------------------------------------------------------------
+const ST_LAST_INBOUND_YEAR = new Date().getFullYear();
+
+function stLastInboundBucket(ts) {
+  if (ts === null || ts === undefined || isNaN(ts)) return null;
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  if (y < ST_LAST_INBOUND_YEAR) return "before";
+  if (y > ST_LAST_INBOUND_YEAR) return "q4"; // future-dated edge case — bucket with the last quarter rather than drop it
+  const m = d.getMonth(); // 0-11
+  if (m <= 2) return "q1";
+  if (m <= 5) return "q2";
+  if (m <= 8) return "q3";
+  return "q4";
+}
+
+function stLastInboundBucketLabel(bucket) {
+  const y = ST_LAST_INBOUND_YEAR;
+  if (bucket === "before") return `Before ${y}`;
+  if (bucket === "q1") return `Q1 ${y} (Jan-Mar)`;
+  if (bucket === "q2") return `Q2 ${y} (Apr-Jun)`;
+  if (bucket === "q3") return `Q3 ${y} (Jul-Sep)`;
+  if (bucket === "q4") return `Q4 ${y} (Oct-Dec)`;
+  return bucket;
+}
+
 function recomputeSellthroughRows() {
-  const { begInv: begInvKey, startSale: startKey, endSale: endKey } = state.stFilters;
+  let { begInv: begInvKey, startSale: startKey, endSale: endKey } = state.stFilters;
+
+  // لو المستخدم مختار "Last Inbound Status" بس لسه مايختارش الشهور التلاتة
+  // (Beginning Inventory / Start Sale / End Sale) بنفسه، بنبني تلقائيًا رينج
+  // يغطي كل الشهور المتاحة في الداتا (من أقدم شهر لأحدث شهر) عشان الفلتر
+  // يجيب "داتا الشهور كلها" زي ما اتطلب، من غير ما يستنى اختيار يدوي. لو
+  // المستخدم اختار أي واحد من التلاتة فلاتر دول بنفسه، بناخد اختياره زي ما هو
+  // (بيبقى أولوية على الرينج التلقائي).
+  let stAutoFullRangeApplied = false;
+  if (state.stFilters.lastInboundStatus && (!begInvKey || !startKey || !endKey)) {
+    const monthOpts = (state.sellthroughMonthOptions && state.sellthroughMonthOptions.length)
+      ? state.sellthroughMonthOptions
+      : computeSellthroughMonthOptions();
+    if (monthOpts.length) {
+      const sortedAsc = [...monthOpts].sort((a, b) => a.date - b.date);
+      const earliestKey = sortedAsc[0].key;
+      const latestKey = sortedAsc[sortedAsc.length - 1].key;
+      begInvKey = begInvKey || earliestKey;
+      startKey = startKey || earliestKey;
+      endKey = endKey || latestKey;
+      stAutoFullRangeApplied = true;
+    }
+  }
+
+  const stSubtitleEl = $("stFiltersSubtitle");
+  if (stSubtitleEl) {
+    stSubtitleEl.textContent = stAutoFullRangeApplied
+      ? `Apply filters to update the Sellthrough data — showing all available months (${begInvKey} → ${endKey}), narrowed by Last Inbound Status`
+      : "Apply filters to update the Sellthrough data";
+  }
+
   if (!begInvKey || !startKey || !endKey) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
 
   // ---------------------------------------------------------------------
@@ -6472,7 +6683,7 @@ function recomputeSellthroughRows() {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec,
     inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
     needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
-    stockByProductId, singleOverallStats, productsBySkuNormalized, stNormalizeSku
+    stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku
   } = idx;
 
   // مجموعة الـ SKU الأساسية = اتحاد الموجودين في الثلاث مصادر عند begInvKey
@@ -6523,6 +6734,10 @@ function recomputeSellthroughRows() {
     const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
     const avg3dConfirmed = singleOverallStats(sku).avg;
     const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
+    // AVG 15D / DOH_15D: نفس منطق AVG 3D/DOH فوق بالظبط (Overall Debundled
+    // demand)، بس على شباك آخر 15 يوم بدل آخر 3 أيام.
+    const avg15dConfirmed = singleOverallStats15d(sku).avg;
+    const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
 
     // Availability / Is_Locked: من شيت Products (PRODUCTS_GID) عن طريق SKU —
     // مطابقة مباشرة الأول، وبعدين مطابقة بعد توحيد الشكل (trim + كابيتال)
@@ -6534,18 +6749,29 @@ function recomputeSellthroughRows() {
       name: info.name || "Unknown",
       cat: info.cat || "Uncategorized",
       lastRecDate: lastRec ? lastRec.text : "-",
+      lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
       stRate, soldInb, firstBuy,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
+      avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
       websiteStatus: prodInfo.websiteStatus || "-", isLocked: prodInfo.isLocked || "-"
     });
   });
 
-  state.sellthroughDataPrepared = rows;
+  // "Last inbound status" فلتر — لو المستخدم مختار قيمة (Before <year> أو
+  // Quarter معين)، بنفلتر الصفوف هنا قبل ما تتخزن، عشان الفلتر يعكس صح في
+  // الجدول الرئيسي وفي جداول الـ Summary (Confirmed/Delivered) مع بعض، مش
+  // بس في الجدول — الاتنين بياخدوا نفس الـ rows المفلترة دي.
+  const lastInboundStatusFilter = state.stFilters.lastInboundStatus;
+  const filteredRows = lastInboundStatusFilter
+    ? rows.filter(r => stLastInboundBucket(r.lastRecTs) === lastInboundStatusFilter)
+    : rows;
+
+  state.sellthroughDataPrepared = filteredRows;
   applySellthroughFiltersAndSort();
-  renderSellthroughSummaries(rows);
+  renderSellthroughSummaries(filteredRows);
 }
 
 // =====================================================================
@@ -6870,6 +7096,9 @@ function renderPaginatedSellthroughTable() {
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="center">${m.websiteStatus}</td>
       <td class="center"><span class="badge-outline ${String(m.isLocked).toLowerCase() === 'true' || String(m.isLocked).toLowerCase() === 'yes' ? 'red' : 'dim'}">${m.isLocked}</span></td>
+      <td class="num text-blue">${fmtIntCell(Math.round(m.avg3d))}</td>
+      <td class="num text-purple">${fmtIntCell(Math.round(m.avg15d))}</td>
+      <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh15d))}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -6913,6 +7142,25 @@ document.addEventListener("DOMContentLoaded", () => {
       recomputeSellthroughRows();
     });
   });
+
+  // "Last inbound status" — فلتر اختياري (ممكن يفضل "All" من غير ما يمنع
+  // الحسبة زي التلاتة اللي فوق)، بيبني الأوبشنز ديناميكيًا (Before <year>
+  // + Q1..Q4 <year> بناء على السنة الحالية) مرة واحدة أول ما الصفحة تحمّل.
+  const stLastInboundStatusSelect = $("stLastInboundStatusSelect");
+  if (stLastInboundStatusSelect && stLastInboundStatusSelect.options.length <= 1) {
+    ["before", "q1", "q2", "q3", "q4"].forEach(bucket => {
+      const opt = document.createElement("option");
+      opt.value = bucket;
+      opt.textContent = stLastInboundBucketLabel(bucket);
+      stLastInboundStatusSelect.appendChild(opt);
+    });
+  }
+  if (stLastInboundStatusSelect) {
+    stLastInboundStatusSelect.addEventListener("change", (e) => {
+      state.stFilters.lastInboundStatus = e.target.value || "";
+      recomputeSellthroughRows();
+    });
+  }
 
   if($("prevPageSellthrough")) $("prevPageSellthrough").addEventListener("click", () => {
     if (state.sellthroughPage > 0) { state.sellthroughPage -= 1; renderPaginatedSellthroughTable(); }
