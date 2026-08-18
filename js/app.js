@@ -1711,8 +1711,19 @@ function buildDebundledStockDohIndex(mainRows, windowDays) {
     let doh, avg;
     if (isBundleSku && mappings.length) {
       const stats = mappings.map(mp => singleOverallStats(mp.singleId));
-      const bottleneck = stats.reduce((min, s) => (s.doh < min.doh ? s : min), stats[0]);
-      doh = bottleneck.doh; avg = bottleneck.avg;
+      // معيار الـ Minimum DOH بيتطبق بس على الـ Singles اللي عندها طلب فعلي
+      // (avg > 0) — لو 2 اسكيو مختلفين وعندهم طلب، بناخد أقل DOH بينهم زي
+      // ما هو مطلوب بالظبط. لو كل مكونات البندل مالهاش طلب خالص (avg = 0
+      // للجميع)، يبقى البندل "مش شغال" ومفيش بوتلنيك حقيقي نقيسه — وقتها
+      // الـ DOH يبقى ببساطة = الـ Stock بتاع نفس الصف (stock)، مش ستوك سنجل
+      // تاني مختلف عن اللي ظاهر في الجدول.
+      const withDemand = stats.filter(s => s.avg > 0);
+      if (withDemand.length) {
+        const bottleneck = withDemand.reduce((min, s) => (s.doh < min.doh ? s : min), withDemand[0]);
+        doh = bottleneck.doh; avg = bottleneck.avg;
+      } else {
+        doh = stock || 0; avg = 0;
+      }
     } else {
       const stats = singleOverallStats(sku);
       doh = stats.doh; avg = stats.avg;
@@ -1970,9 +1981,17 @@ function prepareRecommendedTrackerData() {
     let currentInventoryDoh, avgSkuLast3d;
     if (isBundleSku && mappings.length) {
       const singleStats = mappings.map(mp => singleOverallStats(mp.singleId));
-      const bottleneck = singleStats.reduce((min, s) => (s.doh < min.doh ? s : min), singleStats[0]);
-      currentInventoryDoh = bottleneck.doh;
-      avgSkuLast3d = bottleneck.avg;
+      // معيار الـ Minimum DOH بيتطبق بس على الـ Singles اللي عندها طلب فعلي
+      // (avg > 0) — لو 2 اسكيو مختلفين وعندهم طلب، بناخد أقل DOH بينهم زي
+      // ما هو مطلوب بالظبط. لو كل مكونات البندل مالهاش طلب خالص، يبقى
+      // الـ DOH = الـ Stock بتاع الصف/الماتش نفسه (currentInventory).
+      const withDemand = singleStats.filter(s => s.avg > 0);
+      if (withDemand.length) {
+        const bottleneck = withDemand.reduce((min, s) => (s.doh < min.doh ? s : min), withDemand[0]);
+        currentInventoryDoh = bottleneck.doh; avgSkuLast3d = bottleneck.avg;
+      } else {
+        currentInventoryDoh = currentInventory || 0; avgSkuLast3d = 0;
+      }
     } else {
       const stats = singleOverallStats(sku);
       currentInventoryDoh = stats.doh;
@@ -2956,13 +2975,33 @@ function prepareProductsAnalystData() {
   // الداشبورد كله (computeCommercialActuals/Products Matches Analyst).
   const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
 
+  // AVG CONFIRMED DAILY (LAST 5D) — DEMAND SINGLE OVERALL: مجموع Confirmed
+  // Pieces (لكل الصفوف اللي مصدرها المنتج ده نفسه سنجل، أو أي بندل الـ
+  // Single ده عضو فيه، بضرب الكمية) لآخر 5 أيام فعليين من كل تاريخ
+  // MAIN_GID، مقسومة على 5 — نفس منطق conf3d/conf15d في buildDebundledStockDohIndex
+  // بالظبط بس على شباك 5 أيام.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const d5Ms = todayMs - (5 * 86400000);
+  const conf5dBySingleOverall = new Map();
+  mainRowsAll.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime < d5Ms || rTime > todayMs) return;
+    mappingsFor(r.sku).forEach(mp => {
+      conf5dBySingleOverall.set(mp.singleId, (conf5dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+    });
+  });
+
   const bySingle = new Map();
   const getBucket = (singleId) => {
     let b = bySingle.get(singleId);
     if (!b) {
       b = {
         ppm: 0, deliveredGmv: 0, deliveredPieces: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0,
-        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        currentPlacedPieces: 0, currentConfirmedPieces: 0, currentDeliveredPieces: 0
       };
       bySingle.set(singleId, b);
     }
@@ -2982,6 +3021,12 @@ function prepareProductsAnalystData() {
       b.deliveredPieces += (r.deliveredPieces || 0) * qty;
       b.ppm += (r.ppm || 0) * weight;
       b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      // CURRENT — Placed/Confirmed/Delivered Pieces الشهر الحالي، DEMAND
+      // SINGLE OVERALL (كل البندلات اللي الـ Single ده عضو فيها)، من غير
+      // أي كات أوف.
+      b.currentPlacedPieces += (r.placedPieces || 0) * qty;
+      b.currentConfirmedPieces += (r.confirmedPieces || 0) * qty;
+      b.currentDeliveredPieces += (r.deliveredPieces || 0) * qty;
       // CM3 (وCM3/Piece وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت
       // كات أوف الـ CM3، بما فيها Delivered Pieces المستخدمة كمقام لـ CM3/Piece
       // (cm3DeliveredPieces) — مش إجمالي Delivered Pieces الكامل فوق.
@@ -3018,6 +3063,8 @@ function prepareProductsAnalystData() {
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
     const demandConfirmed3m = demandBySingle.get(singleId) || 0;
     const avgConfirmedDaily = last3TotalDays > 0 ? (demandConfirmed3m / last3TotalDays) : 0;
+    // AVG CONFIRMED DAILY (LAST 5D) — DEMAND SINGLE OVERALL ÷ 5.
+    const avgConfirmedDailyLast5d = (conf5dBySingleOverall.get(singleId) || 0) / 5;
     const lastInboundTs = lastInboundTsBySku.get(singleId) || 0;
     const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
@@ -3026,6 +3073,8 @@ function prepareProductsAnalystData() {
     rows.push({
       skuId: singleId, skuName: debundleName || inv.skuName || prod.name || singleId, category: inv.category || prod.category || "Uncategorized",
       lastInboundTs, lastInboundDate: lastInboundTs ? new Date(lastInboundTs).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "-",
+      currentPlacedPieces: Math.round(b.currentPlacedPieces || 0), currentConfirmedPieces: Math.round(b.currentConfirmedPieces || 0), currentDeliveredPieces: Math.round(b.currentDeliveredPieces || 0),
+      avgConfirmedDailyLast5d,
       demandConfirmed3m: Math.round(demandConfirmed3m), avgConfirmedDaily,
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
       crPct, drPct, ndrPct,
@@ -3081,7 +3130,7 @@ function renderPaginatedProdAnTable() {
   const pageRows = prodAnState.filtered.slice(start, start + PAGE_SIZE);
 
   if (!pageRows.length) {
-    tbody.innerHTML = `<tr><td colspan="16" class="text-dim center">No products match this filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="20" class="text-dim center">No products match this filter.</td></tr>`;
   } else {
     pageRows.forEach(m => {
       const tr = document.createElement("tr");
@@ -3090,6 +3139,10 @@ function renderPaginatedProdAnTable() {
         <td class="truncate-cell text-dim" title="${m.skuName || ""}">${m.skuName || '<span class="text-dim">-</span>'}</td>
         <td class="truncate-cell text-dim">${m.category}</td>
         <td class="text-dim">${m.lastInboundDate || "-"}</td>
+        <td class="num text-blue">${fmtIntCell(m.currentPlacedPieces)}</td>
+        <td class="num text-orange">${fmtIntCell(m.currentConfirmedPieces)}</td>
+        <td class="num text-dim">${fmtIntCell(m.currentDeliveredPieces)}</td>
+        <td class="num font-bold text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast5d))}</td>
         <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
         <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
         <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>

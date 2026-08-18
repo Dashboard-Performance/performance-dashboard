@@ -1396,6 +1396,10 @@
                       <th onclick="sortProdAn('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product display name.">SKU NAME</th>
                       <th onclick="sortProdAn('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
                       <th onclick="sortProdAn('lastInboundTs')" style="cursor:pointer;" title="Most recent date this SKU was received into inventory.">LAST INBOUND DATE</th>
+                      <th onclick="sortProdAn('currentPlacedPieces')" class="num" style="cursor:pointer;" title="Placed pieces this month, Demand Single Overall (this Single plus every bundle it's a member of, weighted by quantity). No cutoff applied.">CURRENT PLACED PCS</th>
+                      <th onclick="sortProdAn('currentConfirmedPieces')" class="num" style="cursor:pointer;" title="Confirmed pieces this month, Demand Single Overall. No cutoff applied.">CURRENT CONFIRMED PCS</th>
+                      <th onclick="sortProdAn('currentDeliveredPieces')" class="num" style="cursor:pointer;" title="Delivered pieces this month, Demand Single Overall. No cutoff applied.">CURRENT DELIVERED PCS</th>
+                      <th onclick="sortProdAn('avgConfirmedDailyLast5d')" class="num" style="cursor:pointer;" title="Demand Single Overall confirmed pieces over the last 5 actual days, divided by 5.">AVG CONFIRMED DAILY (LAST 5D)</th>
                       <th onclick="sortProdAn('demandConfirmed3m')" class="num" style="cursor:pointer;" title="Total confirmed demand for this SKU over the last 3 months, from demand-planning data.">DEMAND CONFIRMED (3M)</th>
                       <th onclick="sortProdAn('avgConfirmedDaily')" class="num" style="cursor:pointer;" title="Demand Confirmed (3M) divided by the number of days in that 3-month window.">AVG CONFIRMED DAILY</th>
                       <th onclick="sortProdAn('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed across all bundles this SKU is part of, excluding the most recent 2 days.">CR%</th>
