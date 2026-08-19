@@ -256,6 +256,12 @@ const availabilityLockingState = {
 const healthyLockingState = {
   data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0, merchantPage: 0
 };
+// Healthy Unlocking (تحت Healthy Locking): كل قفل نشط (Merchant × SKU) على SKU
+// مفيش عليه ديماند (Confirmed) حقيقية آخر 6 أيام — مرشح للفك. راجع تعليق
+// prepareHealthyUnlockingData تحت للتفاصيل الكاملة.
+const healthyUnlockingState = {
+  data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0
+};
 let pipelineChartInst = null;
 let pipelineChartMetric = "pieces"; // "orders" | "pieces" — Pipeline Velocity toggle
 let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
@@ -336,6 +342,7 @@ const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
 const navAvailabilityLocking = $("navAvailabilityLocking");
 const navHealthyLocking = $("navHealthyLocking");
+const navHealthyUnlocking = $("navHealthyUnlocking");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navMpMatches = $("navMpMatches");
 const navMpNewMatches = $("navMpNewMatches");
@@ -388,6 +395,7 @@ function switchView(viewName) {
   if(navPoorMatches) navPoorMatches.classList.remove("active");
   if(navAvailabilityLocking) navAvailabilityLocking.classList.remove("active");
   if(navHealthyLocking) navHealthyLocking.classList.remove("active");
+  if(navHealthyUnlocking) navHealthyUnlocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
   if(navMpNewMatches) navMpNewMatches.classList.remove("active");
@@ -413,6 +421,7 @@ function switchView(viewName) {
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
   else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
   else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
+  else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); prepareHealthyUnlockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
   else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); prepareMpNewMatchesData(); }
@@ -445,6 +454,7 @@ if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3A
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
 if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () => switchView("availabilityLocking"));
 if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
+if(navHealthyUnlocking) navHealthyUnlocking.addEventListener("click", () => switchView("healthyUnlocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
@@ -630,6 +640,10 @@ if($("prevPageHealthyLocking")) $("prevPageHealthyLocking").addEventListener("cl
 if($("nextPageHealthyLocking")) $("nextPageHealthyLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((healthyLockingState.filtered || []).length / PAGE_SIZE)); if (healthyLockingState.page < totalPages - 1) { healthyLockingState.page += 1; renderPaginatedHealthyLockingTable(); } });
 if($("prevPageHlMerchant")) $("prevPageHlMerchant").addEventListener("click", () => { if (healthyLockingState.merchantPage > 0) { healthyLockingState.merchantPage -= 1; renderHealthyLockingMerchantTable(); } });
 if($("nextPageHlMerchant")) $("nextPageHlMerchant").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.healthyLockingMerchantRows || []).length / PAGE_SIZE)); if (healthyLockingState.merchantPage < totalPages - 1) { healthyLockingState.merchantPage += 1; renderHealthyLockingMerchantTable(); } });
+const searchHealthyUnlockingInput = $("searchHealthyUnlockingInput");
+if (searchHealthyUnlockingInput) searchHealthyUnlockingInput.addEventListener("input", applyHealthyUnlockingSearchAndSort);
+if($("prevPageHealthyUnlocking")) $("prevPageHealthyUnlocking").addEventListener("click", () => { if (healthyUnlockingState.page > 0) { healthyUnlockingState.page -= 1; renderPaginatedHealthyUnlockingTable(); } });
+if($("nextPageHealthyUnlocking")) $("nextPageHealthyUnlocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((healthyUnlockingState.filtered || []).length / PAGE_SIZE)); if (healthyUnlockingState.page < totalPages - 1) { healthyUnlockingState.page += 1; renderPaginatedHealthyUnlockingTable(); } });
 
 if($("prevPageMpSalesPlan")) $("prevPageMpSalesPlan").addEventListener("click", () => { if (state.mpSalesPlanPage > 0) { state.mpSalesPlanPage -= 1; renderPaginatedMpSalesPlanTable(); } });
 if($("nextPageMpSalesPlan")) $("nextPageMpSalesPlan").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.mpSalesPlanFiltered || []).length / PAGE_SIZE)); if (state.mpSalesPlanPage < totalPages - 1) { state.mpSalesPlanPage += 1; renderPaginatedMpSalesPlanTable(); } });
@@ -8546,6 +8560,261 @@ function renderPaginatedHealthyLockingTable() {
 }
 
 // =========================================================================
+// HEALTHY UNLOCKING (تحت Healthy Locking) — عكس فكرة Healthy Locking: مش
+// بتشوف صحة الاستخدام (Utilization%)، دي بتدور بالتحديد على القفلات النشطة
+// (Merchant × SKU) اللي مالهاش أي مبرر ديماند يخليها متقفلة أصلاً — يعني
+// مرشحة للفك (Unlock)، بغض النظر عن نسبة الاستخدام بتاعتها.
+//
+// شرط الدخول للجدول ده (بالظبط زي ما اتطلب):
+//   قفل نشط (Merchant × SKU) على SKU:
+//     • مفيش عليه ولا قطعة Confirmed خالص آخر 6 أيام (no demand at all)، أو
+//     • متوسط الـ Confirmed اليومي آخر 6 أيام (Daily Avg Confirmed Pcs) أقل من 5
+//   (الشرط التاني أصلاً بيغطي الأول: avg=0 < 5 برضو)، فبنطبق شرط واحد بس:
+//   avg last 6 days Confirmed < 5.
+//
+// الديماند آخر 6 أيام دي بتتحسب "Overall/Debundled" على مستوى الـ Single SKU
+// نفسه (buildDebundledStockDohIndex بـ windowDays=6) — يعني ديماند الـ Single
+// وهو بيتباع لوحده + ديماند كل البندلات اللي هو مكوّن جواها، مش بس اللي طالع
+// عليه هو تحديدًا. ده معيار "هل الـ SKU ده أصلاً له مبرر يفضل مقفول" —
+// مش مربوط بتاجر معين.
+//
+// أما باقي أعمدة الجدول (Stock/DOH, Total Placed/Confirmed/Delivered,
+// Avg Last 3D/10D/15D, CR%/DR%/NDR%, Selling Price/Profit/Cogs/SKU_PPM/PPM%,
+// Delivered GMV, CM3/CM3 per Piece/CM3%) — كل دي "Overall" برضو لنفس الـ
+// Single SKU (بنفس منطق PPM Analyst / Single بالظبط)، مش مقصورة على نشاط
+// التاجر صاحب القفل ده لوحده. القفل نفسه (Allocated/Used/Remaining Pieces،
+// وبيانات التاجر/الـ ACM) هو الحاجة الوحيدة اللي بتفرق فعلاً على مستوى كل
+// صف/قفل — باقي الأعمدة بتتكرر لنفس الـ SKU مهما كان عدد القفلات عليه.
+// =========================================================================
+function prepareHealthyUnlockingData() {
+  const mainRowsAll = state.allParsedRows || [];
+
+  // نفس اتفاقية "Overall" المستخدمة في PPM Analyst / Single: الشهر الحالي
+  // بس، بغض النظر عن فلتر الشهر فوق الصفحة — عشان الأرقام المالية (GMV/CM3/
+  // PPM) تفضل ليها معنى "الشهر الجاري" ومتتلخبطش لو حد فلتر شهر تاني.
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
+  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
+
+  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const { getStockDoh } = buildDebundledStockDohIndex(mainRowsAll);
+  const { singleOverallStats: stats3d } = buildDebundledStockDohIndex(mainRowsAll, 3);
+  // Last Inbound Date — آخر تاريخ استلام فعلي لكل Single SKU، من شيت الـ
+  // Inbound (state.inboundRows، نفس المصدر بتاع Sellthrough Rate Panel). الشيت
+  // ده أصلاً سنجل SKU (مفيش بندلات)، فمفيش داعي لأي ديبندلايز هنا.
+  const inboundLastRecBySingle = new Map();
+  (state.inboundRows || []).forEach(row => {
+    if (!row.sku || !row.rcvTs) return;
+    const cur = inboundLastRecBySingle.get(row.sku);
+    if (!cur || row.rcvTs > cur.ts) inboundLastRecBySingle.set(row.sku, { ts: row.rcvTs, text: row.rcvDateText });
+  });
+  const { singleOverallStats: stats6d } = buildDebundledStockDohIndex(mainRowsAll, 6);
+  const { singleOverallStats: stats10d } = buildDebundledStockDohIndex(mainRowsAll, 10);
+  const { singleOverallStats: stats15d } = buildDebundledStockDohIndex(mainRowsAll, 15);
+
+  const mappingsFor = (sku) => {
+    const m = bundleProductMap.get(sku);
+    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
+  };
+
+  // نفس بناء الـ bucket بالظبط زي preparePpmAnalystSingleData — مجمّع Overall
+  // (Single + كل البندلات اللي هو جواها) على مستوى الشهر الحالي.
+  const bySingle = new Map();
+  const getBucket = (singleId) => {
+    let b = bySingle.get(singleId);
+    if (!b) {
+      b = {
+        placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, placedGmv: 0,
+        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+        ppm: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0
+      };
+      bySingle.set(singleId, b);
+    }
+    return b;
+  };
+  monthRows.forEach(r => {
+    if (!r.sku) return;
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    const crEligible = isRowEligibleForLag(r, crCutoffTs);
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    mappingsFor(r.sku).forEach(mp => {
+      const b = getBucket(mp.singleId);
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      b.placedPieces += (r.placedPieces || 0) * qty;
+      b.confirmedPieces += (r.confirmedPieces || 0) * qty;
+      b.deliveredPieces += (r.deliveredPieces || 0) * qty;
+      b.ppm += (r.ppm || 0) * weight;
+      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      b.placedGmv += (r.placedGmv || 0) * weight;
+      if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
+      if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
+      if (cm3Eligible) {
+        b.cm3 += (r.cm3 || 0) * weight;
+        b.cm3Gmv += (r.deliveredGmv || 0) * weight;
+        b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
+      }
+    });
+  });
+
+  // القفلات النشطة (Active) لكل Single SKU — نفس مصدر ومنطق Availability/
+  // Healthy Locking بالظبط (state.availabilityLockingRows + alIsLockActive).
+  let latestTs = 0; mainRowsAll.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  const today = new Date(latestTs); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
+  const locksBySingle = new Map();
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (!l.singleId) return;
+    if (!locksBySingle.has(l.singleId)) locksBySingle.set(l.singleId, []);
+    locksBySingle.get(l.singleId).push(l);
+  });
+
+  const matchRows = [];
+  const skuSeen = new Set();
+  const merchantSeen = new Set();
+  let remainingPiecesTotal = 0;
+
+  singlesList.forEach((singleName, singleId) => {
+    const activeLocks = (locksBySingle.get(singleId) || []).filter(l => alIsLockActive(l, todayMs));
+    if (!activeLocks.length) return; // مفيش قفل نشط على الـ SKU ده خالص — مش موضوعنا هنا
+
+    // الشرط الأساسي: متوسط الـ Confirmed اليومي Overall آخر 6 أيام < 5 —
+    // ده بيغطي "مفيش ديماند خالص" (avg = 0) برضو، فمفيش داعي لشرط منفصل.
+    const demand6d = stats6d(singleId);
+    if (demand6d.avg >= 5) return;
+
+    const b = getBucket(singleId);
+    const inv = state.inventoryMap[singleId] || {};
+    const prod = state.productsMap[singleId] || {};
+    const { stock, doh } = getStockDoh(singleId);
+    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
+    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
+    const sellingPrice = prod.price || 0;
+    const profit = prod.profit || 0;
+    const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(singleId) || 0) : 0;
+    const skuPpm = sellingPrice - profit - cogs;
+    const lastAspPlaced = b.placedPieces > 0 ? (b.placedGmv / b.placedPieces) : 0;
+    const ppmPct = lastAspPlaced > 0 ? (skuPpm / lastAspPlaced) * 100 : 0;
+    const category = inv.category || prod.category || "Uncategorized";
+    const skuName = singlesList.get(singleId) || inv.skuName || prod.name || singleId;
+    // Availability: نفس مصدر عمود Availability في Inventory (inv.availability
+    // من شيت الـ Inventory)، وفولباك لـ WEBSITE_STATUS من شيت الـ Products لو
+    // الـ SKU ده مش موجود في شيت الـ Inventory أصلاً.
+    const availability = inv.availability || prod.websiteStatus || "Unknown";
+    const lastInbound = inboundLastRecBySingle.get(singleId);
+    const lastInboundTs = lastInbound ? lastInbound.ts : null;
+    const lastInboundText = lastInbound ? lastInbound.text : "—";
+
+    skuSeen.add(singleId);
+
+    activeLocks.forEach(l => {
+      const acm = ((state.merchantInfoMap || new Map()).get(l.tagerId) || {}).acmName || "Unassigned";
+      merchantSeen.add(l.tagerId);
+      remainingPiecesTotal += (l.remainingPieces || 0);
+      matchRows.push({
+        skuId: singleId, skuName, category, availability, lastInboundTs, lastInboundText,
+        merchantName: l.merchantName, tagerId: l.tagerId, acm,
+        allocatedQty: l.allocatedQty, usedQty: l.usedQty, remainingPieces: l.remainingPieces,
+        stock: Math.round(stock || 0), doh: Math.round(doh),
+        totalPlacedPcs: Math.round(b.placedPieces || 0), totalConfirmedPcs: Math.round(b.confirmedPieces || 0), totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
+        avg3d: stats3d(singleId).avg, avg6d: demand6d.avg, avg10d: stats10d(singleId).avg, avg15d: stats15d(singleId).avg,
+        crPct, drPct, ndrPct,
+        sellingPrice, profit, lastAspPlaced, cogs, skuPpm, ppmPct,
+        deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3PerPiece, cm3Pct
+      });
+    });
+  });
+
+  healthyUnlockingState.data = matchRows;
+
+  if ($("huTotalMatches")) $("huTotalMatches").textContent = fmtInt.format(matchRows.length);
+  if ($("huDistinctSkus")) $("huDistinctSkus").textContent = fmtInt.format(skuSeen.size);
+  if ($("huDistinctMerchants")) $("huDistinctMerchants").textContent = fmtInt.format(merchantSeen.size);
+  if ($("huRemainingPieces")) $("huRemainingPieces").textContent = fmtInt.format(Math.round(remainingPiecesTotal));
+
+  applyHealthyUnlockingSearchAndSort();
+}
+
+function sortHealthyUnlocking(key) {
+  if (healthyUnlockingState.sortKey === key) { healthyUnlockingState.sortDir = healthyUnlockingState.sortDir === "asc" ? "desc" : "asc"; } else { healthyUnlockingState.sortKey = key; healthyUnlockingState.sortDir = "desc"; }
+  applyHealthyUnlockingSearchAndSort();
+}
+
+function applyHealthyUnlockingSearchAndSort() {
+  const term = $("searchHealthyUnlockingInput") ? $("searchHealthyUnlockingInput").value.trim().toLowerCase() : "";
+  let data = (healthyUnlockingState.data || []).filter(d => {
+    if (!term) return true;
+    return (d.skuId && String(d.skuId).toLowerCase().includes(term)) || (d.skuName && d.skuName.toLowerCase().includes(term)) ||
+      (d.merchantName && d.merchantName.toLowerCase().includes(term)) || (d.tagerId && String(d.tagerId).toLowerCase().includes(term)) ||
+      (d.category && d.category.toLowerCase().includes(term)) || (d.acm && d.acm.toLowerCase().includes(term)) ||
+      (d.availability && d.availability.toLowerCase().includes(term));
+  });
+  const { sortKey, sortDir } = healthyUnlockingState; const dir = sortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  healthyUnlockingState.filtered = data;
+  healthyUnlockingState.page = 0;
+  renderPaginatedHealthyUnlockingTable();
+}
+
+function renderPaginatedHealthyUnlockingTable() {
+  const tbody = $("huMatchesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const data = healthyUnlockingState.filtered || [];
+  const start = healthyUnlockingState.page * PAGE_SIZE;
+  const pageRows = data.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.skuId}</td>
+      <td class="font-bold truncate-cell" title="${m.skuName}">${m.skuName}</td>
+      <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
+      <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
+      <td class="text-dim">${m.lastInboundText}</td>
+      <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
+      <td class="font-mono text-dim">${m.tagerId}</td>
+      <td class="text-dim">${m.acm}</td>
+      <td class="num font-bold">${fmtIntCell(m.allocatedQty)}</td>
+      <td class="num text-dim">${fmtIntCell(m.usedQty)}</td>
+      <td class="num text-red font-bold">${fmtIntCell(m.remainingPieces)}</td>
+      <td class="num">${fmtIntCell(m.stock)}</td>
+      <td class="num font-bold text-purple">${fmtIntCell(m.doh)}</td>
+      <td class="num">${fmtIntCell(m.totalPlacedPcs)}</td>
+      <td class="num text-blue">${fmtIntCell(m.totalConfirmedPcs)}</td>
+      <td class="num text-dim">${fmtIntCell(m.totalDeliveredPcs)}</td>
+      <td class="num text-orange">${fmtIntCell(Math.round(m.avg3d))}</td>
+      <td class="num text-red font-bold">${fmtIntCell(Math.round(m.avg6d))}</td>
+      <td class="num">${fmtIntCell(Math.round(m.avg10d))}</td>
+      <td class="num text-purple">${fmtIntCell(Math.round(m.avg15d))}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num text-blue">${fmtMoneyCompactCell(m.sellingPrice)}</td>
+      <td class="num text-green">${fmtMoneyCompactCell(m.profit)}</td>
+      <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.lastAspPlaced)}</td>
+      <td class="num text-red">${fmtMoneyCompactCell(m.cogs)}</td>
+      <td class="num text-orange font-bold">${fmtMoneyCompactCell(m.skuPpm)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num">${fmtPctCell(m.cm3Pct)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE));
+  if ($("rowCountHealthyUnlocking")) $("rowCountHealthyUnlocking").textContent = `${fmtInt.format(data.length)} Matches`;
+  if ($("pageIndicatorHealthyUnlocking")) $("pageIndicatorHealthyUnlocking").textContent = `Page ${healthyUnlockingState.page + 1} of ${totalPages}`;
+  if ($("prevPageHealthyUnlocking")) $("prevPageHealthyUnlocking").disabled = healthyUnlockingState.page === 0;
+  if ($("nextPageHealthyUnlocking")) $("nextPageHealthyUnlocking").disabled = healthyUnlockingState.page >= totalPages - 1;
+}
+
+// =========================================================================
 // SEGMENTATION PANEL ENGINE — نفس حسبة شيت "EGY" بالظبط (يوليو TARGET/
 // Actuals/Achievement%)، لكن الـ Actual بيتقرا لايف من شيت
 // "New segmentation #6864" (NEW_SEGMENTATION_GID) بدل ما يبقى نسخة مجمدة.
@@ -9371,6 +9640,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpNewMatches: mpNewMatchesState.page,
         poorMatches: poorMatchesState.page,
         availabilityLocking: availabilityLockingState.page,
+        healthyLocking: healthyLockingState.page,
+        healthyUnlocking: healthyUnlockingState.page,
         mpSalesPlan: state.mpSalesPlanPage,
         cdz: state.cdzPage,
         cm3ap: cm3apState.page,
@@ -9384,6 +9655,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
+    healthyLockingState.page = 0; healthyUnlockingState.page = 0;
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     PAGE_SIZE = 999999;
 
@@ -9402,10 +9674,12 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
     if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
     if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
+    if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
+    if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
     if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
     if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
     if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
-    
+
     // Wait for DOM to render all rows
     setTimeout(() => {
         downloadTableAsCsv(selectedTableForDownload.el, selectedTableForDownload.title);
@@ -9422,6 +9696,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpNewMatchesState.page = originalPage.mpNewMatches;
         poorMatchesState.page = originalPage.poorMatches;
         availabilityLockingState.page = originalPage.availabilityLocking;
+        healthyLockingState.page = originalPage.healthyLocking;
+        healthyUnlockingState.page = originalPage.healthyUnlocking;
         state.mpSalesPlanPage = originalPage.mpSalesPlan;
         state.cdzPage = originalPage.cdz;
         cm3apState.page = originalPage.cm3ap;
@@ -9441,6 +9717,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
         if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
         if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
+        if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
+        if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
         if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
         if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();

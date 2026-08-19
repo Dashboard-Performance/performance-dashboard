@@ -58,6 +58,7 @@
             <a class="nav-item-sub" id="navPoorMatches">Poor Matches</a>
             <a class="nav-item-sub" id="navAvailabilityLocking">Availability Locking</a>
             <a class="nav-item-sub" id="navHealthyLocking">Healthy Locking</a>
+            <a class="nav-item-sub" id="navHealthyUnlocking">Healthy Unlocking</a>
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
             <a class="nav-item-sub" id="navMpNewMatches">New Matches</a>
           </div>
@@ -2239,6 +2240,97 @@
                   </thead>
                   <tbody id="hlRenewTableBody"></tbody>
                 </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- HEALTHY UNLOCKING (تحت Healthy Locking) -->
+        <div id="viewHealthyUnlocking" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Unlock Candidates <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="huTotalMatches">0</div>
+                <div class="metric-sub text-dim">Active locks (Merchant × SKU) with no real demand</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Distinct SKUs <span class="icon-box"></span></div>
+                <div class="metric-value text-orange" id="huDistinctSkus">0</div>
+                <div class="metric-sub text-dim">Single SKUs behind these locks</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">Distinct Merchants <span class="icon-trend"></span></div>
+                <div class="metric-value text-purple" id="huDistinctMerchants">0</div>
+                <div class="metric-sub text-dim">Merchants holding a lock candidate</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Remaining Pieces <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="huRemainingPieces">0</div>
+                <div class="metric-sub text-dim">Stock stuck in locks with weak/no demand — release candidates</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-red">
+                  <h2>Healthy Unlocking — Matches</h2>
+                  <p>Active locks with weak demand (Avg Last 6D Confirmed &lt; 5) — release candidates.</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchHealthyUnlockingInput" type="search" placeholder="Search SKU, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="huMatchesTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortHealthyUnlocking('skuId')" class="font-mono" style="cursor:pointer;" title="Product identifier for the locked SKU.">SKU_ID</th>
+                      <th onclick="sortHealthyUnlocking('skuName')" class="truncate-cell" style="cursor:pointer;" title="Product name.">SKU_NAME</th>
+                      <th onclick="sortHealthyUnlocking('category')" style="cursor:pointer;" title="Product category.">CATEGORY</th>
+                      <th onclick="sortHealthyUnlocking('availability')" style="cursor:pointer;" title="Current availability status for this SKU.">AVAILABILITY</th>
+                      <th onclick="sortHealthyUnlocking('lastInboundTs')" style="cursor:pointer;" title="Most recent inbound (receiving) date for this SKU, from the Inbound sheet. Dash if it was never received.">LAST INBOUND DATE</th>
+                      <th onclick="sortHealthyUnlocking('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">MERCHANT NAME</th>
+                      <th onclick="sortHealthyUnlocking('tagerId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier holding this lock.">MERCHANT ID</th>
+                      <th onclick="sortHealthyUnlocking('acm')" style="cursor:pointer;" title="Account manager responsible for this merchant.">ACM</th>
+                      <th onclick="sortHealthyUnlocking('allocatedQty')" class="num" style="cursor:pointer;" title="Total pieces originally allocated to this lock.">ALLOCATED QTY</th>
+                      <th onclick="sortHealthyUnlocking('usedQty')" class="num" style="cursor:pointer;" title="Pieces from the lock already consumed by orders.">USED QTY</th>
+                      <th onclick="sortHealthyUnlocking('remainingPieces')" class="num text-red" style="cursor:pointer;" title="Pieces still left unused in this lock — the release opportunity size.">REMAINING PIECES</th>
+                      <th onclick="sortHealthyUnlocking('stock')" class="num" style="cursor:pointer;" title="Current stock, Overall (Debundled) — from the Debundle Map sheet.">STOCK</th>
+                      <th onclick="sortHealthyUnlocking('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand, Overall (Debundled): current stock ÷ average daily Confirmed demand (last 3 days, pooled across this SKU and any bundles containing it). Never higher than Stock when there's no demand.">DOH</th>
+                      <th onclick="sortHealthyUnlocking('totalPlacedPcs')" class="num" style="cursor:pointer;" title="Total Placed pieces this month, Overall (Debundled). No cutoff applied.">TOTAL PLACED PCS</th>
+                      <th onclick="sortHealthyUnlocking('totalConfirmedPcs')" class="num text-blue" style="cursor:pointer;" title="Total Confirmed pieces this month, Overall (Debundled). No cutoff applied.">TOTAL CONFIRMED PCS</th>
+                      <th onclick="sortHealthyUnlocking('totalDeliveredPcs')" class="num text-dim" style="cursor:pointer;" title="Total Delivered pieces this month, Overall (Debundled). No cutoff applied.">TOTAL DELIVERED PCS</th>
+                      <th onclick="sortHealthyUnlocking('avg3d')" class="num text-orange" style="cursor:pointer;" title="Average Confirmed pieces per day, last 3 days, Overall (Debundled).">AVG LAST 3D</th>
+                      <th onclick="sortHealthyUnlocking('avg6d')" class="num text-red" style="cursor:pointer;" title="Average Confirmed pieces per day, last 6 days, Overall (Debundled) — this is the qualifying metric for this page: no demand at all, or below 5/day.">AVG LAST 6D</th>
+                      <th onclick="sortHealthyUnlocking('avg10d')" class="num" style="cursor:pointer;" title="Average Confirmed pieces per day, last 10 days, Overall (Debundled).">AVG LAST 10D</th>
+                      <th onclick="sortHealthyUnlocking('avg15d')" class="num text-purple" style="cursor:pointer;" title="Average Confirmed pieces per day, last 15 days, Overall (Debundled).">AVG LAST 15D</th>
+                      <th onclick="sortHealthyUnlocking('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, Overall (Debundled), this month.">CR%</th>
+                      <th onclick="sortHealthyUnlocking('drPct')" class="num text-dim" style="cursor:pointer;" title="Delivered ÷ Confirmed, Overall (Debundled), this month.">DR%</th>
+                      <th onclick="sortHealthyUnlocking('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%, Overall (Debundled).">NDR%</th>
+                      <th onclick="sortHealthyUnlocking('sellingPrice')" class="num text-blue" style="cursor:pointer;" title="Selling price, from product data.">SELLING PRICE</th>
+                      <th onclick="sortHealthyUnlocking('profit')" class="num text-green" style="cursor:pointer;" title="Profit margin, from product data.">PROFIT</th>
+                      <th onclick="sortHealthyUnlocking('lastAspPlaced')" class="num text-purple" style="cursor:pointer;" title="Total Placed GMV ÷ Total Placed Pieces this month, Overall (Debundled).">LAST ASP PLACED</th>
+                      <th onclick="sortHealthyUnlocking('cogs')" class="num text-red" style="cursor:pointer;" title="Cost of goods, from the COGS sheet.">COGS</th>
+                      <th onclick="sortHealthyUnlocking('skuPpm')" class="num text-orange" style="cursor:pointer;" title="Selling Price − Profit − Cogs.">SKU_PPM</th>
+                      <th onclick="sortHealthyUnlocking('ppmPct')" class="num" style="cursor:pointer;" title="SKU_PPM ÷ Last ASP Placed.">PPM%</th>
+                      <th onclick="sortHealthyUnlocking('deliveredGmv')" class="num font-bold" style="cursor:pointer;" title="Total Delivered GMV this month, Overall (Debundled). No cutoff applied.">DELIVERED GMV</th>
+                      <th onclick="sortHealthyUnlocking('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin, Overall (Debundled), excluding the most recent lag days (same CM3 lag used everywhere else).">CM3</th>
+                      <th onclick="sortHealthyUnlocking('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ CM3-eligible Delivered pieces.">CM/PCS</th>
+                      <th onclick="sortHealthyUnlocking('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 ÷ CM3-eligible Delivered GMV.">CM3%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="huMatchesTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountHealthyUnlocking">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPageHealthyUnlocking" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorHealthyUnlocking">Page 1 of 1</span>
+                  <button id="nextPageHealthyUnlocking" class="btn btn-outline small">Next</button>
+                </div>
               </div>
             </div>
           </section>
