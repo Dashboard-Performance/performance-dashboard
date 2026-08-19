@@ -3858,14 +3858,24 @@ function prepareInventoryTableData(rows) {
   for (let sku in state.inventoryMap) {
     const inv = state.inventoryMap[sku]; const prod = state.productsMap[sku] || { price: 0, profit: 0 };
     const dohInfo = getStockDoh(sku);
-    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: dohInfo.doh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
+    // لو مفيش ديماند خالص (avg=0)، getStockDoh بيرجع الـ DOH = الـ Stock بتاعه
+    // هو (من شيت الديبندلايز)، مش بالضرورة نفس رقم الـ Stock المعروض هنا في
+    // عمود الجدول ده (inv.stock، من شيت الـ Inventory/Products، ممكن يختلف
+    // شوية عن شيت الديبندلايز). عشان الـ DOH متطلعش أكبر من الـ Stock المعروض
+    // فعليًا جمبه في نفس الصف، لما مفيش ديماند بنستخدم inv.stock نفسه كـ DOH.
+    const invDoh = dohInfo.avg > 0 ? dohInfo.doh : Math.round(inv.stock || 0);
+    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: invDoh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
   }
   rows.forEach(r => {
     const sku = r.sku; if (!sku) return;
     if (!map.has(sku)) {
       const prod = state.productsMap[sku] || { price: 0, profit: 0 };
       const dohInfo = getStockDoh(sku);
-      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: dohInfo.doh, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
+      // نفس المنطق فوق: الصف ده مالوش Stock معروض (stock: 0 لأنه مش موجود في
+      // شيت الـ Inventory)، فلو مفيش ديماند الـ DOH لازم يبقى 0 برضه (مش
+      // ستوك شيت الديبندلايز اللي ممكن يبقى رقم مختلف تمامًا).
+      const rowDoh = dohInfo.avg > 0 ? dohInfo.doh : 0;
+      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: rowDoh, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
     }
     const entry = map.get(sku);
     entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
