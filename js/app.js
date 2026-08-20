@@ -267,6 +267,66 @@ let pipelineChartMetric = "pieces"; // "orders" | "pieces" — Pipeline Velocity
 let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
 let categoryChartInst = null;
 const $ = (id) => document.getElementById(id);
+
+// =========================================================================
+// PER-SECTION DATE RANGE FILTER (Start Date / End Date) — بطلب صريح: مفيش
+// فلتر عام واحد فوق الصفحة بيأثر على كل حاجة، كل سكشن بيقرا من MAIN_GID
+// وهيتأثر فعلاً بالفلتر ده (Recommended Tracker, PPM Analyst/Products,
+// PPM Analyst/Single, ...) عنده Start Date/End Date خاصين بيه هو بس، جوه
+// نفس السكشن — مستقلين تمامًا عن أي سكشن تاني. كل الفانكشنز بتاخد
+// "sectionKey" (نص فريد زي "recTracker", "ppmSingle", ...) وبتقراه من
+// عنصرين بالـ id: startDate_<sectionKey> وendDate_<sectionKey>.
+//
+// لو السكشن ده عنده رينج تاريخ مختار (الاتنين متعبيين وValid):
+//   • بيستخدم الرينج ده بالظبط كمصدر الصفوف بدل فلتر الشهر العام
+//     (monthSelect) أو أي شهر متثبت (زي "الشهر الحالي").
+//   • بيلغي أي منطق Cutoff/Lag تمامًا (CR_LAG_DAYS، CM3_LAG_DAYS) لنفس
+//     السكشن ده بس — كل صف داخل الرينج بيتحسب زي ما هو من غير تأخير.
+// لو مفيش رينج مختار لسكشن معين (أو sectionKey متبعتش خالص لفانكشن)، بيرجع
+// تلقائيًا لنفس المنطق الأصلي (فلتر الشهر العام + كل الـ Cutoffs زي ما هي).
+// =========================================================================
+function getActiveDateRangeFilter(sectionKey) {
+  if (!sectionKey) return null;
+  const startInput = $("startDate_" + sectionKey);
+  const endInput = $("endDate_" + sectionKey);
+  const startVal = startInput ? startInput.value : "";
+  const endVal = endInput ? endInput.value : "";
+  if (!startVal || !endVal) return null;
+  const start = new Date(startVal + "T00:00:00");
+  const end = new Date(endVal + "T23:59:59");
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start.getTime() > end.getTime()) return null;
+  return { startTs: start.getTime(), endTs: end.getTime(), startVal, endVal };
+}
+function isDateRangeFilterActive(sectionKey) { return !!getActiveDateRangeFilter(sectionKey); }
+// بديل موحّد لشرط "الشهر المختار" (selectedMonth === "" || r.monthYear ===
+// selectedMonth) المستخدم في كل مكان تقريبًا بيقرا من MAIN_GID — لو السكشن
+// (sectionKey) ده عنده رينج تاريخ مختار، بيتجاهل الشهر تمامًا ويرجع بس
+// الصفوف جوه الرينج؛ وإلا بيرجع لنفس شرط الشهر الأصلي زي ما هو.
+function rowMatchesPeriod(r, selectedMonth, sectionKey) {
+  const dateFilter = getActiveDateRangeFilter(sectionKey);
+  if (dateFilter) return r.timestamp >= dateFilter.startTs && r.timestamp <= dateFilter.endTs;
+  return selectedMonth === "" || r.monthYear === selectedMonth;
+}
+// بديل موحّد للأماكن اللي بتثبت "الشهر الحالي" (currentMonthYear) بدل ما
+// تحترم monthSelect (زي PPM Analyst/Single وHealthy Unlocking) — لو السكشن
+// ده عنده رينج تاريخ مختار بياخد بيه، وإلا بيرجع لنفس منطق الشهر الحالي
+// المثبّت زي ما هو.
+function getMonthOrRangeRows(mainRowsAll, currentMonthYear, sectionKey) {
+  const dateFilter = getActiveDateRangeFilter(sectionKey);
+  if (dateFilter) return (mainRowsAll || []).filter(r => r.timestamp >= dateFilter.startTs && r.timestamp <= dateFilter.endTs);
+  return (mainRowsAll || []).filter(r => r.monthYear === currentMonthYear);
+}
+// بيبني HTML لفلتر Start/End Date + Clear خاص بسكشن معين — بينحط جوه
+// panel-head-modern/table-controls بتاعة نفس السكشن. dateFilterSectionsInit
+// (تحت، بعد DOMContentLoaded logic) بتوصّل الأحداث لكل عنصر اتعمله من الدالة دي.
+function dateRangeFilterHtml(sectionKey, title) {
+  return `<div class="filter-group section-date-filter" data-section-date="${sectionKey}" title="${title || 'Pick both dates to use an exact custom range for this section only, with cutoffs disabled — numbers become raw totals for that range. Clear either date to go back to normal.'}">
+    <input id="startDate_${sectionKey}" type="date" class="date-filter-input" aria-label="Start Date" />
+    <span class="text-dim" style="padding:0 4px;">→</span>
+    <input id="endDate_${sectionKey}" type="date" class="date-filter-input" aria-label="End Date" />
+    <button id="clearDate_${sectionKey}" class="btn btn-outline small hidden" data-clear-date="${sectionKey}">Clear</button>
+  </div>`;
+}
 let jsonpCounter = 0;
 
 // ---------------------------------------------------------------------
@@ -936,7 +996,10 @@ function getCm3LagCutoffTimestamp(rows) {
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
   return latestDate.getTime() - (CM3_LAG_DAYS * 86400000);
 }
-function isCm3RowEligible(row, cutoffTs) {
+function isCm3RowEligible(row, cutoffTs, sectionKey) {
+  // فلتر الرينج العام شغال -> ملغيين أي Cutoff/Lag خالص (راجع تعليق
+  // getActiveDateRangeFilter فوق).
+  if (isDateRangeFilterActive(sectionKey)) return true;
   if (!cutoffTs) return false;
   if (!row.timestamp) return false;
   const rd = new Date(row.timestamp); rd.setHours(0, 0, 0, 0);
@@ -1324,7 +1387,8 @@ function getLagCutoffTimestamp(rows, lagDays) {
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
   return latestDate.getTime() - (lagDays * 86400000);
 }
-function isRowEligibleForLag(row, cutoffTs) {
+function isRowEligibleForLag(row, cutoffTs, sectionKey) {
+  if (isDateRangeFilterActive(sectionKey)) return true;
   if (!cutoffTs) return false;
   if (!row.timestamp) return false;
   const rd = new Date(row.timestamp); rd.setHours(0, 0, 0, 0);
@@ -1370,7 +1434,7 @@ function tcFinalizeBucket(b, grandDeliveredGmv) {
 function computeCommercialActuals(mainRowsAll) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = (mainRowsAll || []).filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = (mainRowsAll || []).filter(r => (rowMatchesPeriod(r, selectedMonth, "targetsCommercial")) && (selectedAcm === "All" || r.acmName === selectedAcm));
   const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // 4 أيام (CM3_LAG_DAYS) — نفس كات أوف الـ CM3 والـ DR
   const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // يومين — خاص بالـ CR بس
 
@@ -1385,9 +1449,9 @@ function computeCommercialActuals(mainRowsAll) {
     b.deliveredGmv += r.deliveredGmv;
     if (r.date) b.dateSet.add(r.date);
     if (r.sku) b.skuSet.add(r.sku);
-    if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
-    if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
-    if (isCm3RowEligible(r, cm3CutoffTs)) {
+    if (isRowEligibleForLag(r, crCutoffTs, "targetsCommercial")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
+    if (isRowEligibleForLag(r, cm3CutoffTs, "targetsCommercial")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    if (isCm3RowEligible(r, cm3CutoffTs, "targetsCommercial")) {
       b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv;
     }
     // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
@@ -1659,7 +1723,7 @@ function parseMerchantSkuDailySheet(payload) {
 //    4 أيام (lag 4 أيام).
 //  • CM3% = CM3 Per Merchant ÷ Delivered GMV لنفس الماتش، بنفس كات أوف الـ
 //    4 أيام (نفس الصفوف بالظبط المستخدمة في CM3 Per Merchant).
-//  • SKU PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID/1779314157) -
+//  • Priceing_PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID/1779314157) -
 //    Cost (شيت COGS، COGS_GID/1724469150) — القيم الثلاثة بتتقرا زي ما هي
 //    من الشيتين، مفيش أي حسبة عليهم غير الطرح المذكور.
 // -------------------------------------------------------------------------
@@ -1899,12 +1963,14 @@ function prepareRecommendedTrackerData() {
       dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
       b.placedByDate.set(rTime, dEntry);
     }
-    // CR% — Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (CR lag).
-    if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
+    // CR% — Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (CR lag). لو
+    // فلتر الديت رينج بتاع recTracker شغال، بيتلغي الكات أوف ده تمامًا.
+    const recTrackerDateFilterActive = isDateRangeFilterActive("recTracker");
+    if (recTrackerDateFilterActive || rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
     // DR% — Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (DR lag).
-    if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
+    if (recTrackerDateFilterActive || rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
     // CM3 Per Merchant / CM3% — بس للصفوف اللي عدى عليها 4 أيام (CM3 lag).
-    if (rTime <= cm3CutoffMs) {
+    if (recTrackerDateFilterActive || rTime <= cm3CutoffMs) {
       b.cm3 += (r.cm3 || 0); b.cm3Gmv += (r.deliveredGmv || 0);
     }
     // PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس CM3 اللي لسه
@@ -2036,13 +2102,13 @@ function prepareRecommendedTrackerData() {
     const cm3PerMerchant = b.cm3;
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
 
-    // SKU PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID 1779314157) -
+    // Priceing_PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID 1779314157) -
     // Cost (شيت COGS، COGS_GID 1724469150) لنفس الـ PRODUCT_ID — القيم دي
     // بتتقرا زي ما هي من الشيتين من غير أي حسبة تانية عليها.
     const prodInfo = state.productsMap[sku] || { price: 0, profit: 0 };
     const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
     const skuPpm = (prodInfo.price || 0) - (prodInfo.profit || 0) - cogsCost;
-    // PPM% (بعد SKU PPM مباشرة) = SKU PPM ÷ Last Placed ASP (آخر يوم فيه
+    // PPM% (بعد Priceing_PPM مباشرة) = Priceing_PPM ÷ Last Placed ASP (آخر يوم فيه
     // Placed فعلاً، مش المتوسط) — بيدي نسبة الـ PPM من آخر سعر بيع فعلي.
     const skuPpmPct = lastPlacedAsp > 0 ? (skuPpm / lastPlacedAsp) * 100 : 0;
 
@@ -2485,7 +2551,7 @@ function preparePpmAnalystProductsData() {
   // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
   const now = new Date();
   const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "ppmProducts");
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
@@ -2500,7 +2566,7 @@ function preparePpmAnalystProductsData() {
   const getBucket = (sku) => {
     let b = bySku.get(sku);
     if (!b) {
-      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, placedGmv: 0, placedPieces: 0 };
+      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, placedGmv: 0, placedPieces: 0, placedByDate: new Map() };
       bySku.set(sku, b);
     }
     return b;
@@ -2518,12 +2584,19 @@ function preparePpmAnalystProductsData() {
     // الـ 4 أيام لاج يتشال من الأعمدة دي في الجدول نفسه (مش بس الكروت فوق).
     b.ppm += (r.ppm || 0);
     b.deliveredGmv += (r.deliveredGmv || 0);
-    // LAST ASP PLACED — بنفس حسبة عمود ASP في Inventory بالظبط: مجموع
-    // GMV ÷ مجموع Pieces، من غير أي منطق "آخر يوم" أو كات أوف.
     b.placedGmv += (r.placedGmv || 0);
     b.placedPieces += (r.placedPieces || 0);
-    if (rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
-    if (rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
+    // LAST ASP PLACED — بطلب صريح: مش مجموع الشهر كله، دي آخر يوم فعليًا
+    // الـ SKU اشتغل فيه (Placed > 0) بالتحديد — Placed GMV ÷ Placed Pieces
+    // بتوع نفس اليوم ده بس، مش متوسط/مجموع أي فترة تانية.
+    if (r.placedPieces > 0) {
+      const dEntry = b.placedByDate.get(rTime) || { gmv: 0, pieces: 0 };
+      dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
+      b.placedByDate.set(rTime, dEntry);
+    }
+    const ppmProductsDateFilterActive = isDateRangeFilterActive("ppmProducts");
+    if (ppmProductsDateFilterActive || rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
+    if (ppmProductsDateFilterActive || rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
     // PPM/Piece — من غير أي كات أوف خالص كمان دلوقتي (بطلب صريح إن كل حاجة
     // تخص PPM متبقاش عليها كات أوف، مش بس Total PPM).
     b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
@@ -2556,12 +2629,15 @@ function preparePpmAnalystProductsData() {
     // ASP = DELIVERED_GMV ÷ DELIVERED_PIECES من غير أي كات أوف — بنفس
     // أرقام Delivered GMV/TOTAL DELIVERED PCS اللي أصلاً من غير كات أوف فوق.
     const asp = b.deliveredPieces > 0 ? (b.deliveredGmv / b.deliveredPieces) : 0;
-    // PPM_SKU = Selling Price − Profit − Cogs، وLAST ASP PLACED = نفس حسبة
+    // Priceing_PPM = Selling Price − Profit − Cogs، وLAST ASP PLACED = نفس حسبة
     // عمود ASP في Inventory بالظبط (مجموع GMV ÷ مجموع Pieces)، بس على الـ
-    // Placed مش الـ Delivered — وPPM% = PPM_SKU ÷ LAST ASP PLACED.
+    // Placed مش الـ Delivered — وPPM% = Priceing_PPM ÷ LAST ASP PLACED.
     const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
     const ppmSku = sellingPrice - profit - cogs;
-    const lastAspPlaced = b.placedPieces > 0 ? (b.placedGmv / b.placedPieces) : 0;
+    // LAST ASP PLACED = Placed GMV ÷ Placed Pieces بتوع آخر يوم بس فيه
+    // Placed فعلاً (أحدث تاريخ في placedByDate) — مش مجموع/متوسط الشهر كله.
+    const lastPlacedEntries = Array.from(b.placedByDate.entries()).sort((x, y) => y[0] - x[0]);
+    const lastAspPlaced = (lastPlacedEntries.length && lastPlacedEntries[0][1].pieces > 0) ? (lastPlacedEntries[0][1].gmv / lastPlacedEntries[0][1].pieces) : 0;
     const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
 
     rows.push({
@@ -2671,7 +2747,7 @@ if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", (
 // وهو بيتباع لوحده + كل البندلز اللي هو مكوّن جواها، بنفس منطق
 // buildDebundleProductMap/mappingsFor المستخدم في Products / Analyst
 // بالظبط). فيها كمان أعمدة زيادة عن PPM Analyst / Products: TOTAL PLACED
-// PCS، COGS، وPPM_SKU (Selling Price − Profit − Cogs).
+// PCS، COGS، وPriceing_PPM (Selling Price − Profit − Cogs).
 // -------------------------------------------------------------------------
 const ppmAnalystSingleState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
@@ -2680,7 +2756,7 @@ function preparePpmAnalystSingleData() {
 
   const now = new Date();
   const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "ppmSingle");
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
   const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
@@ -2704,7 +2780,8 @@ function preparePpmAnalystSingleData() {
       b = {
         placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, placedGmv: 0,
         crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
-        ppm: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0
+        ppm: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0,
+        placedByDate: new Map()
       };
       bySingle.set(singleId, b);
     }
@@ -2713,9 +2790,11 @@ function preparePpmAnalystSingleData() {
 
   monthRows.forEach(r => {
     if (!r.sku) return;
-    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
-    const crEligible = isRowEligibleForLag(r, crCutoffTs);
-    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs, "ppmSingle");
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "ppmSingle");
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs, "ppmSingle");
     mappingsFor(r.sku).forEach(mp => {
       const b = getBucket(mp.singleId);
       const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
@@ -2727,9 +2806,15 @@ function preparePpmAnalystSingleData() {
       // Delivered GMV / TOTAL DELIVERED PPM — من غير أي كات أوف برضو.
       b.ppm += (r.ppm || 0) * weight;
       b.deliveredGmv += (r.deliveredGmv || 0) * weight;
-      // LAST ASP PLACED — بنفس حسبة عمود ASP في Inventory بالظبط: مجموع
-      // Placed GMV ÷ مجموع Placed Pieces، من غير أي منطق "آخر يوم".
       b.placedGmv += (r.placedGmv || 0) * weight;
+      // LAST ASP PLACED — بطلب صريح: آخر يوم فعليًا الـ Single ده اشتغل فيه
+      // (Placed > 0)، Overall (هو لوحده + نصيبه المرجّح من كل بندل هو جواه) —
+      // Placed GMV ÷ Placed Pieces بتوع نفس اليوم ده بس.
+      if (r.placedPieces > 0) {
+        const dEntry = b.placedByDate.get(rTime) || { gmv: 0, pieces: 0 };
+        dEntry.gmv += (r.placedGmv || 0) * weight; dEntry.pieces += (r.placedPieces || 0) * qty;
+        b.placedByDate.set(rTime, dEntry);
+      }
       // CR%/DR%/NDR% — Overall، بكات أوف الـ CR (يومين) والـ CM3/DR (5 أيام).
       if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
       if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
@@ -2764,19 +2849,20 @@ function preparePpmAnalystSingleData() {
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
 
     // Selling Price / Profit من شيت الـ Products، Cogs من شيت الـ COGS —
-    // نفس المصادر المستخدمة في Sellthrough & Inbound بالظبط. PPM_SKU = نفس
-    // معادلة "SKU PPM" في Recommended Tracker: Selling Price − Profit − Cogs.
+    // نفس المصادر المستخدمة في Sellthrough & Inbound بالظبط. Priceing_PPM = نفس
+    // معادلة "Priceing_PPM" في Recommended Tracker: Selling Price − Profit − Cogs.
     const sellingPrice = prod.price || 0;
     const profit = prod.profit || 0;
     const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(singleId) || 0) : 0;
     const ppmSku = sellingPrice - profit - cogs;
-    // LAST ASP PLACED — نفس حسبة عمود ASP في Inventory بالظبط (مجموع GMV ÷
-    // مجموع Pieces)، بس على الـ Placed مش الـ Delivered.
-    const lastAspPlaced = b.placedPieces > 0 ? (b.placedGmv / b.placedPieces) : 0;
-    // PPM% = PPM_SKU ÷ LAST ASP PLACED (بطلب صريح) — مش Total Delivered PPM
+    // LAST ASP PLACED = Placed GMV ÷ Placed Pieces بتوع آخر يوم بس فيه
+    // Placed فعلاً (أحدث تاريخ في placedByDate) — مش مجموع/متوسط الشهر كله.
+    const lastPlacedEntries = Array.from(b.placedByDate.entries()).sort((x, y) => y[0] - x[0]);
+    const lastAspPlaced = (lastPlacedEntries.length && lastPlacedEntries[0][1].pieces > 0) ? (lastPlacedEntries[0][1].gmv / lastPlacedEntries[0][1].pieces) : 0;
+    // PPM% = Priceing_PPM ÷ LAST ASP PLACED (بطلب صريح) — مش Total Delivered PPM
     // ÷ Delivered GMV زي أماكن تانية، نفس منطق "PPM%" في Recommended Tracker بالظبط.
     const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
-    // PPM SUGGEST PPM_SKU = LAST ASP PLACED × 25% — قيمة مقترحة لـ PPM_SKU مبنية على آخر سعر بيع Placed.
+    // PPM SUGGEST Priceing_PPM = LAST ASP PLACED × 25% — قيمة مقترحة لـ Priceing_PPM مبنية على آخر سعر بيع Placed.
     const ppmSuggestPpmSku = lastAspPlaced * 0.25;
 
     rows.push({
@@ -2982,7 +3068,7 @@ function prepareProductsAnalystData() {
   // PPM / CM3 الشهر الحالي OVERALL — نفس منطق PPM Analyst / Products بالظبط
   // (Delivered GMV/PPM من غير كات أوف)، والـ CM3 بياخد كات أوف الـ CM3_LAG_DAYS.
   // GMV/PPM/CM3 (فلوس) بيتوزعوا بوزن الـ COGS، والـ Pieces بيتوزعوا بضرب الكمية.
-  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "productsAnalyst");
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
   // CR% (Confirmed/Placed) بيرجع يومين (CR_LAG_DAYS)، DR% (Delivered/
   // Confirmed) بيرجع نفس كات أوف الـ CM3 (CM3_LAG_DAYS) — بالظبط زي باقي
@@ -3023,9 +3109,9 @@ function prepareProductsAnalystData() {
   };
   monthRows.forEach(r => {
     if (!r.sku) return;
-    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
-    const crEligible = isRowEligibleForLag(r, crCutoffTs);
-    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs, "productsAnalyst");
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "productsAnalyst");
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs, "productsAnalyst");
     mappingsFor(r.sku).forEach(mp => {
       if (!inboundThisYearSkus.has(mp.singleId)) return;
       const b = getBucket(mp.singleId);
@@ -3244,7 +3330,7 @@ function prepareProductsMatchesAnalystData() {
     return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
   };
 
-  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "productsMatchesAnalyst");
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows); // 4 أيام (DR%/CM3/CM3-Piece/CM3%)
   const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS); // يومين (CR% بس)
 
@@ -3265,9 +3351,9 @@ function prepareProductsMatchesAnalystData() {
 
   monthRows.forEach(r => {
     if (!r.sku || !r.merchantId) return;
-    const crEligible = isRowEligibleForLag(r, crCutoffTs);
-    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
-    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "productsMatchesAnalyst");
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs, "productsMatchesAnalyst");
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs, "productsMatchesAnalyst");
     mappingsFor(r.sku).forEach(mp => {
       if (!inboundThisYearSkus.has(mp.singleId)) return;
       const key = r.merchantId + "||" + mp.singleId;
@@ -3723,6 +3809,8 @@ function populateFilters(rows) {
 }
 
 function applyFilters() {
+  // الـ Overview مالوش فلتر Date Range خاص بيه (الفلتر دلوقتي جوه كل سكشن
+  // لوحده بس، مش هنا) — فبتفضل شغالة بفلتر الشهر/الـ ACM العام زي ما هي بالظبط.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   if($("tableDateRange")) $("tableDateRange").textContent = selectedMonth || "All Time";
@@ -3774,6 +3862,13 @@ function updateDashboard(rows) {
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
+  // الأقسام دي مكنتش بترندر تلقائي مع باقي الفلاتر (كانت بس بترندر أول ما
+  // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
+  // تاني فوق الصفحة) يفضل شغال عليها لايف لو كانت هي التاب المفتوح دلوقتي.
+  if ($("viewAvailabilityLocking") && $("viewAvailabilityLocking").classList.contains("active-view")) prepareAvailabilityLockingData();
+  if ($("viewHealthyLocking") && $("viewHealthyLocking").classList.contains("active-view")) prepareHealthyLockingData();
+  if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
+  if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
@@ -4279,7 +4374,7 @@ function cm3PeriodSortKey(dateObj, mode) {
   return (dateObj.getFullYear() * 12 + dateObj.getMonth()) * 10 + p;
 }
 
-function cm3BuildCombos(rows, periodMode) {
+function cm3BuildCombos(rows, periodMode, sectionKey) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return null;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
@@ -4292,7 +4387,7 @@ function cm3BuildCombos(rows, periodMode) {
     const key = `${r.merchantId}||${r.sku}||${period}`;
     if (!comboMap.has(key)) { comboMap.set(key, { merchantId: r.merchantId, merchantName: r.merchantName, sku: r.sku, category: r.category, period, periodSort, placedPieces: 0, cm3: 0 }); }
     const e = comboMap.get(key); e.placedPieces += r.placedPieces;
-    if (isCm3RowEligible(r, cm3Cutoff)) e.cm3 += r.cm3;
+    if (isCm3RowEligible(r, cm3Cutoff, sectionKey)) e.cm3 += r.cm3;
   });
   const qualifying = Array.from(comboMap.values()).filter(c => c.placedPieces >= CM3_MIN_PLACED_PIECES);
   const periodSortMap = new Map();
@@ -4378,14 +4473,14 @@ function cm3ComputeTransitionRows(matrix, allPeriodsSorted, displayPeriods) {
   });
 }
 
-function computeCm3Analysis(periodMode, scope) {
+function computeCm3Analysis(periodMode, scope, sectionKey) {
   // بيحترم فلتر الشهر (monthSelect) وفلتر الـ ACM اللي فوق الداشبورد زي أي
   // سكشن تاني — قبل كده كان بيقرأ state.allParsedRows كامل من غير فلترة
   // خالص، فاختيار "All Months" أو شهر معين ماكانش بيفرق مع السكشن ده.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = (state.allParsedRows || []).filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
-  const built = cm3BuildCombos(rows, periodMode); if (!built) return null;
+  const rows = (state.allParsedRows || []).filter(r => (rowMatchesPeriod(r, selectedMonth, sectionKey)) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const built = cm3BuildCombos(rows, periodMode, sectionKey); if (!built) return null;
   const { qualifying, allPeriodsSorted, displayPeriods, latestDate } = built;
   const matchMatrix = cm3BuildEntityMatrix(qualifying, "match");
   const matchLevelRows = cm3ComputeTransitionRows(matchMatrix, allPeriodsSorted, displayPeriods);
@@ -4698,7 +4793,7 @@ function tcWireControlsOnce() {
 }
 
 function renderCm3TargetView() {
-  const analysis = computeCm3Analysis(cm3State.period, cm3State.scope);
+  const analysis = computeCm3Analysis(cm3State.period, cm3State.scope, "cm3Analyst");
   if ($("cm3TableTitle")) $("cm3TableTitle").textContent = `CM3 Target - ${SCOPE_TITLES[cm3State.scope]}`;
   if ($("cm3TableSub")) { $("cm3TableSub").textContent = cm3State.scope === "overall" ? "Total qualifying CM3 (Positive vs Negative) per period" : "Period-over-period status transitions"; }
   hideCm3Drilldown();
@@ -4749,7 +4844,7 @@ function renderCm3AnalystHeaders() {
 //    الصفوف اللي عدت كات أوف الـ CM3 (مش إجمالي Delivered Pcs من غير كات
 //    أوف)، وCM3% بيتقسم على Delivered GMV من نفس الصفوف كمان — عشان
 //    البسط والمقام في النسبتين دول يفضلوا من نفس الفترة المقطوعة بالظبط.
-function prepareCm3AnalystData(rows) {
+function prepareCm3AnalystData(rows, sectionKey) {
   const map = new Map(); let totalGmv = 0; let totalCm3 = 0; let totalCm3Gmv = 0;
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
 
@@ -4786,7 +4881,7 @@ function prepareCm3AnalystData(rows) {
 
   // CM3 (وCM3/Pc وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت كات أوف الـ CM3.
   rows.forEach(r => {
-    if (!isCm3RowEligible(r, cm3Cutoff)) return;
+    if (!isCm3RowEligible(r, cm3Cutoff, sectionKey)) return;
     const key = keyFor(r);
     if (!key || key === "Unassigned") return;
     const entry = getEntry(key, r);
@@ -4885,8 +4980,8 @@ function renderPaginatedCm3AnalystTable() {
 function renderCm3AnalystView() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const filteredRows = state.allParsedRows.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
-  prepareCm3AnalystData(filteredRows);
+  const filteredRows = state.allParsedRows.filter(r => (rowMatchesPeriod(r, selectedMonth, "cm3Analyst")) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  prepareCm3AnalystData(filteredRows, "cm3Analyst");
   analystWireControlsOnce();
 }
 
@@ -4959,7 +5054,7 @@ function prepareMpSalesPlanData() {
     // مستوى Merchant (TAGER_ID = MERCHANT_ID) + Product (PRODUCT_ID = SKU).
     const mainRowsAll = state.allParsedRows || [];
     const perfRows = mainRowsAll.filter(r => {
-        return (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm);
+        return (rowMatchesPeriod(r, selectedMonth, "mpSalesPlan")) && (selectedAcm === "All" || r.acmName === selectedAcm);
     });
 
     let latestTs = 0; perfRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
@@ -5234,7 +5329,7 @@ function computeCommercialDebundlized() {
   const mainRowsAll = state.allParsedRows || [];
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = mainRowsAll.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialDebundlized")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // نفس الـ 4 أيام بتاعة الـ DR والـ CM3
   const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين بتاعة الـ CR
@@ -5260,7 +5355,7 @@ function computeCommercialDebundlized() {
   rows.forEach(r => {
     if (!r.sku) return;
     overallDeliveredGmv += r.deliveredGmv;
-    if (isCm3RowEligible(r, cm3CutoffTs)) overallCm3 += r.cm3;
+    if (isCm3RowEligible(r, cm3CutoffTs, "commercialDebundlized")) overallCm3 += r.cm3;
 
     if (!skuList.has(r.sku)) return; // مش موجود في شيت الديبندلايز خالص (عمود A)
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
@@ -5270,9 +5365,9 @@ function computeCommercialDebundlized() {
     const b = getBucket(r.sku);
     b.placed += r.placedPieces; b.confirmed += r.confirmedPieces; b.delivered += r.deliveredPieces;
     if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
-    if (isRowEligibleForLag(r, crCutoffTs)) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
-    if (isRowEligibleForLag(r, cm3CutoffTs)) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
-    if (isCm3RowEligible(r, cm3CutoffTs)) {
+    if (isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
+    if (isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    if (isCm3RowEligible(r, cm3CutoffTs, "commercialDebundlized")) {
       b.deliveredGmv += r.deliveredGmv;
       b.cm3 += r.cm3;
       b.cm3Gmv += r.deliveredGmv;
@@ -5666,7 +5761,7 @@ function cm3apSeriesFmtCell(v, fmt) {
 
 function buildCm3ApSeriesData(periodMode) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = (state.allParsedRows || []).filter(r => selectedMonth === "" || r.monthYear === selectedMonth);
+  const rows = (state.allParsedRows || []).filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
   if (!rows.length) return { skuList: [], periodLabels: [] };
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
@@ -5712,7 +5807,7 @@ function buildCm3ApSeriesData(periodMode) {
     b.aspWeight += (r.deliveredPieces || 0);
     // الـ CM3 بيحترم كات أوف الـ CM3_LAG_DAYS، لأن عمود الربحية في الشيت نفسه
     // بيتأخر تعبيته أيام قبل ما يوصل — ده مش باج، ده طبيعة مصدر الداتا.
-    if (isCm3RowEligible(r, cm3Cutoff)) {
+    if (isCm3RowEligible(r, cm3Cutoff, "cm3AnalystProducts")) {
       b.cm3 += r.cm3 || 0; b.cm3Gmv += r.deliveredGmv || 0;
     }
     // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس CM3.
@@ -5758,7 +5853,7 @@ function buildCm3AnalystProductsData(periodMode) {
   // بيحترم فلتر الشهر العام اللي فوق الموقع (نفس شيت monthSelect المستخدم في كل
   // سكشن تاني) — لو مفيش شهر مختار (All Months) بيدي كل الداتا زي ما هي.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = (state.allParsedRows || []).filter(r => selectedMonth === "" || r.monthYear === selectedMonth);
+  const rows = (state.allParsedRows || []).filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
   if (!rows.length) return { products: [], latestPeriod: null, prevPeriod: null };
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
   const crCutoff = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين المستخدمين لـ CR% في أي مكان تاني
@@ -5795,7 +5890,7 @@ function buildCm3AnalystProductsData(periodMode) {
     b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces;
     b.aspWeighted += (r.deliveredAsp || 0) * (r.deliveredPieces || 0);
     b.aspWeight += (r.deliveredPieces || 0);
-    if (isCm3RowEligible(r, cm3Cutoff)) {
+    if (isCm3RowEligible(r, cm3Cutoff, "cm3AnalystProducts")) {
       b.cm3 += r.cm3; b.cm3Gmv += r.deliveredGmv;
     }
     // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
@@ -5814,7 +5909,7 @@ function buildCm3AnalystProductsData(periodMode) {
     if (!dPeriods.has(wPeriod)) dPeriods.set(wPeriod, { periodSort: wSort, placed: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0 });
     const db = dPeriods.get(wPeriod);
     db.placed += r.placedPieces; db.deliveredGmv += r.deliveredGmv;
-    if (isCm3RowEligible(r, cm3Cutoff)) { db.cm3 += r.cm3; db.cm3Gmv += r.deliveredGmv; }
+    if (isCm3RowEligible(r, cm3Cutoff, "cm3AnalystProducts")) { db.cm3 += r.cm3; db.cm3Gmv += r.deliveredGmv; }
   });
 
   // كل الـ Periods الموجودة في الداتا كلها، مرتبة زمنياً.
@@ -6404,7 +6499,7 @@ function prepareMpMatchesData() {
   const mainRowsAll = state.allParsedRows || [];
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const mainRows = mainRowsAll.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const mainRows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "mpMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(mainRows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع CM3_LAG_DAYS أيام
 
@@ -6445,7 +6540,7 @@ function prepareMpMatchesData() {
     if (planKeys.has(key)) inPlanDeliveredGmv += r.deliveredGmv;
     else { outDeliveredGmv += r.deliveredGmv; outPlanKeysSeen.add(key); outPlacedPcs += r.placedPieces; }
 
-    if (isCm3RowEligible(r, cm3Cutoff)) {
+    if (isCm3RowEligible(r, cm3Cutoff, "mpMatches")) {
       e.cm3 += r.cm3; e.cm3Gmv += r.deliveredGmv;
       totalConfirmedPcs += r.confirmedPieces; totalDeliveredPcs += r.deliveredPieces;
       if (!planKeys.has(key)) outConfirmedPcs += r.confirmedPieces;
@@ -6597,12 +6692,12 @@ function computePoorMatches() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   const rowsFiltered = (state.allParsedRows || []).filter(r =>
-    (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm)
+    (rowMatchesPeriod(r, selectedMonth, "poorMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm)
   );
   if (!rowsFiltered.length) return [];
 
   const cutoffTs = getCm3LagCutoffTimestamp(rowsFiltered); // نفس كات أوف الـ 4 أيام، مطبق هنا على Placed/Confirmed/Delivered/CM3/NDR
-  const eligibleRows = rowsFiltered.filter(r => isCm3RowEligible(r, cutoffTs)); // بس الصفوف اللي قبل/يوم الكات أوف
+  const eligibleRows = rowsFiltered.filter(r => isCm3RowEligible(r, cutoffTs, "poorMatches")); // بس الصفوف اللي قبل/يوم الكات أوف
   const matches = buildPoorMatchesFromRows(eligibleRows);
 
   // PPM بس هو اللي بقى من غير كات أوف خالص (بطلب صريح) — بنجيبه من كل
@@ -6624,7 +6719,7 @@ function computePoorMatchesPreviousPeriod() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   const currentRows = (state.allParsedRows || []).filter(r =>
-    (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm)
+    (rowMatchesPeriod(r, selectedMonth, "poorMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm)
   );
   if (!currentRows.length) return null;
 
@@ -7077,8 +7172,8 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
 
     // Selling Price / Profit: من نفس شيت الـ Products (PRODUCTS_GID) بتاع
-    // الـ SKU ده. Cogs: من شيت الـ COGS (COGS_GID) بمطابقة الـ SKU. PPM SKU:
-    // نفس معادلة "SKU PPM" المستخدمة في Recommended Tracker بالظبط —
+    // الـ SKU ده. Cogs: من شيت الـ COGS (COGS_GID) بمطابقة الـ SKU. Priceing_PPM:
+    // نفس معادلة "Priceing_PPM" المستخدمة في Recommended Tracker بالظبط —
     // Selling Price - Profit - Cogs.
     const sellingPrice = prodInfo.price || 0;
     const profit = prodInfo.profit || 0;
@@ -7702,7 +7797,7 @@ function prepareMpNewMatchesData() {
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const prevMonthYear = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  const thisMonthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const thisMonthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "mpNewMatches");
   const prevMonthRows = mainRowsAll.filter(r => r.monthYear === prevMonthYear);
 
   // ماتشات ظهرت في نفس الشهر الحالي قبل يوم NEW_MATCH_START_DAY — مستبعدة.
@@ -7752,9 +7847,9 @@ function prepareMpNewMatchesData() {
     const e = map.get(key);
     e.placed += r.placedPieces || 0; e.confirmed += r.confirmedPieces || 0; e.delivered += r.deliveredPieces || 0;
     e.placedGmv += r.placedGmv || 0; e.deliveredGmv += r.deliveredGmv || 0; e.ppm += r.ppm || 0;
-    if (isRowEligibleForLag(r, crCutoff)) { e.crPlaced += r.placedPieces || 0; e.crConfirmed += r.confirmedPieces || 0; }
-    if (isRowEligibleForLag(r, drCutoff)) { e.drConfirmed += r.confirmedPieces || 0; e.drDelivered += r.deliveredPieces || 0; }
-    if (isCm3RowEligible(r, cm3Cutoff)) { e.cm3 += r.cm3 || 0; e.cm3Gmv += r.deliveredGmv || 0; }
+    if (isRowEligibleForLag(r, crCutoff, "mpNewMatches")) { e.crPlaced += r.placedPieces || 0; e.crConfirmed += r.confirmedPieces || 0; }
+    if (isRowEligibleForLag(r, drCutoff, "mpNewMatches")) { e.drConfirmed += r.confirmedPieces || 0; e.drDelivered += r.deliveredPieces || 0; }
+    if (isCm3RowEligible(r, cm3Cutoff, "mpNewMatches")) { e.cm3 += r.cm3 || 0; e.cm3Gmv += r.deliveredGmv || 0; }
     if (r.timestamp && r.timestamp < e.matchStartTs) { e.matchStartTs = r.timestamp; e.matchStartDate = r.date; } // أقدم ظهور للماتش
   });
 
@@ -7992,11 +8087,11 @@ function alIsLockActive(lock, todayMs) {
   return lock.expiryTs >= todayMs;
 }
 
-function computeAvailabilityLocking() {
+function computeAvailabilityLocking(sectionKey) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   const mainRowsAll = state.allParsedRows || [];
-  const mainRows = mainRowsAll.filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const mainRows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, sectionKey)) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
 
@@ -8091,7 +8186,7 @@ function computeAvailabilityLocking() {
 }
 
 function prepareAvailabilityLockingData() {
-  const rows = computeAvailabilityLocking();
+  const rows = computeAvailabilityLocking("availabilityLocking");
   state.availabilityLockingSkuRows = rows;
 
   const catMap = new Map();
@@ -8294,7 +8389,7 @@ function hlBuildGmvContribution() {
   const { productMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = (state.allParsedRows || []).filter(r => (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = (state.allParsedRows || []).filter(r => (rowMatchesPeriod(r, selectedMonth, "healthyLocking")) && (selectedAcm === "All" || r.acmName === selectedAcm));
   const gmvMap = new Map(); // "merchantId||singleId" -> gmv
   let totalGmv = 0;
   rows.forEach(r => {
@@ -8312,7 +8407,7 @@ function hlBuildGmvContribution() {
 }
 
 function prepareHealthyLockingData() {
-  const skuRows = computeAvailabilityLocking();
+  const skuRows = computeAvailabilityLocking("healthyLocking");
   const { gmvMap, totalGmv } = hlBuildGmvContribution();
 
   const matchRows = [];
@@ -8579,7 +8674,7 @@ function renderPaginatedHealthyLockingTable() {
 // مش مربوط بتاجر معين.
 //
 // أما باقي أعمدة الجدول (Stock/DOH, Total Placed/Confirmed/Delivered,
-// Avg Last 3D/10D/15D, CR%/DR%/NDR%, Selling Price/Profit/Cogs/SKU_PPM/PPM%,
+// Avg Last 3D/10D/15D, CR%/DR%/NDR%, Selling Price/Profit/Cogs/Priceing_PPM/PPM%,
 // Delivered GMV, CM3/CM3 per Piece/CM3%) — كل دي "Overall" برضو لنفس الـ
 // Single SKU (بنفس منطق PPM Analyst / Single بالظبط)، مش مقصورة على نشاط
 // التاجر صاحب القفل ده لوحده. القفل نفسه (Allocated/Used/Remaining Pieces،
@@ -8594,7 +8689,7 @@ function prepareHealthyUnlockingData() {
   // PPM) تفضل ليها معنى "الشهر الجاري" ومتتلخبطش لو حد فلتر شهر تاني.
   const now = new Date();
   const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const monthRows = mainRowsAll.filter(r => r.monthYear === currentMonthYear);
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "healthyUnlocking");
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
   const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
@@ -8637,9 +8732,9 @@ function prepareHealthyUnlockingData() {
   };
   monthRows.forEach(r => {
     if (!r.sku) return;
-    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs);
-    const crEligible = isRowEligibleForLag(r, crCutoffTs);
-    const drEligible = isRowEligibleForLag(r, cm3CutoffTs);
+    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs, "healthyUnlocking");
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "healthyUnlocking");
+    const drEligible = isRowEligibleForLag(r, cm3CutoffTs, "healthyUnlocking");
     mappingsFor(r.sku).forEach(mp => {
       const b = getBucket(mp.singleId);
       const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
@@ -9575,6 +9670,58 @@ if($("acmSelect")) $("acmSelect").addEventListener("change", applyFilters);
 if($("refreshBtn")) $("refreshBtn").addEventListener("click", () => loadData(true));
 if($("retryBtn")) $("retryBtn").addEventListener("click", () => loadData(true));
 
+// -------------------------------------------------------------------------
+// PER-SECTION DATE RANGE FILTER — كل سكشن فيه Start Date/End Date خاصين بيه
+// (راجع تعليق getActiveDateRangeFilter في أول الملف للمنطق الكامل). بنستخدم
+// event delegation على document (مش listener لكل عنصر لوحده) عشان الحقول دي
+// موجودة statically جوه كل سكشن في الـ HTML، وده أبسط وأضمن من تسجيل كل واحد
+// فيهم لوحده. SECTION_DATE_FILTER_REFRESH بتربط كل sectionKey بالفانكشن اللي
+// بترندر السكشن ده تاني لما الفلتر بتاعه يتغيّر.
+// -------------------------------------------------------------------------
+const SECTION_DATE_FILTER_REFRESH = {
+  recTracker: () => prepareRecommendedTrackerData(),
+  ppmProducts: () => preparePpmAnalystProductsData(),
+  ppmSingle: () => preparePpmAnalystSingleData(),
+  cm3Analyst: () => { renderCm3TargetView(); renderCm3AnalystView(); },
+  productsAnalyst: () => prepareProductsAnalystData(),
+  productsMatchesAnalyst: () => prepareProductsMatchesAnalystData(),
+  poorMatches: () => preparePoorMatchesData(),
+  availabilityLocking: () => prepareAvailabilityLockingData(),
+  healthyLocking: () => prepareHealthyLockingData(),
+  healthyUnlocking: () => prepareHealthyUnlockingData(),
+  mpMatches: () => prepareMpMatchesData(),
+  mpNewMatches: () => prepareMpNewMatchesData(),
+  commercialDebundlized: () => prepareCommercialDebundlizedData(),
+  targetsCommercial: () => renderTargetsCommercialView(),
+  mpSalesPlan: () => prepareMpSalesPlanData(),
+  cm3AnalystProducts: () => prepareCm3AnalystProductsData()
+};
+function onSectionDateFilterChange(sectionKey) {
+  const startInput = $("startDate_" + sectionKey); const endInput = $("endDate_" + sectionKey);
+  const active = isDateRangeFilterActive(sectionKey);
+  if (startInput) startInput.classList.toggle("active-range", active);
+  if (endInput) endInput.classList.toggle("active-range", active);
+  const clearBtn = $("clearDate_" + sectionKey);
+  if (clearBtn) clearBtn.classList.toggle("hidden", !(startInput && startInput.value) && !(endInput && endInput.value));
+  const fn = SECTION_DATE_FILTER_REFRESH[sectionKey];
+  if (fn) fn();
+}
+document.addEventListener("change", (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains("date-filter-input")) {
+    const wrap = e.target.closest("[data-section-date]");
+    if (wrap) onSectionDateFilterChange(wrap.dataset.sectionDate);
+  }
+});
+document.addEventListener("click", (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest("[data-clear-date]") : null;
+  if (btn) {
+    const key = btn.dataset.clearDate;
+    if ($("startDate_" + key)) $("startDate_" + key).value = "";
+    if ($("endDate_" + key)) $("endDate_" + key).value = "";
+    onSectionDateFilterChange(key);
+  }
+});
+
 // ==========================================
 // DOWNLOAD CSV MODAL LOGIC
 // ==========================================
@@ -9814,5 +9961,29 @@ function downloadTableAsCsv(tableEl, fileName) {
     document.body.removeChild(downloadLink);
 }
 
+// -------------------------------------------------------------------------
+// AUTO REFRESH — كل ساعة، بس مش "كل ساعة من وقت ما الصفحة اتفتحت" (كل واحد
+// هيترفرش في وقت مختلف حسب امتى فتح التاب بتاعه). بدل كده بنحسب الوقت
+// المتبقي لحد أقرب "ساعة مضبوطة" على الساعة الحقيقية (Wall clock — زي
+// 3:00:00, 4:00:00...) ونعمل أول ريفريش بالظبط عليها، وبعدين كل ساعة ثابتة
+// من بعدها. طالما ساعة كل جهاز مضبوطة صح (النظام العادي)، كل اليوزرز اللي
+// فاتحين الداشبورد هيترفرشوا مع بعض في نفس الدقيقة بالظبط، بغض النظر إمتى
+// كل واحد فتح الصفحة هو نفسه. الريفريش نفسه بيستخدم loadData(false) —
+// يعني بصمت في الخلفية (مفيش سبينر/فلاش كامل للصفحة)، وبيبني على نفس منطق
+// "Live — updated" الموجود أصلاً لو الداتا فعلاً اتغيرت.
+// -------------------------------------------------------------------------
+function scheduleAutoRefresh() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1); // أقرب ساعة مضبوطة جاية
+  const delay = next.getTime() - now.getTime();
+  setTimeout(() => {
+    loadData(false);
+    setInterval(() => loadData(false), 60 * 60 * 1000); // كل ساعة ثابتة من بعدها
+  }, delay);
+}
+
 setupTicker();
 loadData(false);
+scheduleAutoRefresh();

@@ -118,7 +118,7 @@
             <div class="metric-card hover-glow highlight-card">
               <div class="metric-title text-orange">Net Delivery Rate (NDR) <span class="icon-trend"></span></div>
               <div class="metric-value" id="ndrVal">0%</div>
-              <div class="metric-sub text-dim">CR Cutoff D-2 &times; DR Cutoff D-5</div>
+              <div class="metric-sub text-dim" id="ndrCutoffLabel">CR Cutoff D-2 &times; DR Cutoff D-5</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Delivered GMV <span class="icon-dollar text-green"></span></div>
@@ -131,12 +131,12 @@
             <div class="metric-card hover-glow">
               <div class="metric-title">Confirmation Rate (CR) <span class="icon-check"></span></div>
               <div class="metric-value" id="crVal">0%</div>
-              <div class="metric-sub text-dim">Cutoff D-2</div>
+              <div class="metric-sub text-dim" id="crCutoffLabel">Cutoff D-2</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Delivery Rate (DR) <span class="icon-truck"></span></div>
               <div class="metric-value" id="drVal">0%</div>
-              <div class="metric-sub text-dim">Cutoff D-5</div>
+              <div class="metric-sub text-dim" id="drCutoffLabel">Cutoff D-5</div>
             </div>
             <div class="metric-card hover-glow">
               <div class="metric-title">Active SKUs <span class="icon-box"></span></div>
@@ -226,6 +226,12 @@
                   <p>Products &amp; Matches — live Starting vs Current</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="recTracker" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_recTracker" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_recTracker" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_recTracker" class="btn btn-outline small hidden" data-clear-date="recTracker">Clear</button>
+                  </div>
                   <select id="rtAcmFilterSelect" class="filter-select">
                     <option value="">All ACMs</option>
                   </select>
@@ -265,8 +271,8 @@
                       <th onclick="sortRecommendedTracker('placedAsp')" class="num" style="cursor:pointer;" title="Average selling price from the last 3 days that had placed orders.">Placed ASP</th>
                       <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;" title="Contribution margin for this match, excluding the most recent 4 days.">CM3 Per Merchant</th>
                       <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, using the same 4-day cutoff as CM3 Per Merchant.">CM3%</th>
-                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;" title="Price minus cost minus profit for this SKU, read from product/cost data.">SKU PPM</th>
-                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="SKU PPM ÷ the most recent single day's Placed ASP (not a 3-day average).">PPM%</th>
+                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;" title="Price minus cost minus profit for this SKU, read from product/cost data.">Priceing_PPM</th>
+                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ the most recent single day's Placed ASP (not a 3-day average).">PPM%</th>
                       <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;" title="Pieces allocated to this merchant for this SKU under the active stock lock.">Allocated Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;" title="Pieces already used from this merchant's allocated lock.">Used Qty (Merchant)</th>
                       <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;" title="Pieces still available from this merchant's lock allocation.">Remaining Pieces (Merchant)</th>
@@ -685,6 +691,14 @@
                   <h2 id="tcTableTitle">Targets Commercial — Grand Total</h2>
                   <p>Targets Category vs Actual (CM3/rate cut-off Rules)</p>
                 </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="targetsCommercial" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_targetsCommercial" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_targetsCommercial" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_targetsCommercial" class="btn btn-outline small hidden" data-clear-date="targetsCommercial">Clear</button>
+                  </div>
+                </div>
               </div>
               <div class="table-responsive">
                 <table class="data-table" id="tcTable">
@@ -788,6 +802,12 @@
                   <p>SKU demand (Bundle) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="commercialDebundlized" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_commercialDebundlized" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_commercialDebundlized" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_commercialDebundlized" class="btn btn-outline small hidden" data-clear-date="commercialDebundlized">Clear</button>
+                  </div>
                   <input id="searchCdzInput" type="search" placeholder="Search Product ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -924,6 +944,12 @@
                   <p id="cm3apTableSub">Current period vs previous period</p>
                 </div>
                 <div class="table-controls cm3ap-search-slot">
+                  <div class="filter-group section-date-filter" data-section-date="cm3AnalystProducts" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_cm3AnalystProducts" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_cm3AnalystProducts" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_cm3AnalystProducts" class="btn btn-outline small hidden" data-clear-date="cm3AnalystProducts">Clear</button>
+                  </div>
                   <input id="cm3apSearchInput" type="search" placeholder="Search SKU or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -1150,6 +1176,12 @@
                    <p>Detailed performance and profitability status mapped with category targets.</p>
                  </div>
                  <div class="table-controls">
+                   <div class="filter-group section-date-filter" data-section-date="cm3Analyst" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_cm3Analyst" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_cm3Analyst" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_cm3Analyst" class="btn btn-outline small hidden" data-clear-date="cm3Analyst">Clear</button>
+                  </div>
                    <input id="searchAnalystInput" type="search" placeholder="Search Entity, SKU, or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                  </div>
                </div>
@@ -1206,6 +1238,14 @@
                   <p>This month, SKUs only — sorted by Delivered GMV, with Stock/DOH from Recommended Tracker's debundled logic</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="ppmProducts" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_ppmProducts" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_ppmProducts" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_ppmProducts" class="btn btn-outline small hidden" data-clear-date="ppmProducts">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchPpmAnalystInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                   <select id="ppmAnalystFilterOp" class="filter-select">
                     <option value="">PPM% Filter</option>
@@ -1234,7 +1274,7 @@
                       <th onclick="sortPpmAnalyst('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed this month, excluding the most recent 5 days.">DR%</th>
                       <th onclick="sortPpmAnalyst('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — inherits the 2-day CR and 5-day DR cutoffs from each component.">NDR%</th>
                       <th onclick="sortPpmAnalyst('ppmPerPiece')" class="num" style="cursor:pointer;" title="Average profit per delivered piece this month. No cutoff applied.">PPM/Piece</th>
-                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;" title="PPM_SKU ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
+                      <th onclick="sortPpmAnalyst('ppmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
                       <th onclick="sortPpmAnalyst('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month. No cutoff applied.">TOTAL DELIVERED PPM</th>
                       <th onclick="sortPpmAnalyst('totalDeliveredPcs')" class="num" style="cursor:pointer;" title="Total pieces delivered this month. No cutoff applied.">TOTAL DELIVERED PCS</th>
                       <th onclick="sortPpmAnalyst('contrPpmPct')" class="num" style="cursor:pointer;" title="This SKU's share of total PPM delivered this month.">CONTR PPM%</th>
@@ -1291,6 +1331,14 @@
                   <p>Single SKU level (all its bundles combined) — every Single SKU from the debundle map, this month's PPM &amp; CM3 (CM3 respects the standard lag cutoff)</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="ppmSingle" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_ppmSingle" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_ppmSingle" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_ppmSingle" class="btn btn-outline small hidden" data-clear-date="ppmSingle">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchPpmAnalystSingleInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                   <select id="ppmAnalystSingleFilterOp" class="filter-select">
                     <option value="">PPM% Filter</option>
@@ -1322,9 +1370,9 @@
                       <th onclick="sortPpmAnalystSingle('cogs')" class="num" style="cursor:pointer;" title="Cost of goods for this SKU, from the cost data.">COGS</th>
                       <th onclick="sortPpmAnalystSingle('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month, Overall. No cutoff applied.">DELIVERED GMV</th>
                       <th onclick="sortPpmAnalystSingle('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
-                      <th onclick="sortPpmAnalystSingle('ppmSku')" class="num" style="cursor:pointer;" title="Selling Price − Profit − Cogs for this SKU (same formula used as SKU PPM elsewhere in the dashboard).">PPM_SKU</th>
-                      <th onclick="sortPpmAnalystSingle('ppmPct')" class="num" style="cursor:pointer;" title="PPM_SKU ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
-                      <th onclick="sortPpmAnalystSingle('ppmSuggestPpmSku')" class="num" style="cursor:pointer;" title="LAST ASP PLACED × 25% — a suggested target PPM_SKU based on the most recent placed selling price.">PPM SUGGEST PPM_SKU</th>
+                      <th onclick="sortPpmAnalystSingle('ppmSku')" class="num" style="cursor:pointer;" title="Selling Price − Profit − Cogs for this SKU (same formula used as Priceing_PPM elsewhere in the dashboard).">Priceing_PPM</th>
+                      <th onclick="sortPpmAnalystSingle('ppmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
+                      <th onclick="sortPpmAnalystSingle('ppmSuggestPpmSku')" class="num" style="cursor:pointer;" title="LAST ASP PLACED × 25% — a suggested target Priceing_PPM based on the most recent placed selling price.">PPM SUGGEST Priceing_PPM</th>
                       <th onclick="sortPpmAnalystSingle('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month, Overall. No cutoff applied.">TOTAL DELIVERED PPM</th>
                       <th onclick="sortPpmAnalystSingle('cm3')" class="num" style="cursor:pointer;" title="This SKU's total CM3 this month, Overall, excluding the most recent 5 days of data.">CM3</th>
                       <th onclick="sortPpmAnalystSingle('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 per delivered piece; both figures use the same 5-day CM3 cutoff.">CM3/PCS</th>
@@ -1384,6 +1432,14 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2>Products / Analyst</h2>
                   <p>Single SKU level (all its bundles combined) — All Products Inbound This Year, Demand Confirmed (last 3 months), current-month PPM &amp; CM3 (CM3 respects the standard lag cutoff)</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="productsAnalyst" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_productsAnalyst" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_productsAnalyst" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_productsAnalyst" class="btn btn-outline small hidden" data-clear-date="productsAnalyst">Clear</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <input id="searchProdAnInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -1462,6 +1518,14 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2>Products Matches / Analyst</h2>
                   <p>Every Merchant working on a Single SKU this month — even via a Bundle, apportioned down to Single SKU level (same debundle logic as Products / Analyst). Status compares this match's activity to last month over the same date range.</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="productsMatchesAnalyst" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_productsMatchesAnalyst" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_productsMatchesAnalyst" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_productsMatchesAnalyst" class="btn btn-outline small hidden" data-clear-date="productsMatchesAnalyst">Clear</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <input id="searchPmaInput" type="search" placeholder="Search SKU, Merchant or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -1563,6 +1627,14 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2>ACM Sales Plan Tracking</h2>
                   <p>Placed / Confirmed / Delivered / GMV — Target MTD, Run Rate &amp; Achievement% Per SKU, with Owner (ACM)</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="mpSalesPlan" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_mpSalesPlan" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_mpSalesPlan" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_mpSalesPlan" class="btn btn-outline small hidden" data-clear-date="mpSalesPlan">Clear</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <input id="searchMpSalesPlanInput" type="search" placeholder="Search Product, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -1704,6 +1776,14 @@
                   <p>All Merchant x Product matches — CM3 &amp; CM3% (Cutoff D-4)</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="mpMatches" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_mpMatches" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_mpMatches" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_mpMatches" class="btn btn-outline small hidden" data-clear-date="mpMatches">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchMpMatchesInput" type="search" placeholder="Search Product, Merchant, or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -1778,6 +1858,14 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2>New Matches</h2>
                   <p>SKU × Merchant details (Day 7 → Today, CM3 at Cutoff D-4)</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="mpNewMatches" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_mpNewMatches" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_mpNewMatches" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_mpNewMatches" class="btn btn-outline small hidden" data-clear-date="mpNewMatches">Clear</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <input id="searchMpNewMatchesInput" type="search" placeholder="Search SKU, Merchant, or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -1887,6 +1975,14 @@
                   <p>Bad matches only, ranked by Impact Pieces — Merchant × SKU combos dragging NDR% down vs their Sub-Category</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="poorMatches" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_poorMatches" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_poorMatches" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_poorMatches" class="btn btn-outline small hidden" data-clear-date="poorMatches">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchPoorMatchesInput" type="search" placeholder="Search Product, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -1984,6 +2080,14 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2>Active Locks</h2>
                   <p>Every active lock (Merchant × SKU) — allocation, usage, remaining pieces &amp; expiry</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="availabilityLocking" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_availabilityLocking" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_availabilityLocking" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_availabilityLocking" class="btn btn-outline small hidden" data-clear-date="availabilityLocking">Clear</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <input id="searchAvailabilityLockingInput" type="search" placeholder="Search SKU, Merchant, Category or Locking Type..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -2146,6 +2250,14 @@
                   <p>Every active lock (Merchant × SKU) with a Health Status — Healthy, At Risk, or Unhealthy</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="healthyLocking" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_healthyLocking" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_healthyLocking" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_healthyLocking" class="btn btn-outline small hidden" data-clear-date="healthyLocking">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchHealthyLockingInput" type="search" placeholder="Search SKU, Merchant, Category or Locking Type..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -2279,6 +2391,14 @@
                   <p>Active locks with weak demand (Avg Last 6D Confirmed &lt; 5) — release candidates.</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="healthyUnlocking" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_healthyUnlocking" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_healthyUnlocking" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_healthyUnlocking" class="btn btn-outline small hidden" data-clear-date="healthyUnlocking">Clear</button>
+                  </div>
+                </div>
+                <div class="table-controls">
                   <input id="searchHealthyUnlockingInput" type="search" placeholder="Search SKU, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -2313,8 +2433,8 @@
                       <th onclick="sortHealthyUnlocking('profit')" class="num text-green" style="cursor:pointer;" title="Profit margin, from product data.">PROFIT</th>
                       <th onclick="sortHealthyUnlocking('lastAspPlaced')" class="num text-purple" style="cursor:pointer;" title="Total Placed GMV ÷ Total Placed Pieces this month, Overall (Debundled).">LAST ASP PLACED</th>
                       <th onclick="sortHealthyUnlocking('cogs')" class="num text-red" style="cursor:pointer;" title="Cost of goods, from the COGS sheet.">COGS</th>
-                      <th onclick="sortHealthyUnlocking('skuPpm')" class="num text-orange" style="cursor:pointer;" title="Selling Price − Profit − Cogs.">SKU_PPM</th>
-                      <th onclick="sortHealthyUnlocking('ppmPct')" class="num" style="cursor:pointer;" title="SKU_PPM ÷ Last ASP Placed.">PPM%</th>
+                      <th onclick="sortHealthyUnlocking('skuPpm')" class="num text-orange" style="cursor:pointer;" title="Selling Price − Profit − Cogs.">Priceing_PPM</th>
+                      <th onclick="sortHealthyUnlocking('ppmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ Last ASP Placed.">PPM%</th>
                       <th onclick="sortHealthyUnlocking('deliveredGmv')" class="num font-bold" style="cursor:pointer;" title="Total Delivered GMV this month, Overall (Debundled). No cutoff applied.">DELIVERED GMV</th>
                       <th onclick="sortHealthyUnlocking('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin, Overall (Debundled), excluding the most recent lag days (same CM3 lag used everywhere else).">CM3</th>
                       <th onclick="sortHealthyUnlocking('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ CM3-eligible Delivered pieces.">CM/PCS</th>
@@ -2521,7 +2641,7 @@
                       <th data-stkey="sellingPrice" class="num text-blue" title="Listed selling price for this SKU, from product data.">Selling Price</th>
                       <th data-stkey="profit" class="num text-green" title="Per-unit profit figure for this SKU, from product data.">Profit</th>
                       <th data-stkey="cogs" class="num text-red" title="Cost of goods for this SKU, from the cost data.">Cogs</th>
-                      <th data-stkey="ppmSku" class="num text-orange" title="Selling Price − Profit − Cogs for this SKU (same formula used as SKU PPM elsewhere in the dashboard).">PPM SKU</th>
+                      <th data-stkey="ppmSku" class="num text-orange" title="Selling Price − Profit − Cogs for this SKU (same formula used as Priceing_PPM elsewhere in the dashboard).">Priceing_PPM</th>
                     </tr>
                   </thead>
                   <tbody id="sellthroughTableBody"></tbody>

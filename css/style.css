@@ -53,6 +53,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .topbar-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .filter-group select { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; outline: none; font-family: inherit; color: var(--text); background: var(--bg); cursor: pointer; font-size: 12px; transition: border-color 0.2s; }
 .filter-group select:hover { border-color: var(--line-light); }
+.date-filter-input { padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; outline: none; font-family: inherit; color: var(--text); background: var(--bg); cursor: pointer; font-size: 12px; transition: border-color 0.2s; color-scheme: dark; }
+.date-filter-input:hover { border-color: var(--line-light); }
+.date-filter-input.active-range { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
 .btn { font-family: inherit; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s ease; letter-spacing: 0.3px; }
 .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .btn-outline { background: transparent; border: 1px solid var(--line-light); color: var(--text); }
