@@ -23,7 +23,7 @@ const INVENTORY_GID = "1780730573";
 const PRODUCTS_GID = "1779314157";
 const CAT_TARGETS_GID = "1656655269";
 const ACM_SALES_PLAN_GID = "892918900"; // شيت التارجت اليومي الخاص بالـ Sales Plan-ACM (TAGER_ID/PRODUCT_ID/ACM/Daily Targets)
-const NEW_SEGMENTATION_GID = "683046998"; // شيت "New segmentation #6864" الخام (الداتا اللي بتتحسب منها بنية الـ Segmentation Panel)
+const NEW_SEGMENTATION_GID = "1304674893"; // شيت "New segmentation #6864" الخام (الداتا اللي بتتحسب منها بنية الـ Segmentation Panel)
 const INBOUND_GID = "565878313";
 // المصادر التلاتة بتاعت البانل ده بقوا بيتقروا من نفس السبريدشيت (SHEET_ID) بدل
 // ما كانوا بيتجابوا من روابط Metabase العامة (اللينكات دي كانت بتقف/متسحبش أحياناً).
