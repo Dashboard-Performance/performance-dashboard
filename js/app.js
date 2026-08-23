@@ -2830,6 +2830,29 @@ function preparePpmAnalystSingleData() {
   // كل الـ Single SKUs الموجودة في شيت الديبندلايز لازم تظهر، حتى لو من غير أي نشاط الشهر ده.
   singlesList.forEach((name, singleId) => getBucket(singleId));
 
+  // AVG LAST 3D / AVG LAST 7D (Confirmed Pcs) — متوسط الـ Confirmed Pieces
+  // اليومي لكل Single SKU Overall (نفس منطق التوزيع على البندلات فوق)، على
+  // مدار آخر 3/7 أيام كاملة قبل النهاردة، من غير ما نحسب النهاردة نفسه لأن
+  // يومه لسه ماخلصش. بنستخدم mainRowsAll (مش monthRows) عشان نطاق الـ 7 أيام
+  // ميتقصش لو إحنا في أول الشهر.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const d3Start = todayMs - (3 * 86400000);
+  const d7Start = todayMs - (7 * 86400000);
+  const confirmed3dBySingle = new Map();
+  const confirmed7dBySingle = new Map();
+  mainRowsAll.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime >= todayMs || rTime < d7Start) return; // متطلعش النهاردة، وبرا نطاق الـ 7 أيام
+    mappingsFor(r.sku).forEach(mp => {
+      const pcs = (r.confirmedPieces || 0) * (mp.quantity || 1);
+      confirmed7dBySingle.set(mp.singleId, (confirmed7dBySingle.get(mp.singleId) || 0) + pcs);
+      if (rTime >= d3Start) confirmed3dBySingle.set(mp.singleId, (confirmed3dBySingle.get(mp.singleId) || 0) + pcs);
+    });
+  });
+
   let grandDeliveredGmv = 0, grandPpm = 0;
   bySingle.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
   const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
@@ -2865,10 +2888,14 @@ function preparePpmAnalystSingleData() {
     // PPM SUGGEST Priceing_PPM = LAST ASP PLACED × 25% — قيمة مقترحة لـ Priceing_PPM مبنية على آخر سعر بيع Placed.
     const ppmSuggestPpmSku = lastAspPlaced * 0.25;
 
+    const avgLast3d = (confirmed3dBySingle.get(singleId) || 0) / 3;
+    const avgLast7d = (confirmed7dBySingle.get(singleId) || 0) / 7;
+
     rows.push({
       skuId: singleId, skuName: singlesList.get(singleId) || inv.skuName || prod.name || singleId,
       category: inv.category || prod.category || "Uncategorized",
       placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0), deliveredPieces: Math.round(b.deliveredPieces || 0),
+      avgLast3d, avgLast7d,
       crPct, drPct, ndrPct,
       stock: Math.round(stock || 0), doh: Math.round(doh),
       lastAspPlaced,
@@ -2938,6 +2965,8 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
       <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
       <td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td>
+      <td class="num text-orange font-bold">${m.avgLast3d.toFixed(1)}</td>
+      <td class="num text-purple font-bold">${m.avgLast7d.toFixed(1)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
