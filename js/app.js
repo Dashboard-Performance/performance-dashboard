@@ -7809,34 +7809,38 @@ function renderPaginatedMpMatchesTable() {
 
 // =====================================================================
 // NEW MATCHES (تحت Marketplace، بعد Performance-Matches مباشرة) — ماتشات
-// (Merchant × SKU) "جديدة" بمعنى حرفي: أول ظهور ليها هو من يوم
-// NEW_MATCH_START_DAY الشهر الحالي لحد النهاردة، ومعندهاش أي نشاط خالص:
-//   1) في نفس الشهر الحالي قبل يوم NEW_MATCH_START_DAY، ولا
-//   2) في الشهر اللي فات كله (بنستخدم بيانات شيت الـ Main بتاعة الشهر اللي
-//      فات كاملة — مش بس جزء منه — عشان نتأكد إن الماتش فعلاً معندوش أي
-//      نشاط في الشهر ده خالص).
-// لو الماتش ظهر في أي واحدة من الفترتين دول، مبيبقاش "جديد" حتى لو كمان
-// ظهر من يوم NEW_MATCH_START_DAY لحد النهاردة — بيتستبعد خالص.
+// (Merchant × SKU) "جديدة" بمعنى: عندها نشاط في الشهر الحالي (أو في رينج
+// التاريخ المختار للسكشن ده لو فيه)، ومعندهاش أي نشاط خالص في الشهر اللي
+// فات كله (بنستخدم بيانات شيت الـ Main بتاعة الشهر اللي فات كاملة — مش بس
+// جزء منه — عشان نتأكد إن الماتش فعلاً معندوش أي نشاط في الشهر ده خالص).
+// لغينا تمامًا قيد "من يوم 10 الشهر" اللي كان موجود قبل كده — دلوقتي بيقرا
+// إجمالي New Matches للشهر الحالي كامل (أول يوم في الشهر لحد النهاردة).
+//
+// فلتر التاريخ الخاص بالسكشن (Start/End Date تحت): لو مختار (الاتنين
+// متعبيين وValid)، بيبقى هو مصدر صفوف الفترة بدل الشهر الحالي بالكامل —
+// يعني هيرجّع الـ New Matches جوه الرينج المختار بالظبط (getMonthOrRangeRows
+// بتتكفل بده تلقائيًا زي أي سكشن تاني).
+//
 // كل match (مفتاح Merchant×SKU) بيتجمّع مرة واحدة بس (Map)، فالعدّ في
-// كروت الكاتيجوري تحت مش ممكن يبقى فيه تكرار لنفس الماتش.
+// كروت الكاتيجوري تحت مش ممكن يبقى فيه تكرار لنفس الماتش. وبعد التجميع
+// بيتفلتر بس الماتشات اللي إجمالي الـ Placed بتاعها أكبر من
+// NEW_MATCH_MIN_PLACED (5) — أي ماتش Placed بتاعه 5 أو أقل بيتستبعد.
 //
 // كاتيجوريز "Fashion" و"Taager Gomla" مستبعدة بالكامل من السكشن ده (مش
 // كاتيجوريز حقيقية معتمدة هنا) — لا في الكروت ولا في الجدول.
 //
 // الأرقام:
 //   - Total Placed/Confirmed/Delivered Pcs, Placed ASP, PPM%: من غير أي
-//     لاج، من كل صفوف الفترة يوم NEW_MATCH_START_DAY -> النهاردة.
-//   - CR% (Confirmed/Placed): كات أوف يومين (CR_LAG_DAYS)، على نفس فترة
-//     يوم NEW_MATCH_START_DAY -> النهاردة.
+//     لاج، من كل صفوف الفترة (الشهر الحالي أو الرينج المختار).
+//   - CR% (Confirmed/Placed): كات أوف يومين (CR_LAG_DAYS)، على نفس الفترة.
 //   - DR% (Delivered/Confirmed): كات أوف 4 أيام، على نفس الفترة.
 //   - NDR% = CR% × DR%.
 //   - CM3/CM3-Per-Piece/CM3%: نفس كات أوف الـ CM3_LAG_DAYS المطبق في أي
 //     حتة تانية مصدرها MAIN_GID (Performance-Matches وغيره).
-//   - Match Start: أقدم تاريخ ظهر فيه الماتش ده (من يوم
-//     NEW_MATCH_START_DAY -> النهاردة، لأنه أصلاً معندوش نشاط قبل كده).
+//   - Match Start: أقدم تاريخ ظهر فيه الماتش ده جوه الفترة.
 // =====================================================================
-const NEW_MATCH_START_DAY = 10;
 const NEW_MATCH_DR_LAG_DAYS = 4;
+const NEW_MATCH_MIN_PLACED = 5; // بس الماتشات اللي Total Placed بتاعها أكبر من 5
 const NEW_MATCH_EXCLUDED_CATEGORIES = new Set(["fashion", "taager gomla"]);
 
 function prepareMpNewMatchesData() {
@@ -7846,38 +7850,30 @@ function prepareMpNewMatchesData() {
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const prevMonthYear = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  const thisMonthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "mpNewMatches");
+  // صفوف الفترة: رينج التاريخ المختار للسكشن لو فيه، وإلا الشهر الحالي كامل
+  // (من غير أي قيد على يوم بداية زي الأول).
+  const periodRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "mpNewMatches");
   const prevMonthRows = mainRowsAll.filter(r => r.monthYear === prevMonthYear);
 
-  // ماتشات ظهرت في نفس الشهر الحالي قبل يوم NEW_MATCH_START_DAY — مستبعدة.
-  const beforeStartKeys = new Set();
-  // صفوف من يوم NEW_MATCH_START_DAY لحد النهاردة (البيانات أصلاً بتتسحب لحد
-  // النهاردة، فمفيش داعي لقيد إضافي على "آخر تاريخ").
-  const startDayRows = [];
-  thisMonthRows.forEach(r => {
-    if (!r.merchantId || !r.sku || !r.timestamp) return;
-    const day = new Date(r.timestamp).getDate();
-    const key = r.merchantId + "||" + r.sku;
-    if (day < NEW_MATCH_START_DAY) beforeStartKeys.add(key);
-    else startDayRows.push(r);
-  });
+  const validRows = periodRows.filter(r => r.merchantId && r.sku && r.timestamp);
 
   // ماتشات ظهرت في الشهر اللي فات (أي نشاط خالص، من كل بيانات الشهر اللي
-  // فات المتاحة في شيت الـ Main، من غير أي قيد على الرينج) — مستبعدة.
+  // فات المتاحة في شيت الـ Main، من غير أي قيد على الرينج) — مستبعدة، عشان
+  // تفضل "جديدة" فعلاً ومعندهاش نشاط سابق.
   const prevMonthKeys = new Set();
   prevMonthRows.forEach(r => {
     if (!r.merchantId || !r.sku) return;
     prevMonthKeys.add(r.merchantId + "||" + r.sku);
   });
 
-  const cm3Cutoff = getCm3LagCutoffTimestamp(startDayRows);
-  const crCutoff = getLagCutoffTimestamp(startDayRows, CR_LAG_DAYS); // يومين
-  const drCutoff = getLagCutoffTimestamp(startDayRows, NEW_MATCH_DR_LAG_DAYS); // 4 أيام
+  const cm3Cutoff = getCm3LagCutoffTimestamp(validRows);
+  const crCutoff = getLagCutoffTimestamp(validRows, CR_LAG_DAYS); // يومين
+  const drCutoff = getLagCutoffTimestamp(validRows, NEW_MATCH_DR_LAG_DAYS); // 4 أيام
 
   const map = new Map();
-  startDayRows.forEach(r => {
+  validRows.forEach(r => {
     const key = r.merchantId + "||" + r.sku;
-    if (beforeStartKeys.has(key) || prevMonthKeys.has(key)) return; // مش ماتش جديد
+    if (prevMonthKeys.has(key)) return; // مش ماتش جديد — اشتغل الشهر اللي فات
     const inv = state.inventoryMap[r.sku];
     const category = (inv ? inv.category : "") || r.category || "Uncategorized";
     if (NEW_MATCH_EXCLUDED_CATEGORIES.has(category.trim().toLowerCase())) return; // Fashion / Taager Gomla مستبعدين
@@ -7902,19 +7898,24 @@ function prepareMpNewMatchesData() {
     if (r.timestamp && r.timestamp < e.matchStartTs) { e.matchStartTs = r.timestamp; e.matchStartDate = r.date; } // أقدم ظهور للماتش
   });
 
-  mpNewMatchesState.data = Array.from(map.values()).map(e => {
-    const crPct = e.crPlaced ? (e.crConfirmed / e.crPlaced) * 100 : 0;
-    const drPct = e.drConfirmed ? (e.drDelivered / e.drConfirmed) * 100 : 0;
-    const ndrPct = (crPct * drPct) / 100;
-    const cm3PerPiece = e.delivered ? (e.cm3 / e.delivered) : 0;
-    const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
-    const placedAsp = e.placed ? (e.placedGmv / e.placed) : 0;
-    const ppmPct = e.deliveredGmv ? (e.ppm / e.deliveredGmv) * 100 : 0;
-    return { ...e, crPct, drPct, ndrPct, cm3PerPiece, cm3Pct, placedAsp, ppmPct };
-  });
+  mpNewMatchesState.data = Array.from(map.values())
+    .filter(e => (e.placed || 0) > NEW_MATCH_MIN_PLACED) // بس الماتشات اللي Total Placed أكبر من 5
+    .map(e => {
+      const crPct = e.crPlaced ? (e.crConfirmed / e.crPlaced) * 100 : 0;
+      const drPct = e.drConfirmed ? (e.drDelivered / e.drConfirmed) * 100 : 0;
+      const ndrPct = (crPct * drPct) / 100;
+      const cm3PerPiece = e.delivered ? (e.cm3 / e.delivered) : 0;
+      const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
+      const placedAsp = e.placed ? (e.placedGmv / e.placed) : 0;
+      const ppmPct = e.deliveredGmv ? (e.ppm / e.deliveredGmv) * 100 : 0;
+      return { ...e, crPct, drPct, ndrPct, cm3PerPiece, cm3Pct, placedAsp, ppmPct };
+    });
 
   if ($("mpNewMatchesTotal")) $("mpNewMatchesTotal").textContent = fmtInt.format(mpNewMatchesState.data.length);
-  if ($("mpNewMatchesRangeLabel")) $("mpNewMatchesRangeLabel").textContent = `Day ${NEW_MATCH_START_DAY} - ${now.getDate()} ${currentMonthYear}`;
+  if ($("mpNewMatchesRangeLabel")) {
+    const dateFilter = getActiveDateRangeFilter("mpNewMatches");
+    $("mpNewMatchesRangeLabel").textContent = dateFilter ? `${dateFilter.startVal} → ${dateFilter.endVal}` : `${currentMonthYear}`;
+  }
 
   renderMpNewMatchesCategoryBoxes();
   applyMpNewMatchesSearchAndSort();
