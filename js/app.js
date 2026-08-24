@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
