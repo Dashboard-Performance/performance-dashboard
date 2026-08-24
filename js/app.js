@@ -251,6 +251,16 @@ const poorMatchesState = {
 const availabilityLockingState = {
   data: [], filtered: [], sortKey: "remainingPieces", sortDir: "desc", page: 0
 };
+// Allocation Locking (تحت Availability Locking، جنب Healthy Locking): جدول
+// تفصيلي على مستوى كل قفل نشط (Merchant × Single SKU) — بس بيعيد توزيع الـ
+// Stock الحالي على التجار المقفول عليهم كل SKU بنسبة مساهمة كل تاجر (CONTR%)
+// في الديماند الكلي، بدل ما يعرض عمود ALLOCATED_QUANTITY الخام زي Availability
+// Locking. راجع التعليق الكامل فوق computeAllocationLocking تحت لتفاصيل كل
+// عمود ومصدره. بادئة الأسامي هنا "alc" (Allocation Locking) — "al" already
+// مستخدمة لـ Availability Locking.
+const allocationLockingState = {
+  data: [], filtered: [], sortKey: "finalActionQty", sortDir: "desc", page: 0
+};
 // Healthy Locking (تحت Availability Locking): نفس فكرة availabilityLockingState
 // بس على مستوى صحة كل قفل (Healthy/At Risk/Unhealthy) بدل مجرد Active/Expiring.
 const healthyLockingState = {
@@ -401,6 +411,7 @@ const navProductsMatchesAnalyst = $("navProductsMatchesAnalyst");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
 const navAvailabilityLocking = $("navAvailabilityLocking");
+const navAllocationLocking = $("navAllocationLocking");
 const navHealthyLocking = $("navHealthyLocking");
 const navHealthyUnlocking = $("navHealthyUnlocking");
 const navMpSalesPlan = $("navMpSalesPlan");
@@ -454,6 +465,7 @@ function switchView(viewName) {
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
   if(navAvailabilityLocking) navAvailabilityLocking.classList.remove("active");
+  if(navAllocationLocking) navAllocationLocking.classList.remove("active");
   if(navHealthyLocking) navHealthyLocking.classList.remove("active");
   if(navHealthyUnlocking) navHealthyUnlocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
@@ -480,6 +492,7 @@ function switchView(viewName) {
   else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3TargetView(); renderCm3AnalystView(); }
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
   else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
+  else if (viewName === "allocationLocking") { activeSection = $("viewAllocationLocking"); if(navAllocationLocking) navAllocationLocking.classList.add("active"); prepareAllocationLockingData(); }
   else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
   else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); prepareHealthyUnlockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
@@ -513,6 +526,7 @@ if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.addEventListener("click"
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
 if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () => switchView("availabilityLocking"));
+if(navAllocationLocking) navAllocationLocking.addEventListener("click", () => switchView("allocationLocking"));
 if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
 if(navHealthyUnlocking) navHealthyUnlocking.addEventListener("click", () => switchView("healthyUnlocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
@@ -693,6 +707,11 @@ const searchAvailabilityLockingInput = $("searchAvailabilityLockingInput");
 if (searchAvailabilityLockingInput) searchAvailabilityLockingInput.addEventListener("input", applyAvailabilityLockingSearchAndSort);
 if($("prevPageAvailabilityLocking")) $("prevPageAvailabilityLocking").addEventListener("click", () => { if (availabilityLockingState.page > 0) { availabilityLockingState.page -= 1; renderPaginatedAvailabilityLockingTable(); } });
 if($("nextPageAvailabilityLocking")) $("nextPageAvailabilityLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((availabilityLockingState.filtered || []).length / PAGE_SIZE)); if (availabilityLockingState.page < totalPages - 1) { availabilityLockingState.page += 1; renderPaginatedAvailabilityLockingTable(); } });
+
+const searchAllocationLockingInput = $("searchAllocationLockingInput");
+if (searchAllocationLockingInput) searchAllocationLockingInput.addEventListener("input", applyAllocationLockingSearchAndSort);
+if($("prevPageAllocationLocking")) $("prevPageAllocationLocking").addEventListener("click", () => { if (allocationLockingState.page > 0) { allocationLockingState.page -= 1; renderPaginatedAllocationLockingTable(); } });
+if($("nextPageAllocationLocking")) $("nextPageAllocationLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((allocationLockingState.filtered || []).length / PAGE_SIZE)); if (allocationLockingState.page < totalPages - 1) { allocationLockingState.page += 1; renderPaginatedAllocationLockingTable(); } });
 
 const searchHealthyLockingInput = $("searchHealthyLockingInput");
 if (searchHealthyLockingInput) searchHealthyLockingInput.addEventListener("input", applyHealthyLockingSearchAndSort);
@@ -3895,6 +3914,7 @@ function updateDashboard(rows) {
   // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
   // تاني فوق الصفحة) يفضل شغال عليها لايف لو كانت هي التاب المفتوح دلوقتي.
   if ($("viewAvailabilityLocking") && $("viewAvailabilityLocking").classList.contains("active-view")) prepareAvailabilityLockingData();
+  if ($("viewAllocationLocking") && $("viewAllocationLocking").classList.contains("active-view")) prepareAllocationLockingData();
   if ($("viewHealthyLocking") && $("viewHealthyLocking").classList.contains("active-view")) prepareHealthyLockingData();
   if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
   if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
@@ -8363,6 +8383,641 @@ function renderPaginatedAvailabilityLockingTable() {
 }
 
 // =========================================================================
+// ALLOCATION LOCKING (تحت Availability Locking، في نفس الساب-مينيو Marketplace)
+// -------------------------------------------------------------------------
+// ملحوظة تسمية (Naming convention): كل الـ ids/functions بتاعة السكشن ده
+// بادئة "alc" (Allocation Locking) — عشان "al" already مستخدمة لـ Availability
+// Locking (alIsLockActive, alLockTable...) و"hl"/"hu" مستخدمين لـ Healthy
+// Locking/Unlocking، فمفيش تعارض في الأسامي.
+//
+// المصدر (Data Source) — ملحوظة مهمة جدًا: السكشن ده مالوش أي شيت/GID جديد
+// خالص. كل حاجة فيه محسوبة "live" من داتا موجودة بالفعل ومحمّلة قبل كده:
+//   - state.availabilityLockingRows → القفلات الفعلية (Merchant × Single) +
+//     عمود usedQty (الاستخدام الفعلي) — المصدر الوحيد المتاح لأي حاجة اسمها
+//     "استخدام" في الداشبورد ده، فبنعتمد عليه هنا زي ما هو (نفس افتراض
+//     Healthy Locking/Unlocking بالظبط).
+//   - state.allParsedRows → Placed/Confirmed Pieces يومي لكل (تاجر × SKU)،
+//     مصدر متوسطات الـ Confirmed و الـ CR%.
+//   - state.debundleMap / buildDebundleProductMap → علاقة Bundle→Singles
+//     (لأي SKU اتباع جوه بندل، بنوزع الـ Confirmed بتاعه على مكوناته).
+//   - buildDebundledStockDohIndex → منطق الـ "Bottleneck" (أقل DOH/Avg بين
+//     مكونات البندل) بنعيد استخدامه بالظبط زي ما هو في "Min Bundle
+//     Allocation" تحت.
+//
+// الـ population (مين اللي بيظهر في الجدول) = بالظبط نفس صفوف
+// state.availabilityLockingRows اللي حاليًا Active (alIsLockActive) — يعني
+// صف واحد لكل (تاجر × Single SKU) مقفول دلوقتي. مفيش صفوف جديدة ولا SKUs
+// جديدة، بس بنعيد حساب أعمدة تانية عليهم: Allocated Qty هنا *مُعاد حسابها*
+// من الصفر بناءً على الـ Stock الحالي × نسبة مساهمة التاجر (CONTR%) — مش
+// نفس عمود ALLOCATED_QUANTITY الخام اللي لسه بيتعرض زي ما هو في Availability
+// Locking (Active Locks table)، وده مقصود ومختلف عمدًا.
+// =========================================================================
+const ALC_WINDOW_DAYS = 3; // "آخر 3 أيام، من غير النهاردة" — نفس اتفاقية buildDebundledStockDohIndex (خاص بسكشن Allocation Locking فقط، ماله علاقة بـ CM3_LAG_DAYS/CR_LAG_DAYS ولا أي رولينج ويندو تاني في الداشبورد)
+
+// بيرجع Map مفتاحها "merchantId||singleId" -> مجموع Confirmed Pieces (بعد
+// الديبندلايز، يعني موزعة على مستوى Single SKU) في الشباك [today-N, today)
+// (النهاردة نفسها مستبعدة) لكل تاجر لوحده — نفس منطق confWindowBySingleOverall
+// جوه buildDebundledStockDohIndex بالظبط، بس هنا مقصور على تاجر واحد في كل
+// مرة بدل إجمالي كل التجار مع بعض. بيرجع كمان خريطة خام (raw, undebundled،
+// بمفتاح merchantId||actualSku) — محتاجينها في حساب "Min Bundle Allocation"
+// تحت (لازم ديماند التاجر على الـ Bundle SKU *نفسه* بالظبط، مش على مكوناته).
+function alcBuildMerchantWindowMaps(mainRows, windowDays, bundleProductMap) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const windowStart = todayMs - (windowDays * 86400000);
+  const debundled = new Map();  // "merchantId||singleId" -> sum confirmed (ديبندلايز)
+  const raw = new Map();        // "merchantId||actualSku" -> sum confirmed (زي ما هي)
+  (mainRows || []).forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime < windowStart || rTime >= todayMs) return;
+    const rawKey = r.merchantId + "||" + r.sku;
+    raw.set(rawKey, (raw.get(rawKey) || 0) + (r.confirmedPieces || 0));
+    const mappings = bundleProductMap.get(r.sku);
+    if (mappings && mappings.length) {
+      mappings.forEach(mp => {
+        const key = r.merchantId + "||" + mp.singleId;
+        debundled.set(key, (debundled.get(key) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+      });
+    } else {
+      debundled.set(rawKey, (debundled.get(rawKey) || 0) + (r.confirmedPieces || 0));
+    }
+  });
+  return { debundled, raw };
+}
+
+// CR% (Confirmed÷Placed) على مستوى (تاجر × Single SKU)، بعد الديبندلايز (لو
+// الـ Single اتباع جوه بندل، Placed/Confirmed بتاعت صف البندل بتتوزع عليه ×
+// PRODUCT_QUANTITY) — بكات أوف الـ CR_LAG_DAYS المعتاد (يومين)، بالظبط زي كل
+// CR% تاني في الداشبورد ده (getLagCutoffTimestamp/isRowEligibleForLag).
+function alcBuildMerchantSingleCr(monthRows, bundleProductMap, crCutoffTs, sectionKey) {
+  const map = new Map(); // "merchantId||singleId" -> {placed, confirmed}
+  (monthRows || []).forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    if (!isRowEligibleForLag(r, crCutoffTs, sectionKey)) return;
+    const bump = (key, qty) => {
+      const cur = map.get(key) || { placed: 0, confirmed: 0 };
+      cur.placed += (r.placedPieces || 0) * qty; cur.confirmed += (r.confirmedPieces || 0) * qty;
+      map.set(key, cur);
+    };
+    const mappings = bundleProductMap.get(r.sku);
+    if (mappings && mappings.length) mappings.forEach(mp => bump(r.merchantId + "||" + mp.singleId, mp.quantity || 1));
+    else bump(r.merchantId + "||" + r.sku, 1);
+  });
+  return map;
+}
+
+// CR% (Confirmed÷Placed) على مستوى (تاجر × SKU الخام كما هو)، من غير أي
+// ديبندلايز/توزيع على مكونات — موازية لـ alcBuildMerchantSingleCr فوق بس
+// بتفتاح على r.sku مباشرة بدل ما تمر على bundleProductMap. محتاجينها لصفوف
+// الـ Bundle الجديدة تحت (Type=Bundle) عشان الـ CR% بتاعها يتحسب على مستوى
+// الـ Bundle SKU نفسه (Placed/Confirmed بتاعت صفوفه هو، مش موزعة على
+// الـ Singles اللي جواه) — نفس كات أوف CR_LAG_DAYS/isRowEligibleForLag.
+function alcBuildMerchantRawSkuCr(monthRows, crCutoffTs, sectionKey) {
+  const map = new Map(); // "merchantId||sku" -> {placed, confirmed}
+  (monthRows || []).forEach(r => {
+    if (!r.sku || !r.merchantId) return;
+    if (!isRowEligibleForLag(r, crCutoffTs, sectionKey)) return;
+    const key = r.merchantId + "||" + r.sku;
+    const cur = map.get(key) || { placed: 0, confirmed: 0 };
+    cur.placed += (r.placedPieces || 0); cur.confirmed += (r.confirmedPieces || 0);
+    map.set(key, cur);
+  });
+  return map;
+}
+
+// -------------------------------------------------------------------------
+// SHARED ROW-FORMULA HELPER — الخطوات (3) فأكتر من ملاحظات المستخدم: بياخد
+// أرقام "خام" (stock, merchantAvg3d, overallAvg3d, crPct, usedQty) مهما كان
+// مصدرها (Single lock فعلي، أو Bundle SKU مُشتق من bundlesContainingSingle)
+// ويحسب منها بالظبط نفس السلسلة (Suggested Allocation → Allocated Qty →
+// Remaining → Final Action → Final Action DOH) — عشان صفوف الـ Single
+// والـ Bundle الاتنين يفضلوا ماشيين بنفس المعادلة حرفيًا ومينفعش يفترقوا.
+// usedQty بيتبعت =0 لصفوف الـ Bundle دايمًا من الكولر (مفيش مصدر استخدام
+// فعلي على مستوى Bundle خالص — Availability Locking بيقفل Singles بس).
+// -------------------------------------------------------------------------
+function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty }) {
+  // Suggested Allocation = توزيع الـ Stock الحالي على التاجر بنسبة مساهمته
+  // (CONTR%) في الديماند الـ overall. ده الرقم الوحيد "المحسوب" فعليًا في
+  // السلسلة دي (مش مسحوب من أي مصدر خام) — وهو نفسه اللي "Min Bundle
+  // Allocation" بيقارن بيه عبر كل بندل (البوتلنيك الخام قبل تعديل CR%).
+  // ملحوظة: Allocated Qty / Used Qty / Remaining Pieces مش جوه الدالة دي
+  // خالص — دول قيم خام بتتسحب مباشرة من صف القفل الفعلي (l.allocatedQty،
+  // l.usedQty, l.remainingPieces) في computeAllocationLocking تحت لصفوف
+  // الـ Single، أو null لصفوف الـ Bundle (مفيش قفل فعلي على مستوى بندل).
+  const contrPct = overallAvg3d > 0 ? (merchantAvg3d / overallAvg3d) * 100 : 0;
+  const suggestedAllocation = Math.round(stock * (contrPct / 100));
+
+  // Final Action (Qty to Lock) = (Suggested Allocation ÷ (CR%/100)) + Used Qty.
+  // بطلب صريح من المستخدم: القسمة على CR% بتحصل على الـ Suggested Allocation
+  // لوحدها الأول (تعديلها بمعدل الكونفيرم بتاع التاجر)، وبعد كده بس بيتجمع
+  // عليها Used Qty (من غير أي تعديل بـ CR% عليه هو نفسه). قسمة واحدة بس على
+  // CR% في السلسلة كلها، وعلى الـ Suggested Allocation بس. ملحوظة: الدالة دي
+  // (alcComputeRowMath) دلوقتي مستخدمة لصفوف الـ Single فقط — صفوف الـ Bundle
+  // بقى Final Action بتاعها = 0 ثابت دايمًا (راجع bundleRowKeys.forEach تحت).
+  const finalActionQty = crPct > 0 ? Math.round(suggestedAllocation / (crPct / 100)) + (usedQty || 0) : suggestedAllocation + (usedQty || 0);
+
+  return { contrPct, suggestedAllocation, finalActionQty };
+}
+
+function computeAllocationLocking() {
+  const mainRowsAll = state.allParsedRows || [];
+
+  // اتفاقية "Overall/CR%" الشهر الحالي (زي prepareHealthyUnlockingData بالظبط):
+  // الرولينج أفريدج (4 أيام) مبني على تاريخ الجهاز الحقيقي (مش آخر تاريخ في
+  // MAIN_GID)، فمنطقي إن الـ CR% كمان يتحسب على الشهر الجاري بغض النظر عن أي
+  // فلتر شهر فوق الصفحة، عشان الاتنين يفضلوا معبرين عن "دلوقتي".
+  const now = new Date();
+  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "allocationLocking");
+  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
+
+  const { productMap: bundleProductMap, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const { singleOverallStats, getStockDoh, isBundleByProductId } = buildDebundledStockDohIndex(mainRowsAll, ALC_WINDOW_DAYS);
+  const { debundled: merchantSingleWindow, raw: merchantSkuWindowRaw } = alcBuildMerchantWindowMaps(mainRowsAll, ALC_WINDOW_DAYS, bundleProductMap);
+  const merchantSingleCr = alcBuildMerchantSingleCr(monthRows, bundleProductMap, crCutoffTs, "allocationLocking");
+
+  // عكس bundleProductMap: لكل Single SKU، مين البندلات الحقيقية (لو فيه) اللي
+  // هو مكوّن جواها — محتاجينها لحساب "Min Bundle Allocation" تحت (نفس Single
+  // ممكن يبقى مكوّن جوه أكتر من بندل مختلف في نفس الوقت). بنستبعد أي صف الـ
+  // SKU فيه بيتمابّ لنفسه (Single لوحده مش جوه بندل حقيقي) باستخدام
+  // isBundleByProductId اللي راجعة من buildDebundledStockDohIndex.
+  const bundlesContainingSingle = new Map(); // singleId -> [{ bundleProductId, quantity }]
+  bundleProductMap.forEach((mappings, bundleProductId) => {
+    if (!isBundleByProductId.get(bundleProductId)) return; // مش بندل فعلي
+    mappings.forEach(mp => {
+      if (mp.singleId === bundleProductId) return; // احتياط إضافي
+      if (!bundlesContainingSingle.has(mp.singleId)) bundlesContainingSingle.set(mp.singleId, []);
+      bundlesContainingSingle.get(mp.singleId).push({ bundleProductId, quantity: mp.quantity || 1 });
+    });
+  });
+
+  const merchantRawSkuCr = alcBuildMerchantRawSkuCr(monthRows, crCutoffTs, "allocationLocking");
+
+  // عكس merchantSingleWindow — لكل Single SKU، مين كل التجار اللي عندهم
+  // ديماند حقيقية (confirmed pieces > 0، ديبندلايز) في نفس الشباك [today-N,
+  // today) — بغض النظر لو عندهم قفل نشط دلوقتي ولا لأ. ده اللي بيسمحلنا نطلع
+  // صف "Unlocked" لأي تاجر بيساهم في overallAvg3dForTable بتاع الـ SKU ده بس
+  // مش ظاهرله صف لأنه مش مقفول حاليًا — عشان overallAvg3dForTable (اللي بقى =
+  // مجموع merchantAvg3d لكل الصفوف الظاهرة، راجع Phase 2 تحت) يبقى ليه مقابل
+  // كامل من الصفوف، وCONTR% عبر كل صفوف نفس SKU يتجمع بالظبط 100%.
+  const merchantsBySingle = new Map(); // singleId -> Set<tagerId>
+  merchantSingleWindow.forEach((qty, key) => {
+    if (!qty) return;
+    const sep = key.indexOf("||");
+    if (sep < 0) return;
+    const tagerId = key.slice(0, sep);
+    const singleId = key.slice(sep + 2);
+    if (!merchantsBySingle.has(singleId)) merchantsBySingle.set(singleId, new Set());
+    merchantsBySingle.get(singleId).add(tagerId);
+  });
+
+  // Cache لعرض (Stock/Category/SKU Name) بتاع كل Single SKU — بتتحسب أول مرة
+  // بس (من أول صف Locked نشوفه لنفس الـ singleId، أو Unlocked لو حصل بطريقة
+  // ما) وبعدين بتتعاد استخدامها لأي صف تاني (Locked أو Unlocked) لنفس الـ
+  // SKU، بدل ما تتحسب من الصفر في كل مرة — الأرقام دي مش مرتبطة بالتاجر خالص.
+  const singleDisplayInfo = new Map(); // singleId -> { stock, category, skuName }
+
+  // Suggested Allocation (Stock × CONTR%) لأي (تاجر × Single)، بغض النظر لو
+  // عليه قفل نشط دلوقتي ولا لأ — محتاجينها عشان نقيّم *كل* مكونات أي بندل حتى
+  // لو بعض المكونات مش مقفولة للتاجر ده حاليًا (البندل ممكن يحتاج Single تاني
+  // مقفول لتاجر مختلف أو مش مقفول خالص).
+  //
+  // ملحوظة محدّثة: الدالة دي كانت بتستخدم دايمًا الحساب المستقل القديم
+  // singleOverallStats(singleId).avg (مش مجموع merchantAvg3d من صفوف ظاهرة في
+  // الجدول). دلوقتي بقت بتفضّل *أول حاجة* suggestedAllocationByPair (القيمة
+  // النهائية المُصححة 100% بتاعة صف الـ Single نفسه، لو موجود له صف في الجدول
+  // ده) — وده بيغطي الحالة الشائعة: مكوّن البندل ده نفسه ظاهر كصف Single مستقل
+  // في نفس الجدول (نفس SKU، نفس التاجر). الحساب المستقل القديم (singleOverallStats)
+  // فضل بس كـ fallback لزوج (تاجر × Single) مالوش صف مستقل خالص (Single تاني
+  // مكوّن جوه نفس البندل بس مفيش قفل نشط عليه ولا ديماند من نفس التاجر يدخله
+  // نطاق الجدول) — الحالة دي لسه ممكن تحمل نفس فرق التقريب القديم (±1-2 نقطة
+  // مئوية)، لكنها أفضل تقدير متاح لما مفيش رقم رسمي نقراه.
+  const alcSingleSuggestedAllocationFor = (tagerId, singleId) => {
+    // الأولوية: لو الزوج (تاجر × Single) ده أصلاً ليه صف Single في الجدول ده
+    // (الحالة الشائعة — بالظبط زي مثال المستخدم: نفس الـ SKU وTاجر ظاهرين
+    // كصف Single وكصف Bundle مع بعض)، بنستخدم suggestedAllocation النهائي
+    // بتاعه المُسجّل في suggestedAllocationByPair (المُصحح 100% من Phase 2a
+    // فوق) بدل ما نعيد حسابه بحساب مستقل تاني بيدي رقم مختلف شوية.
+    const known = suggestedAllocationByPair.get(tagerId + "||" + singleId);
+    if (known !== undefined) return known;
+
+    // Fallback — بس لو الزوج ده مالوش صف مستقل في الجدول ده أصلاً (Single
+    // تاني خالص، مكوّن جوه نفس البندل، بس مفيش قفل نشط عليه ولا ديماند من
+    // نفس التاجر يدخله نطاق الجدول). بنستخدم الحساب المستقل القديم
+    // singleOverallStats(singleId).avg، اللي ممكن يحمل نفس فرق التقريب
+    // القديم (±1-2 نقطة مئوية) عن overallAvg3dForTable المُصحح — لكن ده أفضل
+    // تقدير متاح لزوج مفيش ليه صف نقرا منه رقم رسمي.
+    const invInfo = state.inventoryMap[singleId] || {};
+    const stock = stockBySingle.has(singleId) ? stockBySingle.get(singleId) : (invInfo.stock || 0);
+    const overallAvg3d = singleOverallStats(singleId).avg;
+    const merchantAvg3d = Math.round((merchantSingleWindow.get(tagerId + "||" + singleId) || 0) / ALC_WINDOW_DAYS);
+    const contrPct = overallAvg3d > 0 ? (merchantAvg3d / overallAvg3d) * 100 : 0;
+    return Math.round(stock * (contrPct / 100));
+  };
+
+  // Suggested Allocation لصف بندل = أقل "Suggested Allocation مُعدّل بوحدة
+  // البندل" بين كل الـ Singles المكوّنة له لنفس التاجر (بوتلنيك حقيقي: بندل
+  // مينفعش يتوزع أكتر من أضعف مكوّن فيه) — مش حساب مستقل على مستوى ديماند/
+  // ستوك البندل نفسه.
+  //
+  // التعديل بوحدة البندل (PRODUCT_QUANTITY/mp.quantity): كام قطعة Single
+  // مطلوبة لكل وحدة بندل واحدة (مثلًا بندل "4 قطع" محتاج 4 قطع من نفس الـ
+  // Single لكل وحدة بندل). فبدل ما نقارن الـ Suggested Allocation الخام لكل
+  // مكوّن (بوحدة "قطعة Single")، بنقسمه على mp.quantity الأول عشان نحوّله
+  // لنفس وحدة البندل ("كام وحدة بندل ممكن تتجمّع من القطع دي")، وبعدين ناخد
+  // الأقل. القسمة دي *من غير تقريب* عمدًا — الكسر معناه حقيقي (كام وحدة بندل
+  // كاملة ممكن تتجمّع، مش عدد قطع Single خام)، فمينفعش نستدير هنا؛ التقريب
+  // النهائي بيحصل بعدين وبس على Final Action Qty (عدد صحيح فعلي للقفل).
+  const alcBundleMinComponentAllocation = (tagerId, bundleProductId) => {
+    const mappings = bundleProductMap.get(bundleProductId) || [];
+    if (!mappings.length) return 0;
+    let min = null;
+    mappings.forEach(mp => {
+      const raw = alcSingleSuggestedAllocationFor(tagerId, mp.singleId);
+      const perBundleUnit = mp.quantity > 0 ? (raw / mp.quantity) : raw; // احتياط ضد قسمة على صفر لو الكمية مفقودة/صفر
+      if (min === null || perBundleUnit < min) min = perBundleUnit;
+    });
+    return min === null ? 0 : min;
+  };
+
+  // اسم/كاتيجوري صف الـ Bundle للعرض — أقرب مصدر جودة هو نفس صف الديبندلايز
+  // (state.debundleMap) بتاع الـ productId ده بالظبط (عمود B/PRODUCT_NAME)،
+  // اللي هو أصلاً مصدر بيانات الـ Bundle الوحيد اللي معانا (مفيش صف Bundle
+  // مباشر في inventoryMap/productsMap غالبًا لأنهم مبنيين على Single SKUs).
+  // فولباك تسلسلي: productName من debundleMap → state.productsMap[id].name →
+  // نفس الـ productId (زي أي fallback تاني في السكشن ده لما مفيش اسم).
+  // الكاتيجوري: مفيش عمود category في شيت الديبندلايز خالص، فبنعتمد على
+  // inventoryMap/productsMap بنفس ترتيب أولوية صفوف الـ Single، وفولباك
+  // "Uncategorized" لو الاتنين فاضيين.
+  const bundleProductNameById = new Map();
+  (state.debundleMap || []).forEach(r => {
+    if (r.productId && r.productName && !bundleProductNameById.has(r.productId)) bundleProductNameById.set(r.productId, r.productName);
+  });
+
+  const today = new Date(); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
+
+  const rows = [];
+  // بندلات فعلية شوفناها أثناء المرور على القفلات — مفتاحها "tagerId||bundleProductId"،
+  // مدّيدة (dedupe) عشان نفس (تاجر × بندل) ما يتكررش لو أكتر من Single مقفول
+  // عند نفس التاجر بيغذّي نفس البندل، أو نفس الـ Single بيغذي أكتر من بندل.
+  const bundleRowKeys = new Map(); // key -> { tagerId, bundleProductId, merchantName }
+
+  // كل (tagerId||singleId) اتعمله صف Locked فعلاً — عشان مرحلة الـ Unlocked
+  // تحت متكررش نفس الزوج ده تاني (dedupe).
+  const lockedPairs = new Set();
+  // كل الـ Single SKUs اللي دخلت النطاق أصلاً (عليها قفل نشط واحد على الأقل
+  // لأي تاجر) — نطاق الجدول فضل زي ما هو ("SKUs تحت Allocation Locking")،
+  // إحنا بس بنكمّل صفوف باقي التجار المساهمين لنفس الـ SKUs دي، مش بنجيب
+  // SKUs جديدة كل قفلاتها = صفر.
+  const singleIdsInScope = new Set();
+
+  // -----------------------------------------------------------------------
+  // TWO-PHASE Single-row construction (بديل عن alcBuildSingleRow القديمة اللي
+  // كانت بتحسب overallAvg3d بشكل مستقل تمامًا من merchantAvg3d، وده اللي كان
+  // بيسبب الباج المُبلّغ عنه: مجموع Merchant Avg Confirmed (3D) عبر كل صفوف
+  // نفس الـ SKU ما كانش بيساوي Single Overall Avg Confirmed (3D) المعروض
+  // (وممكن CONTR% لصف واحد يعدّي 100%). الحل: overallAvg3d المعروض في الجدول
+  // بقى *حرفيًا* = مجموع merchantAvg3d لكل الصفوف الظاهرة لنفس الـ singleId —
+  // مش رقم مستقل. عشان كده لازم نعرف كل صفوف نفس الـ SKU الأول قبل ما نقدر
+  // نحسب أي حاجة مبنية على overallAvg3d (CONTR%/Suggested Allocation/Final
+  // Action/...) — فالبناء اتقسم مرحلتين:
+  //
+  //   Phase 1 (base rows): لكل (tagerId, singleId, lockStatus, l) بنحسب بس
+  //   الحقول اللي *مش* محتاجة overallAvg3d المُصحح (stock/category/skuName،
+  //   merchantAvg3d، crPct، usedQty، merchantName) ونجمّعها في rowsBySingle
+  //   (Map<singleId, baseRow[]>). وبرضه بنسجل bundleRowKeys هنا (dedupe
+  //   تاجر×بندل) لأنها مش محتاجة overallAvg3d خالص.
+  //
+  //   Phase 2 (derived fields): لكل singleId في rowsBySingle، بنجمع
+  //   merchantAvg3d بتاع كل صفوفه (Locked + Unlocked مع بعض) = overallAvg3dForTable
+  //   — نفس الرقم ده بيتعرض identical على كل صفوف الـ SKU ده. وبعدين لكل صف
+  //   base بنحسب alcComputeRowMath بالـ overallAvg3d الجديد ده، وminBundleAllocation
+  //   وfinalActionDoh، ونبني الصف النهائي.
+  // -----------------------------------------------------------------------
+  const rowsBySingle = new Map(); // singleId -> baseRow[]
+
+  // Suggested Allocation النهائي (المُصحح، Phase 2a) لكل صف Single ظاهر في
+  // الجدول ده — مفتاحها "tagerId||singleId". دي هي القيمة "الرسمية" اللي
+  // alcSingleSuggestedAllocationFor لازم يرجعها لو الزوج (تاجر × Single) ده
+  // أصلاً ليه صف في الجدول (بدل ما يعيد حسابها من singleOverallStats القديم
+  // ويجيب رقم مختلف شوية بسبب فرق التقريب). بتتملى في Phase 2a تحت (لكل صف
+  // Single فور ما suggestedAllocation بتاعه يتحسب)، وبتتقرا في Phase 2b (لحساب
+  // minBundleAllocation) وفي حساب صفوف الـ Bundle بعد كده — عشان كده لازم
+  // *كل* مجموعات rowsBySingle تخلّص Phase 2a الأول قبل ما أي حد يقرا منها
+  // (راجع تقسيم Phase 2a/2b تحت لسبب كده بالظبط).
+  const suggestedAllocationByPair = new Map(); // "tagerId||singleId" -> suggestedAllocation
+
+  function alcBuildBaseSingleRow(tagerId, singleId, lockStatus, l) {
+    // Stock/Category/SKU Name — نفس القيمة لأي صف على نفس الـ singleId (مش
+    // مرتبطة بالتاجر خالص)، فبنحسبها أول مرة بس ونعيد استخدامها (cache) —
+    // زي ما اتطلب بالظبط، بدل ما نعيد اشتقاقها لكل تاجر.
+    let disp = singleDisplayInfo.get(singleId);
+    if (!disp) {
+      const invInfo = state.inventoryMap[singleId] || {};
+      const prodInfo = state.productsMap[singleId] || {};
+      const category = invInfo.category || prodInfo.category || "Uncategorized";
+      // skuName: لو معانا صف قفل فعلي بيفضل الأول (l.skuName) زي الأصل، وإلا
+      // فولباك تسلسلي عادي.
+      const skuName = (l && l.skuName) || invInfo.skuName || prodInfo.name || singleId;
+      const stock = stockBySingle.has(singleId) ? stockBySingle.get(singleId) : (invInfo.stock || 0);
+      disp = { stock, category, skuName };
+      singleDisplayInfo.set(singleId, disp);
+    }
+    const { stock, category, skuName } = disp;
+
+    // Merchant Avg Confirmed (3D) — نفس الحساب زي الأصل بالظبط (ده الجزء اللي
+    // كان صح دايمًا). هو ده أساس overallAvg3dForTable الجديد كمان (Phase 2).
+    const merchantAvg3d = Math.round((merchantSingleWindow.get(tagerId + "||" + singleId) || 0) / ALC_WINDOW_DAYS);
+
+    // CR% (تاجر معين على الـ SKU ده بالذات)، ديبندلايز، بكات أوف يومين — نفس
+    // المصدر للحالتين (Locked/Unlocked)، مالوش علاقة بوجود قفل من عدمه.
+    const crBucket = merchantSingleCr.get(tagerId + "||" + singleId) || { placed: 0, confirmed: 0 };
+    const crPct = crBucket.placed > 0 ? (crBucket.confirmed / crBucket.placed) * 100 : 0;
+
+    // Used Qty — Locked: زي ما هي من عمود QUANTITY_USED بتاع صف القفل l.
+    // Unlocked: 0 دايمًا — مفيش مصدر تتبع استخدام من غير قفل فعلي (بالظبط
+    // نفس افتراض صفوف الـ Bundle، اللي هي كمان بلا قفل مباشر).
+    const usedQty = l ? (l.usedQty || 0) : 0;
+
+    const merchantName = l
+      ? (l.merchantName || tagerId)
+      // Unlocked: مفيش صف قفل نسحب منه الاسم، فبنستخدم نفس خريطة
+      // merchantInfoMap (مبنية من شيت الـ Main) اللي باقي السكشنز في الداشبورد
+      // بتعتمد عليها لحل اسم التاجر من الـ tagerId لوحده — فولباك للـ tagerId
+      // الخام لو مفيش اسم معروف.
+      : (((state.merchantInfoMap || new Map()).get(tagerId) || {}).merchantName || tagerId);
+
+    // نسجل أي بندلات بيغذّيها الـ Single ده في bundleRowKeys (عشان صفوف الـ
+    // Bundle تحت) — الرجستريشن نفسه مش محتاج overallAvg3d خالص (مجرد dedupe
+    // تاجر×بندل)، فبيحصل هنا في Phase 1 للحالتين (Locked/Unlocked) زي الأصل.
+    const bundlesForSingle = bundlesContainingSingle.get(singleId) || [];
+    bundlesForSingle.forEach(b => {
+      const bundleKey = tagerId + "||" + b.bundleProductId;
+      if (!bundleRowKeys.has(bundleKey)) bundleRowKeys.set(bundleKey, { tagerId, bundleProductId: b.bundleProductId, merchantName });
+    });
+
+    const baseRow = { tagerId, singleId, lockStatus, l, stock, category, skuName, merchantAvg3d, crPct, usedQty, merchantName };
+    if (!rowsBySingle.has(singleId)) rowsBySingle.set(singleId, []);
+    rowsBySingle.get(singleId).push(baseRow);
+  }
+
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (!l.singleId || !l.tagerId) return;
+    if (!alIsLockActive(l, todayMs)) return; // بس القفلات النشطة دلوقتي — بالظبط زي Healthy Locking/Unlocking
+
+    const singleId = l.singleId; const tagerId = l.tagerId;
+    singleIdsInScope.add(singleId);
+    lockedPairs.add(tagerId + "||" + singleId);
+    alcBuildBaseSingleRow(tagerId, singleId, "Locked", l);
+  });
+
+  // -----------------------------------------------------------------------
+  // UNLOCKED ROWS — لكل Single SKU دخل النطاق فوق (عليه قفل نشط واحد على
+  // الأقل لأي تاجر)، بنكمّل صف لكل تاجر تاني عنده ديماند حقيقية (confirmed >
+  // 0، نفس شباك الـ 3 أيام) على نفس الـ SKU ده بس مش ظاهرله صف Locked حاليًا
+  // — عشان overallAvg3dForTable (اللي بقى دلوقتي = مجموع merchantAvg3d بتاع
+  // *كل* الصفوف الظاهرة، Phase 2 تحت) يبقى ليه مقابل كامل من الصفوف، وCONTR%
+  // عبر كل صفوف نفس الـ SKU يتجمع بالظبط 100% (بدل ما يفضل ناقص بمقدار نصيب
+  // التجار الغير مقفولين، زي ما كان بيحصل قبل الفيتشر ده). النطاق نفسه *مش*
+  // بيتوسع — لسه بس الـ SKUs اللي أصلاً عليها قفل نشط، إحنا بس بنكمّل صفوفها.
+  singleIdsInScope.forEach(singleId => {
+    const merchants = merchantsBySingle.get(singleId);
+    if (!merchants) return;
+    merchants.forEach(tagerId => {
+      const pairKey = tagerId + "||" + singleId;
+      if (lockedPairs.has(pairKey)) return; // ده أصلاً ظاهر كصف Locked
+      lockedPairs.add(pairKey); // احتياط ضد أي تكرار جوه merchantsBySingle نفسها
+      alcBuildBaseSingleRow(tagerId, singleId, "Unlocked", null);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Phase 2a — derived fields ما عدا minBundleAllocation، لكل مجموعة (singleId)
+  // على حدة. overallAvg3dForTable هنا هو التصحيح الأساسي بتاع الباج: مش
+  // singleOverallStats(singleId).avg (حساب مستقل) زي الأصل، دلوقتي = مجموع
+  // merchantAvg3d الفعلي لكل الصفوف الظاهرة لنفس الـ SKU (Locked + Unlocked
+  // مع بعض) — نفس الرقم ده بالظبط بيتعرض identical على كل صفوف الـ SKU ده كـ
+  // "Single Overall Avg Confirmed (3D)"، فمجموع CONTR% عبر صفوف نفس الـ SKU
+  // بيبقى = 100% بالظبط دايمًا (بحكم البنا: مجموع الأجزاء ÷ نفس المجموع = 1)،
+  // ومفيش صف ممكن CONTR% بتاعه يعدّي 100% (لأن merchantAvg3d لصف واحد ≤ مجموع
+  // كل الصفوف، والمساواة بس لو تاجر واحد بس مساهم في الـ SKU ده).
+  //
+  // ليه اتقسمت لـ 2a/2b: minBundleAllocation بتاع أي صف Single محتاج يقارن
+  // بـ suggestedAllocation بتاع Singles تانية (siblings مكوّنة نفس البندل)،
+  // وممكن الـ sibling ده يكون في مجموعة singleId تانية في rowsBySingle لسه ما
+  // اتحسبتش لو عملنا كل حاجة في مرور واحد بس. فبنأجّل minBundleAllocation
+  // لمرور تاني (2b) بعد ما *كل* مجموعات rowsBySingle تكون خلّصت suggestedAllocation
+  // بتاعها وسجّلته في suggestedAllocationByPair.
+  // -----------------------------------------------------------------------
+  const pendingRows = []; // صفوف Single خلّصت كل حاجة ما عدا minBundleAllocation، مستنية Phase 2b
+  rowsBySingle.forEach((baseRows, singleId) => {
+    const overallAvg3dForTable = baseRows.reduce((sum, r) => sum + r.merchantAvg3d, 0);
+
+    baseRows.forEach(r => {
+      const { tagerId, lockStatus, l, stock, category, skuName, merchantAvg3d, crPct, usedQty, merchantName } = r;
+
+      const math = alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d: overallAvg3dForTable, crPct, usedQty });
+
+      // نسجل الـ suggestedAllocation النهائي بتاع الصف ده فورًا — عشان أي صف
+      // Bundle (أو صف Single تاني بيدور على sibling) يقدر يلاقيه في
+      // alcSingleSuggestedAllocationFor بعد كده (Phase 2b وحساب صفوف الـ Bundle).
+      suggestedAllocationByPair.set(tagerId + "||" + singleId, math.suggestedAllocation);
+
+      // Final Action DOH — تغطية بالأيام لكمية Final Action بمعدل الكونفيرم
+      // بتاع آخر 3 أيام لنفس التاجر (merchantAvg3d).
+      const finalActionDoh = merchantAvg3d > 0 ? Math.round(math.finalActionQty / merchantAvg3d) : null;
+
+      pendingRows.push({
+        // Allocated Qty / Remaining Pieces: Locked = خام 100% من صف القفل l
+        // (ALLOCATED_QUANTITY/REMAINING_PIECES). Unlocked = null (زي صفوف
+        // الـ Bundle بالظبط ولنفس السبب — مفيش قفل مصدره نسحب منه الرقمين دول).
+        type: "Single", lockStatus, singleId, skuName, category, tagerId, merchantName,
+        stock: Math.round(stock || 0), merchantAvg3d, overallAvg3d: overallAvg3dForTable, contrPct: math.contrPct, crPct,
+        suggestedAllocation: math.suggestedAllocation, allocatedQty: l ? l.allocatedQty : null, usedQty,
+        remainingPieces: l ? l.remainingPieces : null, finalActionQty: math.finalActionQty,
+        finalActionDoh
+      });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Phase 2b — minBundleAllocation، بعد ما كل صفوف Phase 2a سجّلت suggestedAllocation
+  // بتاعها في suggestedAllocationByPair (فأي sibling مكوّن نفس البندل، من أي
+  // مجموعة singleId تانية، بقى ليه رقم رسمي جاهز نقراه).
+  //
+  // ملحوظة مقصودة (مش تصحيح ضمني — بس توضيح وحدة القياس): minBundleAllocation
+  // بتاع صف Single بيقارن بين قيمتين ممكن تبقوا بوحدتين مختلفتين — suggestedAllocation
+  // بتاع الـ Single نفسه (بوحدة "قطعة Single خام")، وalcBundleMinComponentAllocation
+  // بتاع أي بندل بيحتوي عليه (بوحدة "وحدة بندل" بعد القسمة على PRODUCT_QUANTITY،
+  // زي فورمولا suggestedAllocation بتاعة صف الـ Bundle نفسه). المستخدم أكّد
+  // بس فورمولا Suggested Allocation بتاعة صف الـ Bundle، وإن Min Bundle
+  // Allocation بتاعه بيعكس نفس القيمة (المُعدّلة بالكمية) — مفيش طلب صريح
+  // بتغيير دلالة minBundleAllocation بتاع صف الـ Single نفسه، فده امتداد
+  // طبيعي/متسق لنفس الـ helper بس محتاج يتراجع مع المستخدم.
+  // -----------------------------------------------------------------------
+  pendingRows.forEach(r => {
+    let minBundleAllocation = r.suggestedAllocation;
+    const bundlesForSingle = bundlesContainingSingle.get(r.singleId) || [];
+    bundlesForSingle.forEach(b => {
+      const bundleSuggestedAllocation = alcBundleMinComponentAllocation(r.tagerId, b.bundleProductId);
+      if (bundleSuggestedAllocation < minBundleAllocation) minBundleAllocation = bundleSuggestedAllocation;
+    });
+    r.minBundleAllocation = minBundleAllocation;
+    rows.push(r);
+  });
+
+  // صفوف الـ Bundle — الأعمدة المعلوماتية (Stock/Merchant Avg/Single Overall
+  // Avg/CONTR%/CR%) لسه بتتحسب على مستوى الـ Bundle SKU نفسه (بوتلنيك
+  // getStockDoh + ديماند/CR% الـ Bundle الخام)، للعرض بس. لكن Suggested
+  // Allocation — وبالتبعية Final Action وFinal Action DOH المبنيين عليها —
+  // *مش* حساب مستقل تاني على مستوى البندل؛ دلوقتي = alcBundleMinComponentAllocation
+  // (أقل Suggested Allocation بين الـ Singles المكوّنة للبندل ده لنفس التاجر،
+  // بوتلنيك حقيقي — بالظبط زي ما اتطلب). Used Qty = 0 دايمًا (مفيش تتبع
+  // استخدام فعلي على مستوى بندل — Availability Locking بيقفل Single SKUs
+  // بس، مفيش قفلة مباشرة على بندل خالص). Min Bundle Allocation لصف البندل
+  // نفسه = نفس الـ Suggested Allocation بتاعه (نفس الرقم بالظبط، مفيش "أقل
+  // بين بندلات" تاني هنا — المفهوم أصلاً خاص بصفوف الـ Single اللي بتتوزع
+  // على أكتر من بندل).
+  bundleRowKeys.forEach(({ tagerId, bundleProductId, merchantName }) => {
+    const bundleStats = getStockDoh(bundleProductId); // { stock, avg, doh } بوتلنيك-أدجستد — للعرض المعلوماتي بس
+    const stock = bundleStats.stock || 0;
+    const overallAvg3d = bundleStats.avg || 0;
+    const merchantAvg3d = Math.round((merchantSkuWindowRaw.get(tagerId + "||" + bundleProductId) || 0) / ALC_WINDOW_DAYS);
+    const crBucket = merchantRawSkuCr.get(tagerId + "||" + bundleProductId) || { placed: 0, confirmed: 0 };
+    const crPct = crBucket.placed > 0 ? (crBucket.confirmed / crBucket.placed) * 100 : 0;
+    const usedQty = 0; // Bundle rows have no usage-tracking source at all — Availability Locking only ever locks Singles.
+    const contrPct = overallAvg3d > 0 ? (merchantAvg3d / overallAvg3d) * 100 : 0; // معلوماتي بس — مش أساس Suggested Allocation تاني
+
+    // Suggested Allocation = بوتلنيك المكونات (نفس القيمة اللي بتتحسب لصفوف
+    // الـ Single فوق في minBundleAllocation لنفس البندل — رقم واحد موحّد).
+    const suggestedAllocation = alcBundleMinComponentAllocation(tagerId, bundleProductId);
+    // Final Action (Qty to Lock) لصفوف الـ Bundle = 0 ثابت دايمًا، بطلب صريح
+    // من المستخدم — مفيش قفل فعلي على مستوى بندل خالص (Availability Locking
+    // بيقفل Singles بس)، فمفيش "أكشن قفل" حقيقي نطلعه لصف بندل. Final Action
+    // DOH بالتبعية بردو null/"—" دايمًا (0 ÷ أي معدل = 0 يوم تغطية، مالوش معنى
+    // يُعرض).
+    const finalActionQty = 0;
+    const finalActionDoh = null;
+
+    const invInfo = state.inventoryMap[bundleProductId] || {};
+    const prodInfo = state.productsMap[bundleProductId] || {};
+    const category = invInfo.category || prodInfo.category || "Uncategorized";
+    const skuName = bundleProductNameById.get(bundleProductId) || prodInfo.name || invInfo.skuName || bundleProductId;
+
+    rows.push({
+      // Allocated Qty / Remaining Pieces = null لصفوف الـ Bundle — مفيش قفل
+      // فعلي على مستوى بندل خالص (Availability Locking بيقفل Singles بس)،
+      // فمفيش مصدر خام نسحب منه الرقمين دول. null (مش 0) عشان "0" كانت
+      // هتوهم إن الأصل "اتخصص صفر"، بينما الحقيقة إن الخانة دي "مش منطبقة".
+      type: "Bundle", lockStatus: "—", singleId: bundleProductId, skuName, category, tagerId, merchantName,
+      stock: Math.round(stock || 0), merchantAvg3d, overallAvg3d, contrPct, crPct,
+      suggestedAllocation, allocatedQty: null, usedQty,
+      remainingPieces: null, minBundleAllocation: suggestedAllocation, finalActionQty,
+      finalActionDoh
+    });
+  });
+
+  return rows;
+}
+
+function prepareAllocationLockingData() {
+  const rows = computeAllocationLocking();
+  allocationLockingState.data = rows;
+
+  const totals = rows.reduce((acc, r) => {
+    acc.stock += r.stock; acc.suggestedAllocation += r.suggestedAllocation; acc.usedQty += r.usedQty;
+    acc.finalActionQty += r.finalActionQty;
+    // Allocated Qty / Remaining Pieces بتتجمع بس للصفوف اللي فعلاً عندها قيمة
+    // خام (Single rows) — صفوف الـ Bundle قيمتها null (مفيش مصدر خام)، فلو
+    // اتجمعت زي ما هي هتحول المجموع كله لـ NaN. بنتجاهلها هنا بدل ما نعتبرها 0.
+    if (r.allocatedQty != null) acc.allocatedQty += r.allocatedQty;
+    if (r.remainingPieces != null) acc.remainingPieces += r.remainingPieces;
+    return acc;
+  }, { stock: 0, suggestedAllocation: 0, allocatedQty: 0, usedQty: 0, remainingPieces: 0, finalActionQty: 0 });
+  state.allocationLockingTotals = totals;
+
+  if ($("alcTotalStock")) $("alcTotalStock").textContent = fmtInt.format(Math.round(totals.stock));
+  if ($("alcTotalSuggestedAllocation")) $("alcTotalSuggestedAllocation").textContent = fmtInt.format(Math.round(totals.suggestedAllocation));
+  if ($("alcTotalAllocatedQty")) $("alcTotalAllocatedQty").textContent = fmtInt.format(Math.round(totals.allocatedQty));
+  if ($("alcTotalUsedQty")) $("alcTotalUsedQty").textContent = fmtInt.format(Math.round(totals.usedQty));
+  if ($("alcTotalRemainingPieces")) $("alcTotalRemainingPieces").textContent = fmtInt.format(Math.round(totals.remainingPieces));
+  if ($("alcTotalFinalAction")) $("alcTotalFinalAction").textContent = fmtInt.format(Math.round(totals.finalActionQty));
+
+  applyAllocationLockingSearchAndSort();
+}
+
+function sortAllocationLocking(key) {
+  if (allocationLockingState.sortKey === key) { allocationLockingState.sortDir = allocationLockingState.sortDir === "asc" ? "desc" : "asc"; } else { allocationLockingState.sortKey = key; allocationLockingState.sortDir = "desc"; }
+  applyAllocationLockingSearchAndSort();
+}
+
+function applyAllocationLockingSearchAndSort() {
+  const term = $("searchAllocationLockingInput") ? $("searchAllocationLockingInput").value.trim().toLowerCase() : "";
+  let data = (allocationLockingState.data || []).filter(d => {
+    if (!term) return true;
+    return (d.singleId && String(d.singleId).toLowerCase().includes(term)) || (d.skuName && d.skuName.toLowerCase().includes(term)) ||
+      (d.merchantName && d.merchantName.toLowerCase().includes(term)) || (d.tagerId && String(d.tagerId).toLowerCase().includes(term)) ||
+      (d.category && d.category.toLowerCase().includes(term));
+  });
+  const { sortKey, sortDir } = allocationLockingState; const dir = sortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  allocationLockingState.filtered = data;
+  allocationLockingState.page = 0;
+  renderPaginatedAllocationLockingTable();
+}
+
+// Suggested Allocation / Min Bundle Allocation ممكن يبقوا كسريين دلوقتي لصفوف
+// الـ Bundle (بعد القسمة على PRODUCT_QUANTITY — راجع alcBundleMinComponentAllocation
+// فوق) وبالتبعية minBundleAllocation بتاع صف Single مقارن ببندل. القيمة
+// الصحيحة (integer) لسه بتتفرمت زي أي خانة تانية (fmtIntCell)؛ الكسرية بس
+// بتتعرض بمنزلتين عشريتين بدل ما تتقرّب وتضيع المعنى (350.75 = كام وحدة بندل
+// ممكن تتجمّع، مش عدد قطع Single). بقية أعمدة الجدول (خصوصًا Final Action Qty)
+// فضلت زي ما هي — عدد صحيح مُقرّب، مفيش تغيير هناك.
+const fmtAllocCell = (n) => (n == null ? "—" : (Number.isInteger(n) ? fmtIntCell(n) : wrapRawCell(n, n.toFixed(2))));
+
+function renderPaginatedAllocationLockingTable() {
+  const tbody = $("alcTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const data = allocationLockingState.filtered || [];
+  const start = allocationLockingState.page * PAGE_SIZE;
+  const pageRows = data.slice(start, start + PAGE_SIZE);
+  pageRows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${r.singleId}</td>
+      <td class="font-bold truncate-cell" title="${r.skuName}">${r.skuName}</td>
+      <td><span class="badge-outline ${r.type === 'Bundle' ? 'blue' : 'gray'}">${r.type}</span></td>
+      <td>${r.lockStatus === '—' ? '<span class="text-dim">—</span>' : `<span class="badge-outline ${r.lockStatus === 'Locked' ? 'green' : 'orange'}">${r.lockStatus}</span>`}</td>
+      <td class="text-dim">${r.category}</td>
+      <td class="font-mono text-dim">${r.tagerId}</td>
+      <td class="truncate-cell" title="${r.merchantName}">${r.merchantName}</td>
+      <td class="num text-dim">${fmtIntCell(r.stock)}</td>
+      <td class="num text-purple">${fmtIntCell(r.merchantAvg3d)}</td>
+      <td class="num text-dim">${fmtIntCell(r.overallAvg3d)}</td>
+      <td class="num">${fmtPctCell(r.contrPct)}</td>
+      <td class="num">${fmtPctCell(r.crPct)}</td>
+      <td class="num">${fmtAllocCell(r.suggestedAllocation)}</td>
+      <td class="num font-bold">${r.allocatedQty == null ? "—" : fmtIntCell(r.allocatedQty)}</td>
+      <td class="num text-dim" title="${r.type === 'Bundle' ? 'Always 0 for Bundle rows — Availability Locking only ever locks Single SKUs, so there is no usage-tracking source at the bundle grain.' : ''}">${fmtIntCell(r.usedQty)}</td>
+      <td class="num text-orange font-bold">${r.remainingPieces == null ? "—" : fmtIntCell(r.remainingPieces)}</td>
+      <td class="num text-blue">${fmtAllocCell(r.minBundleAllocation)}</td>
+      <td class="num text-purple">${fmtIntCell(r.merchantAvg3d)}</td>
+      <td class="num text-red font-bold">${fmtIntCell(r.finalActionQty)}</td>
+      <td class="num text-dim">${r.finalActionDoh === null || r.finalActionDoh === undefined ? "—" : fmtIntCell(r.finalActionDoh)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE));
+  if ($("rowCountAllocationLocking")) $("rowCountAllocationLocking").textContent = `${fmtInt.format(data.length)} Rows (Locked + Unlocked Singles + their Bundles)`;
+  if ($("pageIndicatorAllocationLocking")) $("pageIndicatorAllocationLocking").textContent = `Page ${allocationLockingState.page + 1} of ${totalPages}`;
+  if ($("prevPageAllocationLocking")) $("prevPageAllocationLocking").disabled = allocationLockingState.page === 0;
+  if ($("nextPageAllocationLocking")) $("nextPageAllocationLocking").disabled = allocationLockingState.page >= totalPages - 1;
+}
+
+// =========================================================================
 // HEALTHY LOCKING (تحت Availability Locking) — بتاخد نفس صفوف القفلات
 // النشطة (activeLocks) من computeAvailabilityLocking() وبتحكم على كل قفل:
 // "صحي" (Healthy) — بيتستخدم فعلاً وفيه ديماند حالي عليه، "في خطر" (At Risk)
@@ -9816,6 +10471,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpNewMatches: mpNewMatchesState.page,
         poorMatches: poorMatchesState.page,
         availabilityLocking: availabilityLockingState.page,
+        allocationLocking: allocationLockingState.page,
         healthyLocking: healthyLockingState.page,
         healthyUnlocking: healthyUnlockingState.page,
         mpSalesPlan: state.mpSalesPlanPage,
@@ -9831,6 +10487,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
+    allocationLockingState.page = 0;
     healthyLockingState.page = 0; healthyUnlockingState.page = 0;
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     PAGE_SIZE = 999999;
@@ -9850,6 +10507,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
     if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
     if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
+    if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
     if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
     if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
     if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
@@ -9872,6 +10530,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpNewMatchesState.page = originalPage.mpNewMatches;
         poorMatchesState.page = originalPage.poorMatches;
         availabilityLockingState.page = originalPage.availabilityLocking;
+        allocationLockingState.page = originalPage.allocationLocking;
         healthyLockingState.page = originalPage.healthyLocking;
         healthyUnlockingState.page = originalPage.healthyUnlocking;
         state.mpSalesPlanPage = originalPage.mpSalesPlan;
@@ -9893,6 +10552,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
         if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
         if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
+        if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
         if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
         if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
         if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
