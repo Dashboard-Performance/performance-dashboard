@@ -2144,32 +2144,32 @@
               <div class="metric-card hover-glow">
                 <div class="metric-title text-dim">Total Stock <span class="icon-box"></span></div>
                 <div class="metric-value" id="alcTotalStock">0</div>
-                <div class="metric-sub text-dim">Sum of current stock across every Single SKU under Allocation Locking (counted once per SKU × merchant row, Locked or Unlocked)</div>
+                <div class="metric-sub text-dim">Sum of current stock across every Single SKU</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-purple">Total Suggested Allocation <span class="icon-box"></span></div>
                 <div class="metric-value text-purple" id="alcTotalSuggestedAllocation">0</div>
-                <div class="metric-sub text-dim">Stock distributed to each merchant proportional to their CONTR% share (before the CR% adjustment)</div>
+                <div class="metric-sub text-dim">Stock distributed to each merchant proportional to their CONTR%</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-purple">Total Allocated Qty <span class="icon-box"></span></div>
                 <div class="metric-value text-purple" id="alcTotalAllocatedQty">0</div>
-                <div class="metric-sub text-dim">Raw ALLOCATED_QUANTITY summed across Single-row locks only (Bundle rows have no lock source, so are excluded rather than counted as 0)</div>
+                <div class="metric-sub text-dim">Raw ALLOCATED_QUANTITY summed across Single-row locks only.</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title">Total Used Qty <span class="icon-box"></span></div>
                 <div class="metric-value" id="alcTotalUsedQty">0</div>
-                <div class="metric-sub text-dim">Pieces already consumed, from Availability Locking's Used Qty</div>
+                <div class="metric-sub text-dim">Pieces already consumed, from Availability Locking's Used Qty.</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title text-orange">Total Remaining Pieces <span class="icon-box"></span></div>
                 <div class="metric-value text-orange" id="alcTotalRemainingPieces">0</div>
-                <div class="metric-sub text-dim">Raw REMAINING_PIECES summed across Single-row locks only (Bundle rows excluded, same as Allocated Qty)</div>
+                <div class="metric-sub text-dim">Raw REMAINING_PIECES summed across Single-row locks only.</div>
               </div>
               <div class="metric-card hover-glow highlight-card">
                 <div class="metric-title text-red">Total Final Action (Qty to Lock) <span class="icon-trend"></span></div>
                 <div class="metric-value text-red" id="alcTotalFinalAction">0</div>
-                <div class="metric-sub text-dim">Single rows: (Suggested Allocation ÷ CR%) + Used Qty. Bundle rows: always 0 (no direct bundle-level lock exists)</div>
+                <div class="metric-sub text-dim">Single rows: (Suggested Allocation ÷ CR%) + Used Qty.</div>
               </div>
             </div>
           </section>
@@ -2179,7 +2179,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
                   <h2>Allocation Locking</h2>
-                  <p>Every merchant with real confirmed demand on a SKU currently under Allocation Locking (Locked or Unlocked — see Lock Status), plus their Bundles — stock distributed by contribution share, with the qty-to-lock next action. Single Overall Avg Confirmed (3D) is the sum of this SKU's own Merchant Avg Confirmed (3D) values across every row shown, so CONTR% reconciles to exactly 100% per SKU.</p>
+                  <p>Every merchant with real confirmed demand on a SKU currently under Allocation Locking.</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchAllocationLockingInput" type="search" placeholder="Search SKU, Merchant or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
