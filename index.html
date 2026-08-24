@@ -78,6 +78,7 @@
       <div class="sidebar-footer">
         <div id="sidebarStatus">Live System Sync</div>
         <div id="sidebarUpdated"></div>
+        <div id="sidebarVersion" class="text-dim" style="font-size:10px;margin-top:4px;letter-spacing:0.5px;">Ver: --</div>
       </div>
     </aside>
     <div class="main">
@@ -1841,6 +1842,36 @@
                 <div class="metric-title">Total New Matches <span class="icon-box"></span></div>
                 <div class="metric-value" id="mpNewMatchesTotal">0</div>
                 <div class="metric-sub text-dim" id="mpNewMatchesRangeLabel">This Month</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Placed Pcs <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpNewMatchesSumPlaced">0</div>
+                <div class="metric-sub text-dim">No cutoff applied</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Confirmed Pcs <span class="icon-box"></span></div>
+                <div class="metric-value text-blue" id="mpNewMatchesSumConfirmed">0</div>
+                <div class="metric-sub text-dim">No cutoff applied</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Delivered Pcs <span class="icon-box"></span></div>
+                <div class="metric-value text-green" id="mpNewMatchesSumDelivered">0</div>
+                <div class="metric-sub text-dim">No cutoff applied</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">CR% <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpNewMatchesCr">0%</div>
+                <div class="metric-sub text-dim">Confirmed ÷ Placed, cutoff D-2</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">DR% <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpNewMatchesDr">0%</div>
+                <div class="metric-sub text-dim">Delivered ÷ Confirmed, cutoff D-4</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">NDR% <span class="icon-box"></span></div>
+                <div class="metric-value" id="mpNewMatchesNdr">0%</div>
+                <div class="metric-sub text-dim">CR% × DR%</div>
               </div>
             </div>
           </section>

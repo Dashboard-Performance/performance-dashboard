@@ -1,3 +1,11 @@
+// =========================================================================
+// APP VERSION — غيّرها إنت يدوي (رقم بعد التاني، أو زي ما تحب) قبل كل مرة
+// ترفع فيها أبديت جديد على السيرفر. بتتعرض في أسفل الـ Sidebar (Ver: X)
+// عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
+// لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
+// =========================================================================
+const APP_VERSION = "1.0.0";
+
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
   console.error("System Error: " + e.message);
@@ -277,6 +285,84 @@ let pipelineChartMetric = "pieces"; // "orders" | "pieces" — Pipeline Velocity
 let pipelineChartLastRows = []; // آخر بيانات اتبعتلها الشارت، عشان نقدر نعيد الرسم لما المقياس يتغيّر من غير ما نطلب الداتا تاني
 let categoryChartInst = null;
 const $ = (id) => document.getElementById(id);
+if ($("sidebarVersion")) $("sidebarVersion").textContent = `Ver: ${APP_VERSION}`;
+
+// =========================================================================
+// AUTO-REFRESH ON NEW DEPLOY — بطلب صريح: مفيش داعي اليوزر يعمل رفرش يدوي
+// من الكروم بعد كل ديبلوي جديد ع السيرفر. بيشيك كل AUTO_REFRESH_POLL_MS على
+// آخر تعديل (ETag/Last-Modified) لملفات الموقع الأساسية (index.html,
+// js/app.js, css/style.css) عن طريق HEAD requests خفيفة جدًا (من غير ما
+// يحمّل الملفات كاملة كل مرة) — مفيش أي خطوة يدوية مطلوبة منك، أي رفعة
+// جديدة للملفات دي على السيرفر بتغيّر التاريخ/الـ ETag بتاعها تلقائيًا.
+// أول ما يكتشف إن أي ملف من التلاتة اتغيّر عن اللي كان محمّل وقت ما فتحت
+// الصفحة، بيظهر بانر صغير فوق وبيعمل reload تلقائي بعد كام ثانية (مع خيار
+// "Refresh Now" أو "Later" لو كنت وسط كتابة حاجة). لو السيرفر مش بيرجّع
+// ETag ولا Last-Modified خالص (نادر) بترجع fetchAutoRefreshFingerprint()
+// بـ null ومفيش أي reload هيحصل — بدل ما نعمل reload غلط بناءً على بيانات
+// ناقصة.
+// =========================================================================
+const AUTO_REFRESH_POLL_MS = 60 * 1000; // بيشيك كل دقيقة
+const AUTO_REFRESH_FILES = ["index.html", "js/app.js", "css/style.css"];
+let autoRefreshBaseline = null;
+let autoRefreshBannerShown = false;
+
+async function fetchAutoRefreshFingerprint() {
+  const stamps = await Promise.all(AUTO_REFRESH_FILES.map(async (path) => {
+    try {
+      const url = new URL(path, window.location.href);
+      url.searchParams.set("_", Date.now()); // كسر أي كاش وسيط (CDN/براوزر) عن الهيدرز
+      const res = await fetch(url.toString(), { method: "HEAD", cache: "no-store" });
+      if (!res.ok) return null;
+      return res.headers.get("etag") || res.headers.get("last-modified") || null;
+    } catch (e) {
+      return null;
+    }
+  }));
+  if (stamps.every(s => !s)) return null; // مفيش أي هيدر مفيد اتجاب — منعرفش نقارن
+  return stamps.join("|");
+}
+
+async function startAutoRefreshBaseline() {
+  autoRefreshBaseline = await fetchAutoRefreshFingerprint();
+}
+
+function showAutoRefreshBanner() {
+  if (autoRefreshBannerShown || $("autoRefreshBanner")) return;
+  autoRefreshBannerShown = true;
+  const banner = document.createElement("div");
+  banner.id = "autoRefreshBanner";
+  banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#0ea5e9;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;";
+  banner.innerHTML = `<span>🔄 New version deployed — refreshing in <span id="autoRefreshCountdown">8</span>s…</span><button id="autoRefreshNowBtn" style="padding:3px 10px;border-radius:4px;border:1px solid #fff;background:transparent;color:#fff;cursor:pointer;font-weight:600;">Refresh Now</button><button id="autoRefreshLaterBtn" style="padding:3px 10px;border-radius:4px;border:1px solid #fff;background:transparent;color:#fff;cursor:pointer;font-weight:600;">Later</button>`;
+  document.body.appendChild(banner);
+  let seconds = 8;
+  const timer = setInterval(() => {
+    seconds -= 1;
+    const el = $("autoRefreshCountdown");
+    if (el) el.textContent = String(Math.max(seconds, 0));
+    if (seconds <= 0) { clearInterval(timer); window.location.reload(); }
+  }, 1000);
+  const nowBtn = $("autoRefreshNowBtn");
+  if (nowBtn) nowBtn.addEventListener("click", () => window.location.reload());
+  const laterBtn = $("autoRefreshLaterBtn");
+  if (laterBtn) laterBtn.addEventListener("click", () => {
+    clearInterval(timer);
+    banner.remove();
+    autoRefreshBannerShown = false;
+    // بيأجل إعادة تأسيس الـ baseline 5 دقايق عشان نسيب اليوزر يخلص اللي هو
+    // فيه من غير ما نلح عليه بالبانر تاني كل دقيقة على نفس النسخة الجديدة.
+    setTimeout(startAutoRefreshBaseline, 5 * 60 * 1000);
+  });
+}
+
+async function autoRefreshPollTick() {
+  if (autoRefreshBannerShown) return; // البانر ظاهر أصلاً، مفيش داعي نشيك تاني
+  const current = await fetchAutoRefreshFingerprint();
+  if (!current || !autoRefreshBaseline) return; // لسه معندناش baseline صالح للمقارنة
+  if (current !== autoRefreshBaseline) showAutoRefreshBanner();
+}
+
+startAutoRefreshBaseline();
+setInterval(autoRefreshPollTick, AUTO_REFRESH_POLL_MS);
 
 // =========================================================================
 // PER-SECTION DATE RANGE FILTER (Start Date / End Date) — بطلب صريح: مفيش
@@ -7917,8 +8003,34 @@ function prepareMpNewMatchesData() {
     $("mpNewMatchesRangeLabel").textContent = dateFilter ? `${dateFilter.startVal} → ${dateFilter.endVal}` : `${currentMonthYear}`;
   }
 
+  renderMpNewMatchesSummaryCards();
   renderMpNewMatchesCategoryBoxes();
   applyMpNewMatchesSearchAndSort();
+}
+
+// كروت السامري فوق الجدول: إجمالي Placed/Confirmed/Delivered Pcs (بدون أي
+// لاج) + CR%/DR%/NDR% مجمّعين على كل الماتشات الجديدة في mpNewMatchesState
+// (نفس منطق كل كارت في الجدول نفسه، بس على مستوى إجمالي كل الماتشات مع
+// بعض بدل كل ماتش لوحده).
+function renderMpNewMatchesSummaryCards() {
+  const rows = mpNewMatchesState.data || [];
+  let sumPlaced = 0, sumConfirmed = 0, sumDelivered = 0;
+  let sumCrPlaced = 0, sumCrConfirmed = 0, sumDrConfirmed = 0, sumDrDelivered = 0;
+  rows.forEach(m => {
+    sumPlaced += m.placed || 0; sumConfirmed += m.confirmed || 0; sumDelivered += m.delivered || 0;
+    sumCrPlaced += m.crPlaced || 0; sumCrConfirmed += m.crConfirmed || 0;
+    sumDrConfirmed += m.drConfirmed || 0; sumDrDelivered += m.drDelivered || 0;
+  });
+  const crPct = sumCrPlaced ? (sumCrConfirmed / sumCrPlaced) * 100 : 0;
+  const drPct = sumDrConfirmed ? (sumDrDelivered / sumDrConfirmed) * 100 : 0;
+  const ndrPct = (crPct * drPct) / 100;
+
+  if ($("mpNewMatchesSumPlaced")) $("mpNewMatchesSumPlaced").textContent = fmtInt.format(Math.round(sumPlaced));
+  if ($("mpNewMatchesSumConfirmed")) $("mpNewMatchesSumConfirmed").textContent = fmtInt.format(Math.round(sumConfirmed));
+  if ($("mpNewMatchesSumDelivered")) $("mpNewMatchesSumDelivered").textContent = fmtInt.format(Math.round(sumDelivered));
+  if ($("mpNewMatchesCr")) $("mpNewMatchesCr").textContent = fmtPct(crPct);
+  if ($("mpNewMatchesDr")) $("mpNewMatchesDr").textContent = fmtPct(drPct);
+  if ($("mpNewMatchesNdr")) $("mpNewMatchesNdr").textContent = fmtPct(ndrPct);
 }
 
 // كارت لكل كاتيجوري فيها ماتش جديد واحد على الأقل، بعدد الماتشات الجديدة
