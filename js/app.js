@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -4395,6 +4395,13 @@ function prepareMerchantTableData(rows) {
   });
   const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
+  // segElapsedDays = عدد الأيام لحد امبارح بس (من غير النهارده) — مستخدم بس
+  // في RR Confirmed (Merchant Segmentation & Projections) بطلب صريح، عشان
+  // النهارده لسه بياناته مش كاملة (لسه ماخلصش)، فمضروبه في الـ Run Rate
+  // بيوهم إن الأداء أعلى/أقل مما هو فعلاً. باقي الـ Run Rate بتاعة الجدول
+  // التاني (GMV) فاضلة زي ما هي (بتحسب لحد النهارده)، مش متأثرة بالتغيير ده.
+  let segElapsedDays = elapsedDays;
+  if (selectedMonthStr) { const d = new Date(selectedMonthStr); const now = new Date(); if (!isNaN(d) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { segElapsedDays = Math.max(elapsedDays - 1, 1); } }
 
   // مصدر Confirmed Orders لجدول "Merchant Segmentation & Projections" بس
   // (segConfirmed/rrConfirmed/projectedSegment تحت) — من شيت MERCHANT_SEGMENTATION_GID
@@ -4420,7 +4427,7 @@ function prepareMerchantTableData(rows) {
     // لو التاجر ده معندوش صف في الشيت الجديد أصلاً (لسه معملش Confirmed خالص
     // في الفترة دي)، بيرجع 0 بدل ما يرجع لأرقام MAIN_GID القديمة.
     const segConfirmed = segConfirmedMap.has(m.id) ? segConfirmedMap.get(m.id) : 0;
-    const rrConfirmed = (segConfirmed / elapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
+    const rrConfirmed = (segConfirmed / segElapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
     return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, targetGmv, targetPlaced, achievedPct, runRate, currentSegment, segConfirmed, rrConfirmed, projectedSegment, skuCount: m.skus.size };
   });
 }
