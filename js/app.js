@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.0.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -39,6 +39,18 @@ const INBOUND_GID = "565878313";
 const BEGIN_INV_GID = "22283311";        // شيت "EGY Beginning Inventory #4132"
 const PRODUCTS_INFO_GID = "531154071";   // شيت "Porducts_infor #4259"
 const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate needed data #2941"
+// شيت "Merchant Segmentation" الجديد (تحت Performance Merchant's / Merchant
+// Segmentation & Projections) — صف واحد لكل (Merchant × Month)، بالأعمدة
+// (0-based): 0 MONTH, 1 COUNTRY, 2 TAGER_ID, 3 TAGER_NAME, 4 ACC_MANAGER,
+// 5 DELIVERED_GMV, 6 PLACED_ORDERS, 7 CONFIRMED, 8 DELIVERED, 9 CR, 10 DR,
+// 11 NDR, 12 SEGMENTATION, 13 NEW_SEGMENTATION, 14 PLACED_PIECES,
+// 15 CONFIRMED_PIECES, 16 DELIVERED_PIECES, 17 NEXT_MONTH_SEGMENT,
+// 18 PERV_MONTH_SEGMENT, 19 FIRST_TIME_MVM, 20 FIRST_TIME_HVM, 21 FIRST_MONTH.
+// عمود CONFIRMED (7) هو مصدر الـ "Confirmed Orders" و"RR Confirmed (EOM)"
+// وبالتالي الـ "Projected Segment" في جدول Merchant Segmentation & Projections
+// بالظبط — بدل ما كانت بتتحسب من تجميع MAIN_GID زي باقي أعمدة الجدول التاني
+// (Performance Merchant's) اللي فاضلة زي ما هي.
+const MERCHANT_SEGMENTATION_GID = "620123165";
 
 // -------------------------------------------------------------------------
 // COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
@@ -193,6 +205,7 @@ const state = {
   mpSalesPlanSortDir: "desc",
   mpSalesPlanPage: 0,
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
+  merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
@@ -3762,6 +3775,43 @@ function parseNewSegmentationSheet(payload) {
   return rows;
 }
 
+// -------------------------------------------------------------------------
+// شيت "Merchant Segmentation" الجديد (MERCHANT_SEGMENTATION_GID، gid=620123165).
+// صف واحد لكل (Merchant × Month). راجع تعليق MERCHANT_SEGMENTATION_GID فوق
+// لترتيب الأعمدة الكامل — هنا بنقرا بس اللي محتاجينه فعلاً (TAGER_ID،
+// TAGER_NAME، MONTH، CONFIRMED)، والباقي بيتقرا كمان تحسبًا لأي استخدام لاحق.
+// -------------------------------------------------------------------------
+function parseMerchantSegmentationSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const merchantId = cellText(c[2]).trim();
+    if (!merchantId || merchantId === "TAGER_ID") continue; // فاضي أو صف العناوين
+    const dateStr = cellText(c[0]).trim();
+    const d = new Date(dateStr);
+    const monthYear = isNaN(d.getTime()) ? dateStr : d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    rows.push({
+      monthYear,
+      country: cellText(c[1]).trim(),
+      merchantId,
+      merchantName: cellText(c[3]).trim(),
+      acmName: cellText(c[4]).trim(),
+      deliveredGmv: cellNumber(c[5]),
+      placedOrders: cellNumber(c[6]),
+      confirmedOrders: cellNumber(c[7]), // <-- CONFIRMED: مصدر Confirmed Orders/RR Confirmed في Merchant Segmentation & Projections
+      deliveredOrders: cellNumber(c[8]),
+      cr: cellNumber(c[9]), dr: cellNumber(c[10]), ndr: cellNumber(c[11]),
+      segmentation: cellText(c[12]).trim(), newSegmentation: cellText(c[13]).trim(),
+      placedPieces: cellNumber(c[14]), confirmedPieces: cellNumber(c[15]), deliveredPieces: cellNumber(c[16]),
+      nextMonthSegment: cellText(c[17]).trim(), prevMonthSegment: cellText(c[18]).trim(),
+      firstTimeMvm: cellText(c[19]).trim(), firstTimeHvm: cellText(c[20]).trim(), firstMonth: cellText(c[21]).trim()
+    });
+  }
+  return rows;
+}
+
 // شيت "Inbound" (GID 565878313). ترتيب الأعمدة (0-based) زي الشيت الأصلي بالظبط:
 // 0 Date (تاريخ الاستلام), 1 Odoo_NO, 2 SKU, 3 RCV_QTY, 4 Des (اسم المنتج),
 // 5 Category, 6 Receiving Month (أول يوم في شهر الاستلام),
@@ -4345,12 +4395,33 @@ function prepareMerchantTableData(rows) {
   });
   const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
+
+  // مصدر Confirmed Orders لجدول "Merchant Segmentation & Projections" بس
+  // (segConfirmed/rrConfirmed/projectedSegment تحت) — من شيت MERCHANT_SEGMENTATION_GID
+  // (gid=620123165) بدل تجميع MAIN_GID زي باقي أعمدة الجدول (Performance
+  // Merchant's) اللي فاضلة زي ما هي. لو فيه شهر مختار من monthSelect بنقرا
+  // بس صف نفس الشهر ده (r.monthYear نفس فورمات monthSelect.value بالظبط)؛
+  // لو "All Months" بنجمع كل شهور الشيت الجديد المتاحة لكل تاجر مع بعض.
+  const segConfirmedMap = new Map();
+  (state.merchantSegSourceRows || []).forEach(r => {
+    if (!r.merchantId) return;
+    if (selectedMonthStr && r.monthYear !== selectedMonthStr) return;
+    segConfirmedMap.set(r.merchantId, (segConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
+  });
+
   state.merchantTableData = Array.from(map.values()).map(m => {
     const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) : 0;
     const targetData = state.merchantTargets[m.id] || { gmv: 0, placed: 0 }; const targetGmv = targetData.gmv; const targetPlaced = targetData.placed;
     const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
-    const currentSegment = state.merchantSegmentsMap[m.id] || "In active"; const rrConfirmed = (m.confirmed / elapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, targetGmv, targetPlaced, achievedPct, runRate, currentSegment, rrConfirmed, projectedSegment, skuCount: m.skus.size };
+    const currentSegment = state.merchantSegmentsMap[m.id] || "In active";
+    // segConfirmed = Confirmed Orders من الشيت الجديد (MERCHANT_SEGMENTATION_GID) —
+    // ده اللي بيتعرض في عمود "Confirmed Orders" وبيتحسب منه "RR Confirmed
+    // (EOM)" و"Projected Segment" في Merchant Segmentation & Projections.
+    // لو التاجر ده معندوش صف في الشيت الجديد أصلاً (لسه معملش Confirmed خالص
+    // في الفترة دي)، بيرجع 0 بدل ما يرجع لأرقام MAIN_GID القديمة.
+    const segConfirmed = segConfirmedMap.has(m.id) ? segConfirmedMap.get(m.id) : 0;
+    const rrConfirmed = (segConfirmed / elapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
+    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, targetGmv, targetPlaced, achievedPct, runRate, currentSegment, segConfirmed, rrConfirmed, projectedSegment, skuCount: m.skus.size };
   });
 }
 
@@ -4414,7 +4485,7 @@ function renderPaginatedSegTable() {
   const start = state.pageSeg * PAGE_SIZE; const pageRows = state.filteredSegData.slice(start, start + PAGE_SIZE);
   pageRows.forEach((m, idx) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td><span class="seg-badge ${getSegBadgeClass(m.currentSegment)}">${m.currentSegment}</span></td><td class="num font-bold text-light">${fmtIntCell(m.confirmed)}</td><td class="num font-bold text-blue">${fmtIntCell(Math.round(m.rrConfirmed))}</td><td><span class="seg-badge ${getSegBadgeClass(m.projectedSegment)}">${m.projectedSegment}</span></td>`;
+    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td><span class="seg-badge ${getSegBadgeClass(m.currentSegment)}">${m.currentSegment}</span></td><td class="num font-bold text-light">${fmtIntCell(m.segConfirmed)}</td><td class="num font-bold text-blue">${fmtIntCell(Math.round(m.rrConfirmed))}</td><td><span class="seg-badge ${getSegBadgeClass(m.projectedSegment)}">${m.projectedSegment}</span></td>`;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(state.filteredSegData.length / PAGE_SIZE));
@@ -10131,7 +10202,7 @@ const ALL_SHEET_GIDS = [
   NEW_SEGMENTATION_GID, INBOUND_GID,
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
-  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID
+  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -10162,7 +10233,8 @@ const GID_LABELS = {
   [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
   [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets",
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
-  [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)"
+  [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
+  [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation"
 };
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
@@ -10192,7 +10264,7 @@ async function fetchAllSheetsSnapshot() {
       newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
       debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
-      productsMatchesPayload, merchantSkuDailyPayload
+      productsMatchesPayload, merchantSkuDailyPayload, merchantSegPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -10212,7 +10284,8 @@ async function fetchAllSheetsSnapshot() {
       COGS_GID ? loadSheetWithRetry(COGS_GID).catch(track(COGS_GID)) : Promise.resolve(null),
       AVAILABILITY_LOCKING_GID ? loadSheetWithRetry(AVAILABILITY_LOCKING_GID).catch(track(AVAILABILITY_LOCKING_GID)) : Promise.resolve(null),
       PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null),
-      MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null)
+      MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null),
+      MERCHANT_SEGMENTATION_GID ? loadSheetWithRetry(MERCHANT_SEGMENTATION_GID).catch(track(MERCHANT_SEGMENTATION_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -10223,7 +10296,8 @@ async function fetchAllSheetsSnapshot() {
       [BEGIN_INV_GID]: begInvPayload, [SELLTHROUGH_NEEDED_GID]: sellthroughNeededPayload,
       [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload,
       [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload,
-      [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload
+      [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload,
+      [MERCHANT_SEGMENTATION_GID]: merchantSegPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -10247,6 +10321,7 @@ async function fetchAllSheetsSnapshot() {
   const availabilityLockingPayload = sheets[AVAILABILITY_LOCKING_GID];
   const productsMatchesPayload = sheets[PRODUCTS_MATCHES_GID];
   const merchantSkuDailyPayload = sheets[MERCHANT_SKU_DAILY_GID];
+  const merchantSegPayload = sheets[MERCHANT_SEGMENTATION_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -10278,6 +10353,7 @@ async function fetchAllSheetsSnapshot() {
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
+    merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     staleGids // sheets that failed every retry and are still showing old data
   };
 }
@@ -10347,6 +10423,7 @@ function applySnapshotToState(snapshot) {
   state.availabilityLockingRows = snapshot.availabilityLockingRows || state.availabilityLockingRows || [];
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
+  state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
   // ترتيب أعمدة تواريخ الفيدباك (K فأكتر) زي ما هي في شيت الماتشات — معلقة
   // على الـ array نفسه من parseProductsMatchesSheet (rows.feedbackDateLabels).
   state.matchesFeedbackDateLabels = state.productsMatchesRows.feedbackDateLabels || state.matchesFeedbackDateLabels || [];

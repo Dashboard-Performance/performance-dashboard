@@ -610,7 +610,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-orange">
                   <h2>Merchant Segmentation & Projections</h2>
-                  <p>Current segment vs projected EOM segment based on Confirmed Orders Run Rate</p>
+                  <p>Current segment vs projected EOM segment based on Confirmed Orders Run Rate (Confirmed Orders read from the Merchant Segmentation sheet)</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchSegInput" type="search" placeholder="Search Merchant..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -625,7 +625,7 @@
                       <th data-skey="name" title="Merchant's name.">Merchant Name</th>
                       <th data-skey="acm" title="Account manager assigned to this merchant.">ACM</th>
                       <th data-skey="currentSegment" title="Merchant's segment, from the merchant classification data.">Current Segment</th>
-                      <th data-skey="confirmed" class="num" title="Total confirmed orders this month. No cutoff applied.">Confirmed Orders</th>
+                      <th data-skey="segConfirmed" class="num" title="Confirmed orders from the Merchant Segmentation sheet (GID 620123165), for the selected month.">Confirmed Orders</th>
                       <th data-skey="rrConfirmed" class="num" title="Projected month-end confirmed orders, extrapolated from the daily average so far this month.">RR Confirmed (EOM)</th>
                       <th data-skey="projectedSegment" title="Segment the merchant would land in if the projected month-end run rate holds.">Projected Segment</th>
                     </tr>
