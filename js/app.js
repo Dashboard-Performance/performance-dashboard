@@ -3222,24 +3222,31 @@ function prepareProductsAnalystData() {
   // الداشبورد كله (computeCommercialActuals/Products Matches Analyst).
   const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
 
-  // AVG CONFIRMED DAILY (LAST 5D) — DEMAND SINGLE OVERALL: مجموع Confirmed
-  // Pieces (لكل الصفوف اللي مصدرها المنتج ده نفسه سنجل، أو أي بندل الـ
-  // Single ده عضو فيه، بضرب الكمية) لآخر 5 أيام فعليين من كل تاريخ
-  // MAIN_GID، مقسومة على 5 — نفس منطق conf3d/conf15d في buildDebundledStockDohIndex
-  // بالظبط بس على شباك 5 أيام.
+  // AVG CONFIRMED DAILY (LAST 2D / 5D / 15D) — DEMAND SINGLE OVERALL: مجموع
+  // Confirmed Pieces (لكل الصفوف اللي مصدرها المنتج ده نفسه سنجل، أو أي بندل
+  // الـ Single ده عضو فيه، بضرب الكمية) لآخر N يوم *كامل قبل النهارده* —
+  // النهارده نفسه مستبعد دايماً لأن يومه لسه ماخلصش (زي ما اتطلب صراحةً)،
+  // مقسومة على N. نفس اتفاقية buildDebundledStockDohIndex بالظبط
+  // (rTime < start || rTime >= todayMs يبقى مستبعد من النطاق).
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const d5Ms = todayMs - (5 * 86400000);
-  const conf5dBySingleOverall = new Map();
-  mainRowsAll.forEach(r => {
-    if (!r.sku) return;
-    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-    const rTime = rDate.getTime();
-    if (rTime < d5Ms || rTime > todayMs) return;
-    mappingsFor(r.sku).forEach(mp => {
-      conf5dBySingleOverall.set(mp.singleId, (conf5dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+  const buildConfNDaysBySingleOverall = (days) => {
+    const dStartMs = todayMs - (days * 86400000);
+    const map = new Map();
+    mainRowsAll.forEach(r => {
+      if (!r.sku) return;
+      const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+      const rTime = rDate.getTime();
+      if (rTime < dStartMs || rTime >= todayMs) return; // النهارده مستبعد
+      mappingsFor(r.sku).forEach(mp => {
+        map.set(mp.singleId, (map.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
+      });
     });
-  });
+    return map;
+  };
+  const conf2dBySingleOverall = buildConfNDaysBySingleOverall(2);
+  const conf5dBySingleOverall = buildConfNDaysBySingleOverall(5);
+  const conf15dBySingleOverall = buildConfNDaysBySingleOverall(15);
 
   const bySingle = new Map();
   const getBucket = (singleId) => {
@@ -3310,8 +3317,16 @@ function prepareProductsAnalystData() {
     const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
     const demandConfirmed3m = demandBySingle.get(singleId) || 0;
     const avgConfirmedDaily = last3TotalDays > 0 ? (demandConfirmed3m / last3TotalDays) : 0;
-    // AVG CONFIRMED DAILY (LAST 5D) — DEMAND SINGLE OVERALL ÷ 5.
+    // DEMAND (2D) — إجمالي (خام، قبل القسمة) الـ Confirmed Pieces بتاعة الـ
+    // Demand Single Overall آخر يومين كاملين قبل النهارده (نفس البسط اللي
+    // AVG CONFIRMED DAILY (LAST 2D) بيتقسم منه على 2) — زي demandConfirmed3m
+    // جمب avgConfirmedDaily بالظبط.
+    const demandConfirmedLast2d = Math.round(conf2dBySingleOverall.get(singleId) || 0);
+    // AVG CONFIRMED DAILY (LAST 2D / 5D / 15D) — DEMAND SINGLE OVERALL ÷ N،
+    // كل واحدة مبنية على نطاق مستبعد منه النهارده (شوف buildConfNDaysBySingleOverall فوق).
+    const avgConfirmedDailyLast2d = (conf2dBySingleOverall.get(singleId) || 0) / 2;
     const avgConfirmedDailyLast5d = (conf5dBySingleOverall.get(singleId) || 0) / 5;
+    const avgConfirmedDailyLast15d = (conf15dBySingleOverall.get(singleId) || 0) / 15;
     const lastInboundTs = lastInboundTsBySku.get(singleId) || 0;
     const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
@@ -3321,7 +3336,7 @@ function prepareProductsAnalystData() {
       skuId: singleId, skuName: debundleName || inv.skuName || prod.name || singleId, category: inv.category || prod.category || "Uncategorized",
       lastInboundTs, lastInboundDate: lastInboundTs ? new Date(lastInboundTs).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "-",
       currentPlacedPieces: Math.round(b.currentPlacedPieces || 0), currentConfirmedPieces: Math.round(b.currentConfirmedPieces || 0), currentDeliveredPieces: Math.round(b.currentDeliveredPieces || 0),
-      avgConfirmedDailyLast5d,
+      demandConfirmedLast2d, avgConfirmedDailyLast2d, avgConfirmedDailyLast5d, avgConfirmedDailyLast15d,
       demandConfirmed3m: Math.round(demandConfirmed3m), avgConfirmedDaily,
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
       crPct, drPct, ndrPct,
@@ -3377,7 +3392,7 @@ function renderPaginatedProdAnTable() {
   const pageRows = prodAnState.filtered.slice(start, start + PAGE_SIZE);
 
   if (!pageRows.length) {
-    tbody.innerHTML = `<tr><td colspan="20" class="text-dim center">No products match this filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="23" class="text-dim center">No products match this filter.</td></tr>`;
   } else {
     pageRows.forEach(m => {
       const tr = document.createElement("tr");
@@ -3389,7 +3404,10 @@ function renderPaginatedProdAnTable() {
         <td class="num text-blue">${fmtIntCell(m.currentPlacedPieces)}</td>
         <td class="num text-orange">${fmtIntCell(m.currentConfirmedPieces)}</td>
         <td class="num text-dim">${fmtIntCell(m.currentDeliveredPieces)}</td>
+        <td class="num text-dim">${fmtIntCell(m.demandConfirmedLast2d)}</td>
+        <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast2d))}</td>
         <td class="num font-bold text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast5d))}</td>
+        <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast15d))}</td>
         <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
         <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
         <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
