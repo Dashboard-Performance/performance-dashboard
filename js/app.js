@@ -9071,6 +9071,13 @@ function renderPaginatedAvailabilityLockingTable() {
 // =========================================================================
 const ALC_WINDOW_DAYS = 3; // "آخر 3 أيام، من غير النهاردة" — نفس اتفاقية buildDebundledStockDohIndex (خاص بسكشن Allocation Locking فقط، ماله علاقة بـ CM3_LAG_DAYS/CR_LAG_DAYS ولا أي رولينج ويندو تاني في الداشبورد)
 
+// بطلب صريح من المستخدم: الهدف بقى إن أي كمية "Final Action (Qty to Lock)"
+// تديله تغطية (Final Action DOH) = 7 أيام بالظبط بمعدل الكونفيرم بتاع آخر 3
+// أيام لنفس التاجر (merchantAvg3d — "الـ run rate بتاعه"). يعني الكمية بقت
+// target ثابت مبني على الـ run rate مباشرة، مش مشتقة من Suggested
+// Allocation/CR%/Used Qty زي الأول. راجع alcComputeRowMath تحت.
+const ALC_TARGET_DOH_DAYS = 7;
+
 // بيرجع Map مفتاحها "merchantId||singleId" -> مجموع Confirmed Pieces (بعد
 // الديبندلايز، يعني موزعة على مستوى Single SKU) في الشباك [today-N, today)
 // (النهاردة نفسها مستبعدة) لكل تاجر لوحده — نفس منطق confWindowBySingleOverall
@@ -9166,14 +9173,16 @@ function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty 
   const contrPct = overallAvg3d > 0 ? (merchantAvg3d / overallAvg3d) * 100 : 0;
   const suggestedAllocation = Math.round(stock * (contrPct / 100));
 
-  // Final Action (Qty to Lock) = (Suggested Allocation ÷ (CR%/100)) + Used Qty.
-  // بطلب صريح من المستخدم: القسمة على CR% بتحصل على الـ Suggested Allocation
-  // لوحدها الأول (تعديلها بمعدل الكونفيرم بتاع التاجر)، وبعد كده بس بيتجمع
-  // عليها Used Qty (من غير أي تعديل بـ CR% عليه هو نفسه). قسمة واحدة بس على
-  // CR% في السلسلة كلها، وعلى الـ Suggested Allocation بس. ملحوظة: الدالة دي
+  // Final Action (Qty to Lock) = round(merchantAvg3d × ALC_TARGET_DOH_DAYS).
+  // بطلب صريح من المستخدم: الكمية دي هدفها إنها تدي التاجر تغطية (Final
+  // Action DOH) = 7 أيام بالظبط بمعدل الكونفيرم بتاعه هو (آخر 3 أيام —
+  // الـ "run rate" بتاعه)، مش مشتقة من Suggested Allocation/CR%/Used Qty زي
+  // الأول (دول لسه بيتعرضوا في أعمدتهم لوحدهم للمعلومية، بس مبقوش داخلين في
+  // معادلة Final Action). لو مفيش run rate خالص (merchantAvg3d = 0) مفيش
+  // أساس نحسب عليه تغطية أيام، فالكمية بترجع 0. ملحوظة: الدالة دي
   // (alcComputeRowMath) دلوقتي مستخدمة لصفوف الـ Single فقط — صفوف الـ Bundle
   // بقى Final Action بتاعها = 0 ثابت دايمًا (راجع bundleRowKeys.forEach تحت).
-  const finalActionQty = crPct > 0 ? Math.round(suggestedAllocation / (crPct / 100)) + (usedQty || 0) : suggestedAllocation + (usedQty || 0);
+  const finalActionQty = merchantAvg3d > 0 ? Math.round(merchantAvg3d * ALC_TARGET_DOH_DAYS) : 0;
 
   return { contrPct, suggestedAllocation, finalActionQty };
 }

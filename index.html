@@ -2168,11 +2168,13 @@
         </div>
         <!-- ALLOCATION LOCKING (under Availability Locking) — computed live, no new sheet/GID.
              Computes a "Suggested Allocation" distribution from current Stock × each merchant's
-             CONTR% share of a Single SKU's overall confirmed demand, then a "Final Action"
-             qty-to-lock from Suggested Allocation net of Used Qty. Allocated Qty / Used Qty /
-             Remaining Pieces are raw pass-through values from Availability Locking's own lock
-             data (null/— for Bundle rows, which have no lock source). See
-             computeAllocationLocking() in js/app.js for the full formulas. -->
+             CONTR% share of a Single SKU's overall confirmed demand (informational), and
+             separately a "Final Action" qty-to-lock sized to give each merchant exactly a
+             7-day (ALC_TARGET_DOH_DAYS) coverage target at their own confirmed run rate
+             (Merchant Avg Confirmed 3D × 7). Allocated Qty / Used Qty / Remaining Pieces are
+             raw pass-through values from Availability Locking's own lock data (null/— for
+             Bundle rows, which have no lock source). See computeAllocationLocking() and
+             alcComputeRowMath() in js/app.js for the full formulas. -->
         <div id="viewAllocationLocking" class="view-section hidden">
           <section class="mb-4">
             <div class="metrics-grid">
@@ -2204,7 +2206,7 @@
               <div class="metric-card hover-glow highlight-card">
                 <div class="metric-title text-red">Total Final Action (Qty to Lock) <span class="icon-trend"></span></div>
                 <div class="metric-value text-red" id="alcTotalFinalAction">0</div>
-                <div class="metric-sub text-dim">Single rows: (Suggested Allocation ÷ CR%) + Used Qty.</div>
+                <div class="metric-sub text-dim">Single rows: round(Merchant Avg Confirmed 3D × 7) — enough to give this merchant exactly 7 days of coverage at their own run rate.</div>
               </div>
             </div>
           </section>
@@ -2242,8 +2244,8 @@
                       <th onclick="sortAllocationLocking('remainingPieces')" class="num text-orange" style="cursor:pointer;" title="Remaining Pieces — raw pass-through, not computed. Locked Single rows: this exact lock's REMAINING_PIECES straight from Availability Locking. Unlocked Single rows and Bundle rows: — (null) — no source lock exists.">Remaining Pieces</th>
                       <th onclick="sortAllocationLocking('minBundleAllocation')" class="num text-blue" style="cursor:pointer;" title="Single rows: the minimum across this Single's own standalone Suggested Allocation (in Single pieces) AND every Bundle containing it (each Bundle's own Suggested Allocation, in Bundle units — see that column's tooltip for the per-Bundle-unit quantity division and authoritative-value reuse). Note these two sides can be in different units (Single pieces vs. Bundle units); this column simply reports whichever is smaller. Bundle rows: identical to this row's own Suggested Allocation (already the quantity-adjusted, per-component-bottleneck figure — no further min-across-bundles concept applies to a Bundle row itself). Can be a decimal for Bundle rows and for Single rows whose binding constraint is a Bundle.">Min Bundle Allocation</th>
                       <th onclick="sortAllocationLocking('merchantAvg3d')" class="num text-purple" style="cursor:pointer;" title="Same value as Merchant Avg Confirmed (3D) earlier in this row, repeated here for convenience.">Last Avg Confirmed 3D</th>
-                      <th onclick="sortAllocationLocking('finalActionQty')" class="num text-red" style="cursor:pointer;" title="Single rows: Final Action (Qty to Lock) = (Suggested Allocation ÷ (CR% ÷ 100)) + Used Qty, or just Suggested Allocation + Used Qty when CR% is 0 — the suggestion grossed up by this merchant's confirm rate, plus what's already used on top. Bundle rows: always 0 — Availability Locking only ever locks Single SKUs, so there's no real lock action at the Bundle level.">Final Action (Qty to Lock)</th>
-                      <th onclick="sortAllocationLocking('finalActionDoh')" class="num" style="cursor:pointer;" title="How many days of coverage the Final Action quantity represents, at this merchant's own last-3-day confirmed run-rate (Final Action Qty ÷ Last Avg Confirmed 3D). Shows — when the average is 0, or on Bundle rows (Final Action is always 0 there).">Final Action DOH</th>
+                      <th onclick="sortAllocationLocking('finalActionQty')" class="num text-red" style="cursor:pointer;" title="Single rows: Final Action (Qty to Lock) = round(Merchant Avg Confirmed 3D × 7) — a fixed 7-day-of-coverage target sized directly off this merchant's own run rate, independent of Suggested Allocation/CR%/Used Qty. 0 when the merchant has no run rate. Bundle rows: always 0 — Availability Locking only ever locks Single SKUs, so there's no real lock action at the Bundle level.">Final Action (Qty to Lock)</th>
+                      <th onclick="sortAllocationLocking('finalActionDoh')" class="num" style="cursor:pointer;" title="How many days of coverage the Final Action quantity represents, at this merchant's own last-3-day confirmed run-rate (Final Action Qty ÷ Last Avg Confirmed 3D). Should read ~7 by construction for any Single row with a run rate. Shows — when the average is 0, or on Bundle rows (Final Action is always 0 there).">Final Action DOH</th>
                     </tr>
                   </thead>
                   <tbody id="alcTableBody"></tbody>
