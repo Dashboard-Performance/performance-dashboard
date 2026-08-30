@@ -72,6 +72,7 @@
           <div class="nav-submenu hidden" id="adminSubmenu">
             <a class="nav-item-sub" id="navSegmentationPanel">Segmentation Panel</a>
             <a class="nav-item-sub" id="navSellthroughPanel">Sellthrough Rate Panel</a>
+            <a class="nav-item-sub" id="navWeeklyInventory">Weekly Inventory &amp; Inbound</a>
           </div>
         </div>
       </nav>
@@ -2785,6 +2786,79 @@
                   <span id="pageIndicatorSellthrough">Page 1 of 1</span>
                   <button id="nextPageSellthrough" class="btn btn-outline small">Next</button>
                 </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- WEEKLY INVENTORY & INBOUND PANEL (Admin Panel) -->
+        <div id="viewWeeklyInventory" class="view-section hidden">
+          <!-- Filters -->
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Weekly Inventory &amp; Inbound Filters</h2>
+                  <p id="wiFiltersSubtitle">Pick a month, then a week (Sunday–Saturday) — defaults to the current week</p>
+                </div>
+              </div>
+              <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; margin-left: 0; justify-content: flex-start; width: 100%;">
+                <select id="wiMonthSelect" class="st-filter-select"><option value="">Month</option></select>
+                <select id="wiWeekSelect" class="st-filter-select"><option value="">Week</option></select>
+                <input id="searchWeeklyInvInput" type="search" placeholder="Search SKU or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+              </div>
+            </div>
+          </section>
+
+          <!-- Simple Summary -->
+          <section class="mb-4">
+            <div class="metrics-grid" id="wiSummaryGrid"></div>
+          </section>
+
+          <!-- Weekly Inventory Trend Chart — نفس ستايل "Sellthrough Trend" بالظبط
+               بس بمقياس أسبوعي، ومستقلة تمامًا عن فلاتر الشهر/الأسبوع فوق. -->
+          <section class="mb-4">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Weekly Inventory Trend (This Year)</h2>
+                  <p id="wiTrendSubtitle">Total Beginning Inventory vs Total Purchases vs Inbound vs Sold % — every week this year</p>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="wiTrendChart"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <!-- Selected week table -->
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2 id="wiWeekTableTitle">Week of —</h2>
+                  <p>Single SKUs that had an inbound during the selected week</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="wiWeekTable">
+                  <thead>
+                    <tr>
+                      <th title="Product identifier.">SKU_ID</th>
+                      <th style="min-width: 180px;" title="Product name.">SKU_NAME</th>
+                      <th class="num" title="Stock on hand as of this week's Sunday, from the Daily SKU Inventory sheet.">Beginning Inventory</th>
+                      <th class="num text-blue" title="Total inbound (received) pieces for this SKU across this week's 7 days.">Inbound Qty (7d)</th>
+                      <th title="Date(s) this SKU was received during this week.">Inbound Date</th>
+                      <th class="num text-green" title="SKU Total Demand Overall (Debundled): confirmed pieces sold as this SKU directly, plus demand pulled in from every bundle it's a component of (× quantity per bundle), summed across this week's 7 days.">Confirmed Qty (7d)</th>
+                      <th class="num" title="Confirmed pieces sourced from beginning inventory = MIN(Confirmed Qty, Beginning Inventory).">Beginning Sales</th>
+                      <th class="num text-orange" title="Confirmed pieces still needing coverage after beginning inventory = Confirmed Qty − Beginning Sales.">Remaining from Beginning</th>
+                      <th class="num" title="Remaining sales from beginning ÷ total inbound this week.">Inbound vs Sold</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wiWeekTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="wiRowCount">0 Rows</span>
               </div>
             </div>
           </section>

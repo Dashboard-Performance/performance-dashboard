@@ -53,6 +53,20 @@ const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate nee
 const MERCHANT_SEGMENTATION_GID = "620123165";
 
 // -------------------------------------------------------------------------
+// WEEKLY INVENTORY & INBOUND PANEL (Admin Panel, تحت Sellthrough Rate Panel)
+// شيت "Daily SKU Inventory" — أعمدة: SKU_ID | SKU_NAME | ثم عمود لكل يوم
+// (عنوان العمود هو تاريخ اليوم، زي "23-August") — بيتضاف عمود جديد كل يوم
+// تلقائيًا. البانل بيجمع الأعمدة دي في أسابيع (أحد -> سبت) وبيحسب لكل SKU
+// لكل أسبوع: Beginning Inventory (قيمة يوم الأحد)، Inbound Qty (من شيت
+// Inbound، مجموع RCV_QTY في الـ 7 أيام)، Confirmed Qty (من شيت الـ Main،
+// مجموع CONFIRMED_PIECES في الـ 7 أيام، عبر كل التجار)، وبعدين:
+//   BEGINNING_SALES          = MIN(Confirmed Qty, Beginning Inventory)
+//   REMAINING_FROM_BEGINNING = Confirmed Qty - BEGINNING_SALES
+//   INBOUND_VS_SOLD           = REMAINING_FROM_BEGINNING / Inbound Qty
+// -------------------------------------------------------------------------
+const WEEKLY_INVENTORY_GID = "1289659887";
+
+// -------------------------------------------------------------------------
 // COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
 // كل Single SKU عن طريق ضم الديماند اللي جاي من البندلز اللي فيها نفس الـ
 // Single SKU (مضروبة في الكمية بتاعتها جوه البندل) فوق الديماند المباشر بتاعه.
@@ -246,7 +260,15 @@ const state = {
   // true لما تتجهز الداتا مرة، يبقى فاتح البانل تاني (نفس الجلسة) مايعملش
   // لودينج ولا يعيد الحساب تاني — إلا لو الداتا الخام اتغيرت (applySnapshotToState
   // بيرجعها false تاني عشان تتحسب مرة واحدة بس مع أحدث داتا).
-  sellthroughPrepared: false
+  sellthroughPrepared: false,
+  // Weekly Inventory & Inbound (Admin Panel)
+  weeklyInventoryRows: [],   // شيت WEEKLY_INVENTORY_GID الخام: [{sku, name, byDate: Map(dateLabel -> qty)}]
+  weeklyInventoryDateCols: [], // [{label, ts}] بترتيب الشيت (الأقدم للأحدث)
+  weeklyInvWeeks: [],        // الأسابيع المحسوبة (أحدث أولاً): [{weekStart, label, rows:[...]}]
+  weeklyInvSearch: "",
+  weeklyInvMonthOptions: [], // [{key, date}] شهور فيها أسابيع فعلاً
+  weeklyInvSelectedMonthKey: null, // "August 2026"
+  weeklyInvSelectedWeekStart: null // timestamp الأحد بتاع الأسبوع المختار
 };
 const analystState = {
   scope: "merchant", data: [], filtered: [], sortKey: "cm3Pct", sortDir: "desc", page: 0, wired: false
@@ -521,6 +543,7 @@ const adminSubmenu = $("adminSubmenu");
 const navAdminCaret = $("navAdminCaret");
 const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
+const navWeeklyInventory = $("navWeeklyInventory");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
@@ -572,6 +595,7 @@ function switchView(viewName) {
   if(navMpNewMatches) navMpNewMatches.classList.remove("active");
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
+  if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
 
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); }
@@ -603,6 +627,11 @@ function switchView(viewName) {
       if(navSellthroughPanel) navSellthroughPanel.classList.add("active");            
       simulateSellthroughProgress(); 
   }
+  else if (viewName === "weeklyInventory") {
+      activeSection = $("viewWeeklyInventory");
+      if(navWeeklyInventory) navWeeklyInventory.classList.add("active");
+      renderWeeklyInventoryPanel();
+  }
 
   if (activeSection) {
     activeSection.classList.remove("hidden");
@@ -633,6 +662,7 @@ if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatc
 if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
+if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
 
 // -------------------------------------------------------------------------
 // ADMIN PANEL — بوابة الباسورد (admin1). لو اتفتحت مرة في نفس الجلسة (tab)
@@ -3858,6 +3888,72 @@ function parseInboundSheet(payload) {
     });
   }
   return rows;
+}
+
+// -------------------------------------------------------------------------
+// شيت "Daily SKU Inventory" (WEEKLY_INVENTORY_GID). أعمدة: 0 SKU_ID |
+// 1 SKU_NAME | 2+ عمود لكل يوم (عنوان العمود نفسه هو تاريخ اليوم ده، زي
+// "23-August") — بيتضاف عمود جديد كل يوم تلقائيًا في الشيت. نفس باترن
+// أعمدة الفيدباك في parseProductsMatchesSheet (table.cols.label الأول،
+// وبعدين صف عناوين جوه rows كـ fallback لو مفيش).
+// -------------------------------------------------------------------------
+function parseWeeklyInventorySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rawCols = payload?.table?.cols ?? [];
+
+  let dateLabels = [];
+  if (rawCols.length > 2) {
+    dateLabels = rawCols.slice(2).map(col => (col && col.label ? String(col.label).trim() : ""));
+  }
+
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const skuId = cellText(c[0]).trim();
+    if (!skuId) continue;
+    if (skuId.toUpperCase() === "SKU_ID") {
+      // صف عناوين جوه rows (لو table.cols ماكانتش فيها label) — نلتقط منه
+      // عناوين أعمدة التواريخ لو لسه ملقطناش حاجة من فوق.
+      if (!dateLabels.some(Boolean) && c.length > 2) {
+        dateLabels = c.slice(2).map(cell => cellText(cell).trim());
+      }
+      continue;
+    }
+    const byDate = new Map();
+    for (let i = 2; i < c.length; i++) {
+      const label = dateLabels[i - 2];
+      if (!label) continue;
+      byDate.set(label, cellNumber(c[i]));
+    }
+    rows.push({ sku: skuId, name: cellText(c[1]).trim(), byDate });
+  }
+
+  const dateCols = dateLabels
+    .map(label => ({ label, ts: wiParseHeaderDate(label) }))
+    .filter(d => d.label && d.ts !== null);
+
+  return { rows, dateCols };
+}
+
+// بيحول عنوان عمود زي "23-August" لتاريخ فعلي (timestamp). مفيش سنة مكتوبة
+// في العنوان، فبنفترض السنة الحالية — إلا لو ده هيخلي التاريخ "قدام"
+// النهاردة بأكتر من 180 يوم (يعني الأرجح إنه من السنة اللي فاتت، حماية من
+// التفاف السنة عند بداية يناير).
+const WI_MONTH_NAMES = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+function wiParseHeaderDate(label) {
+  if (!label) return null;
+  const parts = String(label).trim().split("-");
+  if (parts.length !== 2) return null;
+  const day = parseInt(parts[0], 10);
+  const monthIdx = WI_MONTH_NAMES.indexOf(parts[1].trim().toLowerCase());
+  if (!Number.isFinite(day) || monthIdx === -1) return null;
+  const now = new Date();
+  let d = new Date(now.getFullYear(), monthIdx, day);
+  if (d.getTime() - now.getTime() > 180 * 24 * 60 * 60 * 1000) {
+    d = new Date(now.getFullYear() - 1, monthIdx, day);
+  }
+  return d.getTime();
 }
 
 // -------------------------------------------------------------------------
@@ -7867,8 +7963,360 @@ function renderPaginatedSellthroughTable() {
   if ($("nextPageSellthrough")) $("nextPageSellthrough").disabled = state.sellthroughPage >= totalPages - 1;
 }
 
+// ============================================================================
+// WEEKLY INVENTORY & INBOUND PANEL (Admin Panel, تحت Sellthrough Rate Panel)
+// المصادر:
+//   1) state.weeklyInventoryRows / weeklyInventoryDateCols <- شيت WEEKLY_INVENTORY_GID
+//      (SKU_ID | SKU_NAME | عمود لكل يوم، عنوانه هو تاريخ اليوم زي "23-August")
+//   2) state.inboundRows      <- شيت Inbound (INBOUND_GID) — Inbound Qty لكل أسبوع
+//   3) state.allParsedRows + state.debundleMap <- شيت الـ Main (MAIN_GID) +
+//      شيت الديبندلايز (PRODUCTS_DEBUNDLE_MAP_GID) — Confirmed Qty لكل أسبوع،
+//      "SKU TOTAL DEMAND OVERALL" (Debundled): الديماند المباشر بتاع الـ
+//      Single SKU + ديماند كل البندلات اللي هو مكوّن جواها (× الكمية بتاعته
+//      في كل بندل)، نفس منطق buildDebundledStockDohIndex بالظبط.
+//
+// كل عمود تاريخ في شيت الإنفنتوري بيتحول لأول يوم في أسبوعه (الأحد) عشان
+// الأعمدة تتجمع في مجموعات أسبوعية (أحد -> سبت)، بغض النظر عن ترتيبها أو
+// عدد الأيام المتاحة فعليًا (أسبوع لسه ناقص أيامه بيتعرض بردو بس بالأيام
+// المتاحة بس).
+// ============================================================================
+
+// أول يوم في نفس أسبوع أي تاريخ (الأحد اللي قبله أو نفسه لو هو الأحد).
+function wiWeekStart(ts) {
+  const d = new Date(ts);
+  const day = d.getDay(); // 0 = Sunday
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day).getTime();
+}
+function wiWeekLabel(weekStartTs) {
+  const start = new Date(weekStartTs);
+  const end = new Date(weekStartTs + 6 * 24 * 60 * 60 * 1000);
+  const fmt = (d) => d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+  return `${fmt(start)} – ${fmt(end)}, ${end.getFullYear()}`;
+}
+
+// بيبني كل الأسابيع (أحدث أولاً) من state.weeklyInventoryDateCols، وبيحسب
+// لكل SKU/أسبوع نفس الأعمدة المطلوبة بالظبط. بيتنادى مرة واحدة كل ما البانل
+// يتفتح لأول مرة (أو الداتا الخام تتغير — applySnapshotToState بيصفّر
+// weeklyInvWeeks في الحالة دي).
+function prepareWeeklyInventoryWeeks() {
+  const invRows = state.weeklyInventoryRows || [];
+  const dateCols = state.weeklyInventoryDateCols || [];
+  if (!invRows.length || !dateCols.length) { state.weeklyInvWeeks = []; return; }
+
+  // 1) تجميع أعمدة التاريخ في أسابيع (weekStart -> [{label, ts}], مرتبة تصاعديًا)
+  const weekMap = new Map();
+  dateCols.forEach(({ label, ts }) => {
+    const wk = wiWeekStart(ts);
+    let arr = weekMap.get(wk);
+    if (!arr) { arr = []; weekMap.set(wk, arr); }
+    arr.push({ label, ts });
+  });
+  weekMap.forEach(arr => arr.sort((a, b) => a.ts - b.ts));
+
+  // 2) فهرس Inbound: "sku|weekStart" -> إجمالي RCV_QTY في الأسبوع ده،
+  //    + فهرس تاني بنفس المفتاح لتواريخ الاستلام الفعلية (لعمود Inbound Date).
+  const inboundByWeek = new Map();
+  const inboundDatesByWeek = new Map(); // "sku|weekStart" -> [{text, ts}, ...]
+  (state.inboundRows || []).forEach(row => {
+    if (!row.sku || !row.rcvTs) return;
+    const key = row.sku + "|" + wiWeekStart(row.rcvTs);
+    inboundByWeek.set(key, (inboundByWeek.get(key) || 0) + (row.rcvQty || 0));
+    let arr = inboundDatesByWeek.get(key);
+    if (!arr) { arr = []; inboundDatesByWeek.set(key, arr); }
+    arr.push({ text: row.rcvDateText, ts: row.rcvTs });
+  });
+
+  // 3) فهرس Confirmed: "sku|weekStart" -> إجمالي CONFIRMED_PIECES في الأسبوع
+  //    ده، لكن "SKU TOTAL DEMAND OVERALL" (Debundled) — بنفس منطق
+  //    buildDebundledStockDohIndex/Sellthrough Panel بالظبط: ديماند كل
+  //    Single SKU = الديماند المباشر بتاعه (لما يتباع لوحده) + ديماند كل
+  //    البندلات اللي هو مكوّن جواها (Confirmed × PRODUCT_QUANTITY بتاعه في
+  //    البندل ده)، مش بس الديماند اللي طالع على نفس الـ SKU ده كسطر مباشر
+  //    في MAIN_GID. أي PRODUCT_ID مش موجود في خريطة الديبندلايز أصلاً
+  //    (مفيش مابينج ليه) بيترصد على نفسه زي ما هو (fallback).
+  const { productMap: wiDebundleMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const confirmedByWeek = new Map();
+  (state.allParsedRows || []).forEach(row => {
+    if (!row.sku || !row.timestamp) return;
+    const weekStart = wiWeekStart(row.timestamp);
+    const mappings = wiDebundleMap.get(row.sku);
+    if (mappings && mappings.length) {
+      mappings.forEach(mp => {
+        const key = mp.singleId + "|" + weekStart;
+        confirmedByWeek.set(key, (confirmedByWeek.get(key) || 0) + (row.confirmedPieces || 0) * (mp.quantity || 1));
+      });
+    } else {
+      const key = row.sku + "|" + weekStart;
+      confirmedByWeek.set(key, (confirmedByWeek.get(key) || 0) + (row.confirmedPieces || 0));
+    }
+  });
+
+  // 4) بناء الأسابيع (أحدث أولاً)
+  const weekStarts = Array.from(weekMap.keys()).sort((a, b) => b - a);
+  const weeks = weekStarts.map(weekStart => {
+    const cols = weekMap.get(weekStart); // مرتبة تصاعديًا — أول عمود = الأحد
+    const sundayLabel = cols[0].label;
+
+    const rows = invRows.map(invRow => {
+      const beginInv = invRow.byDate.has(sundayLabel) ? (invRow.byDate.get(sundayLabel) || 0) : 0;
+      const inboundQty = inboundByWeek.get(invRow.sku + "|" + weekStart) || 0;
+      const inboundDatesRaw = inboundDatesByWeek.get(invRow.sku + "|" + weekStart) || [];
+      const inboundDates = [...inboundDatesRaw].sort((a, b) => a.ts - b.ts).map(d => d.text);
+      const confirmedQty = confirmedByWeek.get(invRow.sku + "|" + weekStart) || 0;
+      const beginningSales = Math.min(confirmedQty, beginInv);
+      const remainingFromBeginning = confirmedQty - beginningSales;
+      const inboundVsSold = inboundQty > 0 ? (remainingFromBeginning / inboundQty) * 100 : null;
+      return {
+        sku: invRow.sku, name: invRow.name || "Unknown",
+        beginInv, inboundQty, inboundDates, confirmedQty, beginningSales, remainingFromBeginning, inboundVsSold
+      };
+    });
+
+    return {
+      weekStart,
+      label: wiWeekLabel(weekStart),
+      sundayLabel,
+      dayCount: cols.length,
+      rows
+    };
+  });
+
+  state.weeklyInvWeeks = weeks;
+}
+
+function wiFmtPct(n) {
+  if (n === null || n === undefined || !Number.isFinite(n)) return `<span class="text-dim">-</span>`;
+  return `${n.toFixed(1)}%`;
+}
+
+// -------------------------------------------------------------------------
+// فلاتر الشهر/الأسبوع — شهر بيحدد مجموعة أسابيع، والأسبوع المختار (Sunday
+// timestamp) هو اللي بيحدد الجدول المعروض تحت. الافتراضي: الشهر الحالي +
+// الأسبوع اللي فيه النهاردة (أو أحدث أسبوع متاح في الشهر ده لو مفيش
+// أسبوع للنهاردة بالذات) — لكن الاختيار نفسه مش متقفل على الشهر الحالي؛
+// أي شهر تاني (زي الشهر اللي فات) متاح من نفس الـ Select.
+// -------------------------------------------------------------------------
+function wiPopulateFilters() {
+  const weeks = state.weeklyInvWeeks || [];
+  const monthMap = new Map(); // "August 2026" -> Date(أول يوم في الشهر)
+  weeks.forEach(w => {
+    const d = new Date(w.weekStart);
+    const key = stMonthLabel(new Date(d.getFullYear(), d.getMonth(), 1));
+    if (!monthMap.has(key)) monthMap.set(key, new Date(d.getFullYear(), d.getMonth(), 1));
+  });
+  const options = Array.from(monthMap.entries())
+    .map(([key, date]) => ({ key, date }))
+    .sort((a, b) => b.date - a.date); // الأحدث أولاً
+  state.weeklyInvMonthOptions = options;
+
+  const monthSelect = $("wiMonthSelect");
+  if (monthSelect) {
+    monthSelect.innerHTML = options.map(o => `<option value="${o.key}">${o.key}</option>`).join("") || `<option value="">No data</option>`;
+    const now = new Date();
+    const currentMonthKey = stMonthLabel(new Date(now.getFullYear(), now.getMonth(), 1));
+    let selKey = state.weeklyInvSelectedMonthKey;
+    if (!selKey || !options.some(o => o.key === selKey)) {
+      selKey = options.some(o => o.key === currentMonthKey) ? currentMonthKey : (options[0] ? options[0].key : null);
+    }
+    monthSelect.value = selKey || "";
+    state.weeklyInvSelectedMonthKey = selKey;
+  }
+
+  wiPopulateWeekOptionsForSelectedMonth();
+}
+
+// بيملي #wiWeekSelect بالأسابيع اللي جوه الشهر المختار بس (state.weeklyInvSelectedMonthKey)،
+// وبيحافظ على الأسبوع المختار لو لسه موجود، وإلا بيختار أسبوع النهاردة (لو
+// موجود جوه الشهر ده) أو آخر أسبوع متاح.
+function wiPopulateWeekOptionsForSelectedMonth() {
+  const weeks = state.weeklyInvWeeks || [];
+  const monthKey = state.weeklyInvSelectedMonthKey;
+  const weeksInMonth = weeks
+    .filter(w => {
+      const d = new Date(w.weekStart);
+      return stMonthLabel(new Date(d.getFullYear(), d.getMonth(), 1)) === monthKey;
+    })
+    .sort((a, b) => a.weekStart - b.weekStart);
+
+  const weekSelect = $("wiWeekSelect");
+  if (!weekSelect) return;
+
+  weekSelect.innerHTML = weeksInMonth.map(w => `<option value="${w.weekStart}">${w.label}</option>`).join("") || `<option value="">No weeks</option>`;
+
+  const todayWeekStart = wiWeekStart(Date.now());
+  let selWs = state.weeklyInvSelectedWeekStart;
+  const stillValid = weeksInMonth.some(w => w.weekStart === selWs);
+  if (!stillValid) {
+    const todayMatch = weeksInMonth.find(w => w.weekStart === todayWeekStart);
+    selWs = todayMatch ? todayMatch.weekStart : (weeksInMonth.length ? weeksInMonth[weeksInMonth.length - 1].weekStart : null);
+  }
+  weekSelect.value = (selWs !== null && selWs !== undefined) ? String(selWs) : "";
+  state.weeklyInvSelectedWeekStart = selWs;
+}
+
+// -------------------------------------------------------------------------
+// TREND CHART — "Weekly Inventory Trend (This Year)"، نفس ستايل Sellthrough
+// Trend بالظبط (Total Purchases / المقياس التاني كأرقام على المحور الرئيسي،
+// ونسبة % على محور تاني على اليمين) بس بمقياس أسبوعي بدل شهري، ومستقلة
+// تمامًا عن فلاتر الشهر/الأسبوع فوق (بتاخد كل أسابيع السنة الحالية) — لكن
+// زي الجدول والسامري بالظبط، كل أسبوع بيتحسب بس على الـ SKUs اللي فعلاً
+// عندها إنباوند (Inbound Qty > 0) في الأسبوع ده، مش كل الـ SKUs في شيت
+// الإنفنتوري (وإلا Total Beginning Inventory كانت بتفضل شبه ثابتة كل
+// أسبوع لأنها بتجمع كل الكاتالوج، بغض النظر عن مين اتشحن فعلاً الأسبوع ده).
+// التلات خطوط، كلهم على نفس مجموعة الـ SKUs دي بالظبط:
+//   Total Beginning Inventory (محور رئيسي) / Total Purchases = Inbound Qty
+//   (محور رئيسي) / Inbound vs Sold % = مجموع Remaining from Beginning ÷
+//   مجموع Total Purchases، لكل أسبوع (محور تاني، % — زي Sellthrough %).
+// -------------------------------------------------------------------------
+let wiTrendChartInst = null;
+function buildWeeklyInventoryTrendData() {
+  const currentYear = new Date().getFullYear();
+  const weeks = (state.weeklyInvWeeks || []).filter(w => new Date(w.weekStart).getFullYear() === currentYear);
+  const sorted = [...weeks].sort((a, b) => a.weekStart - b.weekStart);
+  return sorted.map(w => {
+    const activeRows = w.rows.filter(r => r.inboundQty > 0); // نفس فلتر الجدول والسامري بالظبط
+    let sumBeginInv = 0, sumPurchases = 0, sumRemaining = 0;
+    activeRows.forEach(r => { sumBeginInv += r.beginInv; sumPurchases += r.inboundQty; sumRemaining += r.remainingFromBeginning; });
+    const inboundVsSoldPct = sumPurchases > 0 ? (sumRemaining / sumPurchases) * 100 : 0;
+    return { weekStart: w.weekStart, label: w.label, beginInv: sumBeginInv, purchases: sumPurchases, inboundVsSoldPct };
+  });
+}
+function renderWeeklyInventoryTrendChart() {
+  const canvas = document.getElementById("wiTrendChart");
+  if (!canvas || typeof Chart === "undefined") return;
+  const data = buildWeeklyInventoryTrendData();
+
+  if (wiTrendChartInst) { wiTrendChartInst.destroy(); wiTrendChartInst = null; }
+  if (!data.length) return;
+
+  const labels = data.map(d => d.label);
+  wiTrendChartInst = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Total Beginning Inventory", data: data.map(d => d.beginInv), borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#3b82f6", yAxisID: "y" },
+        { label: "Total Purchases", data: data.map(d => d.purchases), borderColor: "#10b981", backgroundColor: "rgba(16,185,129,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#10b981", yAxisID: "y" },
+        { label: "Inbound vs Sold %", data: data.map(d => d.inboundVsSoldPct), borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.08)", fill: false, tension: 0.35, pointRadius: 3, pointBackgroundColor: "#f59e0b", yAxisID: "y1", borderDash: [4, 3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: {
+          backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#cbd5e1", borderColor: "#334155", borderWidth: 1, padding: 10,
+          callbacks: { label: (ctx) => ctx.dataset.yAxisID === "y1" ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%` : `${ctx.dataset.label}: ${fmtInt.format(Math.round(ctx.parsed.y))}` }
+        }
+      },
+      scales: {
+        x: { grid: { display: false, drawBorder: false } },
+        y: { beginAtZero: true, position: "left", grid: { color: "#1e293b", borderDash: [4, 4], drawBorder: false }, ticks: { callback: v => v >= 1000 ? (v / 1000) + "k" : v } },
+        y1: { beginAtZero: true, position: "right", grid: { display: false, drawBorder: false }, ticks: { callback: v => v + "%" } }
+      }
+    }
+  });
+}
+
+// سامري بسيط فوق الجدول — إجماليات الأسبوع المختار (بس على الـ SKUs اللي
+// فعلاً عندهم إنباوند في الأسبوع ده، زي الجدول تحته بالظبط).
+function renderWeeklyInventorySummary(rows) {
+  const grid = $("wiSummaryGrid");
+  if (!grid) return;
+
+  let sumBeg = 0, sumInbound = 0, sumConfirmed = 0, sumRemaining = 0;
+  rows.forEach(r => { sumBeg += r.beginInv; sumInbound += r.inboundQty; sumConfirmed += r.confirmedQty; sumRemaining += r.remainingFromBeginning; });
+  const overallRatio = sumInbound > 0 ? (sumRemaining / sumInbound) * 100 : null;
+
+  grid.innerHTML = `
+    <div class="metric-card hover-glow">
+      <div class="metric-title">SKUs with Inbound</div>
+      <div class="metric-value">${fmtInt.format(rows.length)}</div>
+    </div>
+    <div class="metric-card hover-glow">
+      <div class="metric-title">Total Beginning Inventory</div>
+      <div class="metric-value">${fmtInt.format(Math.round(sumBeg))}</div>
+    </div>
+    <div class="metric-card hover-glow">
+      <div class="metric-title">Total Inbound Qty <span class="icon-cart"></span></div>
+      <div class="metric-value text-blue">${fmtInt.format(Math.round(sumInbound))}</div>
+    </div>
+    <div class="metric-card hover-glow">
+      <div class="metric-title">Total Confirmed Qty (Overall)</div>
+      <div class="metric-value text-green">${fmtInt.format(Math.round(sumConfirmed))}</div>
+    </div>
+    <div class="metric-card hover-glow highlight-card">
+      <div class="metric-title text-orange">Inbound vs Sold <span class="icon-trend"></span></div>
+      <div class="metric-value">${overallRatio === null ? "-" : overallRatio.toFixed(1) + "%"}</div>
+    </div>
+  `;
+}
+
+// بيرسم جدول أسبوع واحد بس (المختار من الفلاتر فوق) — بس الـ SKUs اللي
+// فعلاً عندهم إنباوند (Inbound Qty > 0) في الأسبوع ده، زي ما اتطلب بالظبط.
+function renderWeeklyInventoryTable() {
+  const tbody = $("wiWeekTableBody");
+  const titleEl = $("wiWeekTableTitle");
+  if (!tbody) return;
+
+  const week = (state.weeklyInvWeeks || []).find(w => w.weekStart === state.weeklyInvSelectedWeekStart);
+  if (titleEl) titleEl.textContent = week ? `Week of ${week.label}` : "Week of —";
+
+  if (!week) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
+    if ($("wiRowCount")) $("wiRowCount").textContent = "0 Rows";
+    renderWeeklyInventorySummary([]);
+    return;
+  }
+
+  const q = (state.weeklyInvSearch || "").toLowerCase();
+  let rows = week.rows.filter(r => r.inboundQty > 0);
+  if (q) rows = rows.filter(r => String(r.sku).toLowerCase().includes(q) || String(r.name).toLowerCase().includes(q));
+  rows = [...rows].sort((a, b) => b.inboundQty - a.inboundQty);
+
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td class="font-mono text-dim">${escapeHtml(r.sku)}</td>
+      <td class="font-bold text-light truncate-cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
+      <td class="num text-light">${fmtIntCell(r.beginInv)}</td>
+      <td class="num text-blue">${fmtIntCell(r.inboundQty)}</td>
+      <td class="text-dim">${r.inboundDates && r.inboundDates.length ? escapeHtml(r.inboundDates.join(", ")) : "-"}</td>
+      <td class="num text-green font-bold">${fmtIntCell(r.confirmedQty)}</td>
+      <td class="num text-dim">${fmtIntCell(r.beginningSales)}</td>
+      <td class="num text-orange font-bold">${fmtIntCell(r.remainingFromBeginning)}</td>
+      <td class="num font-bold">${wiFmtPct(r.inboundVsSold)}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="9" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
+
+  if ($("wiRowCount")) $("wiRowCount").textContent = `${fmtInt.format(rows.length)} Rows`;
+  renderWeeklyInventorySummary(rows);
+}
+
+function renderWeeklyInventoryPanel() {
+  if (!(state.weeklyInvWeeks && state.weeklyInvWeeks.length) && (state.weeklyInventoryRows || []).length) {
+    prepareWeeklyInventoryWeeks();
+  }
+  wiPopulateFilters();
+  renderWeeklyInventoryTable();
+  renderWeeklyInventoryTrendChart();
+}
+
 // تفعيل أحداث الضغط (Event Listeners) الخاصة بالبحث والتقليب
 document.addEventListener("DOMContentLoaded", () => {
+  if ($("searchWeeklyInvInput")) $("searchWeeklyInvInput").addEventListener("input", (e) => {
+    state.weeklyInvSearch = e.target.value || "";
+    renderWeeklyInventoryTable();
+  });
+  if ($("wiMonthSelect")) $("wiMonthSelect").addEventListener("change", (e) => {
+    state.weeklyInvSelectedMonthKey = e.target.value || null;
+    state.weeklyInvSelectedWeekStart = null; // يخلي wiPopulateWeekOptionsForSelectedMonth يختار أول أسبوع مناسب في الشهر الجديد
+    wiPopulateWeekOptionsForSelectedMonth();
+    renderWeeklyInventoryTable();
+  });
+  if ($("wiWeekSelect")) $("wiWeekSelect").addEventListener("change", (e) => {
+    state.weeklyInvSelectedWeekStart = e.target.value ? Number(e.target.value) : null;
+    renderWeeklyInventoryTable();
+  });
   if($("searchSellthroughInput")) $("searchSellthroughInput").addEventListener("input", applySellthroughFiltersAndSort);
 
   // فلتر الشهور السريع: بيحدد نفس الشهر لـ Beginning Inventory + Start/End Sale Month مع بعض.
@@ -10227,7 +10675,8 @@ const ALL_SHEET_GIDS = [
   NEW_SEGMENTATION_GID, INBOUND_GID,
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
-  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID
+  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
+  WEEKLY_INVENTORY_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -10259,7 +10708,8 @@ const GID_LABELS = {
   [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets",
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
-  [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation"
+  [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
+  [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)"
 };
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
@@ -10289,7 +10739,8 @@ async function fetchAllSheetsSnapshot() {
       newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
       debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
-      productsMatchesPayload, merchantSkuDailyPayload, merchantSegPayload
+      productsMatchesPayload, merchantSkuDailyPayload, merchantSegPayload,
+      weeklyInventoryPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -10310,7 +10761,8 @@ async function fetchAllSheetsSnapshot() {
       AVAILABILITY_LOCKING_GID ? loadSheetWithRetry(AVAILABILITY_LOCKING_GID).catch(track(AVAILABILITY_LOCKING_GID)) : Promise.resolve(null),
       PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null),
       MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null),
-      MERCHANT_SEGMENTATION_GID ? loadSheetWithRetry(MERCHANT_SEGMENTATION_GID).catch(track(MERCHANT_SEGMENTATION_GID)) : Promise.resolve(null)
+      MERCHANT_SEGMENTATION_GID ? loadSheetWithRetry(MERCHANT_SEGMENTATION_GID).catch(track(MERCHANT_SEGMENTATION_GID)) : Promise.resolve(null),
+      WEEKLY_INVENTORY_GID ? loadSheetWithRetry(WEEKLY_INVENTORY_GID).catch(track(WEEKLY_INVENTORY_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -10322,7 +10774,8 @@ async function fetchAllSheetsSnapshot() {
       [PRODUCTS_DEBUNDLE_MAP_GID]: debundleMapPayload, [SINGLE_SKU_TARGETS_GID]: singleSkuTargetsPayload,
       [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload,
       [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload,
-      [MERCHANT_SEGMENTATION_GID]: merchantSegPayload
+      [MERCHANT_SEGMENTATION_GID]: merchantSegPayload,
+      [WEEKLY_INVENTORY_GID]: weeklyInventoryPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -10347,6 +10800,7 @@ async function fetchAllSheetsSnapshot() {
   const productsMatchesPayload = sheets[PRODUCTS_MATCHES_GID];
   const merchantSkuDailyPayload = sheets[MERCHANT_SKU_DAILY_GID];
   const merchantSegPayload = sheets[MERCHANT_SEGMENTATION_GID];
+  const weeklyInventoryPayload = sheets[WEEKLY_INVENTORY_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -10379,6 +10833,7 @@ async function fetchAllSheetsSnapshot() {
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
+    weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     staleGids // sheets that failed every retry and are still showing old data
   };
 }
@@ -10449,6 +10904,16 @@ function applySnapshotToState(snapshot) {
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
+  // Weekly Inventory & Inbound (Admin Panel) — لو الشيت اتغيّر (عمود يوم جديد
+  // اتضاف مثلاً)، لازم نعيد بناء الأسابيع تاني بدل ما تفضل عارضة داتا قديمة.
+  {
+    const wi = snapshot.weeklyInventory || { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols };
+    const changed = (wi.rows || []).length !== (state.weeklyInventoryRows || []).length
+      || (wi.dateCols || []).length !== (state.weeklyInventoryDateCols || []).length;
+    state.weeklyInventoryRows = wi.rows || [];
+    state.weeklyInventoryDateCols = wi.dateCols || [];
+    if (changed) state.weeklyInvWeeks = []; // يتحسب تاني أول ما البانل يتفتح
+  }
   // ترتيب أعمدة تواريخ الفيدباك (K فأكتر) زي ما هي في شيت الماتشات — معلقة
   // على الـ array نفسه من parseProductsMatchesSheet (rows.feedbackDateLabels).
   state.matchesFeedbackDateLabels = state.productsMatchesRows.feedbackDateLabels || state.matchesFeedbackDateLabels || [];
@@ -10728,6 +11193,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
     if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
     if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
+    if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
 
     // Wait for DOM to render all rows
     setTimeout(() => {
@@ -10778,6 +11244,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
         if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
         if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
+        if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
     }, 150);
 });
 
