@@ -2714,7 +2714,7 @@ function preparePpmAnalystProductsData() {
   const getBucket = (sku) => {
     let b = bySku.get(sku);
     if (!b) {
-      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, placedGmv: 0, placedPieces: 0, placedByDate: new Map() };
+      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, confirmedPieces: 0, placedGmv: 0, placedPieces: 0, placedByDate: new Map() };
       bySku.set(sku, b);
     }
     return b;
@@ -2725,7 +2725,8 @@ function preparePpmAnalystProductsData() {
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
     const rTime = rDate.getTime();
     const b = getBucket(r.sku);
-    // TOTAL DELIVERED PCS — من غير أي كات أوف (زي ما اتطلب بالظبط).
+    // TOTAL PLACED/CONFIRMED/DELIVERED PCS — من غير أي كات أوف خالص (زي ما اتطلب بالظبط).
+    b.confirmedPieces += (r.confirmedPieces || 0);
     b.deliveredPieces += (r.deliveredPieces || 0);
     // Delivered GMV / TOTAL DELIVERED PPM (وبالتبعية CONTR GMV%/PPM%/CONTR
     // PPM% اللي متبنية عليهم) — من غير أي كات أوف خالص برضو، بطلب صريح إن
@@ -2749,6 +2750,29 @@ function preparePpmAnalystProductsData() {
     // تخص PPM متبقاش عليها كات أوف، مش بس Total PPM).
     b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
     b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+  });
+
+  // AVG LAST 3D / AVG LAST 7D / AVG 15D — بطلب صريح لازم يكونوا على أساس
+  // الـ Confirmed Pcs (مش Placed ولا Delivered)، متوسط يومي لكل SKU زي ما هو
+  // (بدون أي تجميع بندلات — الجدول ده مستوى SKU مباشر زي باقي أعمدته)، على
+  // مدار آخر 3/7/15 يوم كامل قبل النهاردة، من غير ما نحسب النهاردة نفسه لأن
+  // يومه لسه ماخلصش. بنستخدم mainRowsAll (مش monthRows) عشان نطاق الـ 15 يوم
+  // ميتقصش لو إحنا في أول الشهر.
+  const d3Start = todayMs - (3 * 86400000);
+  const d7Start = todayMs - (7 * 86400000);
+  const d15Start = todayMs - (15 * 86400000);
+  const confirmed3dBySku = new Map();
+  const confirmed7dBySku = new Map();
+  const confirmed15dBySku = new Map();
+  mainRowsAll.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime >= todayMs || rTime < d15Start) return; // متطلعش النهاردة، وبرا نطاق الـ 15 يوم
+    const pcs = r.confirmedPieces || 0;
+    confirmed15dBySku.set(r.sku, (confirmed15dBySku.get(r.sku) || 0) + pcs);
+    if (rTime >= d7Start) confirmed7dBySku.set(r.sku, (confirmed7dBySku.get(r.sku) || 0) + pcs);
+    if (rTime >= d3Start) confirmed3dBySku.set(r.sku, (confirmed3dBySku.get(r.sku) || 0) + pcs);
   });
 
   // كل الأرقام اللي بتتجمع من bySku بقت أصلاً من غير كات أوف (زي فوق)، فكروت
@@ -2788,6 +2812,10 @@ function preparePpmAnalystProductsData() {
     const lastAspPlaced = (lastPlacedEntries.length && lastPlacedEntries[0][1].pieces > 0) ? (lastPlacedEntries[0][1].gmv / lastPlacedEntries[0][1].pieces) : 0;
     const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
 
+    const avgLast3d = (confirmed3dBySku.get(sku) || 0) / 3;
+    const avgLast7d = (confirmed7dBySku.get(sku) || 0) / 7;
+    const avgLast15d = (confirmed15dBySku.get(sku) || 0) / 15;
+
     rows.push({
       skuId: sku, skuName: inv.skuName || prod.name || sku, category: inv.category || prod.category || "Uncategorized",
       stock: Math.round(stock || 0), doh: Math.round(doh),
@@ -2795,6 +2823,8 @@ function preparePpmAnalystProductsData() {
       deliveredGmv: b.deliveredGmv, contrGmvPct,
       crPct, drPct, ndrPct, ppmPerPiece, ppmPct,
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
+      placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0),
+      avgLast3d, avgLast7d, avgLast15d,
       contrPpmPct
     });
   });
@@ -2871,6 +2901,11 @@ function renderPaginatedPpmAnalystTable() {
       <td class="num">${fmtPctCell(m.ppmPct)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
       <td class="num text-dim">${fmtIntCell(m.totalDeliveredPcs)}</td>
+      <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
+      <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
+      <td class="num text-orange font-bold">${m.avgLast3d.toFixed(1)}</td>
+      <td class="num text-purple font-bold">${m.avgLast7d.toFixed(1)}</td>
+      <td class="num text-purple font-bold">${m.avgLast15d.toFixed(1)}</td>
       <td class="num font-bold">${fmtPctCell(m.contrPpmPct)}</td>
     `;
     tbody.appendChild(tr);
