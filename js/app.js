@@ -7594,6 +7594,26 @@ function recomputeSellthroughRows() {
 
     const rowsByMonth = monthOpts.map(o => computeSellthroughRowsForQuery(o.key, o.key, o.key, idx));
     const merged = mergeSellthroughRowsAcrossMonths(rowsByMonth);
+
+    // ---------------------------------------------------------------------
+    // تصحيح First Buy بعد الدمج: mergeSellthroughRowsAcrossMonths بتجمع كل
+    // الشهور المتاحة (تاريخ الشركة كله) في صف واحد لكل SKU، فلو استخدمنا
+    // الـ OR بتاعها هي (Yes لو أي شهر من كل الشهور كان Yes) هيبقى كل SKU
+    // عنده تاريخ إنباوند هيطلع First Buy = Yes دايمًا (لأن أول شهر ظهر فيه
+    // الـ SKU هيبقى محسوب جوه rowsByMonth أكيد). ده اللي كان بيحصل بالظبط
+    // ("كل الـ SKUs First Buy").
+    // الصح: في فلتر "Last Inbound Status" (Q1/Q2/Q3/Q4)، First Buy المفروض
+    // يعني "أول ظهور للـ SKU ده وقع فعلاً جوه نفس الربع (Quarter) المختار"
+    // — مش أي وقت في التاريخ. فبنقارن شهر أول ظهور فعلي (inboundFirstBuyMonth)
+    // بنفس الـ bucket (Q1/Q2/Q3/Q4/Before) اللي المستخدم مختاره، مش بمجرد
+    // OR عبر كل الشهور.
+    // ---------------------------------------------------------------------
+    merged.forEach(r => {
+      const firstBuyMonthKey = idx.inboundFirstBuyMonth.get(r.sku);
+      const firstBuyTs = firstBuyMonthKey ? new Date(firstBuyMonthKey).getTime() : null;
+      r.firstBuy = (firstBuyTs !== null && stLastInboundBucket(firstBuyTs) === lastInboundStatus) ? "Yes" : "No";
+    });
+
     const filteredRows = merged.filter(r => stLastInboundBucket(r.lastRecTs) === lastInboundStatus);
 
     if (stSubtitleEl) {
