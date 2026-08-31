@@ -7527,6 +7527,95 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
   return rows;
 }
 
+// بتحسب صف واحد لكل SKU لمجموعة شهور "Bucket" واحدة (مثلاً Q3 = يوليو+أغسطس+
+// سبتمبر) دفعة واحدة، بدل ما كل شهر يتحسب لوحده بمعزل عن اللي بعده.
+// الفرق عن computeSellthroughRowsForQuery: هناك TOTAL_PURCHASES و RTOS
+// بياخدوا بس من شهر الـ begInv الواحد (لأن الاستعلام مفروض يمثل دفعة شراء
+// واحدة)، وهنا إحنا عندنا لحد 3 شهور جوه نفس الـ Bucket، وكل شهر منهم ممكن
+// يكون فيه دفعة شراء لوحده (Inbound) ومرتجعات لوحدها — فبنجمعهم على طول
+// شهور الـ Bucket كله (زي ما بيحصل بالظبط مع CNF/DLV). الـ Beginning
+// Inventory لوحده بياخد قيمته من أول شهر في الـ Bucket بس (المخزون الافتتاحي
+// وقت بداية الربع)، عشان منعملوش دبل-كاونت للمخزون نفسه 3 مرات.
+// ده اللي بيخلي PURCHASES_SALES/SOLD_FROM_INBOUND يحسبوا صح لما شراء حصل في
+// شهر من الربع وانباع في شهر تاني جوه نفس الربع — بدل ما يفضلوا صفر لمجرد إن
+// البيع اتأخر شهر أو اتنين عن تاريخ الشراء بالظبط.
+function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
+  const {
+    productInfo, inboundBySkuMonth, inboundLastRec,
+    inboundNameCat, beginInvBySkuMonth, beginInvNameCat, needBySkuMonth,
+    needNameCat, skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
+    stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku
+  } = idx;
+
+  const sortedMonths = bucketMonthKeys.slice().sort((a, b) => new Date(a) - new Date(b));
+  const firstMonthKey = sortedMonths[0];
+
+  const skuSet = new Set();
+  sortedMonths.forEach(mk => {
+    (skuByMonthInbound.get(mk) || []).forEach(sku => skuSet.add(sku));
+    (skuByMonthNeed.get(mk) || []).forEach(sku => skuSet.add(sku));
+    (skuByMonthBegInv.get(mk) || []).forEach(sku => skuSet.add(sku));
+  });
+
+  const rows = [];
+  skuSet.forEach(sku => {
+    let cnfQty = 0, dlvQty = 0, rtos = 0, totPur = 0;
+    sortedMonths.forEach(mk => {
+      const e = needBySkuMonth.get(sku + "|" + mk);
+      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; rtos += (e.rto || 0); }
+      totPur += inboundBySkuMonth.get(sku + "|" + mk) || 0;
+    });
+
+    const begInv = beginInvBySkuMonth.get(sku + "|" + firstMonthKey) || 0;
+    const begSales = Math.min(dlvQty, begInv);
+    const remBeg = dlvQty - begSales;
+    const retSales = Math.min(remBeg, rtos);
+    const remPurSales = dlvQty - (begSales + retSales);
+    const purSales = Math.min(remPurSales, totPur);
+    const denom = begInv + totPur + rtos;
+    const stRate = denom > 0 ? (dlvQty / denom) * 100 : 0;
+    const soldInb = totPur > 0 ? (purSales / totPur) * 100 : 0;
+    const firstBuy = "No"; // بيتصحح بعد كده برة الدالة دي حسب الـ bucket المختار فعليًا
+
+    const cBegSales = Math.min(cnfQty, begInv);
+    const cRemBeg = cnfQty - cBegSales;
+    const cRetSales = Math.min(cRemBeg, rtos);
+    const cRemPurSales = cnfQty - (cBegSales + cRetSales);
+    const cPurSales = Math.min(cRemPurSales, totPur);
+    const cStRate = denom > 0 ? (cnfQty / denom) * 100 : 0;
+
+    const lastRec = inboundLastRec.get(sku);
+    const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
+
+    const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
+    const avg3dConfirmed = singleOverallStats(sku).avg;
+    const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
+    const avg15dConfirmed = singleOverallStats15d(sku).avg;
+    const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
+
+    const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
+    const sellingPrice = prodInfo.price || 0;
+    const profit = prodInfo.profit || 0;
+    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    const ppmSku = sellingPrice - profit - cogsCost;
+
+    rows.push({
+      sku, name: info.name || "Unknown", cat: info.cat || "Uncategorized",
+      lastRecDate: lastRec ? lastRec.text : "-", lastRecTs: lastRec ? lastRec.ts : null,
+      cnfQty, dlvQty, begInv, begSales, remBeg,
+      rtos, retSales, remPurSales, totPur, purSales,
+      stRate, cStRate, soldInb, firstBuy,
+      cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
+      stock: Math.round(stock || 0), doh,
+      avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
+      sellingPrice, profit, cogs: cogsCost, ppmSku,
+      websiteStatus: prodInfo.websiteStatus || "-", isLocked: prodInfo.isLocked || "-"
+    });
+  });
+
+  return rows;
+}
+
 // بتجمع صفوف أكتر من شهر (كل واحد اتحسب لوحده بمعادلته الصح، begInv=start=end
 // لنفس الشهر — زي "Quick Month Select" بالظبط) في صف واحد لكل SKU، بجمع
 // أرقام الـ Flow (Confirmed/Delivered/Beginning Inventory/RTOS/Purchases..)،
@@ -7580,10 +7669,14 @@ function recomputeSellthroughRows() {
   // ---------------------------------------------------------------------
   // "Last Inbound Status" مختار (مش "All"): الفلتر ده بيشتغل لوحده تمامًا،
   // مستقل خالص عن Beginning Inventory / Start Sale / End Sale — بيتجاهلهم
-  // خالص حتى لو متحطين قيمة، وبيجيب داتا كل الشهور المتاحة أوتوماتيك (كل
-  // شهر بيتحسب لوحده بمعادلته الصح، زي ما هو Quick-Select، وبعدين بيتجمعوا
-  // كلهم في صف واحد لكل SKU)، وبعدين بيفلتر بس الـ SKUs اللي آخر تاريخ
-  // إنباوند بتاعتها واقع جوه الـ bucket المختار.
+  // خالص حتى لو متحطين قيمة، وبيجيب داتا كل الشهور المتاحة أوتوماتيك، بس
+  // مجمّعة على مستوى "Bucket" (Before <year> / Q1 / Q2 / Q3 / Q4) مش شهر
+  // شهر لوحده — عشان شراء حصل في شهر من الربع وانباع في شهر تاني جوه نفس
+  // الربع يتحسب صح في PURCHASES_SALES بدل ما يفضل صفر (كان المفروض قبل كده
+  // كل شهر بيتحسب Beginning=Start=End=نفس الشهر، فأي بيع بيتأخر شهر أو
+  // اتنين عن تاريخ الشراء ماكانش بيتحسب في PURCHASES_SALES خالص). بعد كده
+  // بيتفلتر بس الـ SKUs اللي آخر تاريخ إنباوند بتاعتها واقع جوه الـ bucket
+  // المختار.
   // ---------------------------------------------------------------------
   if (lastInboundStatus) {
     const monthOpts = (state.sellthroughMonthOptions && state.sellthroughMonthOptions.length)
@@ -7592,8 +7685,15 @@ function recomputeSellthroughRows() {
 
     if (!monthOpts.length) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
 
-    const rowsByMonth = monthOpts.map(o => computeSellthroughRowsForQuery(o.key, o.key, o.key, idx));
-    const merged = mergeSellthroughRowsAcrossMonths(rowsByMonth);
+    const bucketGroups = new Map(); // bucket -> [monthKey, ...]
+    monthOpts.forEach(o => {
+      const b = stLastInboundBucket(new Date(o.key).getTime());
+      if (!bucketGroups.has(b)) bucketGroups.set(b, []);
+      bucketGroups.get(b).push(o.key);
+    });
+
+    const rowsByBucket = Array.from(bucketGroups.values()).map(months => computeSellthroughRowsForBucket(months, idx));
+    const merged = mergeSellthroughRowsAcrossMonths(rowsByBucket);
 
     // ---------------------------------------------------------------------
     // تصحيح First Buy بعد الدمج: mergeSellthroughRowsAcrossMonths بتجمع كل
