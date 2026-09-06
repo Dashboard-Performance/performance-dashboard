@@ -1628,41 +1628,39 @@ function computeCommercialActuals(mainRowsAll) {
 }
 
 // شيت التارجت اليومي الخاص بسكشن Sales Plan-ACM (ACM_SALES_PLAN_GID / gid=892918900).
-// الأعمدة الجديدة (0-based): TAGER_ID, TAGER_NAME, PRODUCT_ID, PRODUCT_NAME,
-// CATEGORY, ACM, Adjust Daily Placed, Adjust Daily DLV, Adjust DLV GMV,
-// Rounded Daily Confirmed.
+// الأعمدة الجديدة (0-based): SKU ID, SKU Name, Category, Merchant ID,
+// Merchant Name, After Adjust.
 //
-// "Adjust Daily Placed"، "Adjust Daily DLV"، و"Rounded Daily Confirmed"
-// الثلاثة دول تارجت يومي فعلاً زي ما اسمهم بيقول، بياخدوا زي ما هم من غير
-// أي تحويل. الوحيد المختلف هو "Adjust DLV GMV": القيمة الموجودة في الشيت
-// فعليًا هي **إجمالي الشهر كله**، مش يومي. فلو استخدمناها زي ما هي هيبوظ
-// حساب الـ MTD (هيبقى أكبر من المفروض بمقدار عدد أيام الشهر). فبنسيبها
-// هنا زي ما هي (Monthly) وبنحولها لتارجت يومي في prepareMpSalesPlanData
-// (بالقسمة على عدد أيام الشهر) قبل ما نحسب منها MTD Target — بنفس منطق
-// Commercial Plan بالظبط.
+// كل صف هنا بيمثل ماتش (SKU × Merchant) واحد جوا البلان، و"After Adjust"
+// هو الـ Daily Placed Target بتاعه (= Placed > Daily)، بياخد زي ما هو من
+// غير أي تحويل. باقي المقاييس (Confirmed/Delivered/Delivered GMV) بقت
+// بتتحسب لايف في prepareMpSalesPlanData من الـ Placed MTD Target ده،
+// مضروب في CR%/DR%/ASP الفعليين لنفس الماتش بالظبط (جايين من
+// MERCHANT_SKU_DAILY_GID) بدل ما ييجوا من أعمدة تارجت منفصلة زي الأول —
+// ACM مبقاش عمود في الشيت، فبيتجاب لكل صف من merchantInfoMap (شيت الـ
+// Main) على أساس Merchant ID، زي أي سكشن تاني في الداشبورد.
 function parseAcmSalesPlanSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const plan = [];
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
-    const tagerId = cellText(c[0]);
-    const productId = cellText(c[2]);
+    const productId = cellText(c[0]).trim();   // SKU ID
+    const tagerId = cellText(c[3]).trim();      // Merchant ID
     // تخطي صف العناوين أو أي صف فاضي
-    if (!tagerId && !productId) continue;
-    if (tagerId === "TAGER_ID" || productId === "PRODUCT_ID") continue;
+    if (!productId && !tagerId) continue;
+    if (productId === "SKU ID" || productId === "SKU_ID" || tagerId === "Merchant ID") continue;
+    // لازم الصف يبقى معرَّف بماتش كامل (SKU + Merchant) عشان نقدر نربطه
+    // بأداءه الفعلي في MAIN_GID وبـ CR%/DR%/ASP بتاعه في MERCHANT_SKU_DAILY_GID.
+    if (!productId || !tagerId) continue;
 
     plan.push({
-      tagerId: tagerId,
-      tagerName: cellText(c[1]),
       productId: productId,
-      productName: cellText(c[3]),
-      category: cellText(c[4]) || "Uncategorized",
-      acm: cellText(c[5]) || "Unassigned",
-      dailyPlacedTarget: cellNumber(c[6]),      // Adjust Daily Placed — يومي فعلاً
-      dailyDlvTarget: cellNumber(c[7]),          // Adjust Daily DLV — يومي فعلاً
-      gmvMonthlyTarget: cellNumber(c[8]),        // Adjust DLV GMV — إجمالي الشهر كله
-      dailyConfirmedTarget: cellNumber(c[9])     // Rounded Daily Confirmed — يومي فعلاً
+      productName: cellText(c[1]),               // SKU Name
+      category: cellText(c[2]) || "Uncategorized", // Category
+      tagerId: tagerId,
+      tagerName: cellText(c[4]),                  // Merchant Name
+      dailyPlacedTarget: cellNumber(c[5])         // After Adjust — Daily Placed Target
     });
   }
   return plan;
@@ -1801,10 +1799,27 @@ function parseMerchantSkuDailySheet(payload) {
       skuId,
       tagerId: cellText(c[2]).trim(),
       day0: cellNumber(c[13]), day1: cellNumber(c[14]), day2: cellNumber(c[15]),
-      day3: cellNumber(c[16]), day4: cellNumber(c[17]), day5: cellNumber(c[18])
+      day3: cellNumber(c[16]), day4: cellNumber(c[17]), day5: cellNumber(c[18]),
+      // CR_2_DAY / DR_5_DAYS: مستخدمين هنا في Sales Plan-ACM عشان نحسب منهم
+      // Confirmed/Delivered MTD Target بتاع كل ماتش (SKU × Merchant) — راجع
+      // prepareMpSalesPlanData. بنستخدم merchantSkuDailyPercent() بدل
+      // cellPercent() العادية لأن العمودين دول في الشيت ده مش متنسقين %
+      // (Format > Percent) فعليًا — لو الخلية متنسقة % فعلاً، cellPercent()
+      // بترجع الرقم الصح (60 لـ 60%). لو مجرد رقم عادي مكتوب "0.6" (يعني
+      // 60%)، cellPercent() بترجع 0.6 غلط، فبنكبّرها *100 هنا كمعالجة إضافية.
+      crDay: merchantSkuDailyPercent(c[8]), drDay: merchantSkuDailyPercent(c[9]),
+      asp: cellNumber(c[12]) // ASP PER SKU PER MERCHANT — مستخدم لحساب Delivered GMV MTD Target
     });
   }
   return rows;
+}
+
+// راجع تعليق crDay/drDay فوق: بترجع النسبة دايمًا على مقياس 0-100 (60 يعني
+// 60%)، سواء الخلية في الشيت متنسقة % فعليًا أو مجرد رقم عادي زي "0.6".
+function merchantSkuDailyPercent(cell) {
+  let v = cellPercent(cell);
+  if (v > 0 && v <= 1) v *= 100;
+  return v;
 }
 
 // -------------------------------------------------------------------------
@@ -3781,18 +3796,18 @@ if ($("nextPagePma")) $("nextPagePma").addEventListener("click", () => { const t
 
 // -------------------------------------------------------------------------
 // شيت تارجتس الـ Single SKU (SINGLE_SKU_TARGETS_GID / gid=1620722565).
-// الأعمدة الجديدة (0-based): PRODUCT_ID, PRODUCT_NAME, CATEGORY,
-// Availability Placed Daily, Adjust Target Daily Confirmed,
-// Target Delivered PCS, Total Delivered GMV.
+// الأعمدة الفعلية (0-based، بدون عمود Availability): SKU ID, SKU-Name, CAT,
+// Placed Daily, Confirmed (Target Daily Confirmed), Delivered, Total
+// Delivered GMV.
 //
-// مهم جدًا: "Availability Placed Daily" و"Adjust Target Daily Confirmed"
-// دول تارجت يومي فعلاً (زي ما اسمهم بيقول) — بس "Target Delivered PCS" و
-// "Total Delivered GMV" دول إجمالي الشهر كله (Monthly Total)، مش يومي.
-// فلو استخدمناهم زي ما هم كأنهم يومي هيبوظوا حساب الـ MTD تمامًا (هيبقى
-// أكبر من المفروض بمقدار عدد أيام الشهر). فبنسيبهم هنا زي ما هم (Monthly)
-// وبنحولهم لتارجت يومي في computeCommercialDebundlized (بالقسمة على عدد
-// أيام الشهر) قبل ما نحسب منهم MTD Target، بنفس منطق باقي الداشبورد كله
-// (Daily Target × عدد الأيام من أول الشهر لحد امبارح).
+// الأربعة تارجتس (Placed Daily / Confirmed / Delivered / Total Delivered
+// GMV) كلهم بقوا يوميين فعلاً دلوقتي (زي بعض بالظبط) — فبياخدوا زي ما هم من
+// غير أي تحويل، وبيتحسب منهم MTD Target بنفس معادلة باقي الداشبورد كله:
+// Daily Target × عدد الأيام من أول الشهر لحد امبارح (زي Sales Plan-ACM
+// بالظبط). ده يختلف عن الشكل القديم اللي كانت فيه "Target Delivered PCS"
+// و"Total Delivered GMV" إجمالي الشهر كله (كان محتاج قسمة على عدد أيام
+// الشهر الأول) — الشيت الجديد بقى بيديهم يوميين على طول، فمحتاجناش الخطوة
+// دي تاني.
 // -------------------------------------------------------------------------
 function parseSingleSkuTargetsSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
@@ -3801,13 +3816,13 @@ function parseSingleSkuTargetsSheet(payload) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
     const id = cellText(c[0]).trim();
-    if (!id || id === "PRODUCT_ID" || id === "ID") continue;
+    if (!id || id === "PRODUCT_ID" || id === "ID" || id === "SKU ID" || id === "SKU_ID") continue;
     map[id] = {
       name: cellText(c[1]), category: cellText(c[2]),
-      placedDailyTarget: cellNumber(c[3]),   // Availability Placed Daily — يومي فعلاً
-      adjustedTarget: cellNumber(c[4]),       // Adjust Target Daily Confirmed — يومي فعلاً (زي الأول)
-      dlvPcsMonthlyTarget: cellNumber(c[5]),  // Target Delivered PCS — إجمالي الشهر كله
-      dlvGmvMonthlyTarget: cellNumber(c[6])   // Total Delivered GMV — إجمالي الشهر كله
+      placedDailyTarget: cellNumber(c[3]),    // Placed Daily — يومي فعلاً
+      adjustedTarget: cellNumber(c[4]),        // Confirmed (Target Daily Confirmed) — يومي فعلاً
+      dlvPcsDailyTarget: cellNumber(c[5]),     // Delivered — يومي فعلاً
+      dlvGmvDailyTarget: cellNumber(c[6])      // Total Delivered GMV — يومي فعلاً
     };
   }
   return map;
@@ -4283,6 +4298,10 @@ function computeLeaderboard(rows) {
 
 function getCrBadgeColor(pct) { return pct >= 60 ? "green" : (pct >= 50 ? "orange" : "red"); }
 function getNdrBadgeColor(pct) { return pct >= 25 ? "green" : (pct >= 15 ? "orange" : "red"); }
+// نفس فكرة getCrBadgeColor بالظبط، بس لـ DR% — مستخدمة في Sales Plan-ACM
+// (باقي أماكن الداشبورد بتعرض DR% من غير تلوين، فمفيش threshold متفق عليه
+// قبل كده؛ لو الأرقام دي مش مناسبة لطبيعة الميرشنتس، سهل تتغير هنا بس).
+function getDrBadgeColor(pct) { return pct >= 35 ? "green" : (pct >= 20 ? "orange" : "red"); }
 function getSegBadgeClass(segment) {
   const s = segment ? segment.toLowerCase() : "";
   if (s.includes("champions")) return "seg-champions"; if (s.includes("loyal")) return "seg-loyal";
@@ -5428,14 +5447,34 @@ function prepareMpSalesPlanData() {
     const startThisWeek = today.getTime() - (7 * 86400000);
     const startLastWeek = today.getTime() - (14 * 86400000);
 
+    // CR%/DR%/ASP الفعليين لكل ماتش (SKU × Merchant) — جايين من
+    // MERCHANT_SKU_DAILY_GID (عمود CR_2_DAY / DR_5_DAYS / ASP)، مفتاح الماتش
+    // هنا SKU ID || Merchant ID زي أي مكان تاني بيربط بين الشيتين دول.
+    const matchStatsMap = new Map();
+    (state.merchantSkuDailyRows || []).forEach(r => {
+        if (!r.skuId || !r.tagerId) return;
+        matchStatsMap.set(r.skuId + "||" + r.tagerId, { cr: r.crDay || 0, dr: r.drDay || 0, asp: r.asp || 0 });
+    });
+
     let totalSkus = 0; let achievedCount = 0; let missedCount = 0;
     let totalMtdTarget = 0; let totalMtdActual = 0;
     let countCritical = 0; let countGood = 0; let countExcellent = 0; let countUpside = 0;
 
-    // فلترة خطة الـ ACM المختار من فوق كمان (مش بس صفوف الأداء)، عشان لو
-    // حد مختار ACM معين يشوف الـ SKUs بتاعته بس مباشرة من عمود ACM في الشيت.
-    let planRows = state.acmSalesPlanData;
-    if (selectedAcm !== "All") planRows = planRows.filter(p => p.acm === selectedAcm);
+    // الشيت بقى بيدينا الماتشات (SKU × Merchant) اللي جوا البلان بس (After
+    // Adjust)، من غير عمود ACM — فبنجيب ACM كل صف من merchantInfoMap (شيت
+    // الـ Main) على أساس Merchant ID عشان فلتر الـ ACM المختار فوق يفضل شغال.
+    // أي صف After Adjust (Daily Placed Target) بتاعه = 0 بيتشال تمامًا من هنا
+    // (مش بس بيظهر بصفر) — عشان صف زي ده مالوش تارجت حقيقي أصلاً، فمكنش
+    // المفروض يدخل حسبة الـ Critical/Good/Excellent/Upside ولا totals الملخص
+    // فوق (كان بيتحسب "Critical" بس لأن مقسوم على صفر/تارجته صفر، مش لأداء
+    // ضعيف فعلاً).
+    let planRows = (state.acmSalesPlanData || []).filter(p => p.dailyPlacedTarget > 0);
+    if (selectedAcm !== "All") {
+        planRows = planRows.filter(p => {
+            const acm = ((state.merchantInfoMap || new Map()).get(p.tagerId) || {}).acmName || "Unassigned";
+            return acm === selectedAcm;
+        });
+    }
 
     const mergedData = planRows.map(plan => {
         let raw = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0 };
@@ -5453,14 +5492,26 @@ function prepareMpSalesPlanData() {
             }
         });
 
-        // Adjust DLV GMV إجمالي الشهر كله في الشيت، فبنحوله لتارجت يومي
-        // (÷ عدد أيام الشهر) قبل ما نحسبه — بالظبط زي Commercial Plan.
-        // Confirmed يومي فعلاً، بياخد زي ما هو من غير أي تحويل.
-        const gmvDailyTarget = plan.gmvMonthlyTarget > 0 ? (plan.gmvMonthlyTarget / currentMonthDays) : 0;
+        const acm = ((state.merchantInfoMap || new Map()).get(plan.tagerId) || {}).acmName || "Unassigned";
+
+        // Placed MTD Target = After Adjust (Daily Placed Target) × عدد
+        // الأيام من أول الشهر لحد امبارح (daysUntilYesterday، زي باقي
+        // الداشبورد). Confirmed MTD Target = Placed MTD Target × CR% بتاع
+        // نفس الماتش، Delivered MTD Target = Confirmed MTD Target × DR%
+        // بتاع نفس الماتش، Delivered GMV MTD Target = Delivered MTD Target
+        // × ASP PER SKU PER MERCHANT بتاع نفس الماتش — كل ده بيتحقق هنا من
+        // غير ما نغيّر شكل mpSpBuildMetric، لأن ضرب الـ "يومي" في نفس
+        // النسبة/الـ ASP قبل ما نضربه في daysUntilYesterday بيدّي بالظبط
+        // نفس نتيجة إننا نضرب الـ MTD Target نفسه في النسبة دي (لأن الاتنين
+        // بيتضربوا في نفس daysUntilYesterday).
+        const matchStats = matchStatsMap.get(plan.productId + "||" + plan.tagerId) || { cr: 0, dr: 0, asp: 0 };
+        const confirmedDailyTarget = plan.dailyPlacedTarget * (matchStats.cr / 100);
+        const deliveredDailyTarget = confirmedDailyTarget * (matchStats.dr / 100);
+        const gmvDailyTarget = deliveredDailyTarget * matchStats.asp;
 
         const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const confirmedM = mpSpBuildMetric(plan.dailyConfirmedTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const deliveredM = mpSpBuildMetric(plan.dailyDlvTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays);
+        const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
+        const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays);
         const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
 
         // Confirmed Pieces هو المقياس الأساسي اللي بيحدد "الحالة العامة" للصف
@@ -5490,8 +5541,17 @@ function prepareMpSalesPlanData() {
         // لو فاضية لأي سبب، fallback لخريطة الـ Main (merchantInfoMap).
         const merchantName = plan.tagerName || ((state.merchantInfoMap || new Map()).get(plan.tagerId) || {}).merchantName || plan.tagerId;
 
+        // CR%/DR%/NDR%/ASP بتاعت نفس الماتش — نفس الأرقام اللي التارجت
+        // (Confirmed/Delivered/Delivered GMV) اتحسب على أساسها فوق، بنعرضهم
+        // هنا كأعمدة مستقلة عشان يبان واضح التارجت جاي منين. NDR% = CR% × DR%
+        // (بالظبط زي أي مكان تاني في الداشبورد بيحسب NDR% من CR%/DR%).
+        const crPct = matchStats.cr;
+        const drPct = matchStats.dr;
+        const ndrPct = (crPct * drPct) / 100;
+        const asp = matchStats.asp;
+
         return {
-            ...plan, merchantName,
+            ...plan, merchantName, acm,
             metrics: { placed: placedM, confirmed: confirmedM, delivered: deliveredM, gmv: gmvM },
             // نُسخ مسطّحة (flat) لكل مقياس عشان الترتيب (sortMpSalesPlan) يقدر
             // ياخد القيمة بـ row[key] مباشرة من غير تعقيد.
@@ -5502,6 +5562,7 @@ function prepareMpSalesPlanData() {
             // Aliases بتفضل بنفس اسم Confirmed (المقياس الأساسي) عشان أي كود تاني
             // بيتعامل مع mtdTarget/mtdActual/... بشكل عام يفضل شغال زي ما هو.
             mtdTarget: confirmedM.mtdTarget, mtdActual: confirmedM.mtdActual, gap: confirmedM.gap, runRate: confirmedM.runRate, mtdAchievedPct, finalStatus,
+            crPct, drPct, ndrPct, asp,
             wowDiff, wowPct, wowStatus, wowClass, wowIcon
         };
     });
@@ -5608,6 +5669,10 @@ function renderPaginatedMpSalesPlanTable() {
             ${mpSpMetricCellsHtml(m.metrics.confirmed, false)}
             ${mpSpMetricCellsHtml(m.metrics.delivered, false)}
             ${mpSpMetricCellsHtml(m.metrics.gmv, true)}
+            <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+            <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
+            <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+            <td class="num">${m.asp ? fmtMoneyCompactCell(m.asp) : '<span class="text-dim">-</span>'}</td>
             <td class="center"><span class="badge-status ${m.wowClass}">${m.wowIcon} ${m.wowPct > 0 ? '+' : ''}${m.wowPct.toFixed(1)}%</span></td>
             <td class="center"><span class="badge-outline ${m.finalStatus.cls}">${m.finalStatus.text}</span></td>
         `;
@@ -5758,16 +5823,16 @@ function computeCommercialDebundlized() {
     const targetInfo = targets[productId];
     // شيت البلان بيكتب 0 لأي حاجة مش في البلان فعلياً — التارجت لازم يكون > 0
     // عشان نعتبره SKU "في البلان"، غير كده بيتعرض Not in Plan.
-    // أربع تارجتس مستقلين دلوقتي (زي جروبات Sales Plan-ACM بالظبط):
-    //   - Placed / Confirmed: يوميين فعلاً من الشيت، يتاخدوا زي ما هم.
-    //   - Delivered PCS / GMV: إجمالي الشهر كله في الشيت، فبنحولهم لتارجت
-    //     يومي (÷ عدد أيام الشهر) الأول قبل ما نحسب منهم MTD — عشان
-    //     الـ MTD يفضل صحيح ومتناسب مع الأيام اللي فاتت فعلاً، مش الشهر كله.
+    // أربع تارجتس مستقلين دلوقتي (زي جروبات Sales Plan-ACM بالظبط) — كلهم
+    // يوميين فعلاً من الشيت (Placed Daily / Confirmed / Delivered / Total
+    // Delivered GMV)، فبناخدهم زي ما هم من غير أي قسمة على أيام الشهر —
+    // ونحسب منهم MTD بضربهم في daysUntilYesterday (لحد امبارح) زي باقي
+    // الداشبورد بالظبط.
     const hasTarget = !!(targetInfo && targetInfo.adjustedTarget > 0);
     const placedDailyTarget = (targetInfo && targetInfo.placedDailyTarget > 0) ? targetInfo.placedDailyTarget : null;
     const confirmedDailyTarget = hasTarget ? targetInfo.adjustedTarget : null;
-    const dlvPcsDailyTarget = (targetInfo && targetInfo.dlvPcsMonthlyTarget > 0) ? (targetInfo.dlvPcsMonthlyTarget / currentMonthDays) : null;
-    const dlvGmvDailyTarget = (targetInfo && targetInfo.dlvGmvMonthlyTarget > 0) ? (targetInfo.dlvGmvMonthlyTarget / currentMonthDays) : null;
+    const dlvPcsDailyTarget = (targetInfo && targetInfo.dlvPcsDailyTarget > 0) ? targetInfo.dlvPcsDailyTarget : null;
+    const dlvGmvDailyTarget = (targetInfo && targetInfo.dlvGmvDailyTarget > 0) ? targetInfo.dlvGmvDailyTarget : null;
 
     const placedM = cdzBuildMetric(placedDailyTarget, b.placed, daysUntilYesterday, elapsedDays, currentMonthDays);
     const confirmedM = cdzBuildMetric(confirmedDailyTarget, b.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
@@ -5799,6 +5864,10 @@ function computeCommercialDebundlized() {
     result.push({
       singleId: productId, singleName: skuInfo.name,
       category: (targetInfo && targetInfo.category) || (state.inventoryMap[productId] ? state.inventoryMap[productId].category : "") || "Uncategorized",
+      // القيمة اليومية الخام لـ Placed Daily زي ما هي في الشيت (عمود E)، بنعرضها
+      // هنا عشان تقدر تتأكد بعينك من حساب MTD Target = Placed Daily × Days Until
+      // Yesterday (نفس اللي شارحينه في التعليق فوق).
+      placedDailyRaw: placedDailyTarget,
       stock: Math.round(stock || 0), doh,
       hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate, finalStatus,
       metrics: { placed: placedM, confirmed: confirmedM, delivered: deliveredM, gmv: gmvM },
@@ -6013,6 +6082,7 @@ function renderPaginatedCdzTable() {
       <td class="font-mono text-dim" style="white-space:nowrap;">${m.singleId}</td>
       <td class="font-bold truncate-cell" title="${m.singleName}">${m.singleName}</td>
       <td class="text-dim truncate-cell" style="max-width:110px;" title="${m.category}">${m.category}</td>
+      <td class="num text-dim">${m.placedDailyRaw !== null && m.placedDailyRaw !== undefined ? fmtIntCell(Math.round(m.placedDailyRaw)) : "-"}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       ${cdzMetricCellsHtml(m.metrics.placed, false)}
@@ -6020,7 +6090,7 @@ function renderPaginatedCdzTable() {
       ${cdzMetricCellsHtml(m.metrics.delivered, false)}
       ${cdzMetricCellsHtml(m.metrics.gmv, true)}
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
-      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
@@ -7360,10 +7430,11 @@ function getSellthroughIndices() {
     const mk = stMonthKeyFromValue(row.MONTH);
     if (!sku || !mk) return;
     const k = sku + "|" + mk;
-    const cur = needBySkuMonth.get(k) || { cnf: 0, dlv: 0, rto: 0 };
+    const cur = needBySkuMonth.get(k) || { cnf: 0, dlv: 0, rto: 0, plc: 0 };
     cur.cnf += Number(row.CNF_QTY || 0);
     cur.dlv += Number(row.DLV_QTY || 0);
     cur.rto += Number(row.RTO_QTY ?? row.RTOS ?? 0);
+    cur.plc += Number(row.PLC_QTY || 0); // مصدر CR%/DR%/NDR% في Sellthrough & Inbound
     needBySkuMonth.set(k, cur);
     if (!needNameCat.has(sku)) needNameCat.set(sku, { name: row.PRODUCT_NAME, cat: row.CATEGORY_L1 });
     let set = skuByMonthNeed.get(mk);
@@ -7483,11 +7554,19 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
   const rows = [];
 
   skuSet.forEach(sku => {
-    let cnfQty = 0, dlvQty = 0;
+    let cnfQty = 0, dlvQty = 0, plcQty = 0;
     salesMonthKeys.forEach(mk => {
       const e = needBySkuMonth.get(sku + "|" + mk);
-      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; }
+      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; plcQty += (e.plc || 0); }
     });
+
+    // CR% (Confirmed÷Placed) / DR% (Delivered÷Confirmed) / NDR% (CR%×DR%) —
+    // نفس الفترة المختارة (Start/End Sale Month) بالظبط، من غير أي Lag (زي
+    // باقي أرقام السكشن ده كله). NDR% بنفس المعادلة المستخدمة في أي مكان
+    // تاني بالداشبورد (ضرب النسبتين ÷ 100).
+    const crPct = plcQty > 0 ? (cnfQty / plcQty) * 100 : 0;
+    const drPct = cnfQty > 0 ? (dlvQty / cnfQty) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
 
     const begInv = beginInvBySkuMonth.get(sku + "|" + begInvKey) || 0;
     const begSales = Math.min(dlvQty, begInv);                 // H = IF(F>=G,G,F)
@@ -7548,9 +7627,10 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
       cat: info.cat || "Uncategorized",
       lastRecDate: lastRec ? lastRec.text : "-",
       lastRecTs: lastRec ? lastRec.ts : null,
-      cnfQty, dlvQty, begInv, begSales, remBeg,
+      cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
       stRate, cStRate, soldInb, firstBuy,
+      crPct, drPct, ndrPct,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
@@ -7594,12 +7674,18 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
 
   const rows = [];
   skuSet.forEach(sku => {
-    let cnfQty = 0, dlvQty = 0, rtos = 0, totPur = 0;
+    let cnfQty = 0, dlvQty = 0, rtos = 0, totPur = 0, plcQty = 0;
     sortedMonths.forEach(mk => {
       const e = needBySkuMonth.get(sku + "|" + mk);
-      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; rtos += (e.rto || 0); }
+      if (e) { cnfQty += e.cnf; dlvQty += e.dlv; rtos += (e.rto || 0); plcQty += (e.plc || 0); }
       totPur += inboundBySkuMonth.get(sku + "|" + mk) || 0;
     });
+
+    // راجع تعليق CR%/DR%/NDR% في computeSellthroughRowsForQuery فوق — نفس
+    // المعادلة بالظبط، بس على إجمالي شهور الـ Bucket ده كله.
+    const crPct = plcQty > 0 ? (cnfQty / plcQty) * 100 : 0;
+    const drPct = cnfQty > 0 ? (dlvQty / cnfQty) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
 
     const begInv = beginInvBySkuMonth.get(sku + "|" + firstMonthKey) || 0;
     const begSales = Math.min(dlvQty, begInv);
@@ -7637,9 +7723,10 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
     rows.push({
       sku, name: info.name || "Unknown", cat: info.cat || "Uncategorized",
       lastRecDate: lastRec ? lastRec.text : "-", lastRecTs: lastRec ? lastRec.ts : null,
-      cnfQty, dlvQty, begInv, begSales, remBeg,
+      cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
       stRate, cStRate, soldInb, firstBuy,
+      crPct, drPct, ndrPct,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
@@ -7667,7 +7754,7 @@ function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
         m = {
           sku: r.sku, name: r.name, cat: r.cat,
           lastRecDate: r.lastRecDate, lastRecTs: r.lastRecTs,
-          cnfQty: 0, dlvQty: 0, begInv: 0, begSales: 0, remBeg: 0,
+          cnfQty: 0, dlvQty: 0, plcQty: 0, begInv: 0, begSales: 0, remBeg: 0,
           rtos: 0, retSales: 0, remPurSales: 0, totPur: 0, purSales: 0,
           firstBuy: "No",
           cBegSales: 0, cRemBeg: 0, cRetSales: 0, cRemPurSales: 0, cPurSales: 0,
@@ -7677,7 +7764,7 @@ function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
         };
         merged.set(r.sku, m);
       }
-      m.cnfQty += r.cnfQty; m.dlvQty += r.dlvQty; m.begInv += r.begInv; m.begSales += r.begSales; m.remBeg += r.remBeg;
+      m.cnfQty += r.cnfQty; m.dlvQty += r.dlvQty; m.plcQty += (r.plcQty || 0); m.begInv += r.begInv; m.begSales += r.begSales; m.remBeg += r.remBeg;
       m.rtos += r.rtos; m.retSales += r.retSales; m.remPurSales += r.remPurSales; m.totPur += r.totPur; m.purSales += r.purSales;
       m.cBegSales += r.cBegSales; m.cRemBeg += r.cRemBeg; m.cRetSales += r.cRetSales; m.cRemPurSales += r.cRemPurSales; m.cPurSales += r.cPurSales;
       if (r.firstBuy === "Yes") m.firstBuy = "Yes";
@@ -7690,6 +7777,11 @@ function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
     m.stRate = denom > 0 ? (m.dlvQty / denom) * 100 : 0;
     m.cStRate = denom > 0 ? (m.cnfQty / denom) * 100 : 0;
     m.soldInb = m.totPur > 0 ? (m.purSales / m.totPur) * 100 : 0;
+    // CR%/DR%/NDR% بعد الدمج: من إجمالي الشهور المجموعة (مش متوسط النسب) —
+    // نفس مبدأ SELLTHROUGH_RATE/SOLD_FROM_INBOUND فوق بالظبط.
+    m.crPct = m.plcQty > 0 ? (m.cnfQty / m.plcQty) * 100 : 0;
+    m.drPct = m.cnfQty > 0 ? (m.dlvQty / m.cnfQty) * 100 : 0;
+    m.ndrPct = (m.crPct * m.drPct) / 100;
     out.push(m);
   });
   return out;
@@ -8100,6 +8192,10 @@ function renderPaginatedSellthroughTable() {
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="center">${m.websiteStatus}</td>
       <td class="center"><span class="badge-outline ${String(m.isLocked).toLowerCase() === 'true' || String(m.isLocked).toLowerCase() === 'yes' ? 'red' : 'dim'}">${m.isLocked}</span></td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num text-red">${fmtMoneyCompactCell(m.cogs)}</td>
       <td class="num text-blue">${fmtIntCell(Math.round(m.avg3d))}</td>
       <td class="num text-purple">${fmtIntCell(Math.round(m.avg15d))}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh15d))}</td>
@@ -8206,7 +8302,50 @@ function prepareWeeklyInventoryWeeks() {
     }
   });
 
-  // 4) بناء الأسابيع (أحدث أولاً)
+  // 3ب) فهرس Confirmed يومي (لا أسبوعي): "sku|dayTs" مش موجود كخريطة نصية،
+  //     بل sku -> Map(dayTs -> إجمالي CONFIRMED_PIECES في اليوم ده)، بنفس
+  //     منطق الديبندلينج فوق بالظبط — ده اللي بيسمح بفلتر "Sale Start/End"
+  //     الحر (تاريخين فعليين، مش مربوطين بحدود الأسبوع) يحسب الصح.
+  const confirmedBySkuDay = new Map();
+  (state.allParsedRows || []).forEach(row => {
+    if (!row.sku || !row.timestamp) return;
+    const rDate = new Date(row.timestamp); rDate.setHours(0, 0, 0, 0);
+    const dayTs = rDate.getTime();
+    const addDay = (id, qty) => {
+      let m = confirmedBySkuDay.get(id);
+      if (!m) { m = new Map(); confirmedBySkuDay.set(id, m); }
+      m.set(dayTs, (m.get(dayTs) || 0) + qty);
+    };
+    const mappings = wiDebundleMap.get(row.sku);
+    if (mappings && mappings.length) {
+      mappings.forEach(mp => addDay(mp.singleId, (row.confirmedPieces || 0) * (mp.quantity || 1)));
+    } else {
+      addDay(row.sku, row.confirmedPieces || 0);
+    }
+  });
+  state.weeklyInvConfirmedBySkuDay = confirmedBySkuDay;
+
+  // 5) Category / Current Stock (Overall) / DOH / Cogs — لكل SKU لوحده (ثابتين
+  //    مش مرتبطين بأسبوع معين)، بنفس مصدر ومنطق Sellthrough Rate Panel بالظبط
+  //    (buildDebundledStockDohIndex: Stock من شيت الديبندلايز، DOH من ديماند
+  //    الـ SKU "Overall" — هو لوحده + كل البندلات اللي هو مكوّن جواها — آخر 3
+  //    أيام). الكاتيجوري من state.inventoryMap (نفس مصدر باقي الداشبورد)،
+  //    والـ Cogs من شيت الـ COGS مباشرة. بنكاشها في state.weeklyInvSkuMetaMap
+  //    عشان تتقرا برضو من الصفوف اللي بتتبني بفلتر الشراء/البيع الحر تحت.
+  const { stockByProductId: wiStockByProductId, singleOverallStats: wiSingleOverallStats } = buildDebundledStockDohIndex(state.allParsedRows || []);
+  function wiSkuMeta(sku) {
+    const inv = state.inventoryMap[sku] || {};
+    const stock = wiStockByProductId.has(sku) ? wiStockByProductId.get(sku) : (inv.stock || 0);
+    const avg3d = wiSingleOverallStats(sku).avg;
+    const doh = avg3d > 0 ? Math.round(stock / avg3d) : Math.round(stock || 0);
+    const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    return { category: inv.category || "Uncategorized", stock: Math.round(stock || 0), doh, cogs };
+  }
+  const skuMetaMap = new Map();
+  invRows.forEach(r => skuMetaMap.set(r.sku, wiSkuMeta(r.sku)));
+  state.weeklyInvSkuMetaMap = skuMetaMap;
+
+  // 6) بناء الأسابيع (أحدث أولاً)
   const weekStarts = Array.from(weekMap.keys()).sort((a, b) => b - a);
   const weeks = weekStarts.map(weekStart => {
     const cols = weekMap.get(weekStart); // مرتبة تصاعديًا — أول عمود = الأحد
@@ -8221,8 +8360,10 @@ function prepareWeeklyInventoryWeeks() {
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
       const inboundVsSold = inboundQty > 0 ? (remainingFromBeginning / inboundQty) * 100 : null;
+      const meta = skuMetaMap.get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
       return {
         sku: invRow.sku, name: invRow.name || "Unknown",
+        category: meta.category, stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
         beginInv, inboundQty, inboundDates, confirmedQty, beginningSales, remainingFromBeginning, inboundVsSold
       };
     });
@@ -8237,11 +8378,334 @@ function prepareWeeklyInventoryWeeks() {
   });
 
   state.weeklyInvWeeks = weeks;
+
+  // فهارس إضافية مستخدمة في wiComputePurchasesDepletion (عمود "Purchases
+  // Sold Out On") — بتتبني هنا مرة واحدة بدل ما تتبني/تترتب من الأول كل
+  // مرة الجدول بيترسم:
+  //   • weeklyInvSortedDateCols: نفس dateCols بس مرتبة تصاعديًا (الأقدم أول).
+  //   • weeklyInvBySku: SKU -> صف الستوك بتاعه (invRow) — بحث سريع.
+  //   • weeklyInvInboundBySkuDay: SKU -> Map(dayTs -> إجمالي RCV_QTY في اليوم ده).
+  state.weeklyInvSortedDateCols = [...dateCols].sort((a, b) => a.ts - b.ts);
+  const bySku = new Map();
+  invRows.forEach(r => bySku.set(r.sku, r));
+  state.weeklyInvBySku = bySku;
+  const inboundBySkuDay = new Map();
+  (state.inboundRows || []).forEach(row => {
+    if (!row.sku || !row.rcvTs) return;
+    const dayStart = new Date(row.rcvTs); dayStart.setHours(0, 0, 0, 0);
+    let m = inboundBySkuDay.get(row.sku);
+    if (!m) { m = new Map(); inboundBySkuDay.set(row.sku, m); }
+    m.set(dayStart.getTime(), (m.get(dayStart.getTime()) || 0) + (row.rcvQty || 0));
+  });
+  state.weeklyInvInboundBySkuDay = inboundBySkuDay;
+}
+
+// -------------------------------------------------------------------------
+// فلتر "Purchase Start" الحر (اختياري) — بيسمح تحدد يوم معين جوه الأسبوع
+// المختار تبدأ منه المشتريات بدل ما تاخد الأسبوع كله من الأحد. المدخل بييجي
+// من input[type=date] عادي، فمش لازم يطابق بالظبط عمود موجود في شيت
+// الإنفنتوري (ممكن يكون يوم إجازة/متسجلش فيه ستوك) — فبنلزّقه لأقرب عمود
+// ستوك حقيقي قبله أو يساويه (weeklyInvSortedDateCols)، عشان wiComputePurchasesDepletion
+// و"Beginning Inventory" يقدروا يلاقوا قراءة ستوك فعلية عليه.
+function wiSnapToDateCol(ts) {
+  const cols = state.weeklyInvSortedDateCols || [];
+  if (!cols.length || ts === null || ts === undefined) return null;
+  let best = null;
+  for (const c of cols) { if (c.ts <= ts) best = c; else break; }
+  return best ? best.ts : cols[0].ts;
+}
+// بيرجع { startTs, endTs } لرينج "Purchase" الحر لو الاتنين (بداية ونهاية)
+// متحددين مع بعض (زي "Sale Start/End" بالظبط)، وإلا null (يعني اتصرف عادي
+// زي ما هو دلوقتي — الأسبوع كامل من الأحد لحد السبت). الـ startTs بيتلزّق
+// لأقرب عمود ستوك حقيقي (عشان Beginning Inventory وFIFO الديبليشن يلاقوا
+// قراءة ستوك عليه بالظبط)؛ الـ endTs مش محتاج يطابق عمود ستوك، لأنه بس حد
+// أعلى بنقارن بيه تواريخ الإنباوند اليومية.
+function wiGetPurchaseRange() {
+  const r = getActiveDateRangeFilter("weeklyInvPurchase");
+  if (!r) return null;
+  const startDay = new Date(r.startVal + "T00:00:00").getTime();
+  return { startTs: wiSnapToDateCol(startDay), endTs: r.endTs };
+}
+// ستوك الـ SKU في تاريخ معين (لازم يبقى عمود موجود فعلاً — استخدم wiSnapToDateCol الأول).
+function wiStockAtTs(sku, ts) {
+  const invRow = (state.weeklyInvBySku || new Map()).get(sku);
+  if (!invRow) return 0;
+  const col = (state.weeklyInvSortedDateCols || []).find(c => c.ts === ts);
+  if (!col) return 0;
+  return invRow.byDate.get(col.label) || 0;
+}
+// إجمالي المشتريات (Inbound) + تواريخها الفعلية لـ SKU معين، بين تاريخين
+// شاملين الطرفين (مبني على weeklyInvInboundBySkuDay اليومي).
+function wiSumInboundInRange(sku, startTs, endTs) {
+  const m = (state.weeklyInvInboundBySkuDay || new Map()).get(sku);
+  if (!m) return { qty: 0, dates: [] };
+  let qty = 0; const dates = [];
+  Array.from(m.entries()).sort((a, b) => a[0] - b[0]).forEach(([ts, q]) => {
+    if (ts >= startTs && ts <= endTs && q > 0) { qty += q; dates.push(new Date(ts).toLocaleDateString("en-US", { day: "numeric", month: "short" })); }
+  });
+  return { qty, dates };
+}
+// إجمالي الـ Confirmed (Debundled Overall) لـ SKU معين، بين تاريخين شاملين
+// الطرفين (مبني على state.weeklyInvConfirmedBySkuDay اليومي).
+function wiSumConfirmedInRange(sku, startTs, endTs) {
+  const m = (state.weeklyInvConfirmedBySkuDay || new Map()).get(sku);
+  if (!m) return 0;
+  let sum = 0;
+  m.forEach((qty, ts) => { if (ts >= startTs && ts <= endTs) sum += qty; });
+  return sum;
+}
+
+// -------------------------------------------------------------------------
+// "المشتريات (Total Purchases) بتاعت أسبوع معين لـ SKU معين خلصت إمتى
+// بالظبط؟" — بتتحسب بمنطق FIFO حقيقي على أساس الستوك الفعلي المسجل يوم
+// بيوم (شيت Daily SKU Inventory)، مش من الديماند (Confirmed) لوحده، عشان
+// أي حاجة بتأثر على الستوك فعلاً (Returns، تسويات مخزن...) تتحسب تلقائي:
+//
+//  1) بنعتبر رصيد يوم الأحد (Beginning Inventory) "باتش" أول، ومشتريات
+//     الأسبوع ده كله (Total Purchases) "باتش" تاني وراه في الطابور — الباتش
+//     الأول (الأقدم) هو اللي بيتستهلك الأول (FIFO)، زي أي مخزن حقيقي.
+//  2) بنمشي يوم بيوم بعد الأحد ده: قد إيه فعلاً "خرج" من المخزون في اليوم
+//     ده = (ستوك امبارح + أي إنباوند وصل النهاردة) − ستوك النهاردة. الرقم ده
+//     هو اللي بيتخصم من الطابور (من الباتش الأول لحد ما يخلص، بعدين اللي بعده).
+//  3) أي إنباوند بعد نهاية الأسبوع ده (أسابيع جاية) بيتضاف كباتش جديد آخر
+//     الطابور وقت ما بيوصل — يعني بيتستهلك بعد باتش "Total Purchases" بتاعنا،
+//     مش قبله ولا بدل منه (FIFO صحيح بين كل الدفعات).
+//  4) أول يوم باتش "Total Purchases" يوصل لصفر = تاريخ "خلصت فيه". لو لسه
+//     مخلصتش لحد آخر يوم عندنا بيانات ليه، بنرجع الكمية المتبقية بدل التاريخ.
+// -------------------------------------------------------------------------
+// opts (اختياري): { batchEnd, cutoffTs }
+//   • batchEnd: آخر يوم في "الباتش" اللي بنتابعه (شامل) — الافتراضي weekStart+6
+//     (يعني أسبوع كامل، زي الاستخدام الأصلي)؛ لكن لو الباتش ده جاي من فلتر
+//     "Purchase Start/End" حر (مش بالضرورة 7 أيام)، لازم يتبعت batchEnd الصح
+//     هنا، وإلا أي إنباوند بعد الـ 7 أيام الافتراضية (لكن لسه جوه الرينج
+//     الحر) هيتحسب غلط كباتش "لاحق" منفصل بدل ما يبقى جزء من thisWeekPurchases
+//     نفسها (اللي المفروض أصلاً بتجمع كل الإنباوند في الرينج الحر ده).
+//   • cutoffTs: لو متحدد، بنوقف تتبع الاستهلاك عند التاريخ ده بدل آخر يوم
+//     بيانات موجود (بيتفعّل لما "Sale End" يبقى محدد مع فلتر Purchase).
+function wiComputePurchasesDepletion(sku, weekStart, thisWeekPurchases, opts) {
+  opts = opts || {};
+  const dateCols = state.weeklyInvSortedDateCols || [];
+  const invRow = (state.weeklyInvBySku || new Map()).get(sku);
+  if (!invRow || !dateCols.length || thisWeekPurchases <= 0) return { status: "unknown" };
+
+  const idxStart = dateCols.findIndex(d => d.ts === weekStart);
+  if (idxStart === -1) return { status: "unknown" };
+
+  const weekEnd = opts.batchEnd !== undefined && opts.batchEnd !== null ? opts.batchEnd : (weekStart + 6 * 86400000);
+  const cutoffTs = opts.cutoffTs;
+  const inboundBySkuDay = (state.weeklyInvInboundBySkuDay || new Map()).get(sku) || new Map();
+  const beginInv = invRow.byDate.get(dateCols[idxStart].label) || 0;
+
+  const queue = [
+    { qty: beginInv, key: "begin" },
+    { qty: thisWeekPurchases, key: "purchases" }
+  ];
+  const depletedOn = {};
+  const depletedOnTs = {};
+
+  let prevStock = beginInv;
+  let lastSeenLabel = dateCols[idxStart].label, lastSeenTs = weekStart;
+  for (let i = idxStart + 1; i < dateCols.length; i++) {
+    const { label, ts } = dateCols[i];
+    if (cutoffTs && ts > cutoffTs) break; // وقف عند "Sale End" لو محدد، بدل ما نكمل لآخر بيانات
+    if (!invRow.byDate.has(label)) continue; // يوم من غير قراءة ستوك مسجلة — بنتخطاه
+    const todayStock = invRow.byDate.get(label);
+
+    // إنباوند الأسبوع الحالي ده أصلاً متجمّع في باتش "purchases" فوق (زي
+    // ما هو مطلوب: خلصت "المشتريات" دي كلها إمتى)، فبنضيفه تاني كباتش لو
+    // وبس لو جاي من أسبوع بعد كده.
+    const dayInbound = inboundBySkuDay.get(ts) || 0;
+    if (ts > weekEnd && dayInbound > 0) queue.push({ qty: dayInbound, key: "later_" + ts });
+    const inboundForOutflow = ts > weekEnd ? dayInbound : 0;
+
+    let outflow = (prevStock + inboundForOutflow) - todayStock;
+    if (outflow < 0) outflow = 0; // زيادة/تصحيح ستوك مش مفسَّر بإنباوند — بنتجاهله، منقدرش نطلع منه "مبيعات سالبة"
+
+    while (outflow > 0 && queue.length) {
+      const front = queue[0];
+      const take = Math.min(outflow, front.qty);
+      front.qty -= take;
+      outflow -= take;
+      if (front.qty <= 0) { depletedOn[front.key] = label; depletedOnTs[front.key] = ts; queue.shift(); }
+    }
+
+    prevStock = todayStock;
+    lastSeenLabel = label; lastSeenTs = ts;
+    if (depletedOn["purchases"]) break;
+  }
+
+  // عدد الأيام اللي المشتريات دي أخدتها عشان تخلص = من يوم الأحد بتاع
+  // الأسبوع نفسه (يوم الشراء) لحد يوم ما وصلت صفر، شامل الطرفين (يوم الشراء
+  // نفسه = يوم 1).
+  if (depletedOn["purchases"]) {
+    const daysTaken = Math.round((depletedOnTs["purchases"] - weekStart) / 86400000) + 1;
+    return { status: "depleted", dateLabel: depletedOn["purchases"], daysTaken };
+  }
+
+  const purchasesBatch = queue.find(b => b.key === "purchases");
+  const remaining = purchasesBatch ? purchasesBatch.qty : 0;
+  // "as Of": لو فيه cutoffTs ("Sale End" محدد)، بنوقف عنده هو نفسه بدل آخر
+  // يوم بيانات موجود فعلاً — عشان يعكس الرينج المختار صح.
+  const asOf = lastSeenLabel;
+  return { status: "remaining", remaining, asOf };
+}
+
+// -------------------------------------------------------------------------
+// PURCHASE COHORT TRACKER — نفس فكرة buildWeeklyInventoryTrendData بالظبط
+// (كل الـ SKUs مع بعض، أسبوع أسبوع، مفيش فلتر SKU)، بس عمود "Inbound vs
+// Sold %" هنا بيتحسب صح باستخدام wiComputePurchasesDepletion (FIFO على
+// الستوك الفعلي، بيكمل يتابع كل الأسابيع اللي بعد الشراء لحد آخر بيانات
+// موجودة دلوقتي) بدل ما يبقى بس نسبة أول 7 أيام بعد الشراء زي عمود
+// "Inbound vs Sold %" الموجود في Weekly Inventory Trend فوق.
+// -------------------------------------------------------------------------
+function buildPurchaseCohortTrendData() {
+  const currentYear = new Date().getFullYear();
+  const weeks = (state.weeklyInvWeeks || []).filter(w => new Date(w.weekStart).getFullYear() === currentYear);
+  const sorted = [...weeks].sort((a, b) => a.weekStart - b.weekStart);
+
+  const weeklyPoints = sorted.map(w => {
+    const activeRows = w.rows.filter(r => r.inboundQty > 0);
+    let totalPurchases = 0, totalSold = 0;
+    activeRows.forEach(r => {
+      totalPurchases += r.inboundQty;
+      const depletion = wiComputePurchasesDepletion(r.sku, w.weekStart, r.inboundQty);
+      if (depletion.status === "depleted") totalSold += r.inboundQty;
+      else if (depletion.status === "remaining") totalSold += (r.inboundQty - depletion.remaining);
+      // status "unknown" (مفيش بيانات ستوك كفاية) — بنعتبرها 0 اتباع، من غير ما نمنع باقي الأسبوع من الحساب.
+    });
+    const soldPct = totalPurchases > 0 ? (totalSold / totalPurchases) * 100 : 0;
+    // isSelected: نفس الأسبوع المختار في فلتر "Week" فوق (Weekly Inventory &
+    // Inbound Filters) — الجراف والجدول هنا لسه بيوروا السنة كلها زي ما هي،
+    // بس بيتحطلها علامة/تمييز بصري بس عشان تعرف مكانها بسرعة (مفيش أي فلترة
+    // فعلية بتحصل هنا).
+    const isSelected = w.weekStart === state.weeklyInvSelectedWeekStart;
+    return { weekStart: w.weekStart, label: w.label, totalPurchases, totalSold, soldPct, isSelected, isCustom: false };
+  });
+
+  // نقطة/صف إضافي اختياري — لو فيه فلتر "Purchase Start/End" حر متفعّل فوق
+  // (الاتنين مع بعض)، بنضيف نقطة كمان بتاعت نفس الرينج ده بالظبط (مش أسبوع
+  // ثابت)، بنفس منطق الـ FIFO (wiComputePurchasesDepletion)، بس بـ batchEnd =
+  // نهاية الرينج الحر (مش +6 أيام تلقائي)، ومقطوعة عند "Sale End" لو
+  // متحدد كمان (عشان "Sold" تتوقف عند التاريخ ده بدل آخر بيانات موجودة).
+  // بتتحط في مكانها الزمني الصح جوه باقي الأسابيع عشان الخط يفضل منطقي.
+  const purchaseRange = wiGetPurchaseRange();
+  let customPoint = null;
+  if (purchaseRange) {
+    const saleRange = getActiveDateRangeFilter("weeklyInvSale");
+    const cutoffTs = saleRange ? saleRange.endTs : null;
+    let totalPurchases = 0, totalSold = 0;
+    (state.weeklyInvBySku || new Map()).forEach((invRow, sku) => {
+      const inb = wiSumInboundInRange(sku, purchaseRange.startTs, purchaseRange.endTs);
+      if (inb.qty <= 0) return;
+      totalPurchases += inb.qty;
+      const depletion = wiComputePurchasesDepletion(sku, purchaseRange.startTs, inb.qty, { batchEnd: purchaseRange.endTs, cutoffTs });
+      if (depletion.status === "depleted") totalSold += inb.qty;
+      else if (depletion.status === "remaining") totalSold += (inb.qty - depletion.remaining);
+    });
+    const soldPct = totalPurchases > 0 ? (totalSold / totalPurchases) * 100 : 0;
+    const fmtD = ts => new Date(ts).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    customPoint = {
+      weekStart: purchaseRange.startTs,
+      label: `${fmtD(purchaseRange.startTs)} – ${fmtD(purchaseRange.endTs)} (Filter)`,
+      totalPurchases, totalSold, soldPct, isSelected: false, isCustom: true
+    };
+  }
+
+  if (!customPoint) return weeklyPoints;
+  // بنحط النقطة الحرة في مكانها الزمني الصح (بتاريخ بدايتها) جوه باقي
+  // الأسابيع، عشان الجراف يفضل متسلسل زمنيًا ومنطقي.
+  const merged = [...weeklyPoints, customPoint].sort((a, b) => a.weekStart - b.weekStart);
+  return merged;
+}
+
+let wiCohortChartInst = null;
+function renderPurchaseCohortChart() {
+  const canvas = document.getElementById("wiCohortChart");
+  const tbody = $("wiCohortTableBody");
+  const data = buildPurchaseCohortTrendData();
+
+  if (canvas && typeof Chart !== "undefined") {
+    if (wiCohortChartInst) { wiCohortChartInst.destroy(); wiCohortChartInst = null; }
+    if (data.length) {
+      const labels = data.map(d => d.label);
+      // تمييز الأسبوع المختار في فلتر "Week" فوق: نقطة أكبر وحدود بيضاء
+      // حواليها في التلات لاينز، من غير ما نفلتر أو نغيّر أي رقم — لسه
+      // بنعرض السنة كلها بالظبط زي ما هي.
+      // "isCustom" (نقطة فلتر Purchase الحر) بتاخد شكل مميز شبه ماسة كبيرة
+      // بلون بنفسجي، عشان تتفرق بصريًا عن أي أسبوع عادي حتى لو كان "متحدد" برضو.
+      const ptRadius = data.map(d => d.isCustom ? 7 : (d.isSelected ? 6 : 3));
+      const ptBorderColor = data.map(d => d.isCustom ? "#a855f7" : (d.isSelected ? "#fff" : undefined));
+      const ptBorderWidth = data.map(d => d.isCustom ? 3 : (d.isSelected ? 2 : 1));
+      const ptStyle = data.map(d => d.isCustom ? "rectRot" : "circle");
+      wiCohortChartInst = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Total Purchases", data: data.map(d => d.totalPurchases), borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.08)", fill: false, tension: 0.35, pointRadius: ptRadius, pointStyle: ptStyle, pointBorderColor: ptBorderColor, pointBorderWidth: ptBorderWidth, pointBackgroundColor: "#3b82f6", yAxisID: "y" },
+            { label: "Sold So Far", data: data.map(d => d.totalSold), borderColor: "#10b981", backgroundColor: "rgba(16,185,129,0.08)", fill: false, tension: 0.35, pointRadius: ptRadius, pointStyle: ptStyle, pointBorderColor: ptBorderColor, pointBorderWidth: ptBorderWidth, pointBackgroundColor: "#10b981", yAxisID: "y" },
+            { label: "Inbound vs Sold %", data: data.map(d => d.soldPct), borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.08)", fill: false, tension: 0.35, pointRadius: ptRadius, pointStyle: ptStyle, pointBorderColor: ptBorderColor, pointBorderWidth: ptBorderWidth, pointBackgroundColor: "#f59e0b", yAxisID: "y1", borderDash: [4, 3] }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+            tooltip: {
+              backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#cbd5e1", borderColor: "#334155", borderWidth: 1, padding: 10,
+              callbacks: {
+                title: (items) => {
+                  if (!items[0]) return "";
+                  const d = data[items[0].dataIndex];
+                  if (d && d.isCustom) return `${items[0].label} (Purchase filter)`;
+                  if (d && d.isSelected) return `${items[0].label} (selected week)`;
+                  return items[0].label;
+                },
+                label: (ctx) => ctx.dataset.yAxisID === "y1" ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%` : `${ctx.dataset.label}: ${fmtInt.format(Math.round(ctx.parsed.y))}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false, drawBorder: false } },
+            y: { beginAtZero: true, position: "left", grid: { color: "#1e293b", borderDash: [4, 4], drawBorder: false }, ticks: { callback: v => v >= 1000 ? (v / 1000) + "k" : v } },
+            y1: { beginAtZero: true, max: 100, position: "right", grid: { display: false, drawBorder: false }, ticks: { callback: v => v + "%" } }
+          }
+        }
+      });
+    }
+  }
+
+  if (tbody) {
+    tbody.innerHTML = [...data].reverse().map(d => {
+      const rowCls = d.isCustom ? "wi-cohort-row-custom" : (d.isSelected ? "wi-cohort-row-selected" : "");
+      const rowTitle = d.isCustom ? "Custom range from the Purchase/Sale filters above" : (d.isSelected ? "Currently selected week in the Week filter above" : "");
+      const badge = d.isCustom ? ' <span class="badge-outline purple" style="margin-left:6px;">Filter</span>' : (d.isSelected ? ' <span class="badge-outline blue" style="margin-left:6px;">Selected</span>' : "");
+      return `
+      <tr class="${rowCls}" title="${rowTitle}">
+        <td class="text-dim">${escapeHtml(d.label)}${badge}</td>
+        <td class="num text-blue">${fmtIntCell(Math.round(d.totalPurchases))}</td>
+        <td class="num text-green font-bold">${fmtIntCell(Math.round(d.totalSold))}</td>
+        <td class="num text-orange font-bold">${d.soldPct.toFixed(1)}%</td>
+      </tr>
+    `;
+    }).join("") || `<tr><td colspan="4" class="text-dim" style="padding:16px;">No purchases recorded this year yet.</td></tr>`;
+  }
 }
 
 function wiFmtPct(n) {
   if (n === null || n === undefined || !Number.isFinite(n)) return `<span class="text-dim">-</span>`;
   return `${n.toFixed(1)}%`;
+}
+// "Inbound vs Sold" متكبش يعدي الـ 100% في أي مكان بيتعرض فيه (كارت السامري
+// أو عمود الجدول) — أي زيادة فوق الـ 100% بتتحط في "Overachieve" لوحده بدل
+// ما تخلي النسبة الأساسية تعدي الحد ده.
+function wiCappedPct(n) {
+  if (n === null || n === undefined || !Number.isFinite(n)) return `<span class="text-dim">-</span>`;
+  return `${Math.min(n, 100).toFixed(1)}%`;
+}
+function wiOverachievePct(n) {
+  if (n === null || n === undefined || !Number.isFinite(n) || n <= 100) return `<span class="text-dim">-</span>`;
+  return `<span class="text-purple font-bold">+${(n - 100).toFixed(1)}%</span>`;
 }
 
 // -------------------------------------------------------------------------
@@ -8382,6 +8846,12 @@ function renderWeeklyInventorySummary(rows) {
   let sumBeg = 0, sumInbound = 0, sumConfirmed = 0, sumRemaining = 0;
   rows.forEach(r => { sumBeg += r.beginInv; sumInbound += r.inboundQty; sumConfirmed += r.confirmedQty; sumRemaining += r.remainingFromBeginning; });
   const overallRatio = sumInbound > 0 ? (sumRemaining / sumInbound) * 100 : null;
+  // "Inbound vs Sold" متكبش يبقى فوق الـ 100% أبدًا — لو النسبة الحقيقية أكتر
+  // من كده (يعني اللي اتباع من غير المخزون الافتتاحي أكتر من إجمالي
+  // المشتريات نفسها في نفس الفترة)، الزيادة دي بتتحط في كارت منفصل
+  // "Overachieve" بدل ما تخلي الكارت الأساسي يعدي الـ 100%.
+  const cappedRatio = overallRatio === null ? null : Math.min(overallRatio, 100);
+  const overachieve = overallRatio === null ? 0 : Math.max(0, overallRatio - 100);
 
   grid.innerHTML = `
     <div class="metric-card hover-glow">
@@ -8402,7 +8872,11 @@ function renderWeeklyInventorySummary(rows) {
     </div>
     <div class="metric-card hover-glow highlight-card">
       <div class="metric-title text-orange">Inbound vs Sold <span class="icon-trend"></span></div>
-      <div class="metric-value">${overallRatio === null ? "-" : overallRatio.toFixed(1) + "%"}</div>
+      <div class="metric-value">${cappedRatio === null ? "-" : cappedRatio.toFixed(1) + "%"}</div>
+    </div>
+    <div class="metric-card hover-glow" style="${overachieve > 0 ? '' : 'opacity:0.5;'}">
+      <div class="metric-title text-purple">Overachieve</div>
+      <div class="metric-value text-purple">${overallRatio === null ? "-" : "+" + overachieve.toFixed(1) + "%"}</div>
     </div>
   `;
 }
@@ -8418,33 +8892,108 @@ function renderWeeklyInventoryTable() {
   if (titleEl) titleEl.textContent = week ? `Week of ${week.label}` : "Week of —";
 
   if (!week) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="15" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
     if ($("wiRowCount")) $("wiRowCount").textContent = "0 Rows";
     renderWeeklyInventorySummary([]);
     return;
   }
 
+  try {
+  // فلاتر حرة اختيارية — "Purchase Start/End" و"Sale Start/End"، كل واحدة
+  // منهم رينج كامل (لازم البداية والنهاية يتحددوا مع بعض عشان تتفعّل، زي
+  // بعض بالظبط). الاتنين لو من غير قيمة، الجدول بيفضل يقرا زي ما هو دلوقتي
+  // بالظبط (الأسبوع كامل من الأحد لحد السبت، ومبيعات نفس الـ 7 أيام) — من
+  // غير أي تغيير. لو "Sale" مش متحدد لكن "Purchase" متحدد، المبيعات بتتحسب
+  // على نفس رينج الشراء تلقائيًا (يعني تقدر تشوف "الأرقام لحد تاريخ إنباوند
+  // معين" بفلتر واحد بس).
+  const purchaseRange = wiGetPurchaseRange(); // null لو مش متحدد الاتنين مع بعض
+  const saleRange = getActiveDateRangeFilter("weeklyInvSale"); // null لو مش متحدد الاتنين مع بعض
+  const weekEnd = week.weekStart + 6 * 86400000;
+  const customActive = !!purchaseRange || !!saleRange;
+  const statusEl = $("wiCustomFilterStatus");
+
+  let rows;
+  if (customActive) {
+    const effPurchaseStart = purchaseRange ? purchaseRange.startTs : week.weekStart;
+    const effPurchaseEnd = purchaseRange ? purchaseRange.endTs : weekEnd;
+    const effSaleStart = saleRange ? saleRange.startTs : effPurchaseStart;
+    const effSaleEnd = saleRange ? saleRange.endTs : effPurchaseEnd;
+    // سطر تشخيصي — بيوريك بالظبط إيه الرينج اللي اتطبق فعلاً، عشان تتأكد
+    // إن الفلتر شغال (ولو الأرقام نفسها فضلت زي ما هي، يبقى معناه مفيش
+    // فرق حقيقي في البيانات جوه الرينج المختار، مش إن الفلتر مش شغال).
+    if (statusEl) {
+      const fmtD = ts => new Date(ts).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+      statusEl.textContent = `Custom filter active — Purchases counted from ${fmtD(effPurchaseStart)} to ${fmtD(effPurchaseEnd)} · Sales counted from ${fmtD(effSaleStart)} to ${fmtD(effSaleEnd)}.`;
+    }
+    rows = Array.from((state.weeklyInvBySku || new Map()).values()).map(invRow => {
+      const inb = wiSumInboundInRange(invRow.sku, effPurchaseStart, effPurchaseEnd);
+      if (inb.qty <= 0) return null;
+      const beginInv = wiStockAtTs(invRow.sku, effPurchaseStart);
+      const confirmedQty = wiSumConfirmedInRange(invRow.sku, effSaleStart, effSaleEnd);
+      const beginningSales = Math.min(confirmedQty, beginInv);
+      const remainingFromBeginning = confirmedQty - beginningSales;
+      const inboundVsSold = inb.qty > 0 ? (remainingFromBeginning / inb.qty) * 100 : null;
+      const meta = (state.weeklyInvSkuMetaMap || new Map()).get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
+      return {
+        sku: invRow.sku, name: invRow.name || "Unknown",
+        category: meta.category, stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
+        beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning, inboundVsSold,
+        _purchaseStartTs: effPurchaseStart, _purchaseEndTs: effPurchaseEnd
+      };
+    }).filter(Boolean);
+  } else {
+    if (statusEl) statusEl.textContent = "";
+    rows = week.rows.filter(r => r.inboundQty > 0);
+  }
+
   const q = (state.weeklyInvSearch || "").toLowerCase();
-  let rows = week.rows.filter(r => r.inboundQty > 0);
   if (q) rows = rows.filter(r => String(r.sku).toLowerCase().includes(q) || String(r.name).toLowerCase().includes(q));
   rows = [...rows].sort((a, b) => b.inboundQty - a.inboundQty);
 
-  tbody.innerHTML = rows.map(r => `
+  tbody.innerHTML = rows.map(r => {
+    // "المشتريات (Total Purchases) بتاعت الأسبوع ده خلصت إمتى؟" — راجع
+    // wiComputePurchasesDepletion فوق للتفاصيل (FIFO على الستوك الفعلي).
+    // لو فيه "Purchase Start" مخصص، بنبدأ الطابور من اليوم ده بدل الأحد.
+    const depletion = wiComputePurchasesDepletion(r.sku, r._purchaseStartTs || week.weekStart, r.inboundQty, r._purchaseEndTs !== undefined ? { batchEnd: r._purchaseEndTs } : undefined);
+    let depletionHtml;
+    if (depletion.status === "depleted") {
+      depletionHtml = `<span class="badge-outline red" title="خلصت بعد ${fmtInt.format(depletion.daysTaken)} يوم من يوم الشراء">${escapeHtml(depletion.dateLabel)} <span class="text-dim" style="font-weight:400;">(${fmtInt.format(depletion.daysTaken)}d)</span></span>`;
+    } else if (depletion.status === "remaining") {
+      depletionHtml = `<span class="badge-outline orange" title="لسه فاضل ${fmtInt.format(Math.round(depletion.remaining))} قطعة لحد آخر يوم بيانات (${escapeHtml(depletion.asOf)})">Not yet (${fmtIntCell(Math.round(depletion.remaining))} left)</span>`;
+    } else {
+      depletionHtml = `<span class="text-dim">-</span>`;
+    }
+    return `
     <tr>
       <td class="font-mono text-dim">${escapeHtml(r.sku)}</td>
       <td class="font-bold text-light truncate-cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
+      <td class="text-dim truncate-cell" style="max-width:110px;" title="${escapeHtml(r.category)}">${escapeHtml(r.category)}</td>
+      <td class="num text-dim font-bold">${fmtIntCell(r.stock)}</td>
+      <td class="num text-dim font-bold">${fmtIntCell(r.doh)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(r.cogs)}</td>
       <td class="num text-light">${fmtIntCell(r.beginInv)}</td>
       <td class="num text-blue">${fmtIntCell(r.inboundQty)}</td>
       <td class="text-dim">${r.inboundDates && r.inboundDates.length ? escapeHtml(r.inboundDates.join(", ")) : "-"}</td>
       <td class="num text-green font-bold">${fmtIntCell(r.confirmedQty)}</td>
       <td class="num text-dim">${fmtIntCell(r.beginningSales)}</td>
       <td class="num text-orange font-bold">${fmtIntCell(r.remainingFromBeginning)}</td>
-      <td class="num font-bold">${wiFmtPct(r.inboundVsSold)}</td>
+      <td class="num font-bold">${wiCappedPct(r.inboundVsSold)}</td>
+      <td class="num">${wiOverachievePct(r.inboundVsSold)}</td>
+      <td class="center">${depletionHtml}</td>
     </tr>
-  `).join("") || `<tr><td colspan="9" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
+  `;
+  }).join("") || `<tr><td colspan="15" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
 
   if ($("wiRowCount")) $("wiRowCount").textContent = `${fmtInt.format(rows.length)} Rows`;
   renderWeeklyInventorySummary(rows);
+  } catch (err) {
+    // لو حصل أي خطأ جوه فلترة "Purchase Start"/"Sale Start/End" الحرة، بنوريه
+    // هنا واضح بدل ما الجدول يفضل واقف على آخر حالة صح من غير أي تفسير —
+    // ده أسهل تشخيص بكتير من "مفيش حاجة بتتغير" من غير سبب ظاهر.
+    console.error("renderWeeklyInventoryTable error:", err);
+    if ($("wiCustomFilterStatus")) $("wiCustomFilterStatus").textContent = `Error applying the custom filter: ${err.message || err}`;
+    tbody.innerHTML = `<tr><td colspan="15" class="text-red" style="padding:16px;">Error rendering this table: ${escapeHtml(String(err.message || err))}</td></tr>`;
+  }
 }
 
 function renderWeeklyInventoryPanel() {
@@ -8454,6 +9003,7 @@ function renderWeeklyInventoryPanel() {
   wiPopulateFilters();
   renderWeeklyInventoryTable();
   renderWeeklyInventoryTrendChart();
+  renderPurchaseCohortChart();
 }
 
 // تفعيل أحداث الضغط (Event Listeners) الخاصة بالبحث والتقليب
@@ -8467,12 +9017,21 @@ document.addEventListener("DOMContentLoaded", () => {
     state.weeklyInvSelectedWeekStart = null; // يخلي wiPopulateWeekOptionsForSelectedMonth يختار أول أسبوع مناسب في الشهر الجديد
     wiPopulateWeekOptionsForSelectedMonth();
     renderWeeklyInventoryTable();
+    renderPurchaseCohortChart(); // يحدّث تمييز الأسبوع المختار في الـ Cohort Tracker
   });
   if ($("wiWeekSelect")) $("wiWeekSelect").addEventListener("change", (e) => {
     state.weeklyInvSelectedWeekStart = e.target.value ? Number(e.target.value) : null;
     renderWeeklyInventoryTable();
+    renderPurchaseCohortChart(); // يحدّث تمييز الأسبوع المختار في الـ Cohort Tracker
   });
   if($("searchSellthroughInput")) $("searchSellthroughInput").addEventListener("input", applySellthroughFiltersAndSort);
+  // زرار "Apply Filters" — تطبيق يدوي فوري لفلاتر Purchase/Sale فوق (احتياطي
+  // لو الـ change event للـ input[type=date] ماتفعلش لأي سبب، زي استرجاع
+  // المتصفح لقيمة قديمة من غير ما يطلق change فعلي).
+  if ($("wiApplyFiltersBtn")) $("wiApplyFiltersBtn").addEventListener("click", () => {
+    renderWeeklyInventoryTable();
+    renderPurchaseCohortChart();
+  });
 
   // فلتر الشهور السريع: بيحدد نفس الشهر لـ Beginning Inventory + Start/End Sale Month مع بعض.
   if ($("stMonthSelect")) $("stMonthSelect").addEventListener("change", (e) => {
@@ -11222,7 +11781,9 @@ const SECTION_DATE_FILTER_REFRESH = {
   commercialDebundlized: () => prepareCommercialDebundlizedData(),
   targetsCommercial: () => renderTargetsCommercialView(),
   mpSalesPlan: () => prepareMpSalesPlanData(),
-  cm3AnalystProducts: () => prepareCm3AnalystProductsData()
+  cm3AnalystProducts: () => prepareCm3AnalystProductsData(),
+  weeklyInvPurchase: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); },
+  weeklyInvSale: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); }
 };
 function onSectionDateFilterChange(sectionKey) {
   const startInput = $("startDate_" + sectionKey); const endInput = $("endDate_" + sectionKey);

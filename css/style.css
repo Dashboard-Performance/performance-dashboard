@@ -158,6 +158,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .data-table .truncate-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .data-table th.truncate-cell { max-width: 180px; }
 .data-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+/* Purchase Cohort Tracker — تمييز الأسبوع المختار حاليًا في فلتر "Week" فوق
+   (Weekly Inventory & Inbound Filters)، من غير أي فلترة فعلية للجدول. */
+.data-table tbody tr.wi-cohort-row-selected td { background: rgba(59,130,246,0.1); border-left: 2px solid var(--blue); }
+.data-table tbody tr.wi-cohort-row-selected:hover td { background: rgba(59,130,246,0.15); }
+/* الصف الإضافي اللي بيمثل رينج فلتر "Purchase Start/End" الحر — بنفسجي عشان
+   يتفرق عن تمييز الأسبوع المختار (أزرق) وباقي الصفوف العادية. */
+.data-table tbody tr.wi-cohort-row-custom td { background: rgba(167,139,250,0.12); border-left: 2px solid #a78bfa; }
+.data-table tbody tr.wi-cohort-row-custom:hover td { background: rgba(167,139,250,0.18); }
 /* CM3 Analyst Products — Daily/Weekly breakdown: هوية كل عمود Period (يوم أو
    أسبوع) بتتنقل من خلال العنوان (header) + شريط خفيف تحته وتينت خلفية باهت
    جدًا للخلية — مش من تلوين كل رقم بلون مشبع زي الأول (ده اللي كان بيبان

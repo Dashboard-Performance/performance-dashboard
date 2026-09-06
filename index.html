@@ -821,6 +821,7 @@
                       <th rowspan="2" onclick="sortCdz('singleId')" style="cursor:pointer; white-space:nowrap;" title="Unique identifier for this SKU. Click to sort.">Product_ID</th>
                       <th rowspan="2" onclick="sortCdz('singleName')" style="cursor:pointer; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Product's display name. Click to sort.">Product_Name</th>
                       <th rowspan="2" onclick="sortCdz('category')" class="truncate-cell" style="cursor:pointer; max-width: 110px;" title="Product category this SKU belongs to. Click to sort.">Category</th>
+                      <th rowspan="2" onclick="sortCdz('placedDailyRaw')" class="num" style="cursor:pointer;" title="Raw Placed Daily target for this SKU, read straight from the plan sheet. MTD Target (Placed group) = this × Days Until Yesterday. Click to sort.">Placed Daily</th>
                       <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Current stock quantity on hand. Click to sort.">Stock</th>
                       <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand: Stock ÷ average confirmed pieces over the last 3 days. Click to sort.">DOH</th>
                       <th colspan="4" class="center" title="Pieces placed on orders for this SKU. No cutoff applied.">Placed Pieces</th>
@@ -1667,6 +1668,10 @@
                       <th colspan="4" class="center" title="Pieces confirmed for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Confirmed Pieces</th>
                       <th colspan="4" class="center" title="Pieces delivered for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered Pieces</th>
                       <th colspan="4" class="center" title="Delivered revenue for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered GMV</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed for this SKU × Merchant (CR_2_DAY from the Merchant SKU Daily sheet). Used to derive the Confirmed MTD Target from the Placed MTD Target. Click to sort.">CR%</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed for this SKU × Merchant (DR_5_DAYS from the Merchant SKU Daily sheet). Used to derive the Delivered MTD Target from the Confirmed MTD Target. Click to sort.">DR%</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% for this SKU × Merchant. Click to sort.">NDR%</th>
+                      <th rowspan="2" onclick="sortMpSalesPlan('asp')" class="num" style="cursor:pointer;" title="Average selling price per SKU per Merchant (from the Merchant SKU Daily sheet). Used to derive the Delivered GMV MTD Target from the Delivered MTD Target. Click to sort.">ASP</th>
                       <th rowspan="2" onclick="sortMpSalesPlan('wowPct')" class="center" style="cursor:pointer;" title="Change in Confirmed Pieces this week vs last week. Click to sort.">WoW (Confirmed)</th>
                       <th rowspan="2" onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;" title="Overall performance tier based on Confirmed Pieces achievement %. Click to sort.">Status</th>
                     </tr>
@@ -2774,6 +2779,10 @@
                       <th data-stkey="doh" class="num text-dim font-bold" title="Stock ÷ average daily confirmed pieces (last 3 days), demand pooled across this SKU standalone and every bundle it's part of.">DOH</th>
                       <th data-stkey="websiteStatus" class="center" title="Current website availability status for this SKU.">Availability</th>
                       <th data-stkey="isLocked" class="center" title="Whether this SKU currently has an active merchant lock.">Is_Locked</th>
+                      <th data-stkey="crPct" class="num" title="Confirmed ÷ Placed pieces for this SKU, over the same period as CNF_QTY/DLV_QTY (no lag cutoff). Click to sort.">CR%</th>
+                      <th data-stkey="drPct" class="num" title="Delivered ÷ Confirmed pieces for this SKU, over the same period. Click to sort.">DR%</th>
+                      <th data-stkey="ndrPct" class="num" title="CR% × DR% for this SKU. Click to sort.">NDR%</th>
+                      <th data-stkey="cogs" class="num" title="Cost of goods for this SKU, from the cost data (same value as the Cogs column further right). Click to sort.">Cogs</th>
                       <th data-stkey="avg3d" class="num text-blue" title="Average daily confirmed pieces over the last 3 days — the same figure used to compute DOH, pooled across this SKU standalone and every bundle it's part of.">AVG 3D</th>
                       <th data-stkey="avg15d" class="num text-purple" title="Average daily confirmed pieces over the last 15 days, computed the same way as AVG 3D but over a wider window.">AVG 15D</th>
                       <th data-stkey="doh15d" class="num text-dim font-bold" title="Stock ÷ AVG 15D — days of stock on hand based on the last 15 days of demand instead of 3.">DOH(15D)</th>
@@ -2805,12 +2814,27 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Weekly Inventory &amp; Inbound Filters</h2>
-                  <p id="wiFiltersSubtitle">Pick a month, then a week (Sunday–Saturday) — defaults to the current week</p>
+                  <p id="wiFiltersSubtitle">Pick a month, then a week (Sunday–Saturday) — defaults to the current week. Optionally narrow the purchase/sale window below (pick both dates in a pair to activate it) — leave them empty to keep reading the full selected week as usual.</p>
                 </div>
               </div>
               <div class="table-controls" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; margin-left: 0; justify-content: flex-start; width: 100%;">
                 <select id="wiMonthSelect" class="st-filter-select"><option value="">Month</option></select>
                 <select id="wiWeekSelect" class="st-filter-select"><option value="">Week</option></select>
+                <div class="filter-group section-date-filter" data-section-date="weeklyInvPurchase" title="Pick both dates to count purchases (inbound) over this exact custom date range instead of the selected week's own 7 days — e.g. see the numbers as of a specific inbound date. Clear either date to go back to normal.">
+                  <span class="text-dim" style="padding:0 4px;">Purchase</span>
+                  <input id="startDate_weeklyInvPurchase" type="date" class="date-filter-input" aria-label="Purchase Start" />
+                  <span class="text-dim" style="padding:0 4px;">→</span>
+                  <input id="endDate_weeklyInvPurchase" type="date" class="date-filter-input" aria-label="Purchase End" />
+                  <button id="clearDate_weeklyInvPurchase" class="btn btn-outline small hidden" data-clear-date="weeklyInvPurchase">Clear</button>
+                </div>
+                <div class="filter-group section-date-filter" data-section-date="weeklyInvSale" title="Pick both dates to count Confirmed sales over this exact custom date range instead of the selected week's own 7 days. Clear either date to go back to normal.">
+                  <span class="text-dim" style="padding:0 4px;">Sale</span>
+                  <input id="startDate_weeklyInvSale" type="date" class="date-filter-input" aria-label="Sale Start" />
+                  <span class="text-dim" style="padding:0 4px;">→</span>
+                  <input id="endDate_weeklyInvSale" type="date" class="date-filter-input" aria-label="Sale End" />
+                  <button id="clearDate_weeklyInvSale" class="btn btn-outline small hidden" data-clear-date="weeklyInvSale">Clear</button>
+                </div>
+                <button id="wiApplyFiltersBtn" class="btn btn-primary small" title="Force-apply the Purchase/Sale date filters above right now (use this if the numbers don't seem to react to a typed date).">Apply Filters</button>
                 <input id="searchWeeklyInvInput" type="search" placeholder="Search SKU or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
               </div>
             </div>
@@ -2837,6 +2861,40 @@
             </div>
           </section>
 
+          <!-- Purchase Cohort Tracker — نفس ستايل "Weekly Inventory Trend"
+               بالظبط (كل الـ SKUs مع بعض، مش فلتر SKU واحد)، بس بدل ما يوري
+               نسبة "Inbound vs Sold" بتاعة أسبوع الشراء نفسه بس، بيتابع كل
+               أسبوع (Cohort) لحد آخر بيانات موجودة دلوقتي، عن طريق نفس منطق
+               الـ FIFO على الستوك الفعلي (wiComputePurchasesDepletion) —
+               فبيوريك الصورة الحقيقية "قد إيه اتباع من مشتريات كل أسبوع
+               لحد النهاردة"، مش بس أول 7 أيام بعد الشراء. -->
+          <section class="mb-4">
+            <div class="panel chart-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Purchase Cohort Tracker</h2>
+                  <p>Total Purchases vs Cumulative Sold (as of today) vs Inbound vs Sold % — every week this year, tracked FIFO on real stock (not just each week's own 7 days). Set a Purchase Start/End above to add its own point (◆ purple) with performance for that exact custom range.</p>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="wiCohortChart"></canvas>
+              </div>
+              <div class="table-responsive mt-4">
+                <table class="data-table" id="wiCohortTable">
+                  <thead>
+                    <tr>
+                      <th title="Calendar week (Sunday of that week).">Week</th>
+                      <th class="num text-blue" title="Total inbound purchase pieces received that week, across all SKUs.">Total Purchases</th>
+                      <th class="num text-green" title="Cumulative pieces sold from that week's purchases so far, as of the latest inventory data (FIFO — Beginning Inventory is consumed first, then that week's Purchases, then any later inbound).">Sold So Far</th>
+                      <th class="num text-orange" title="Sold So Far ÷ Total Purchases.">Inbound vs Sold %</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wiCohortTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <!-- Selected week table -->
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
@@ -2844,6 +2902,7 @@
                 <div class="panel-title-wrapper border-purple">
                   <h2 id="wiWeekTableTitle">Week of —</h2>
                   <p>Single SKUs that had an inbound during the selected week</p>
+                  <p id="wiCustomFilterStatus" class="text-dim" style="margin-top:4px;font-size:12px;"></p>
                 </div>
               </div>
               <div class="table-responsive">
@@ -2852,13 +2911,19 @@
                     <tr>
                       <th title="Product identifier.">SKU_ID</th>
                       <th style="min-width: 180px;" title="Product name.">SKU_NAME</th>
+                      <th class="truncate-cell" style="max-width:110px;" title="Product category, same source as the rest of the dashboard.">Category</th>
+                      <th class="num" title="Current stock on hand for this Single SKU overall, same source and logic as the Sellthrough Rate Panel's STOCK column.">Current Stock</th>
+                      <th class="num" title="Days of stock on hand: Current Stock ÷ average confirmed pieces over the last 3 days (Overall Debundled demand) — same logic as the Sellthrough Rate Panel's DOH column.">DOH</th>
+                      <th class="num" title="Cost of goods for this SKU, from the cost data.">Cogs</th>
                       <th class="num" title="Stock on hand as of this week's Sunday, from the Daily SKU Inventory sheet.">Beginning Inventory</th>
                       <th class="num text-blue" title="Total inbound (received) pieces for this SKU across this week's 7 days.">Inbound Qty (7d)</th>
                       <th title="Date(s) this SKU was received during this week.">Inbound Date</th>
                       <th class="num text-green" title="SKU Total Demand Overall (Debundled): confirmed pieces sold as this SKU directly, plus demand pulled in from every bundle it's a component of (× quantity per bundle), summed across this week's 7 days.">Confirmed Qty (7d)</th>
                       <th class="num" title="Confirmed pieces sourced from beginning inventory = MIN(Confirmed Qty, Beginning Inventory).">Beginning Sales</th>
                       <th class="num text-orange" title="Confirmed pieces still needing coverage after beginning inventory = Confirmed Qty − Beginning Sales.">Remaining from Beginning</th>
-                      <th class="num" title="Remaining sales from beginning ÷ total inbound this week.">Inbound vs Sold</th>
+                      <th class="num" title="Remaining sales from beginning ÷ total inbound this week. Capped at 100% — any excess shows in the Overachieve column instead.">Inbound vs Sold</th>
+                      <th class="num text-purple" title="The portion of Inbound vs Sold that exceeds 100%, shown separately so the main ratio never goes above 100%.">Overachieve</th>
+                      <th class="center" title="The actual date this week's Total Purchases (this row's Inbound Qty) got fully sold out, computed FIFO on the real daily stock (Beginning Inventory is consumed first, then this week's Purchases, then any later inbound) — not just a monthly/weekly ratio. Shows the remaining quantity instead if it hasn't sold out yet as of the latest inventory data.">Purchases Sold Out On</th>
                     </tr>
                   </thead>
                   <tbody id="wiWeekTableBody"></tbody>
