@@ -52,6 +52,13 @@ const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate nee
 // (Performance Merchant's) اللي فاضلة زي ما هي.
 const MERCHANT_SEGMENTATION_GID = "620123165";
 
+// شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
+// في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
+// Condition, TOTAL_COUNT. بنستخدم بس الصفوف اللي Condition بتاعتها
+// "Damaged BOX" — دول اللي بنعتبرهم "Repack" (قطع تالفة قابلة لإعادة التجهيز)
+// — ومجموع TOTAL_COUNT بتاعتهم لكل SKU_ID هو عمود "Repack" في Purchase Plan.
+const WAREHOUSE_REPACK_GID = "897709273";
+
 // -------------------------------------------------------------------------
 // WEEKLY INVENTORY & INBOUND PANEL (Admin Panel, تحت Sellthrough Rate Panel)
 // شيت "Daily SKU Inventory" — أعمدة: SKU_ID | SKU_NAME | ثم عمود لكل يوم
@@ -220,6 +227,8 @@ const state = {
   mpSalesPlanPage: 0,
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
   merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
+  repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
+  purchasePlanData: [], purchasePlanFiltered: [], purchasePlanSearch: "", purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
   acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
@@ -524,6 +533,7 @@ const marketplaceSubmenu = $("marketplaceSubmenu");
 const navMarketplaceCaret = $("navMarketplaceCaret");
 const navTargetsCommercial = $("navTargetsCommercial");
 const navCommercialDebundlized = $("navCommercialDebundlized");
+const navPurchasePlan = $("navPurchasePlan");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
 const navPpmAnalystSingle = $("navPpmAnalystSingle");
@@ -579,6 +589,7 @@ function switchView(viewName) {
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
   if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
+  if(navPurchasePlan) navPurchasePlan.classList.remove("active");
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
   if(navPpmAnalystSingle) navPpmAnalystSingle.classList.remove("active");
@@ -605,6 +616,7 @@ function switchView(viewName) {
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
+  else if (viewName === "purchasePlan") { activeSection = $("viewPurchasePlan"); if(navPurchasePlan) navPurchasePlan.classList.add("active"); preparePurchasePlanData(); }
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
   else if (viewName === "ppmAnalystSingle") { activeSection = $("viewPpmAnalystSingle"); if(navPpmAnalystSingle) navPpmAnalystSingle.classList.add("active"); preparePpmAnalystSingleData(); }
@@ -646,6 +658,7 @@ if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerform
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
 if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
+if(navPurchasePlan) navPurchasePlan.addEventListener("click", () => switchView("purchasePlan"));
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
 if(navPpmAnalystSingle) navPpmAnalystSingle.addEventListener("click", () => switchView("ppmAnalystSingle"));
@@ -3910,6 +3923,27 @@ function parseMerchantSegmentationSheet(payload) {
   return rows;
 }
 
+// شيت "WareHouse" (WAREHOUSE_REPACK_GID، gid=897709273). الأعمدة (0-based):
+// 0 LOCATION, 1 SKU_ID, 2 PRODUCT_NAME, 3 WAREHOUSE, 4 Condition, 5 TOTAL_COUNT.
+// بيرجع Map(SKU_ID -> مجموع TOTAL_COUNT) بس للصفوف اللي Condition بتاعتها
+// "Damaged BOX" (مقارنة case-insensitive، ومن غير مسافات زيادة) — دي اللي
+// بنعتبرها "Repack" في Purchase Plan.
+function parseWarehouseRepackSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const map = new Map();
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const sku = cellText(c[1]).trim();
+    if (!sku || sku === "SKU_ID") continue;
+    const condition = cellText(c[4]).trim().toLowerCase();
+    if (condition !== "damaged box") continue;
+    const qty = cellNumber(c[5]);
+    map.set(sku, (map.get(sku) || 0) + qty);
+  }
+  return map;
+}
+
 // شيت "Inbound" (GID 565878313). ترتيب الأعمدة (0-based) زي الشيت الأصلي بالظبط:
 // 0 Date (تاريخ الاستلام), 1 Odoo_NO, 2 SKU, 3 RCV_QTY, 4 Des (اسم المنتج),
 // 5 Category, 6 Receiving Month (أول يوم في شهر الاستلام),
@@ -4200,6 +4234,7 @@ function updateDashboard(rows) {
   renderOverallAcmTargetsSummary();
   if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
+  if ($("viewPurchasePlan") && $("viewPurchasePlan").classList.contains("active-view")) preparePurchasePlanData();
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
   if ($("viewPpmAnalystSingle") && $("viewPpmAnalystSingle").classList.contains("active-view")) preparePpmAnalystSingleData();
@@ -4550,13 +4585,64 @@ function renderTrendTables(allRows, selectedAcm) {
   }
 }
 
-function prepareMerchantTableData(rows) {
+// -------------------------------------------------------------------------
+// Performance Merchant's (Top 10 Merchants / Overall Merchant Performance /
+// Merchant Segmentation & Projections) — التلاتة جداول دول بيتاخدوا دلوقتي
+// من شيت "Merchant Segmentation" الجديد (MERCHANT_SEGMENTATION_GID،
+// gid=620123165) بدل الشيت الرئيسي (MAIN_GID)، بطلب صريح: Placed/Confirmed/
+// Delivered (orders و pieces)، Delivered GMV، CR/DR/NDR، والـ Segmentation
+// columns كلها من الشيت الجديد. الحاجات الوحيدة اللي مش موجودة في الشيت
+// الجديد وفضلت زي ما هي من MAIN_GID: Total CM3 / CM3%، Confirmed GMV،
+// وعدد الـ SKUs المميزة، بالإضافة للـ Targets (Target GMV/Placed) والـ Run
+// Rate (بتتحسب فوق الـ Delivered GMV الجديد لكن بنفس منطق الأيام القديم).
+//
+// ملحوظة مهمة: بما إن قائمة التجار نفسها بقت مصدرها الشيت الجديد، أي تاجر
+// معندوش صف في شيت الـ Segmentation للشهر/الفترة المختارة مش هيظهر خالص في
+// التلات جداول دي حتى لو عنده أوردرات في الشيت الرئيسي.
+// -------------------------------------------------------------------------
+function buildMerchantAggFromSegmentation(selectedMonthStr) {
   const map = new Map();
+  (state.merchantSegSourceRows || []).forEach(r => {
+    if (!r.merchantId) return;
+    if (selectedMonthStr && r.monthYear !== selectedMonthStr) return;
+    if (!map.has(r.merchantId)) {
+      map.set(r.merchantId, {
+        id: r.merchantId, name: r.merchantName, acm: r.acmName, country: r.country,
+        placed: 0, confirmed: 0, delivered: 0,
+        placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0,
+        deliveredGmv: 0, _latestMonthTs: -Infinity,
+        segmentation: "", newSegmentation: "", nextMonthSegment: "", prevMonthSegment: "",
+        firstTimeMvm: "", firstTimeHvm: "", firstMonth: ""
+      });
+    }
+    const entry = map.get(r.merchantId);
+    entry.placed += r.placedOrders || 0; entry.confirmed += r.confirmedOrders || 0; entry.delivered += r.deliveredOrders || 0;
+    entry.placedPieces += r.placedPieces || 0; entry.confirmedPieces += r.confirmedPieces || 0; entry.deliveredPieces += r.deliveredPieces || 0;
+    entry.deliveredGmv += r.deliveredGmv || 0;
+    // أحدث شهر متاح بس بيحدد الاسم/الـ ACM/الـ Segmentation snapshot (نصوص) —
+    // عشان لو "All Months" مختارة منجمعش نصوص من شهور مختلفة مع بعض.
+    const rowTs = new Date(r.monthYear).getTime(); const ts = isNaN(rowTs) ? 0 : rowTs;
+    if (ts >= entry._latestMonthTs) {
+      entry._latestMonthTs = ts;
+      entry.name = r.merchantName || entry.name; entry.acm = r.acmName || entry.acm; entry.country = r.country || entry.country;
+      entry.segmentation = r.segmentation; entry.newSegmentation = r.newSegmentation;
+      entry.nextMonthSegment = r.nextMonthSegment; entry.prevMonthSegment = r.prevMonthSegment;
+      entry.firstTimeMvm = r.firstTimeMvm; entry.firstTimeHvm = r.firstTimeHvm; entry.firstMonth = r.firstMonth;
+    }
+  });
+  return map;
+}
+
+function prepareMerchantTableData(rows) {
+  // cm3Map: بس الحاجات اللي مش موجودة في شيت الـ Segmentation الجديد
+  // (Total CM3 / CM3 DeliveredGmv للنسبة، Confirmed GMV، عدد SKUs المميزة) —
+  // لسه بتتجمع من MAIN_GID زي ما كانت بالظبط.
+  const cm3Map = new Map();
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   rows.forEach(r => {
     if (!r.merchantId || r.merchantId === "Unassigned") return;
-    if (!map.has(r.merchantId)) { map.set(r.merchantId, { id: r.merchantId, name: r.merchantName, acm: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, skus: new Set() }); }
-    const entry = map.get(r.merchantId); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.placedGmv += r.placedGmv; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
+    if (!cm3Map.has(r.merchantId)) { cm3Map.set(r.merchantId, { name: r.merchantName, acm: r.acmName, cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, skus: new Set() }); }
+    const entry = cm3Map.get(r.merchantId); entry.confirmedGmv += r.confirmedGmv;
     // cm3DeliveredGmv بكات أوف الـ CM3 بالظبط — نفس المنطق: مايبقاش الـ CM3 لحد يوم والـ GMV لحد يوم تاني
     if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.cm3DeliveredGmv += r.deliveredGmv; }
     if(r.sku && r.placedOrders > 0) entry.skus.add(r.sku);
@@ -4571,32 +4657,52 @@ function prepareMerchantTableData(rows) {
   let segElapsedDays = elapsedDays;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); const now = new Date(); if (!isNaN(d) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { segElapsedDays = Math.max(elapsedDays - 1, 1); } }
 
-  // مصدر Confirmed Orders لجدول "Merchant Segmentation & Projections" بس
-  // (segConfirmed/rrConfirmed/projectedSegment تحت) — من شيت MERCHANT_SEGMENTATION_GID
-  // (gid=620123165) بدل تجميع MAIN_GID زي باقي أعمدة الجدول (Performance
-  // Merchant's) اللي فاضلة زي ما هي. لو فيه شهر مختار من monthSelect بنقرا
-  // بس صف نفس الشهر ده (r.monthYear نفس فورمات monthSelect.value بالظبط)؛
-  // لو "All Months" بنجمع كل شهور الشيت الجديد المتاحة لكل تاجر مع بعض.
-  const segConfirmedMap = new Map();
-  (state.merchantSegSourceRows || []).forEach(r => {
-    if (!r.merchantId) return;
-    if (selectedMonthStr && r.monthYear !== selectedMonthStr) return;
-    segConfirmedMap.set(r.merchantId, (segConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
+  // قائمة التجار نفسها + Placed/Confirmed/Delivered (orders و pieces) +
+  // Delivered GMV + Segmentation columns — كل ده من شيت الـ Segmentation
+  // الجديد (MERCHANT_SEGMENTATION_GID، gid=620123165) دلوقتي.
+  const segAggMap = buildMerchantAggFromSegmentation(selectedMonthStr);
+
+  // أي تاجر عنده Target متحدد (شيت Targets، TARGETS_GID) لازم يفضل ظاهر في
+  // "Overall Merchant Performance" و"Overall Targets Attainment" حتى لو
+  // مالوش صف خالص في شيت الـ Segmentation للشهر/الفترة المختارة (يعني
+  // معملش Placed/Confirmed في الفترة دي) — بدل ما يختفي تمامًا من الجدولين
+  // ومن مجموع الـ Target GMV. بيتضاف بصفوف أصفر (Placed/Confirmed/Delivered
+  // = صفر)، والاسم/الـ ACM بتاعته بيتاخدوا من الشيت الرئيسي لو متوفرين.
+  Object.keys(state.merchantTargets || {}).forEach(id => {
+    if (segAggMap.has(id)) return;
+    const fallback = cm3Map.get(id) || {};
+    segAggMap.set(id, {
+      id, name: fallback.name || id, acm: fallback.acm || "Unassigned", country: "",
+      placed: 0, confirmed: 0, delivered: 0,
+      placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0,
+      deliveredGmv: 0, _latestMonthTs: -Infinity,
+      segmentation: "", newSegmentation: "", nextMonthSegment: "", prevMonthSegment: "",
+      firstTimeMvm: "", firstTimeHvm: "", firstMonth: ""
+    });
   });
 
-  state.merchantTableData = Array.from(map.values()).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) : 0;
+  state.merchantTableData = Array.from(segAggMap.values()).map(m => {
+    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr;
+    const crPieces = m.placedPieces ? (m.confirmedPieces / m.placedPieces) : 0; const drPieces = m.confirmedPieces ? (m.deliveredPieces / m.confirmedPieces) : 0; const ndrPieces = drPieces * crPieces;
+    const cm3Entry = cm3Map.get(m.id) || { cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, skus: new Set() };
+    const cm3Pct = cm3Entry.cm3DeliveredGmv ? (cm3Entry.cm3 / cm3Entry.cm3DeliveredGmv) : 0;
     const targetData = state.merchantTargets[m.id] || { gmv: 0, placed: 0 }; const targetGmv = targetData.gmv; const targetPlaced = targetData.placed;
     const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
     const currentSegment = state.merchantSegmentsMap[m.id] || "In active";
-    // segConfirmed = Confirmed Orders من الشيت الجديد (MERCHANT_SEGMENTATION_GID) —
+    // segConfirmed = نفس Confirmed Orders بتاعت الشيت الجديد أصلاً (m.confirmed) —
     // ده اللي بيتعرض في عمود "Confirmed Orders" وبيتحسب منه "RR Confirmed
     // (EOM)" و"Projected Segment" في Merchant Segmentation & Projections.
-    // لو التاجر ده معندوش صف في الشيت الجديد أصلاً (لسه معملش Confirmed خالص
-    // في الفترة دي)، بيرجع 0 بدل ما يرجع لأرقام MAIN_GID القديمة.
-    const segConfirmed = segConfirmedMap.has(m.id) ? segConfirmedMap.get(m.id) : 0;
+    const segConfirmed = m.confirmed;
     const rrConfirmed = (segConfirmed / segElapsedDays) * totalDays; const projectedSegment = getSegmentLogic(rrConfirmed);
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr * 100, cm3Pct: cm3Pct * 100, targetGmv, targetPlaced, achievedPct, runRate, currentSegment, segConfirmed, rrConfirmed, projectedSegment, skuCount: m.skus.size };
+    return {
+      ...m,
+      cr: cr * 100, dr: dr * 100, ndr: ndr * 100,
+      crPieces: crPieces * 100, drPieces: drPieces * 100, ndrPieces: ndrPieces * 100,
+      cm3: cm3Entry.cm3, cm3DeliveredGmv: cm3Entry.cm3DeliveredGmv, cm3Pct: cm3Pct * 100,
+      confirmedGmv: cm3Entry.confirmedGmv, skuCount: cm3Entry.skus.size,
+      targetGmv, targetPlaced, achievedPct, runRate,
+      currentSegment, segConfirmed, rrConfirmed, projectedSegment
+    };
   });
 }
 
@@ -4615,9 +4721,12 @@ function renderOverallTargetSummary() {
 function renderTop10Merchants() {
   const tbody = $("top10MerchantBody"); if(!tbody) return; tbody.innerHTML = "";
   const top10 = [...state.merchantTableData].sort((a, b) => b.deliveredGmv - a.deliveredGmv).slice(0, 10);
+  // Confirmed/Placed/Delivered هنا Pieces (مش Orders) بطلب صريح، ومعاهم
+  // CR%/DR%/NDR% محسوبين على أساس نفس الـ Pieces دي (crPieces/drPieces/ndrPieces)
+  // عشان يتوافقوا مع الأرقام المعروضة جنبهم.
   top10.forEach((m, idx) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-dim">${fmtMoneyCompactCell(m.confirmedGmv)}</td><td class="num text-dim">${fmtIntCell(m.skuCount)}</td>`;
+    tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmedPieces)}</td><td class="num text-dim">${fmtIntCell(m.placedPieces)}</td><td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPieces)}">${fmtPctCell(m.crPieces)}</span></td><td class="num text-dim">${fmtPctCell(m.drPieces)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPieces)}">${fmtPctCell(m.ndrPieces)}</span></td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-dim">${fmtMoneyCompactCell(m.confirmedGmv)}</td><td class="num text-dim">${fmtIntCell(m.skuCount)}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -4636,7 +4745,7 @@ function renderPaginatedMerchantTable() {
   pageRows.forEach((m, idx) => {
     let progressColor = "blue"; if(m.targetGmv === 0) progressColor = "dim"; else if(m.achievedPct >= 100) progressColor = "green"; else if(m.achievedPct < 50) progressColor = "red"; else if(m.achievedPct >= 50 && m.achievedPct < 80) progressColor = "orange";
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim font-bold">${m.targetPlaced > 0 ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num font-bold text-light">${fmtPctCell(m.cm3Pct)}</td>`;
+    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td><td class="num text-dim font-bold">${m.targetPlaced > 0 ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td><td class="num">${fmtPctCell(m.cr)}</td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>`;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(state.filteredMerchantData.length / PAGE_SIZE));
@@ -5771,7 +5880,7 @@ function computeCommercialDebundlized() {
 
   const buckets = new Map();
   function getBucket(id) {
-    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 });
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 });
     return buckets.get(id);
   }
 
@@ -5794,6 +5903,15 @@ function computeCommercialDebundlized() {
     if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
     if (isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
     if (isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    else {
+      // لسه في نافذة الـ CM3_LAG_DAYS (يعني "Pending" — لسه معرفناش هيتسلم
+      // ولا هيترجع). لو عمره (من "امبارح الحقيقي" بتاع الداتا) >= CM3_LAG_DAYS−3
+      // يوم، يبقى هيعدي الكات أوف ويتحدد مصيره خلال الـ 3 أيام الجايين
+      // بالظبط — ده بس اللي بنعتبره "متأكدين" منه لحساب DOH بتاع Purchase
+      // Plan (راجع pendingConfNear3d/confidentReturns3d تحت).
+      const ageDays = Math.round((todayMs - rTime) / 86400000);
+      if (ageDays >= (CM3_LAG_DAYS - 3)) b.pendingConfNear3d += r.confirmedPieces;
+    }
     if (isCm3RowEligible(r, cm3CutoffTs, "commercialDebundlized")) {
       b.deliveredGmv += r.deliveredGmv;
       b.cm3 += r.cm3;
@@ -5861,6 +5979,28 @@ function computeCommercialDebundlized() {
     const avg3dConfirmed = Math.round(b.conf3d / 3);
     const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
 
+    // Expected Returns — إسقاط فعلي (مش بس نسبة) لعدد القطع اللي هترجع
+    // (Returns) فعلاً خلال الـ CM3_LAG_DAYS (5) أيام الجايين:
+    //  • pendingConfirmed = القطع اللي اتأكدت (Confirmed) بس لسه في نافذة
+    //    الـ 5 أيام الأخيرة (يعني b.drConfirmed — اللي عدى الكات أوف —
+    //    متطرحة من إجمالي b.confirmed) — دول لسه مصيرهم (هيتسلموا ولا
+    //    هيترجعوا) مش معروف، وهيتحدد فعليًا خلال نفس الـ 5 أيام الجايين
+    //    (لما يعدوا نفس الكات أوف اللي بيتحسب بيه drPct).
+    //  • بنطبق عليهم نسبة الرجوع التاريخية لنفس الـ SKU ده (100% − drPct)
+    //    عشان نطلع عدد فعلي متوقع، مش نسبة.
+    const pendingConfirmed = Math.max(0, b.confirmed - b.drConfirmed);
+    const expectedReturns = Math.round(pendingConfirmed * (100 - drPct) / 100);
+    // confidentReturns3d — بس الجزء من pendingConfirmed اللي هيتحدد مصيره
+    // (يتسلم/يرجع) خلال الـ 3 أيام الجايين بالظبط (b.pendingConfNear3d فوق)،
+    // بنفس نسبة الرجوع التاريخية لنفس الـ SKU (100% − DR%). ده اللي بيتستخدم
+    // في حساب DOH بتاع Purchase Plan (Stock + Repack + الريتيرن "المتأكد
+    // منه" خلال 3 أيام) — أضيق وأضمن من expectedReturns العام (5 أيام).
+    const confidentReturns3d = Math.round(b.pendingConfNear3d * (100 - drPct) / 100);
+    // needPcsFullMonth — بس لـ Purchase Plan تحت (Need Pcs): التارجت الشهري
+    // الكامل (مش MTD لحد امبارح) = Confirmed Daily Target × عدد أيام الشهر
+    // كله، عشان يمثل احتياج الشهر بالكامل.
+    const needPcsFullMonth = confirmedDailyTarget ? Math.round(confirmedDailyTarget * currentMonthDays) : 0;
+
     result.push({
       singleId: productId, singleName: skuInfo.name,
       category: (targetInfo && targetInfo.category) || (state.inventoryMap[productId] ? state.inventoryMap[productId].category : "") || "Uncategorized",
@@ -5877,7 +6017,9 @@ function computeCommercialDebundlized() {
       deliveredMtdTarget: deliveredM.mtdTarget, deliveredMtdActual: deliveredM.mtdActual, deliveredRunRate: deliveredM.runRate, deliveredAchievedPct: deliveredM.achievedPct,
       gmvMtdTarget: gmvM.mtdTarget, gmvMtdActual: gmvM.mtdActual, gmvRunRate: gmvM.runRate, gmvAchievedPct: gmvM.achievedPct,
       totalPlaced: b.placed, totalConfirmed: b.confirmed, totalDelivered: b.delivered,
-      crPct, drPct, ndrPct, deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece
+      crPct, drPct, ndrPct, pendingConfirmed, expectedReturns, confidentReturns3d, avg3dConfirmed,
+      confirmedDailyTarget, currentMonthDays, needPcsFullMonth,
+      deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece
     });
   });
   return { rows: result, overallDeliveredGmv, overallCm3, daysUntilYesterday };
@@ -6092,6 +6234,7 @@ function renderPaginatedCdzTable() {
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
       <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num font-bold ${m.expectedReturns > 0 ? 'text-red' : 'text-dim'}">${fmtIntCell(m.expectedReturns)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
       <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.ppm)}</td>
@@ -6116,6 +6259,245 @@ function cdzWireControlsOnce() {
   if ($("searchCdzInput")) $("searchCdzInput").addEventListener("input", applyCdzFilterAndSort);
   if ($("prevPageCdz")) $("prevPageCdz").addEventListener("click", () => { if (state.cdzPage > 0) { state.cdzPage -= 1; renderPaginatedCdzTable(); } });
   if ($("nextPageCdz")) $("nextPageCdz").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.cdzFiltered.length / PAGE_SIZE)); if (state.cdzPage < totalPages - 1) { state.cdzPage += 1; renderPaginatedCdzTable(); } });
+}
+
+// =========================================================================
+// PURCHASE PLAN (تحت Commercial Plan) — per Single SKU، بيربط بين الديماند
+// (Confirmed target/Delivered/Expected Returns من Commercial Plan بالظبط)
+// والمعروض الفعلي (Stock + Repack + Returns) عشان يطلع "قد إيه محتاج تشتري"
+// وبقيمته كام. كل عمود محسوب موضح جنبه من إيه/إزاي في الـ tooltip بتاعه.
+//
+//   Need Pcs        = Confirmed Daily Target × عدد أيام الشهر كله (احتياج
+//                      الشهر بالكامل، من Commercial Plan).
+//   Delivered Pcs    = إجمالي القطع المتسلمة فعلاً لحد دلوقتي (من غير كات
+//                      أوف)، من Commercial Plan.
+//   Returns          = Expected Returns بنفس منطق عمود "Expected Returns" في
+//                      Commercial Plan بالظبط (القطع المتوقع ترجع خلال الـ
+//                      5 أيام الجايين).
+//   Begin Stock      = الستوك الحالي (Current Stock) بتاع الـ Single SKU،
+//                      نفس عمود Stock في Commercial Plan.
+//   Repack           = مجموع TOTAL_COUNT بتاع نفس الـ SKU من شيت WareHouse
+//                      (WAREHOUSE_REPACK_GID) للصفوف اللي Condition بتاعتها
+//                      "Damaged BOX" بس.
+//   Available        = Begin Stock + Repack + Returns.
+//   Cost             = تكلفة القطعة الواحدة من شيت الـ COGS.
+//   Qty To Buy       = MAX(0, Need Pcs − Delivered Pcs − Available).
+//   Purchase Value   = Qty To Buy × Cost.
+//   Avg 3D           = متوسط الكونفيرمد آخر 3 أيام (من غير النهاردة) — نفس
+//                      عمود Avg Last 3 Days المستخدم في حساب DOH في أي مكان
+//                      تاني بالداشبورد.
+//   DOH              = (Begin Stock + Repack + "Actual Returns" اللي متأكدين
+//                      إنها هترجع خلال الـ 3 أيام الجايين بالظبط — مش الـ 5
+//                      أيام الكاملة بتاعة Returns فوق) ÷ Avg 3D. يعني: المخزون
+//                      ده (بعد ما نضيفله المتأكد رجوعه قريب) هيقضي معايا قد
+//                      إيه يوم من الديماند اليومي الحالي.
+// =========================================================================
+// -------------------------------------------------------------------------
+// PURCHASE PLAN — "Overall Single SKU" (Debundled) — بطلب صريح: بعكس
+// Commercial Plan اللي بيقرا كل PRODUCT_ID لوحده منفصل (من غير فك بندل)،
+// هنا الـ CR%/DR%/Avg 3D/Delivered Pcs بتاعة كل Single SKU لازم تبقى شاملة
+// كل الديماند الحقيقي بتاعها — سواء جاي من صفوف الـ Main اللي الـ SKU فيها
+// هو نفسه الـ Single ده، أو من صفوف بندل بيحتوي عليه (بالظبط زي
+// buildDebundledStockDohIndex/singleOverallStats المستخدمة في Weekly
+// Inventory وSellthrough)، لكن هنا كمان بنطبق كات أوف الـ CR_LAG_DAYS/
+// CM3_LAG_DAYS المعتادة عشان نحسب CR%/DR% صح (singleOverallStats مالهاش
+// كات أوف أصلاً، بس بتحسب Avg Confirmed).
+// -------------------------------------------------------------------------
+function computePurchasePlanOverallSingleStats() {
+  const { productMap } = buildDebundleProductMap(state.debundleMap || [], state.cogsMap || new Map());
+  const mainRowsAll = state.allParsedRows || [];
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialDebundlized")) && (selectedAcm === "All" || r.acmName === selectedAcm));
+
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(rows);
+  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
+
+  let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  const today = new Date(latestTs); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const d3Ms = todayMs - (3 * 86400000);
+
+  const buckets = new Map();
+  function getBucket(id) {
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 });
+    return buckets.get(id);
+  }
+
+  rows.forEach(r => {
+    if (!r.sku) return;
+    const mappings = productMap.get(r.sku) || [{ singleId: r.sku, quantity: 1 }];
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized");
+    const cm3Eligible = isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized");
+    let ageDaysNear3 = false;
+    if (!cm3Eligible) {
+      const ageDays = Math.round((todayMs - rTime) / 86400000);
+      ageDaysNear3 = ageDays >= (CM3_LAG_DAYS - 3);
+    }
+    mappings.forEach(mp => {
+      const qty = mp.quantity || 1;
+      const b = getBucket(mp.singleId);
+      b.placed += r.placedPieces * qty; b.confirmed += r.confirmedPieces * qty; b.delivered += r.deliveredPieces * qty;
+      if (rTime >= d3Ms) b.conf3d += r.confirmedPieces * qty;
+      if (crEligible) { b.crPlaced += r.placedPieces * qty; b.crConfirmed += r.confirmedPieces * qty; }
+      if (cm3Eligible) { b.drConfirmed += r.confirmedPieces * qty; b.drDelivered += r.deliveredPieces * qty; }
+      else if (ageDaysNear3) { b.pendingConfNear3d += r.confirmedPieces * qty; }
+    });
+  });
+
+  return buckets; // Map(singleId -> {placed, confirmed, delivered, crPlaced, crConfirmed, drConfirmed, drDelivered, conf3d, pendingConfNear3d})
+}
+
+// -------------------------------------------------------------------------
+// فلترة "Single SKU حقيقي بس" لـ Purchase Plan (بطلب صريح): Commercial Plan
+// نفسه بيعرض كل صف في شيت الديبندلايز زي ما هو (سواء PRODUCT_ID ده سنجل أو
+// بندل)، لكن Purchase Plan معناها الحرفي إنك "هتشتري" — ومفيش حد بيشتري
+// بندل لوحده، فبنستبعد أي صف الـ PRODUCT_ID بتاعه نفسه بندل (IS_BUNDLE=true)
+// خالص. وبعدين من الـ Singles الحقيقية اللي فاضلة، بنستبعد أي Single مالوش
+// تارجت (hasTarget=false) — "برة البلان" — إلا لو نفس الـ Single ده مكوّن
+// (SINGLE_ID) جوه أي بندل تاني في نفس شيت الديبندلايز، ساعتها بيفضل ظاهر
+// عشان تعرف عنه حتى لو مالوش تارجت مستقل بيه.
+// -------------------------------------------------------------------------
+function buildPurchasePlanEligibility() {
+  const debundle = state.debundleMap || [];
+  const isBundleByProductId = new Map();
+  const singlesInBundles = new Set();
+  debundle.forEach(r => {
+    if (!r.productId) return;
+    if (!isBundleByProductId.has(r.productId)) {
+      isBundleByProductId.set(r.productId, /^(true|yes|1)$/i.test(String(r.isBundle || "").trim()));
+    }
+  });
+  debundle.forEach(r => {
+    if (!r.singleId) return;
+    if (isBundleByProductId.get(r.productId) && r.productId !== r.singleId) singlesInBundles.add(r.singleId);
+  });
+  return { isBundleByProductId, singlesInBundles };
+}
+
+function computePurchasePlanData() {
+  const cdz = computeCommercialDebundlized();
+  const repackMap = state.repackMap || new Map();
+  const cogsMap = state.cogsMap || new Map();
+  const { isBundleByProductId, singlesInBundles } = buildPurchasePlanEligibility();
+  const overallStats = computePurchasePlanOverallSingleStats();
+
+  const rows = cdz.rows
+    .filter(m => !isBundleByProductId.get(m.singleId)) // استبعاد صفوف البندلات نفسها — مفيش "شراء" لبندل لوحده
+    .filter(m => m.hasTarget || singlesInBundles.has(m.singleId)) // برة البلان؟ يفضل بس لو مكوّن جوه بندل
+    .map(m => {
+    // "Overall Single SKU" — بطلب صريح: CR%/DR%/Avg 3D/Delivered Pcs/Returns
+    // هنا بتتحسب من إجمالي الديماند الحقيقي بتاع الـ Single ده (جوه بندلات
+    // كمان)، مش بس من صفوفه المباشرة زي Commercial Plan.
+    const ov = overallStats.get(m.singleId) || { placed: 0, confirmed: 0, delivered: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 };
+    const crPct = ov.crPlaced ? (ov.crConfirmed / ov.crPlaced) * 100 : 0;
+    const drPct = ov.drConfirmed ? (ov.drDelivered / ov.drConfirmed) * 100 : 0;
+    const avg3d = Math.round(ov.conf3d / 3);
+    const deliveredPcs = ov.delivered || 0;
+    const pendingConfirmed = Math.max(0, ov.confirmed - ov.drConfirmed);
+    const returnsPcs = Math.round(pendingConfirmed * (100 - drPct) / 100);
+    const confidentReturns3d = Math.round(ov.pendingConfNear3d * (100 - drPct) / 100);
+
+    const needPcs = m.needPcsFullMonth || 0;
+    const beginStock = m.stock || 0;
+    const repackQty = repackMap.get(m.singleId) || 0;
+    const available = beginStock + repackQty + returnsPcs;
+    const cost = cogsMap.get(m.singleId) || 0;
+    const qtyToBuy = Math.max(0, Math.round(needPcs - deliveredPcs - available));
+    const purchaseValue = qtyToBuy * cost;
+    // DOH هنا بيستخدم confidentReturns3d (اللي هيتحدد فعليًا خلال 3 أيام)
+    // بدل الـ Returns الكامل (5 أيام) بطلب صريح — "الريتيرن اللي متأكد
+    // منه" بس، عشان الرقم يبقى محافظ (Conservative) مش متفائل زيادة.
+    const dohStockBase = beginStock + repackQty + (confidentReturns3d || 0);
+    const doh = avg3d > 0 ? Math.round(dohStockBase / avg3d) : Math.round(dohStockBase);
+
+    return {
+      singleId: m.singleId, singleName: m.singleName, category: m.category,
+      hasTarget: m.hasTarget, needPcs, deliveredPcs, returnsPcs,
+      beginStock, repackQty, available, cost, qtyToBuy, purchaseValue,
+      avg3d, doh, crPct, drPct
+    };
+  });
+
+  return rows;
+}
+
+function preparePurchasePlanData() {
+  state.purchasePlanData = computePurchasePlanData();
+  purchasePlanWireControlsOnce();
+  applyPurchasePlanFilterAndSort();
+}
+
+function sortPurchasePlan(key) {
+  if (state.purchasePlanSortKey === key) { state.purchasePlanSortDir = state.purchasePlanSortDir === "asc" ? "desc" : "asc"; }
+  else { state.purchasePlanSortKey = key; state.purchasePlanSortDir = "desc"; }
+  applyPurchasePlanFilterAndSort();
+}
+
+function applyPurchasePlanFilterAndSort() {
+  let data = [...(state.purchasePlanData || [])];
+  const q = $("searchPurchasePlanInput") ? $("searchPurchasePlanInput").value.trim().toLowerCase() : "";
+  if (q) {
+    data = data.filter(d => (d.singleId && d.singleId.toLowerCase().includes(q)) || (d.singleName && d.singleName.toLowerCase().includes(q)) || (d.category && d.category.toLowerCase().includes(q)));
+  }
+  const key = state.purchasePlanSortKey; const dir = state.purchasePlanSortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => {
+    let valA = a[key]; let valB = b[key];
+    if (valA === null || valA === undefined) valA = -Infinity;
+    if (valB === null || valB === undefined) valB = -Infinity;
+    if (typeof valA === "string") return valA.localeCompare(valB) * dir;
+    return (valA - valB) * dir;
+  });
+  state.purchasePlanFiltered = data;
+  state.purchasePlanPage = 0;
+  renderPaginatedPurchasePlanTable();
+}
+
+function renderPaginatedPurchasePlanTable() {
+  const tbody = $("purchasePlanTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const start = state.purchasePlanPage * PAGE_SIZE;
+  const pageRows = (state.purchasePlanFiltered || []).slice(start, start + PAGE_SIZE);
+  const frag = document.createDocumentFragment();
+  pageRows.forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim" style="white-space:nowrap;">${m.singleId}</td>
+      <td class="font-bold truncate-cell" title="${m.singleName}">${m.singleName}</td>
+      <td class="text-dim truncate-cell" style="max-width:110px;" title="${m.category}">${m.category}</td>
+      <td class="num text-dim">${m.hasTarget ? fmtIntCell(m.needPcs) : `<span class="badge-outline dim">Not in Plan</span>`}</td>
+      <td class="num font-bold">${fmtIntCell(m.deliveredPcs)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
+      <td class="num ${m.returnsPcs > 0 ? 'text-red' : 'text-dim'}">${fmtIntCell(m.returnsPcs)}</td>
+      <td class="num text-dim font-bold">${fmtIntCell(m.beginStock)}</td>
+      <td class="num ${m.repackQty > 0 ? 'text-orange' : 'text-dim'}">${fmtIntCell(m.repackQty)}</td>
+      <td class="num font-bold text-blue">${fmtIntCell(m.available)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.cost)}</td>
+      <td class="num font-bold ${m.qtyToBuy > 0 ? 'text-orange' : 'text-green'}">${fmtIntCell(m.qtyToBuy)}</td>
+      <td class="num font-bold text-green">${fmtMoneyCompactCell(m.purchaseValue)}</td>
+      <td class="num text-dim">${fmtIntCell(m.avg3d)}</td>
+      <td class="num font-bold text-dim">${fmtIntCell(m.doh)}</td>
+    `;
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  const totalPages = Math.max(1, Math.ceil((state.purchasePlanFiltered || []).length / PAGE_SIZE));
+  if ($("rowCountPurchasePlan")) $("rowCountPurchasePlan").textContent = `${fmtInt.format((state.purchasePlanFiltered || []).length)} SKUs`;
+  if ($("pageIndicatorPurchasePlan")) $("pageIndicatorPurchasePlan").textContent = `Page ${state.purchasePlanPage + 1} of ${totalPages}`;
+  if ($("prevPagePurchasePlan")) $("prevPagePurchasePlan").disabled = state.purchasePlanPage === 0;
+  if ($("nextPagePurchasePlan")) $("nextPagePurchasePlan").disabled = state.purchasePlanPage >= totalPages - 1;
+}
+
+let purchasePlanControlsWired = false;
+function purchasePlanWireControlsOnce() {
+  if (purchasePlanControlsWired) return; purchasePlanControlsWired = true;
+  if ($("searchPurchasePlanInput")) $("searchPurchasePlanInput").addEventListener("input", applyPurchasePlanFilterAndSort);
+  if ($("prevPagePurchasePlan")) $("prevPagePurchasePlan").addEventListener("click", () => { if (state.purchasePlanPage > 0) { state.purchasePlanPage -= 1; renderPaginatedPurchasePlanTable(); } });
+  if ($("nextPagePurchasePlan")) $("nextPagePurchasePlan").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.purchasePlanFiltered || []).length / PAGE_SIZE)); if (state.purchasePlanPage < totalPages - 1) { state.purchasePlanPage += 1; renderPaginatedPurchasePlanTable(); } });
 }
 
 // =========================================================================
@@ -8550,6 +8932,20 @@ function wiComputePurchasesDepletion(sku, weekStart, thisWeekPurchases, opts) {
   return { status: "remaining", remaining, asOf };
 }
 
+// كام قطعة فعلاً اتباعت من نفس دفعة المشتريات دي (thisWeekPurchases)، بنفس
+// منطق الـ FIFO الحقيقي بتاع wiComputePurchasesDepletion بالظبط — ده اللي
+// بيستخدمه "Confirmed From Purchase" و"Inbound vs Sold %" في جدول Weekly
+// Inventory (بدل الطريقة القديمة التقريبية اللي كانت بس بتفترض إن أي ديماند
+// فوق الـ Beginning Inventory اتغطى بالكامل من نفس دفعة المشتريات، من غير
+// متابعة يوم بيوم فعلية)، وبرضو نفس المنطق المستخدم في Purchase Cohort
+// Tracker وبادچ "Purchases Sold Out On" — عشان الثلاثة يفضلوا متطابقين.
+function wiSoldFromPurchasesQty(depletion, qty) {
+  if (!qty || qty <= 0) return 0;
+  if (depletion.status === "depleted") return qty;
+  if (depletion.status === "remaining") return Math.max(0, qty - depletion.remaining);
+  return 0; // "unknown" — مفيش بيانات ستوك كفاية نتابعها
+}
+
 // -------------------------------------------------------------------------
 // PURCHASE COHORT TRACKER — نفس فكرة buildWeeklyInventoryTrendData بالظبط
 // (كل الـ SKUs مع بعض، أسبوع أسبوع، مفيش فلتر SKU)، بس عمود "Inbound vs
@@ -8843,9 +9239,12 @@ function renderWeeklyInventorySummary(rows) {
   const grid = $("wiSummaryGrid");
   if (!grid) return;
 
-  let sumBeg = 0, sumInbound = 0, sumConfirmed = 0, sumRemaining = 0;
-  rows.forEach(r => { sumBeg += r.beginInv; sumInbound += r.inboundQty; sumConfirmed += r.confirmedQty; sumRemaining += r.remainingFromBeginning; });
-  const overallRatio = sumInbound > 0 ? (sumRemaining / sumInbound) * 100 : null;
+  // sumConfirmedFromPurchase بيستخدم نفس رقم الـ FIFO الحقيقي (Confirmed
+  // From Purchase) اللي في الجدول تحت — مش "Remaining from Beginning" —
+  // عشان النسبة هنا تتطابق مع نفس الفلتر في Purchase Cohort Tracker بالظبط.
+  let sumBeg = 0, sumInbound = 0, sumConfirmed = 0, sumConfirmedFromPurchase = 0;
+  rows.forEach(r => { sumBeg += r.beginInv; sumInbound += r.inboundQty; sumConfirmed += r.confirmedQty; sumConfirmedFromPurchase += (r.confirmedFromPurchase !== undefined ? r.confirmedFromPurchase : r.remainingFromBeginning); });
+  const overallRatio = sumInbound > 0 ? (sumConfirmedFromPurchase / sumInbound) * 100 : null;
   // "Inbound vs Sold" متكبش يبقى فوق الـ 100% أبدًا — لو النسبة الحقيقية أكتر
   // من كده (يعني اللي اتباع من غير المخزون الافتتاحي أكتر من إجمالي
   // المشتريات نفسها في نفس الفترة)، الزيادة دي بتتحط في كارت منفصل
@@ -8892,7 +9291,7 @@ function renderWeeklyInventoryTable() {
   if (titleEl) titleEl.textContent = week ? `Week of ${week.label}` : "Week of —";
 
   if (!week) {
-    tbody.innerHTML = `<tr><td colspan="15" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
     if ($("wiRowCount")) $("wiRowCount").textContent = "0 Rows";
     renderWeeklyInventorySummary([]);
     return;
@@ -8911,6 +9310,16 @@ function renderWeeklyInventoryTable() {
   const weekEnd = week.weekStart + 6 * 86400000;
   const customActive = !!purchaseRange || !!saleRange;
   const statusEl = $("wiCustomFilterStatus");
+
+  // العنوان "Week of ..." بيتغير لـ "Custom range: ..." طول ما فيه فلتر
+  // Purchase/Sale شغال — بغض النظر عن وجود statusEl، عشان يفضل بيقرا صح
+  // حتى لو العنصر ده اتشال لأي سبب لاحقًا.
+  if (titleEl && customActive) {
+    const rangeStartTs = purchaseRange ? purchaseRange.startTs : (saleRange ? saleRange.startTs : week.weekStart);
+    const rangeEndTs = purchaseRange ? purchaseRange.endTs : (saleRange ? saleRange.endTs : weekEnd);
+    const fmtDShort = ts => new Date(ts).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    titleEl.textContent = `Custom range: ${fmtDShort(rangeStartTs)} – ${fmtDShort(rangeEndTs)}`;
+  }
 
   let rows;
   if (customActive) {
@@ -8932,18 +9341,34 @@ function renderWeeklyInventoryTable() {
       const confirmedQty = wiSumConfirmedInRange(invRow.sku, effSaleStart, effSaleEnd);
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
-      const inboundVsSold = inb.qty > 0 ? (remainingFromBeginning / inb.qty) * 100 : null;
+      // Confirmed From Purchase / Inbound vs Sold % — بقوا بيتحسبوا بنفس
+      // منطق الـ FIFO الحقيقي (wiComputePurchasesDepletion) بالظبط زي بادچ
+      // "Purchases Sold Out On" وPurchase Cohort Tracker، مش بس تقريب من
+      // "Remaining from Beginning" (ده اللي كان بيسبب اختلاف الرقم هنا عن
+      // رقم الـ Cohort Tracker لنفس الفلتر بالظبط).
+      const depletion = wiComputePurchasesDepletion(invRow.sku, effPurchaseStart, inb.qty, { batchEnd: effPurchaseEnd, cutoffTs: saleRange ? saleRange.endTs : undefined });
+      const confirmedFromPurchase = wiSoldFromPurchasesQty(depletion, inb.qty);
+      const inboundVsSold = inb.qty > 0 ? (confirmedFromPurchase / inb.qty) * 100 : null;
       const meta = (state.weeklyInvSkuMetaMap || new Map()).get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
       return {
         sku: invRow.sku, name: invRow.name || "Unknown",
         category: meta.category, stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
-        beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning, inboundVsSold,
+        beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning,
+        confirmedFromPurchase, inboundVsSold, depletion,
         _purchaseStartTs: effPurchaseStart, _purchaseEndTs: effPurchaseEnd
       };
     }).filter(Boolean);
   } else {
     if (statusEl) statusEl.textContent = "";
-    rows = week.rows.filter(r => r.inboundQty > 0);
+    // نفس التصحيح فوق، لكن للأسبوع الافتراضي (من غير فلتر): بنحسب الـ
+    // depletion الحقيقي بس للصفوف اللي فعلاً هتتعرض (عندها إنباوند)، مش لكل
+    // أسابيع السنة مقدمًا، عشان الأداء يفضل زي ما هو.
+    rows = week.rows.filter(r => r.inboundQty > 0).map(r => {
+      const depletion = wiComputePurchasesDepletion(r.sku, week.weekStart, r.inboundQty);
+      const confirmedFromPurchase = wiSoldFromPurchasesQty(depletion, r.inboundQty);
+      const inboundVsSold = r.inboundQty > 0 ? (confirmedFromPurchase / r.inboundQty) * 100 : null;
+      return { ...r, confirmedFromPurchase, inboundVsSold, depletion };
+    });
   }
 
   const q = (state.weeklyInvSearch || "").toLowerCase();
@@ -8951,10 +9376,10 @@ function renderWeeklyInventoryTable() {
   rows = [...rows].sort((a, b) => b.inboundQty - a.inboundQty);
 
   tbody.innerHTML = rows.map(r => {
-    // "المشتريات (Total Purchases) بتاعت الأسبوع ده خلصت إمتى؟" — راجع
-    // wiComputePurchasesDepletion فوق للتفاصيل (FIFO على الستوك الفعلي).
-    // لو فيه "Purchase Start" مخصص، بنبدأ الطابور من اليوم ده بدل الأحد.
-    const depletion = wiComputePurchasesDepletion(r.sku, r._purchaseStartTs || week.weekStart, r.inboundQty, r._purchaseEndTs !== undefined ? { batchEnd: r._purchaseEndTs } : undefined);
+    // "المشتريات (Total Purchases) بتاعت الأسبوع ده خلصت إمتى؟" — نفس الـ
+    // depletion المحسوب فوق بالظبط (مفيش إعادة حساب هنا)، عشان البادچ ده
+    // والنسبة/الكمية جنبه يفضلوا متطابقين مع بعض دايمًا.
+    const depletion = r.depletion;
     let depletionHtml;
     if (depletion.status === "depleted") {
       depletionHtml = `<span class="badge-outline red" title="خلصت بعد ${fmtInt.format(depletion.daysTaken)} يوم من يوم الشراء">${escapeHtml(depletion.dateLabel)} <span class="text-dim" style="font-weight:400;">(${fmtInt.format(depletion.daysTaken)}d)</span></span>`;
@@ -8977,12 +9402,13 @@ function renderWeeklyInventoryTable() {
       <td class="num text-green font-bold">${fmtIntCell(r.confirmedQty)}</td>
       <td class="num text-dim">${fmtIntCell(r.beginningSales)}</td>
       <td class="num text-orange font-bold">${fmtIntCell(r.remainingFromBeginning)}</td>
+      <td class="num font-bold text-blue">${fmtIntCell(r.confirmedFromPurchase)}</td>
       <td class="num font-bold">${wiCappedPct(r.inboundVsSold)}</td>
       <td class="num">${wiOverachievePct(r.inboundVsSold)}</td>
       <td class="center">${depletionHtml}</td>
     </tr>
   `;
-  }).join("") || `<tr><td colspan="15" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
+  }).join("") || `<tr><td colspan="16" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
 
   if ($("wiRowCount")) $("wiRowCount").textContent = `${fmtInt.format(rows.length)} Rows`;
   renderWeeklyInventorySummary(rows);
@@ -8992,7 +9418,7 @@ function renderWeeklyInventoryTable() {
     // ده أسهل تشخيص بكتير من "مفيش حاجة بتتغير" من غير سبب ظاهر.
     console.error("renderWeeklyInventoryTable error:", err);
     if ($("wiCustomFilterStatus")) $("wiCustomFilterStatus").textContent = `Error applying the custom filter: ${err.message || err}`;
-    tbody.innerHTML = `<tr><td colspan="15" class="text-red" style="padding:16px;">Error rendering this table: ${escapeHtml(String(err.message || err))}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="text-red" style="padding:16px;">Error rendering this table: ${escapeHtml(String(err.message || err))}</td></tr>`;
   }
 }
 
@@ -11399,7 +11825,7 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID
+  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID
 ].filter(Boolean);
 
 // Single round trip to the Apps Script backend (backend/Code.gs doGet).
@@ -11432,7 +11858,8 @@ const GID_LABELS = {
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
-  [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)"
+  [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
+  [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)"
 };
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
@@ -11463,7 +11890,7 @@ async function fetchAllSheetsSnapshot() {
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
       debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
       productsMatchesPayload, merchantSkuDailyPayload, merchantSegPayload,
-      weeklyInventoryPayload
+      weeklyInventoryPayload, warehouseRepackPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -11485,7 +11912,8 @@ async function fetchAllSheetsSnapshot() {
       PRODUCTS_MATCHES_GID ? loadSheetWithRetry(PRODUCTS_MATCHES_GID).catch(track(PRODUCTS_MATCHES_GID)) : Promise.resolve(null),
       MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null),
       MERCHANT_SEGMENTATION_GID ? loadSheetWithRetry(MERCHANT_SEGMENTATION_GID).catch(track(MERCHANT_SEGMENTATION_GID)) : Promise.resolve(null),
-      WEEKLY_INVENTORY_GID ? loadSheetWithRetry(WEEKLY_INVENTORY_GID).catch(track(WEEKLY_INVENTORY_GID)) : Promise.resolve(null)
+      WEEKLY_INVENTORY_GID ? loadSheetWithRetry(WEEKLY_INVENTORY_GID).catch(track(WEEKLY_INVENTORY_GID)) : Promise.resolve(null),
+      WAREHOUSE_REPACK_GID ? loadSheetWithRetry(WAREHOUSE_REPACK_GID).catch(track(WAREHOUSE_REPACK_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
@@ -11498,7 +11926,8 @@ async function fetchAllSheetsSnapshot() {
       [COGS_GID]: cogsPayload, [AVAILABILITY_LOCKING_GID]: availabilityLockingPayload,
       [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload,
       [MERCHANT_SEGMENTATION_GID]: merchantSegPayload,
-      [WEEKLY_INVENTORY_GID]: weeklyInventoryPayload
+      [WEEKLY_INVENTORY_GID]: weeklyInventoryPayload,
+      [WAREHOUSE_REPACK_GID]: warehouseRepackPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -11524,6 +11953,7 @@ async function fetchAllSheetsSnapshot() {
   const merchantSkuDailyPayload = sheets[MERCHANT_SKU_DAILY_GID];
   const merchantSegPayload = sheets[MERCHANT_SEGMENTATION_GID];
   const weeklyInventoryPayload = sheets[WEEKLY_INVENTORY_GID];
+  const warehouseRepackPayload = sheets[WAREHOUSE_REPACK_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -11557,6 +11987,7 @@ async function fetchAllSheetsSnapshot() {
     merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
+    repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
     staleGids // sheets that failed every retry and are still showing old data
   };
 }
@@ -11627,6 +12058,7 @@ function applySnapshotToState(snapshot) {
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
+  state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   // Weekly Inventory & Inbound (Admin Panel) — لو الشيت اتغيّر (عمود يوم جديد
   // اتضاف مثلاً)، لازم نعيد بناء الأسابيع تاني بدل ما تفضل عارضة داتا قديمة.
   {

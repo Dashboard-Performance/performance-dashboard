@@ -39,6 +39,7 @@
           <div class="nav-submenu hidden" id="commercialSubmenu">
             <a class="nav-item-sub" id="navTargetsCommercial">Targets Commercial</a>
             <a class="nav-item-sub" id="navCommercialDebundlized">Commercial Plan</a>
+            <a class="nav-item-sub" id="navPurchasePlan">Purchase Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystProducts">PPM Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystSingle">PPM Analyst / Single</a>
@@ -510,11 +511,11 @@
                       <th title="Merchant's unique ID.">ID</th>
                       <th title="Merchant's name.">Merchant Name</th>
                       <th title="Account manager assigned to this merchant.">ACM</th>
-                      <th class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
-                      <th class="num" title="Total placed orders. No cutoff applied.">Placed</th>
-                      <th class="num" title="Total delivered orders. No cutoff applied.">Delivered</th>
-                      <th class="num" title="Confirmed ÷ Placed. No cutoff applied.">CR%</th>
-                      <th class="num" title="Delivered ÷ Confirmed. No cutoff applied.">DR%</th>
+                      <th class="num" title="Total confirmed pieces. No cutoff applied.">Confirmed</th>
+                      <th class="num" title="Total placed pieces. No cutoff applied.">Placed</th>
+                      <th class="num" title="Total delivered pieces. No cutoff applied.">Delivered</th>
+                      <th class="num" title="Confirmed Pieces ÷ Placed Pieces. No cutoff applied.">CR%</th>
+                      <th class="num" title="Delivered Pieces ÷ Confirmed Pieces. No cutoff applied.">DR%</th>
                       <th class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
                       <th class="num" title="Total delivered GMV. Ranking basis for this table.">Delivered GMV</th>
                       <th class="num" title="Total confirmed GMV. No cutoff applied.">Confirmed GMV</th>
@@ -578,18 +579,19 @@
                       <th data-mkey="id" title="Merchant's unique ID.">ID</th>
                       <th data-mkey="name" title="Merchant's name.">Merchant Name</th>
                       <th data-mkey="acm" title="Account manager assigned to this merchant.">ACM</th>
-                      <th data-mkey="targetPlaced" class="num" title="Placed-orders target assigned to this merchant.">Target Placed</th>
                       <th data-mkey="targetGmv" class="num" title="GMV target assigned to this merchant.">Target GMV</th>
-                      <th data-mkey="deliveredGmv" class="num" title="Total delivered GMV. No cutoff applied.">Delivered GMV</th>
-                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;" title="Delivered GMV ÷ Target GMV.">Achieved %</th>
+                      <th data-mkey="deliveredGmv" class="num" title="Total delivered GMV.">Delivered GMV</th>
                       <th data-mkey="runRate" class="num" title="Projected end-of-month GMV based on the current daily pace.">Run Rate (EOM)</th>
+                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;" title="Delivered GMV ÷ Target GMV.">Achieved %</th>
+                      <th data-mkey="targetPlaced" class="num" title="Placed-orders target assigned to this merchant.">Target Placed</th>
                       <th data-mkey="placed" class="num" title="Total placed orders. No cutoff applied.">Placed</th>
                       <th data-mkey="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
                       <th data-mkey="delivered" class="num" title="Total delivered orders. No cutoff applied.">Delivered</th>
                       <th data-mkey="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
-                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3 / GMV %</th>
+                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3 %</th>
+                      <th data-mkey="cr" class="num" title="Confirmed ÷ Placed. No cutoff applied.">CR%</th>
+                      <th data-mkey="dr" class="num" title="Delivered ÷ Confirmed. No cutoff applied.">DR%</th>
                       <th data-mkey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
-                      <th data-mkey="cm3Pct" class="num" title="Same figure as CM3 / GMV % — contribution margin as a share of delivered GMV, 5-day cutoff.">CM3 %</th>
                     </tr>
                   </thead>
                   <tbody id="merchantTableBody"></tbody>
@@ -831,6 +833,7 @@
                       <th rowspan="2" onclick="sortCdz('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces, excluding the most recent 2 days.">CR%</th>
                       <th rowspan="2" onclick="sortCdz('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces, excluding the most recent 5 days.">DR%</th>
                       <th rowspan="2" onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%, carrying both the 2-day and 5-day cutoffs.">NDR%</th>
+                      <th rowspan="2" onclick="sortCdz('expectedReturns')" class="num text-red" style="cursor:pointer;" title="Actual projected pieces expected to come back as returns within the next 5 days — Confirmed pieces still inside the 5-day DR cutoff (pendingConfirmed = Confirmed − DR-eligible Confirmed) × this SKU's own historical return rate (100% − DR%).">Expected Returns</th>
                       <th rowspan="2" onclick="sortCdz('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin for this SKU, excluding the most recent 5 days.">Total CM3</th>
                       <th rowspan="2" onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;" title="Total CM3 ÷ delivered pieces, both under the 5-day cutoff.">CM3/Piece</th>
                       <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;" title="Total promotional spend (PPM) for this SKU. No cutoff applied.">Total PPM</th>
@@ -866,6 +869,55 @@
                   <button id="prevPageCdz" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorCdz">Page 1 of 1</span>
                   <button id="nextPageCdz" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- PURCHASE PLAN SECTION (under Commercial Plan) -->
+        <div id="viewPurchasePlan" class="view-section hidden">
+          <section class="table-section">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>Purchase Plan</h2>
+                  <p>Per Single SKU — how much to buy and its value, based on this month's Need vs. what's Delivered and already Available (Stock + Repack + Expected Returns). Only Singles in the plan are shown, plus any Single that's out of the plan but still used as a component inside a bundle.</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchPurchasePlanInput" type="search" placeholder="Search Product ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="purchasePlanTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortPurchasePlan('singleId')" style="cursor:pointer; white-space:nowrap;" title="Unique identifier for this Single SKU. Click to sort.">Product_ID</th>
+                      <th onclick="sortPurchasePlan('singleName')" style="cursor:pointer; max-width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="Product's display name. Click to sort.">Product_Name</th>
+                      <th onclick="sortPurchasePlan('category')" class="truncate-cell" style="cursor:pointer; max-width:110px;" title="Product category. Click to sort.">Category</th>
+                      <th onclick="sortPurchasePlan('needPcs')" class="num" style="cursor:pointer;" title="Full-month need = Confirmed Daily Target (Commercial Plan) × number of days in the current month. Shows &quot;Not in Plan&quot; if this SKU has no target.">Need Pcs</th>
+                      <th onclick="sortPurchasePlan('deliveredPcs')" class="num" style="cursor:pointer;" title="Overall Single SKU delivered pieces this month, no cutoff applied — includes demand pulled in from any bundle this Single is a component of, not just its own direct rows.">Delivered Pcs</th>
+                      <th onclick="sortPurchasePlan('crPct')" class="num" style="cursor:pointer;" title="Overall Single SKU CR% (Confirmed ÷ Placed), 2-day cutoff — includes demand pulled in from any bundle this Single is a component of.">CR%</th>
+                      <th onclick="sortPurchasePlan('drPct')" class="num" style="cursor:pointer;" title="Overall Single SKU DR% (Delivered ÷ Confirmed), 5-day cutoff — includes demand pulled in from any bundle this Single is a component of.">DR%</th>
+                      <th onclick="sortPurchasePlan('returnsPcs')" class="num" style="cursor:pointer;" title="Expected Returns, on an Overall Single SKU basis: Confirmed pieces still inside the 5-day DR cutoff × this Single's own Overall historical return rate (100% − DR%).">Returns</th>
+                      <th onclick="sortPurchasePlan('beginStock')" class="num" style="cursor:pointer;" title="Current stock on hand for this Single SKU — same as the Stock column in Commercial Plan.">Begin Stock</th>
+                      <th onclick="sortPurchasePlan('repackQty')" class="num" style="cursor:pointer;" title="Damaged-box pieces for this SKU from the WareHouse sheet (Condition = &quot;Damaged BOX&quot;), summed from TOTAL_COUNT — treated as recoverable stock.">Repack</th>
+                      <th onclick="sortPurchasePlan('available')" class="num" style="cursor:pointer;" title="Available = Begin Stock + Repack + Returns.">Available</th>
+                      <th onclick="sortPurchasePlan('cost')" class="num" style="cursor:pointer;" title="Cost per piece, from the COGS sheet.">Cost</th>
+                      <th onclick="sortPurchasePlan('qtyToBuy')" class="num" style="cursor:pointer;" title="Qty To Buy = MAX(0, Need Pcs − Delivered Pcs − Available). Zero means what's already delivered plus what's available covers this month's need.">Qty To Buy</th>
+                      <th onclick="sortPurchasePlan('purchaseValue')" class="num" style="cursor:pointer;" title="Purchase Value = Qty To Buy × Cost.">Purchase Value</th>
+                      <th onclick="sortPurchasePlan('avg3d')" class="num" style="cursor:pointer;" title="Overall Single SKU average confirmed pieces over the last 3 days, excluding today — includes demand pulled in from any bundle this Single is a component of.">Avg 3D</th>
+                      <th onclick="sortPurchasePlan('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand = (Begin Stock + Repack + the portion of Returns you can be confident will actually come back within the next 3 days) ÷ Avg 3D (Overall Single SKU).">DOH</th>
+                    </tr>
+                  </thead>
+                  <tbody id="purchasePlanTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountPurchasePlan">0 SKUs</span>
+                <div class="pager">
+                  <button id="prevPagePurchasePlan" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorPurchasePlan">Page 1 of 1</span>
+                  <button id="nextPagePurchasePlan" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>
@@ -2921,7 +2973,8 @@
                       <th class="num text-green" title="SKU Total Demand Overall (Debundled): confirmed pieces sold as this SKU directly, plus demand pulled in from every bundle it's a component of (× quantity per bundle), summed across this week's 7 days.">Confirmed Qty (7d)</th>
                       <th class="num" title="Confirmed pieces sourced from beginning inventory = MIN(Confirmed Qty, Beginning Inventory).">Beginning Sales</th>
                       <th class="num text-orange" title="Confirmed pieces still needing coverage after beginning inventory = Confirmed Qty − Beginning Sales.">Remaining from Beginning</th>
-                      <th class="num" title="Remaining sales from beginning ÷ total inbound this week. Capped at 100% — any excess shows in the Overachieve column instead.">Inbound vs Sold</th>
+                      <th class="num text-blue" title="Pieces sold from this exact purchase batch so far, tracked FIFO on real daily stock (Beginning Inventory is consumed first, then this batch's Purchases) — same method as &quot;Purchases Sold Out On&quot; and the Purchase Cohort Tracker.">Confirmed From Purchase</th>
+                      <th class="num" title="Confirmed From Purchase ÷ Inbound Qty, same FIFO method as Purchases Sold Out On and the Purchase Cohort Tracker. Capped at 100% — any excess shows in the Overachieve column instead.">Inbound vs Sold</th>
                       <th class="num text-purple" title="The portion of Inbound vs Sold that exceeds 100%, shown separately so the main ratio never goes above 100%.">Overachieve</th>
                       <th class="center" title="The actual date this week's Total Purchases (this row's Inbound Qty) got fully sold out, computed FIFO on the real daily stock (Beginning Inventory is consumed first, then this week's Purchases, then any later inbound) — not just a monthly/weekly ratio. Shows the remaining quantity instead if it hasn't sold out yet as of the latest inventory data.">Purchases Sold Out On</th>
                     </tr>
