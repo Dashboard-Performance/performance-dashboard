@@ -5590,12 +5590,19 @@ function prepareMpSalesPlanData() {
 
         perfRows.forEach(r => {
             if (r.sku === plan.productId && r.merchantId === plan.tagerId) {
-                // ACTUAL بيتحسب من الـ Pieces (مش الأوردرات)، زي قسم الـ Marketplace كله.
-                raw.placed += r.placedPieces;
-                raw.confirmed += r.confirmedPieces;
-                raw.delivered += r.deliveredPieces;
-                raw.deliveredGmv += r.deliveredGmv;
                 const rTime = new Date(r.timestamp).setHours(0,0,0,0);
+                // ACTUAL بيتحسب من الـ Pieces (مش الأوردرات)، زي قسم الـ Marketplace كله.
+                // بيوقف عند "امبارح" بالظبط (rTime < today) بطلب صريح، عشان
+                // يفضل متسق مع الـ MTD Target اللي أصلاً بيوقف عند امبارح
+                // (daysUntilYesterday) — انهارده يوم لسه مش مكتمل، فمينفعش
+                // نقارن Actual فيه بتارجت يوم كامل. WoW (thisWeek/lastWeek)
+                // مش متأثرة — دي مقارنة أسبوعية منفصلة، مالهاش علاقة بالـ MTD.
+                if (rTime < today.getTime()) {
+                    raw.placed += r.placedPieces;
+                    raw.confirmed += r.confirmedPieces;
+                    raw.delivered += r.deliveredPieces;
+                    raw.deliveredGmv += r.deliveredGmv;
+                }
                 if (rTime >= startThisWeek) raw.thisWeekConfirmed += r.confirmedPieces;
                 else if (rTime >= startLastWeek && rTime < startThisWeek) raw.lastWeekConfirmed += r.confirmedPieces;
             }
@@ -5880,7 +5887,7 @@ function computeCommercialDebundlized() {
 
   const buckets = new Map();
   function getBucket(id) {
-    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 });
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 });
     return buckets.get(id);
   }
 
@@ -5900,6 +5907,13 @@ function computeCommercialDebundlized() {
     // Quantity ولا وزن COGS (مفيش تجميع/فك بندل خالص هنا دلوقتي).
     const b = getBucket(r.sku);
     b.placed += r.placedPieces; b.confirmed += r.confirmedPieces; b.delivered += r.deliveredPieces;
+    // نسخة مقطوعة عند "امبارح" بالظبط (rTime < todayMs) — دي المستخدمة كـ
+    // "Actual" في المقارنة مع الـ MTD Target (اللي أصلاً بيوقف عند امبارح
+    // برضو، daysUntilYesterday) بطلب صريح: انهارده يوم لسه مش مكتمل، فمينفعش
+    // نقارن Actual فيه بتارجت يوم كامل. b.placed/confirmed/delivered الكاملين
+    // فوق فاضلين زي ما هم (شاملين انهارده) لأي حساب تاني محتاج الإجمالي
+    // الحقيقي (زي pendingConfirmed/Expected Returns تحت).
+    if (rTime < todayMs) { b.mtdPlaced += r.placedPieces; b.mtdConfirmed += r.confirmedPieces; b.mtdDelivered += r.deliveredPieces; }
     if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
     if (isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
     if (isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
@@ -5925,7 +5939,7 @@ function computeCommercialDebundlized() {
   const targets = state.singleSkuTargets || {};
   const result = [];
   skuList.forEach((skuInfo, productId) => {
-    const b = buckets.get(productId) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
+    const b = buckets.get(productId) || { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
     const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
     const ndrPct = (crPct * drPct) / 100;
@@ -5952,9 +5966,15 @@ function computeCommercialDebundlized() {
     const dlvPcsDailyTarget = (targetInfo && targetInfo.dlvPcsDailyTarget > 0) ? targetInfo.dlvPcsDailyTarget : null;
     const dlvGmvDailyTarget = (targetInfo && targetInfo.dlvGmvDailyTarget > 0) ? targetInfo.dlvGmvDailyTarget : null;
 
-    const placedM = cdzBuildMetric(placedDailyTarget, b.placed, daysUntilYesterday, elapsedDays, currentMonthDays);
-    const confirmedM = cdzBuildMetric(confirmedDailyTarget, b.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
-    const deliveredM = cdzBuildMetric(dlvPcsDailyTarget, b.delivered, daysUntilYesterday, elapsedDays, currentMonthDays);
+    // بطلب صريح: الـ Actual هنا (Placed/Confirmed/Delivered) بيوقف عند
+    // "امبارح" بالظبط زي الـ MTD Target (b.mtdPlaced/mtdConfirmed/mtdDelivered
+    // بدل b.placed/confirmed/delivered الكاملين) — عشان المقارنة تبقى عادلة
+    // (يوم كامل مقابل يوم كامل)، مش تارجت يوم كامل مقابل Actual فيه انهارده
+    // الجزئي. Delivered GMV مالهاش داعي لتغيير — أصلاً بتاخد كات أوف الـ
+    // CM3_LAG_DAYS (5 أيام) اللي هي أقدم بكتير من امبارح.
+    const placedM = cdzBuildMetric(placedDailyTarget, b.mtdPlaced, daysUntilYesterday, elapsedDays, currentMonthDays);
+    const confirmedM = cdzBuildMetric(confirmedDailyTarget, b.mtdConfirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
+    const deliveredM = cdzBuildMetric(dlvPcsDailyTarget, b.mtdDelivered, daysUntilYesterday, elapsedDays, currentMonthDays);
     const gmvM = cdzBuildMetric(dlvGmvDailyTarget, b.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
 
     // Aliases (زي ما كانت قبل كده) عشان أي كود تاني أو ترتيب بيعتمد على
