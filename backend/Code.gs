@@ -148,8 +148,17 @@ function handlePublishComputedBatch(payload) {
   var sections = payload.sections;
   if (!sections || !sections.length) return jsonResponse({ success: false, message: "No sections provided." });
 
-  var lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  // ملحوظة مهمة: عمدًا من غير LockService.getScriptLock() هنا (بعكس باقي
+  // الـ handlers التانية في الملف ده). getScriptLock() قفل عام على المشروع
+  // كله — أي حاجة تانية بتستخدمه (login/signup/heartbeat/feedback...) بتقف
+  // تستنى لحد ما يتفك. الداشبورد بيبعت 27 طلب نشر متتالي (واحد لكل سكشن)
+  // كل مرة يعمل ريفريش، وبعضهم بيكتب ملفات كبيرة على Drive (آلاف الصفوف) —
+  // لو استخدمنا نفس القفل العام هنا، أي طلب تسجيل دخول أو heartbeat بيوصل
+  // في نفس اللحظة كان بيستنى ورا الـ 27 طلب دول، وده اللي كان بيسبب
+  // الـ "blocked by CORS policy" اللي كان بيظهر فجأة (الطلب بيتأخر جدًا أو
+  // بيتقطع من جوجل، والرد اللي بيرجع في الحالة دي مالوش CORS headers خالص).
+  // هنا مش محتاجين قفل أصلاً: كل سكشن بيكتب في ملف خاص بيه بس (section__table.json)،
+  // فمفيش تعارض حقيقي بين الطلبات دي وبعضها.
   try {
     var folder = getOrCreateComputedSnapshotsFolder();
     var publishedAt = new Date().toISOString();
@@ -179,8 +188,6 @@ function handlePublishComputedBatch(payload) {
     return jsonResponse({ success: true, publishedAt: publishedAt, results: results });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
-  } finally {
-    lock.releaseLock();
   }
 }
 

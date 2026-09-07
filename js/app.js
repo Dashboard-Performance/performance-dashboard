@@ -286,7 +286,8 @@ const state = {
   weeklyInvSearch: "",
   weeklyInvMonthOptions: [], // [{key, date}] شهور فيها أسابيع فعلاً
   weeklyInvSelectedMonthKey: null, // "August 2026"
-  weeklyInvSelectedWeekStart: null // timestamp الأحد بتاع الأسبوع المختار
+  weeklyInvSelectedWeekStart: null, // timestamp الأحد بتاع الأسبوع المختار
+  weeklyInvExpandedSkus: new Set() // SKU_IDs اللي متفتحة دلوقتي (Bundles containing this Single SKU)
 };
 const analystState = {
   scope: "merchant", data: [], filtered: [], sortKey: "cm3Pct", sortDir: "desc", page: 0, wired: false
@@ -1191,19 +1192,35 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   { section: "overview", table: "leaderboard", getRows: () => computeLeaderboard(state.allParsedRows || []) },
 ];
 
+// بيستنى تيك واحد من الـ event loop (macrotask) — بنستخدمها بين كل سكشن
+// والتاني تحت عشان نسيب فرصة للمتصفح يرسم/يستجيب (مايجمدش) بدل ما يحسب
+// الـ 27 سكشن كلهم ورا بعض في نفس الـ tick.
+function yieldToMainThread() { return new Promise(resolve => setTimeout(resolve, 0)); }
+
 async function publishComputedSnapshots() {
   if (!PUBLISH_COMPUTED_API_URL) return; // disabled (لو الرابط فاضي)
   if (!state.allParsedRows || state.allParsedRows.length === 0) return; // لسه مفيش داتا خام اتحملت
 
+  // بطلب صريح: الشاشة كانت بتجمد (Freeze) وقت تحميل الداتا الجديدة، بسبب إن
+  // حساب الـ 27 سكشن دول كان بيحصل كله مرة واحدة ورا بعض في نفس الـ tick
+  // (بعض الجداول آلاف الصفوف — زي allocationLocking بـ 20 ألف صف)، فالمتصفح
+  // كان بياخد وقت طويل من غير ما يرسم أي حاجة تانية. الحل: بعد ما loadData()
+  // يخلص ويعرض الداتا (سواء القديمة من الكاش أو الجديدة)، بنستنى تيك واحد
+  // الأول (عشان الشاشة ترسم بالداتا الجديدة فورًا)، وبعدين بنحسب كل سكشن
+  // لوحده مع يilding صغير بين كل واحد والتاني — كده المتصفح يقدر يستجيب
+  // ويرسم بين كل حساب والتاني بدل ما يجمد لثواني.
+  await yieldToMainThread();
+
   const sections = [];
-  COMPUTED_SNAPSHOT_REGISTRY.forEach(entry => {
+  for (const entry of COMPUTED_SNAPSHOT_REGISTRY) {
     try {
       const rows = entry.getRows() || [];
       sections.push({ section: entry.section, table: entry.table, rows });
     } catch (e) {
       console.warn(`[Computed API publish] skipped ${entry.section}/${entry.table} (non-fatal):`, e.message);
     }
-  });
+    await yieldToMainThread();
+  }
   if (!sections.length) return;
 
   // بنبعت كل سكشن في POST منفصل (مش الـ 27 كلهم مجمّعين في request واحد) —
@@ -9430,6 +9447,157 @@ function renderWeeklyInventorySummary(rows) {
   `;
 }
 
+// Availability لأي Single SKU — بنفس المصدر بالظبط المستخدم في سكشن
+// Inventory (state.inventoryMap[sku].availability، من عمود Availability في
+// شيت الـ Inventory)، وfallback لـ state.productsMap[sku].websiteStatus لو
+// الـ SKU مش موجود في شيت الـ Inventory (نفس الـ fallback المستخدم في PPM
+// Analyst / Single).
+function wiGetAvailability(sku) {
+  const inv = (state.inventoryMap || {})[sku] || {};
+  const prod = (state.productsMap || {})[sku] || {};
+  return inv.availability || prod.websiteStatus || "Unknown";
+}
+
+// -------------------------------------------------------------------------
+// WEEKLY INVENTORY — "Bundles containing this Single SKU" (بطلب صريح):
+// لما تدوس على SKU_ID في جدول الأسبوع، بيتفتح تحته سكشن فيه كل الـ PRODUCT_ID
+// المعلّمة كـ Bundle في شيت الديبندلايز واللي الـ Single ده مكوّن (SINGLE_ID)
+// جواها، مع أداء كل بندل من ديه كـ SKU مستقل (زي أي PRODUCT_ID تاني في
+// Commercial Plan — من غير فك بندل تاني، لأننا بنعرض أداء البندل نفسه):
+//   - Availability: نفس مصدر wiGetAvailability فوق، بس على PRODUCT_ID بتاع
+//     البندل نفسه.
+//   - Total Placed/Confirmed/Delivered: الشهر الحالي بس (نفس فلتر الشهر
+//     المختار فوق الداشبورد، rowMatchesPeriod).
+//   - Avg 3D/15D/30D Confirmed: متوسط يومي بيعدي حدود الشهر عادي (بيرجع في
+//     التاريخ الحقيقي مش بيقف عند أول الشهر) — زي ما اتطلب بالظبط: "لو تيجي
+//     ترجع 30 يوم هتلاقي نفسك فيه أيام معدودة في الشهر الحالي وباقي الأيام في
+//     الشهر اللي فات"، فبنستخدم state.allParsedRows كامل (مش مفلتر بالشهر)
+//     لحساب المتوسطات دي بس.
+//   - CR%/DR%/NDR%: بنفس كات أوف CR_LAG_DAYS/CM3_LAG_DAYS المعتاد، لكن على
+//     صفوف الشهر الحالي بس (متسقين مع باقي الداشبورد اللي بيعرض CR/DR/NDR
+//     كمقياس شهري).
+// -------------------------------------------------------------------------
+function wiComputeBundleStatsForSingle(singleId) {
+  // Reverse map: كل PRODUCT_ID معلّم Bundle واللي الـ Single ده (SINGLE_ID)
+  // مكوّن جواه.
+  const bundlesMap = new Map(); // productId -> { productId, productName }
+  (state.debundleMap || []).forEach(r => {
+    if (!r.productId || !r.singleId) return;
+    if (r.singleId !== singleId) return;
+    if (r.productId === r.singleId) return; // مش بندل، ده نفسه الـ Single
+    const isBundle = /^(true|yes|1)$/i.test(String(r.isBundle || "").trim());
+    if (!isBundle) return;
+    if (!bundlesMap.has(r.productId)) bundlesMap.set(r.productId, { productId: r.productId, productName: r.productName || r.productId });
+  });
+  if (!bundlesMap.size) return [];
+
+  const mainRows = state.allParsedRows || [];
+  const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
+
+  let latestTs = 0; mainRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  const today = new Date(latestTs); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
+  const d3Ms = todayMs - (3 * 86400000), d15Ms = todayMs - (15 * 86400000), d30Ms = todayMs - (30 * 86400000);
+
+  const results = [];
+  bundlesMap.forEach(b => {
+    const rows = mainRows.filter(r => r.sku === b.productId); // كل صفوف البندل ده، من غير أي فلتر شهر (عشان المتوسطات المتحركة)
+    const cmRows = rows.filter(r => rowMatchesPeriod(r, selectedMonth, "weeklyInventory")); // الشهر الحالي بس (للـ Totals وCR/DR/NDR)
+
+    let placed = 0, confirmed = 0, delivered = 0;
+    cmRows.forEach(r => { placed += r.placedPieces; confirmed += r.confirmedPieces; delivered += r.deliveredPieces; });
+
+    let conf3 = 0, conf15 = 0, conf30 = 0;
+    rows.forEach(r => {
+      const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0); const rTime = rd.getTime();
+      if (rTime < todayMs) {
+        if (rTime >= d3Ms) conf3 += r.confirmedPieces;
+        if (rTime >= d15Ms) conf15 += r.confirmedPieces;
+        if (rTime >= d30Ms) conf30 += r.confirmedPieces;
+      }
+    });
+
+    const crCutoffTs = getLagCutoffTimestamp(cmRows, CR_LAG_DAYS);
+    const cm3CutoffTs = getCm3LagCutoffTimestamp(cmRows);
+    let crPlaced = 0, crConfirmed = 0, drConfirmed = 0, drDelivered = 0;
+    cmRows.forEach(r => {
+      if (isRowEligibleForLag(r, crCutoffTs, "weeklyInventory")) { crPlaced += r.placedPieces; crConfirmed += r.confirmedPieces; }
+      if (isRowEligibleForLag(r, cm3CutoffTs, "weeklyInventory")) { drConfirmed += r.confirmedPieces; drDelivered += r.deliveredPieces; }
+    });
+    const crPct = crPlaced ? (crConfirmed / crPlaced) * 100 : 0;
+    const drPct = drConfirmed ? (drDelivered / drConfirmed) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+
+    results.push({
+      productId: b.productId, productName: b.productName,
+      availability: wiGetAvailability(b.productId),
+      placed, confirmed, delivered,
+      avg3: Math.round(conf3 / 3), avg15: Math.round(conf15 / 15), avg30: Math.round(conf30 / 30),
+      crPct, drPct, ndrPct
+    });
+  });
+  return results.sort((a, b) => b.confirmed - a.confirmed);
+}
+
+function wiToggleSkuExpand(sku) {
+  if (!state.weeklyInvExpandedSkus) state.weeklyInvExpandedSkus = new Set();
+  if (state.weeklyInvExpandedSkus.has(sku)) state.weeklyInvExpandedSkus.delete(sku);
+  else state.weeklyInvExpandedSkus.add(sku);
+  renderWeeklyInventoryTable();
+}
+
+// عدد أعمدة #wiWeekTable الحقيقي (بعد إضافة Availability) — نفس الرقم
+// مستخدم في colspan لصف "مفيش داتا" وصف توسيع البندلات تحت.
+const WI_WEEK_TABLE_COLSPAN = 17;
+
+function wiRenderBundleExpandRowHtml(sku) {
+  if (!state.weeklyInvExpandedSkus || !state.weeklyInvExpandedSkus.has(sku)) return "";
+  let bundles = [];
+  try { bundles = wiComputeBundleStatsForSingle(sku); } catch (err) {
+    console.error("wiComputeBundleStatsForSingle error:", err);
+    return `<tr class="wi-bundle-expand-row"><td colspan="${WI_WEEK_TABLE_COLSPAN}" class="text-red" style="padding:12px 16px;">Error loading bundles: ${escapeHtml(String(err.message || err))}</td></tr>`;
+  }
+
+  const rowsHtml = bundles.length ? bundles.map(b => `
+      <tr>
+        <td class="font-mono text-dim">${escapeHtml(b.productId)}</td>
+        <td class="text-light truncate-cell" style="max-width:180px;" title="${escapeHtml(b.productName)}">${escapeHtml(b.productName)}</td>
+        <td><span class="badge-outline ${b.availability === 'Out of Stock' ? 'red' : 'blue'}">${escapeHtml(b.availability)}</span></td>
+        <td class="num text-dim">${fmtIntCell(b.placed)}</td>
+        <td class="num text-green font-bold">${fmtIntCell(b.confirmed)}</td>
+        <td class="num text-blue">${fmtIntCell(b.delivered)}</td>
+        <td class="num text-dim">${fmtIntCell(b.avg3)}</td>
+        <td class="num text-dim">${fmtIntCell(b.avg15)}</td>
+        <td class="num text-dim">${fmtIntCell(b.avg30)}</td>
+        <td class="num"><span class="badge-outline ${getCrBadgeColor(b.crPct)}">${fmtPctCell(b.crPct)}</span></td>
+        <td class="num"><span class="badge-outline ${getDrBadgeColor(b.drPct)}">${fmtPctCell(b.drPct)}</span></td>
+        <td class="num"><span class="badge-outline ${getNdrBadgeColor(b.ndrPct)}">${fmtPctCell(b.ndrPct)}</span></td>
+      </tr>
+    `).join("") : `<tr><td colspan="12" class="text-dim" style="padding:10px;">This Single SKU isn't a component of any bundle.</td></tr>`;
+
+  return `
+    <tr class="wi-bundle-expand-row">
+      <td colspan="${WI_WEEK_TABLE_COLSPAN}" style="padding:12px 16px;background:rgba(255,255,255,0.03);">
+        <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600;">Bundles containing ${escapeHtml(sku)} — current month totals, Avg 3D/15D/30D Confirmed (rolling, crosses month boundary), and CR%/DR%/NDR% (current month, same lag cutoffs as the rest of the dashboard)</div>
+        <div class="table-responsive">
+          <table class="data-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th>Bundle Product_ID</th><th>Bundle Name</th><th>Availability</th>
+                <th class="num">Total Placed (Current Month)</th>
+                <th class="num">Confirmed (Current Month)</th>
+                <th class="num">Delivered (Current Month)</th>
+                <th class="num">Avg 3D</th><th class="num">Avg 15D</th><th class="num">Avg 30D</th>
+                <th class="num">CR%</th><th class="num">DR%</th><th class="num">NDR%</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
 // بيرسم جدول أسبوع واحد بس (المختار من الفلاتر فوق) — بس الـ SKUs اللي
 // فعلاً عندهم إنباوند (Inbound Qty > 0) في الأسبوع ده، زي ما اتطلب بالظبط.
 function renderWeeklyInventoryTable() {
@@ -9441,7 +9609,7 @@ function renderWeeklyInventoryTable() {
   if (titleEl) titleEl.textContent = week ? `Week of ${week.label}` : "Week of —";
 
   if (!week) {
-    tbody.innerHTML = `<tr><td colspan="16" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${WI_WEEK_TABLE_COLSPAN}" class="text-dim" style="padding:16px;">No data for this week.</td></tr>`;
     if ($("wiRowCount")) $("wiRowCount").textContent = "0 Rows";
     renderWeeklyInventorySummary([]);
     return;
@@ -9502,7 +9670,7 @@ function renderWeeklyInventoryTable() {
       const meta = (state.weeklyInvSkuMetaMap || new Map()).get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
       return {
         sku: invRow.sku, name: invRow.name || "Unknown",
-        category: meta.category, stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
+        category: meta.category, availability: wiGetAvailability(invRow.sku), stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
         beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning,
         confirmedFromPurchase, inboundVsSold, depletion,
         _purchaseStartTs: effPurchaseStart, _purchaseEndTs: effPurchaseEnd
@@ -9517,7 +9685,7 @@ function renderWeeklyInventoryTable() {
       const depletion = wiComputePurchasesDepletion(r.sku, week.weekStart, r.inboundQty);
       const confirmedFromPurchase = wiSoldFromPurchasesQty(depletion, r.inboundQty);
       const inboundVsSold = r.inboundQty > 0 ? (confirmedFromPurchase / r.inboundQty) * 100 : null;
-      return { ...r, confirmedFromPurchase, inboundVsSold, depletion };
+      return { ...r, availability: wiGetAvailability(r.sku), confirmedFromPurchase, inboundVsSold, depletion };
     });
   }
 
@@ -9538,11 +9706,13 @@ function renderWeeklyInventoryTable() {
     } else {
       depletionHtml = `<span class="text-dim">-</span>`;
     }
+    const isExpanded = !!(state.weeklyInvExpandedSkus && state.weeklyInvExpandedSkus.has(r.sku));
     return `
     <tr>
-      <td class="font-mono text-dim">${escapeHtml(r.sku)}</td>
+      <td class="font-mono text-dim" style="cursor:pointer;user-select:none;" title="Click to show/hide the bundles that contain this Single SKU." onclick="wiToggleSkuExpand('${escapeHtml(r.sku).replace(/'/g, "\\'")}')">${isExpanded ? "▾" : "▸"} ${escapeHtml(r.sku)}</td>
       <td class="font-bold text-light truncate-cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
       <td class="text-dim truncate-cell" style="max-width:110px;" title="${escapeHtml(r.category)}">${escapeHtml(r.category)}</td>
+      <td><span class="badge-outline ${r.availability === 'Out of Stock' ? 'red' : 'blue'}">${escapeHtml(r.availability)}</span></td>
       <td class="num text-dim font-bold">${fmtIntCell(r.stock)}</td>
       <td class="num text-dim font-bold">${fmtIntCell(r.doh)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(r.cogs)}</td>
@@ -9557,8 +9727,9 @@ function renderWeeklyInventoryTable() {
       <td class="num">${wiOverachievePct(r.inboundVsSold)}</td>
       <td class="center">${depletionHtml}</td>
     </tr>
+    ${wiRenderBundleExpandRowHtml(r.sku)}
   `;
-  }).join("") || `<tr><td colspan="16" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
+  }).join("") || `<tr><td colspan="${WI_WEEK_TABLE_COLSPAN}" class="text-dim" style="padding:16px;">No SKUs had an inbound this week.</td></tr>`;
 
   if ($("wiRowCount")) $("wiRowCount").textContent = `${fmtInt.format(rows.length)} Rows`;
   renderWeeklyInventorySummary(rows);
@@ -9568,7 +9739,7 @@ function renderWeeklyInventoryTable() {
     // ده أسهل تشخيص بكتير من "مفيش حاجة بتتغير" من غير سبب ظاهر.
     console.error("renderWeeklyInventoryTable error:", err);
     if ($("wiCustomFilterStatus")) $("wiCustomFilterStatus").textContent = `Error applying the custom filter: ${err.message || err}`;
-    tbody.innerHTML = `<tr><td colspan="16" class="text-red" style="padding:16px;">Error rendering this table: ${escapeHtml(String(err.message || err))}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${WI_WEEK_TABLE_COLSPAN}" class="text-red" style="padding:16px;">Error rendering this table: ${escapeHtml(String(err.message || err))}</td></tr>`;
   }
 }
 
