@@ -146,6 +146,15 @@ const DATA_API_URL = "";
 // مستخدم هنا بس عشان يبعت فيدباك الـ Recommended Tracker (save_match_feedback)
 // لل backend، اللي بيكتبه لايف في شيت الماتشات (PRODUCTS_MATCHES_GID).
 const MATCHES_FEEDBACK_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
+// -------------------------------------------------------------------------
+// COMPUTED DATA API (publish side) — نفس رابط الـ Apps Script Web App
+// المستخدم فوق (MATCHES_FEEDBACK_API_URL/CONFIG.API_URL)، بيستخدم هنا عشان
+// الداشبورد "ينشر" آخر نسخة من الأرقام المحسوبة (مش الداتا الخام) لكل
+// سكشن/تيبول مسجل في COMPUTED_SNAPSHOT_REGISTRY تحت، عشان أي حد برة يقدر
+// يسحبها لايف عن طريق GET (backend/Code.gs: action=getComputed&section=..
+// &table=..&key=..). راجع publishComputedSnapshots() تحت لتفاصيل الميكانيزم.
+// -------------------------------------------------------------------------
+const PUBLISH_COMPUTED_API_URL = MATCHES_FEEDBACK_API_URL;
 // The backend fetches every GID sequentially (one gviz request at a time,
 // on purpose — see backend/Code.gs), so the total round trip for ~14
 // sheets can take longer than a single sheet used to. 60s gives it room.
@@ -1097,6 +1106,116 @@ async function backupSnapshotToDrive(snapshot) {
     console.log(`[Drive backup] all ${totalChunks} chunk(s) sent for uploadId=${uploadId}. This confirms the requests went out, not that the server wrote the file — check the Drive folder or Apps Script Executions log to verify.`);
   } catch (e) {
     console.warn("[Drive backup] failed (non-fatal):", e.message);
+  }
+}
+
+// -------------------------------------------------------------------------
+// COMPUTED DATA API (publish side) — بعد كل تحميل/ريفريش ناجح للداتا، بننشر
+// آخر نسخة من الأرقام المحسوبة (مش الخام) لكل سكشن/تيبول مسجل تحت، عشان أي
+// حد معاه الـ API key يقدر يسحبها لايف من برة الداشبورد (GET
+// ?action=getComputed&section=..&table=..&key=..، أو ?action=listComputed
+// لمعرفة كل الـ sections/tables المتاحة). راجع الشرح الكامل فوق
+// PUBLISH_COMPUTED_API_URL وفي backend/Code.gs.
+//
+// عشان تضيف سكشن/تيبول جديد للنشر: ضيف عنصر هنا بس — { section, table,
+// getRows } — getRows() لازم ترجع array من objects عادية (JSON-safe)، مفيش
+// داعي تلمس أي حاجة تانية. لو الدالة رمت Exception (مثلاً السكشن ده لسه
+// مالوش داتا كافية)، بيتسجل تحذير في الـ console وباقي السكشنز بينشروا عادي
+// (فشل سكشن واحد ما يوقفش الباقي).
+// -------------------------------------------------------------------------
+//
+// ملحوظة: كل سكشن في الـ nav دلوقتي متغطي هنا — Weekly Inventory & Inbound
+// اتفحصت خصوصي (كانت المرشحة الوحيدة للاستبعاد) وطلعت آمنة تتنادى مباشرة
+// (تفاصيل التعليق فوق عنصرها تحت)، فمفيش أي سكشن مستبعد حاليًا.
+const COMPUTED_SNAPSHOT_REGISTRY = [
+  { section: "commercialPlan", table: "main", getRows: () => computeCommercialDebundlized().rows },
+  { section: "purchasePlan", table: "main", getRows: () => computePurchasePlanData() },
+  { section: "salesPlanAcm", table: "main", getRows: () => state.mpSalesPlanDataPrepared || [] },
+  { section: "performanceMerchant", table: "overall", getRows: () => state.merchantTableData || [] },
+  // Top 10 Merchants — نفس فرز/قص renderTop10Merchants() بالظبط (Top 10 بالـ
+  // Delivered GMV)، بس من غير أي لمس للـ DOM.
+  { section: "performanceMerchant", table: "top10", getRows: () => [...(state.merchantTableData || [])].sort((a, b) => b.deliveredGmv - a.deliveredGmv).slice(0, 10) },
+  // Recommended Tracker — prepareRecommendedTrackerData() بتتنادى أصلاً بس
+  // لو التاب مفتوح (updateDashboard)؛ بننادها هنا يدوي عشان state.recTrackerDataPrepared
+  // يتحسب لايف بغض النظر عن أي تاب مفتوح.
+  { section: "recommendedTracker", table: "main", getRows: () => { prepareRecommendedTrackerData(); return state.recTrackerDataPrepared || []; } },
+  // Performance ACM — prepareAcmTableData(rows) بتتنادى من غير أي شرط أصلاً
+  // جوه updateDashboard، فـ state.acmTableData دايمًا محدثة.
+  { section: "performanceAcm", table: "main", getRows: () => state.acmTableData || [] },
+  // Targets Commercial — computeCommercialActuals(rows) دالة حسابية بحتة
+  // (بترجع object لكل كاتيجوري + "grand total")، بنحولها لـ array من صفوف.
+  { section: "targetsCommercial", table: "main", getRows: () => { const actuals = computeCommercialActuals(state.allParsedRows || []); return Object.entries(actuals).map(([category, row]) => ({ category, ...row })); } },
+  // CM3 Analyst / Products — cm3apDataAll متغير عام (مش جوه state) بيتحدث
+  // جوه prepareCm3AnalystProductsData()، فبنناديها الأول.
+  { section: "cm3AnalystProducts", table: "main", getRows: () => { prepareCm3AnalystProductsData(); return cm3apDataAll || []; } },
+  { section: "ppmAnalystProducts", table: "main", getRows: () => { preparePpmAnalystProductsData(); return ppmAnalystState.data || []; } },
+  { section: "ppmAnalystSingle", table: "main", getRows: () => { preparePpmAnalystSingleData(); return ppmAnalystSingleState.data || []; } },
+  { section: "productsAnalyst", table: "main", getRows: () => { prepareProductsAnalystData(); return prodAnState.data || []; } },
+  { section: "productsMatchesAnalyst", table: "main", getRows: () => { prepareProductsMatchesAnalystData(); return pmaState.data || []; } },
+  // Inventory — prepareInventoryTableData(rows) بتتنادى من غير أي شرط أصلاً
+  // جوه updateDashboard، فـ state.inventoryTableData دايمًا محدثة.
+  { section: "inventory", table: "main", getRows: () => state.inventoryTableData || [] },
+  // CM3 Analyst (مستوى الماركت بليس، مختلف عن CM3 Analyst/Products) —
+  // renderCm3AnalystView() بتفلتر الصفوف بنفس منطق الفلاتر فوق الصفحة
+  // وتنادي prepareCm3AnalystData()، اللي بتحدث analystState.data (بمنطق
+  // analystState.scope الحالي — الافتراضي "merchant").
+  { section: "cm3Analyst", table: "main", getRows: () => { renderCm3AnalystView(); return analystState.data || []; } },
+  { section: "poorMatches", table: "main", getRows: () => { preparePoorMatchesData(); return poorMatchesState.data || []; } },
+  { section: "availabilityLocking", table: "main", getRows: () => { prepareAvailabilityLockingData(); return availabilityLockingState.data || []; } },
+  { section: "allocationLocking", table: "main", getRows: () => { prepareAllocationLockingData(); return allocationLockingState.data || []; } },
+  { section: "healthyLocking", table: "main", getRows: () => { prepareHealthyLockingData(); return healthyLockingState.data || []; } },
+  { section: "healthyUnlocking", table: "main", getRows: () => { prepareHealthyUnlockingData(); return healthyUnlockingState.data || []; } },
+  { section: "mpMatches", table: "main", getRows: () => { prepareMpMatchesData(); return mpMatchesState.data || []; } },
+  { section: "mpNewMatches", table: "main", getRows: () => { prepareMpNewMatchesData(); return mpNewMatchesState.data || []; } },
+  // Segmentation Panel — computeSegmentationPerformance() دالة حسابية بحتة؛
+  // بنعمل updateSegPanelMonths() الأول بس عشان SEG_PANEL_MONTH/PREV_MONTH
+  // يتحدثوا لآخر شهر متاح في state.newSegRows (مفيهاش أي لمس للـ DOM).
+  { section: "segmentationPanel", table: "main", getRows: () => { updateSegPanelMonths(); return computeSegmentationPerformance(); } },
+  // Sellthrough Rate Panel — prepareSellthroughData() بتتنادى عادة بس أول
+  // ما البانل يتفتح (simulateSellthroughProgress)؛ بنناديها هنا مباشرة
+  // (من غير الأنيميشن) عشان state.sellthroughDataPrepared يفضل لايف.
+  { section: "sellthroughPanel", table: "main", getRows: () => { prepareSellthroughData(); return state.sellthroughDataPrepared || []; } },
+  // Weekly Inventory & Inbound — عادةً بتتبني بس أول ما البانل يتفتح
+  // (renderWeeklyInventoryPanel)، لكن prepareWeeklyInventoryWeeks() نفسها
+  // اتفحصت وطلعت دالة نضيفة تمامًا (تقرا بس من state.weeklyInventoryRows/
+  // weeklyInventoryDateCols/allParsedRows/inboundRows، وتكتب state.weeklyInvWeeks
+  // — من غير أي $("...") أو لمس DOM خالص)، فآمن نناديها هنا مباشرة. كل
+  // أسبوع بيرجع مجموعة صفوف (rows) منفصلة، فبنعملهم flatten مع إضافة
+  // weekStart/weekLabel لكل صف عشان الـ API يرجع array واحدة مسطحة.
+  { section: "weeklyInventory", table: "main", getRows: () => { prepareWeeklyInventoryWeeks(); return (state.weeklyInvWeeks || []).flatMap(w => w.rows.map(r => ({ weekStart: w.weekStart, weekLabel: w.label, ...r }))); } },
+  // Over View — computeMetrics(rows)/computeLeaderboard(rows) دوال حسابية
+  // بحتة (زي ما هي مستخدمة جوه updateDashboard)، من غير أي أثر جانبي على
+  // state أو الـ DOM. computeMetrics بترجع object واحد (مش array)، فبنلفه
+  // في array من عنصر واحد عشان يتوافق مع شكل باقي الـ getRows().
+  { section: "overview", table: "metrics", getRows: () => [computeMetrics(state.allParsedRows || [])] },
+  { section: "overview", table: "leaderboard", getRows: () => computeLeaderboard(state.allParsedRows || []) },
+];
+
+async function publishComputedSnapshots() {
+  if (!PUBLISH_COMPUTED_API_URL) return; // disabled (لو الرابط فاضي)
+  if (!state.allParsedRows || state.allParsedRows.length === 0) return; // لسه مفيش داتا خام اتحملت
+
+  const sections = [];
+  COMPUTED_SNAPSHOT_REGISTRY.forEach(entry => {
+    try {
+      const rows = entry.getRows() || [];
+      sections.push({ section: entry.section, table: entry.table, rows });
+    } catch (e) {
+      console.warn(`[Computed API publish] skipped ${entry.section}/${entry.table} (non-fatal):`, e.message);
+    }
+  });
+  if (!sections.length) return;
+
+  try {
+    await fetch(PUBLISH_COMPUTED_API_URL, {
+      method: "POST",
+      mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+      body: JSON.stringify({ action: "publish_computed_batch", sections })
+    });
+    console.log(`[Computed API publish] sent ${sections.length} section(s)/table(s).`);
+  } catch (e) {
+    console.warn("[Computed API publish] failed (non-fatal):", e.message);
   }
 }
 
@@ -12147,6 +12266,7 @@ async function loadData(isManualRefresh = false) {
     renderCurrentState();
     saveDataToCache(snapshot);
     backupSnapshotToDrive(snapshot); // fire-and-forget; internally async (gzip), never awaited so it can't block the UI
+    publishComputedSnapshots(); // fire-and-forget — publishes the live computed tables for the external Computed Data API
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     if (snapshot.staleGids && snapshot.staleGids.length > 0) {

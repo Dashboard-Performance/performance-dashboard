@@ -24,6 +24,17 @@
  *  6. Every time you edit this script, create a NEW deployment version
  *     (or use "Manage deployments" > Edit > New version) for changes to
  *     go live.
+ *
+ *  EXTERNAL "COMPUTED DATA" API (read the dashboard's live numbers from
+ *  outside, per section/table) — see the big comment above COMPUTED_API_KEYS
+ *  further down for how it works. Quick start:
+ *  1. Change COMPUTED_API_KEYS below to your own secret key(s).
+ *  2. Deploy a new version (step 6 above).
+ *  3. Open the dashboard once (or wait for its next hourly auto-refresh) so
+ *     it publishes its first snapshot.
+ *  4. GET <Web app URL>?action=listComputed&key=YOUR_KEY to see what's
+ *     available, then GET ...&action=getComputed&section=..&table=..&key=..
+ *     to pull one table's live computed rows as JSON.
  * ============================================================================
  */
 
@@ -69,6 +80,42 @@ var BACKUP_FOLDER_NAME = "Performance Dashboard Backups";
 // grows without bound.
 var BACKUP_KEEP_LAST_N = 30;
 
+/**
+ * ============================================================================
+ *  COMPUTED DATA API — lets an outside consumer (a script, a BI tool, another
+ *  team's app) pull the dashboard's already-computed numbers (exactly what a
+ *  user sees in a given section/table — MTD targets, Achieved%, CR/DR%, etc.)
+ *  over plain HTTP, without opening the dashboard in a browser.
+ *
+ *  WHY IT WORKS THIS WAY
+ *  Every real computation (targets, lag cutoffs, debundling, run rates...)
+ *  lives in js/app.js and runs client-side in the browser — reimplementing
+ *  all of that a second time here in Apps Script would mean keeping two
+ *  parallel copies of dozens of formulas in sync forever, which breaks
+ *  quickly in practice. Instead: whenever the dashboard is open in a browser
+ *  and finishes loading/refreshing its data (on page load, and every hourly
+ *  auto-refresh, and on manual "Refresh"), it PUBLISHES its own already-
+ *  computed tables here (see publishComputedSnapshots() in app.js). This
+ *  endpoint just stores the latest one it received per (section, table) and
+ *  serves it back on request — so the data is "live" as of the last time
+ *  someone had the dashboard open, which in practice (a team dashboard that
+ *  gets opened throughout the day, plus the hourly auto-refresh) stays fresh.
+ *
+ *  SETUP
+ *  1. Change COMPUTED_API_KEYS below to your own secret key(s) — anyone with
+ *     a key can read published data (not write it; only the dashboard itself
+ *     can publish, since that goes through this same script, not a public key).
+ *  2. Redeploy (Manage deployments > Edit > New version) so it's live.
+ *
+ *  CONSUME IT
+ *    GET <deployment URL>?action=getComputed&section=commercialPlan&table=main&key=YOUR_KEY
+ *    GET <deployment URL>?action=listComputed&key=YOUR_KEY   (see what's published)
+ * ============================================================================
+ */
+var COMPUTED_API_KEYS = ["CHANGE_ME_TO_A_SECRET_KEY"]; // <-- replace before sharing this URL with anyone
+var COMPUTED_SNAPSHOTS_FOLDER_ID = ""; // leave "" to auto-create/reuse, like BACKUP_FOLDER_ID above
+var COMPUTED_SNAPSHOTS_FOLDER_NAME = "Performance Dashboard Computed Snapshots";
+
 function doPost(e) {
   var payload;
   try {
@@ -85,7 +132,129 @@ function doPost(e) {
   if (action === "get_online_users") return handleGetOnlineUsers(payload);
   if (action === "save_match_feedback") return handleSaveMatchFeedback(payload);
   if (action === "add_new_locked_matches") return handleAddNewLockedMatches(payload);
+  if (action === "publish_computed_batch") return handlePublishComputedBatch(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
+}
+
+/**
+ * Called by js/app.js (publishComputedSnapshots) after every fresh data
+ * load/refresh. payload.sections = [{ section, table, rows }, ...] — each
+ * one overwrites whatever was previously published for that exact
+ * (section, table) pair. No API key required here (this is the dashboard
+ * itself publishing its own data, through the same trusted deployment) —
+ * only reading it back (getComputed/listComputed) requires a key.
+ */
+function handlePublishComputedBatch(payload) {
+  var sections = payload.sections;
+  if (!sections || !sections.length) return jsonResponse({ success: false, message: "No sections provided." });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var folder = getOrCreateComputedSnapshotsFolder();
+    var publishedAt = new Date().toISOString();
+    var results = [];
+    sections.forEach(function (s) {
+      var section = sanitizeComputedName(s.section);
+      var table = sanitizeComputedName(s.table);
+      if (!section || !table) { results.push({ section: s.section, table: s.table, ok: false, error: "Invalid section/table name." }); return; }
+
+      var fileName = section + "__" + table + ".json";
+      var content = JSON.stringify({
+        section: section,
+        table: table,
+        updatedAt: publishedAt,
+        rowCount: Array.isArray(s.rows) ? s.rows.length : 0,
+        rows: s.rows || []
+      });
+
+      var existing = folder.getFilesByName(fileName);
+      if (existing.hasNext()) {
+        existing.next().setContent(content);
+      } else {
+        folder.createFile(fileName, content, MimeType.PLAIN_TEXT);
+      }
+      results.push({ section: section, table: table, ok: true });
+    });
+    return jsonResponse({ success: true, publishedAt: publishedAt, results: results });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleGetComputed(e) {
+  var keyCheck = requireComputedApiKey(e);
+  if (keyCheck) return keyCheck;
+
+  var section = sanitizeComputedName((e.parameter && e.parameter.section) || "");
+  var table = sanitizeComputedName((e.parameter && e.parameter.table) || "");
+  if (!section || !table) return jsonResponse({ success: false, message: "section and table query params are required." });
+
+  try {
+    var folder = getOrCreateComputedSnapshotsFolder();
+    var fileName = section + "__" + table + ".json";
+    var files = folder.getFilesByName(fileName);
+    if (!files.hasNext()) {
+      return jsonResponse({ success: false, message: "No data published yet for section='" + section + "', table='" + table + "'." });
+    }
+    var content = files.next().getBlob().getDataAsString();
+    var parsed = JSON.parse(content);
+    return jsonResponse({ success: true, section: parsed.section, table: parsed.table, updatedAt: parsed.updatedAt, rowCount: parsed.rowCount, rows: parsed.rows });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+function handleListComputed(e) {
+  var keyCheck = requireComputedApiKey(e);
+  if (keyCheck) return keyCheck;
+
+  try {
+    var folder = getOrCreateComputedSnapshotsFolder();
+    var files = folder.getFiles();
+    var list = [];
+    while (files.hasNext()) {
+      var f = files.next();
+      var name = f.getName();
+      if (!/\.json$/.test(name)) continue;
+      var parts = name.replace(/\.json$/, "").split("__");
+      var entry = { section: parts[0] || "", table: parts[1] || "" };
+      try {
+        var parsed = JSON.parse(f.getBlob().getDataAsString());
+        entry.updatedAt = parsed.updatedAt;
+        entry.rowCount = parsed.rowCount;
+      } catch (err) { /* skip metadata, keep the name-derived entry */ }
+      list.push(entry);
+    }
+    return jsonResponse({ success: true, available: list });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+function requireComputedApiKey(e) {
+  var key = (e.parameter && e.parameter.key) || "";
+  if (COMPUTED_API_KEYS.indexOf(key) === -1) {
+    return jsonResponse({ success: false, message: "Missing or invalid API key." });
+  }
+  return null;
+}
+
+function sanitizeComputedName(name) {
+  return String(name || "").trim().replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+function getOrCreateComputedSnapshotsFolder() {
+  if (COMPUTED_SNAPSHOTS_FOLDER_ID) {
+    return DriveApp.getFolderById(COMPUTED_SNAPSHOTS_FOLDER_ID);
+  }
+  var existing = DriveApp.getFoldersByName(COMPUTED_SNAPSHOTS_FOLDER_NAME);
+  if (existing.hasNext()) return existing.next();
+  var created = DriveApp.createFolder(COMPUTED_SNAPSHOTS_FOLDER_NAME);
+  Logger.log("Created computed-snapshots folder. Paste this into COMPUTED_SNAPSHOTS_FOLDER_ID: " + created.getId());
+  return created;
 }
 
 /**
@@ -488,6 +657,8 @@ function pruneOldBackups(folder) {
 function doGet(e) {
   var action = e && e.parameter ? e.parameter.action : null;
   if (action === "getData") return handleGetData(e);
+  if (action === "getComputed") return handleGetComputed(e);
+  if (action === "listComputed") return handleListComputed(e);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
