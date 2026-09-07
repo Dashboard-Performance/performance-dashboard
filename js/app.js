@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1206,17 +1206,28 @@ async function publishComputedSnapshots() {
   });
   if (!sections.length) return;
 
-  try {
-    await fetch(PUBLISH_COMPUTED_API_URL, {
-      method: "POST",
-      mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
-      body: JSON.stringify({ action: "publish_computed_batch", sections })
-    });
-    console.log(`[Computed API publish] sent ${sections.length} section(s)/table(s).`);
-  } catch (e) {
-    console.warn("[Computed API publish] failed (non-fatal):", e.message);
+  // بنبعت كل سكشن في POST منفصل (مش الـ 27 كلهم مجمّعين في request واحد) —
+  // بعض الجداول (زي CM3 Analyst Products أو Availability Locking) ممكن
+  // تكون كبيرة، وجمع كل الـ 27 في body واحد كان بيرجّع 400 من Google (على
+  // الأغلب حجم الـ payload) حتى لو كل سكشن لوحده صغير جدًا وكان هيعدي عادي.
+  // متتابعين (مش كلهم مع بعض) عشان مانضربش نفس الـ Apps Script بـ 27 تنفيذ
+  // متزامن (LockService ممكن يستنى/يفشل)، وكل واحد في try/catch لوحده عشان
+  // فشل سكشن واحد (حتى لو كان لسه كبير أوي) ما يمنعش الباقي من الوصول.
+  let sentCount = 0;
+  for (const s of sections) {
+    try {
+      await fetch(PUBLISH_COMPUTED_API_URL, {
+        method: "POST",
+        mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+        body: JSON.stringify({ action: "publish_computed_batch", sections: [s] })
+      });
+      sentCount++;
+    } catch (e) {
+      console.warn(`[Computed API publish] request failed for ${s.section}/${s.table} (non-fatal):`, e.message);
+    }
   }
+  console.log(`[Computed API publish] sent ${sentCount}/${sections.length} section(s)/table(s) request(s). (mode:"no-cors" means this confirms the requests went OUT, not that the server accepted every one — check Apps Script Executions or listComputed to verify.)`);
 }
 
 function setSyncStatus(text) {
