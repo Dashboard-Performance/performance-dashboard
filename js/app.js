@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -4337,17 +4337,22 @@ function populateFilters(rows) {
   }
 }
 
-function applyFilters() {
+async function applyFilters() {
   // الـ Overview مالوش فلتر Date Range خاص بيه (الفلتر دلوقتي جوه كل سكشن
   // لوحده بس، مش هنا) — فبتفضل شغالة بفلتر الشهر/الـ ACM العام زي ما هي بالظبط.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   if($("tableDateRange")) $("tableDateRange").textContent = selectedMonth || "All Time";
   const filteredRows = state.allParsedRows.filter(r => { return (selectedMonth === "" || r.monthYear === selectedMonth) && (selectedAcm === "All" || r.acmName === selectedAcm); });
-  updateDashboard(filteredRows);
+  await updateDashboard(filteredRows);
 }
 
-function updateDashboard(rows) {
+// updateDashboard بقت async وبتعمل yieldToMainThread() بين كل مجموعة شغل تقيلة
+// (بدل ما تشتغل كلها مرة واحدة بلوك واحد متصل). ده مش بيغيّر أي حساب ولا أي
+// شكل نهائي — نفس النتيجة بالظبط — بس بيدي فرصة للمتصفح إنه يرندر/يستجيب بين
+// كل خطوة، فمتصفح المستخدم متجمدش (freeze) وهو بيحمّل الداتا الجديدة، خصوصاً
+// في اللحظة اللي بيجيب فيها snapshot جديد ويبني كل الجداول من الأول.
+async function updateDashboard(rows) {
   const metrics = computeMetrics(rows);
   const leaderboard = computeLeaderboard(rows);
   if($("placedOrdersVal")) $("placedOrdersVal").textContent = fmtInt.format(metrics.placedOrders);
@@ -4377,8 +4382,10 @@ function updateDashboard(rows) {
   }
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
   renderPipelineChart(rows); renderCategoryChart(rows);
+  await yieldToMainThread();
   prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
   renderOverallAcmTargetsSummary();
+  await yieldToMainThread();
   if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
   if ($("viewPurchasePlan") && $("viewPurchasePlan").classList.contains("active-view")) preparePurchasePlanData();
@@ -4389,6 +4396,7 @@ function updateDashboard(rows) {
   if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
   // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) { renderCm3TargetView(); renderCm3AnalystView(); }
+  await yieldToMainThread();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
@@ -4400,6 +4408,7 @@ function updateDashboard(rows) {
   if ($("viewHealthyLocking") && $("viewHealthyLocking").classList.contains("active-view")) prepareHealthyLockingData();
   if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
   if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
+  await yieldToMainThread();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
@@ -12405,9 +12414,9 @@ function applySnapshotToState(snapshot) {
   }
   state._stSourceFingerprint = newStFingerprint;
 }
-function renderCurrentState() {
+async function renderCurrentState() {
   populateFilters(state.allParsedRows);
-  applyFilters();
+  await applyFilters();
 }
 
 // loadData(isManualRefresh):
@@ -12426,7 +12435,7 @@ async function loadData(isManualRefresh = false) {
 
   if (cache && !isManualRefresh) {
     applySnapshotToState(cache.data);
-    renderCurrentState();
+    await renderCurrentState();
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     setSyncStatus(`Cached — ${formatCacheTimestamp(cache.savedAt)}`);
@@ -12445,7 +12454,7 @@ async function loadData(isManualRefresh = false) {
     // بيظهروا بس لو فعلاً حصل تغيير في الداتا.
     const dataChanged = !paintedFromCache || !cache || cache.fingerprint !== freshFingerprint;
     applySnapshotToState(snapshot);
-    renderCurrentState();
+    await renderCurrentState();
     saveDataToCache(snapshot);
     backupSnapshotToDrive(snapshot); // fire-and-forget; internally async (gzip), never awaited so it can't block the UI
     publishComputedSnapshots(); // fire-and-forget — publishes the live computed tables for the external Computed Data API
@@ -12472,7 +12481,7 @@ async function loadData(isManualRefresh = false) {
       // Fresh fetch failed (e.g. manual refresh during an outage) but we do
       // have a cache — fall back to it instead of a dead error screen.
       applySnapshotToState(cache.data);
-      renderCurrentState();
+      await renderCurrentState();
       if (loadingEl) loadingEl.classList.add("hidden");
       if (errorEl) errorEl.classList.add("hidden");
       setSyncStatus(`Sync failed — showing cache from ${formatCacheTimestamp(cache.savedAt)}`);
