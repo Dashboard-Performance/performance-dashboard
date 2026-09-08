@@ -782,12 +782,19 @@ function runScheduledSync() {
   var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
   var folder = getOrCreateLastSyncFolder_();
   var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
-  var gzBlob = Utilities.gzip(Utilities.newBlob(content, "application/json", LAST_SYNC_FILE_NAME));
+  // ⚠️ لازم تحدد الاسم صراحةً كـ باراميتر تاني هنا — Utilities.gzip(blob) من
+  // غيره بيسمي الملف "archive.gz" تلقائيًا (بغض النظر عن اسم الـ blob الأصلي)،
+  // وده كان بيخلي handleGetLastSync تحت مش بيلاقي الملف تاني لأنه بيدور على
+  // LAST_SYNC_FILE_NAME بالظبط.
+  var gzBlob = Utilities.gzip(Utilities.newBlob(content, "application/json"), LAST_SYNC_FILE_NAME);
 
   // مفيش setBytes() على DriveApp.File للملفات الـ binary — أسهل وأضمن طريقة
   // هي نمسح أي نسخة قديمة (لو موجودة) وننشئ واحدة جديدة بدل ما نعدّل في مكانها.
   var existing = folder.getFilesByName(LAST_SYNC_FILE_NAME);
   while (existing.hasNext()) { existing.next().setTrashed(true); }
+  // كمان بنشيل أي نسخة قديمة باسم "archive.gz" (من التشغيلة الأولى قبل التصليح ده).
+  var oldArchive = folder.getFilesByName("archive.gz");
+  while (oldArchive.hasNext()) { oldArchive.next().setTrashed(true); }
   folder.createFile(gzBlob);
 
   PropertiesService.getScriptProperties().setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
