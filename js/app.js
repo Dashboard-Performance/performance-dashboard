@@ -12550,10 +12550,17 @@ async function loadData(isManualRefresh = false) {
     // عدد التنفيذات المتزامنة (concurrent executions) على نفس السكريبت لحظة
     // فتح كل سكشن/تحميل، وده كان بيسبب 404s متقطعة (Failed to load resource)
     // على طلبات backup_chunk و publish_computed_batch. تسلسلهم بيقلل الذروة.
-    (async () => {
-      await backupSnapshotToDrive(snapshot);
-      await publishComputedSnapshots();
-    })();
+    //
+    // guard إضافي: لو loadData() اتنادت تاني (مثلاً بولينج المزامنة المركزية
+    // كل دقيقة، أو الريفريش الساعاتي) قبل ما دورة backup+publish اللي قبلها
+    // تخلص، مانبدأش دورة جديدة فوق القديمة — ده كان سبب رئيسي في الـ 404s:
+    // لو الدورتين اشتغلوا في نفس الوقت، بيبقى فيه ضعف عدد الطلبات المتزامنة
+    // على نفس الـ Apps Script deployment. الدورة الجديدة بتتأجل لحد ما القديمة
+    // تخلص بدل ما تتجاهل خالص، عشان آخر نسخة من الداتا برضه توصل للـ backup/API.
+    if (loadData._bgChainTail === undefined) loadData._bgChainTail = Promise.resolve();
+    loadData._bgChainTail = loadData._bgChainTail.then(() =>
+      backupSnapshotToDrive(snapshot).then(() => publishComputedSnapshots())
+    ).catch((e) => console.warn("[background publish chain] failed (non-fatal):", e && e.message));
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     // بنعرض توقيت المزامنة المركزية الجاي من السيرفر (snapshot.serverFetchedAt)
