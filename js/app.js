@@ -1139,7 +1139,7 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   // Recommended Tracker — prepareRecommendedTrackerData() بتتنادى أصلاً بس
   // لو التاب مفتوح (updateDashboard)؛ بننادها هنا يدوي عشان state.recTrackerDataPrepared
   // يتحسب لايف بغض النظر عن أي تاب مفتوح.
-  { section: "recommendedTracker", table: "main", getRows: () => { prepareRecommendedTrackerData(); return state.recTrackerDataPrepared || []; } },
+  { section: "recommendedTracker", table: "main", getRows: () => { prepareRecommendedTrackerData({ sync: false }); return state.recTrackerDataPrepared || []; } },
   // Performance ACM — prepareAcmTableData(rows) بتتنادى من غير أي شرط أصلاً
   // جوه updateDashboard، فـ state.acmTableData دايمًا محدثة.
   { section: "performanceAcm", table: "main", getRows: () => state.acmTableData || [] },
@@ -2134,7 +2134,17 @@ function buildDebundledStockDohIndex(mainRows, windowDays) {
 
   return { stockByProductId, bundleProductMap, isBundleByProductId, singleOverallStats, getStockDoh };
 }
-function prepareRecommendedTrackerData() {
+// opts.sync (افتراضي true): لو false، الفانكشن بتحسب وترجّع نفس الصفوف
+// بالظبط (شاملة أي ماتشات "New Locked" جديدة) لكن من غير ما تكتب/تبعت أي
+// حاجة لل backend (syncNewLockedMatchesToSheet تحت). بنستخدم false بس لما
+// الفانكشن دي بتتنادى من غير ما اليوزر فعليًا فاتح سكشن Recommended Tracker
+// (زي getRows بتاع الـ Computed Data API اللي بيشتغل في الخلفية كل تحميل
+// صفحة) — عشان الكتابة دي متتكررش من غير داعي وتزوّد الضغط على الـ backend
+// (اللي كان بيسبب 404/HTML بدل JSON لما بيتضرب مع نشر الـ Computed API
+// والـ Drive backup في نفس اللحظة). لما اليوزر فعلاً يفتح السكشن أو يغيّر
+// فلتر التاريخ بتاعه، الكتابة بتفضل شغالة عادي زي ما هي.
+function prepareRecommendedTrackerData(opts) {
+  const allowSync = !opts || opts.sync !== false;
   const mainRows = state.allParsedRows || [];
 
   // Placed Pieces اليومية لآخر 6 أيام (DAY0..DAY5) من MERCHANT_SKU_DAILY_GID
@@ -2362,7 +2372,7 @@ function prepareRecommendedTrackerData() {
       feedbackByDate: {}
     });
   });
-  if (missingLockedMatches.length) syncNewLockedMatchesToSheet(missingLockedMatches);
+  if (missingLockedMatches.length && allowSync) syncNewLockedMatchesToSheet(missingLockedMatches);
 
   const rows = (state.productsMatchesRows || []).concat(missingLockedMatches).map(m => {
     const sku = m.productId;
