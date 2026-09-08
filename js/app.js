@@ -155,10 +155,12 @@ const MATCHES_FEEDBACK_API_URL = "https://script.google.com/macros/s/AKfycbwJw0d
 // &table=..&key=..). راجع publishComputedSnapshots() تحت لتفاصيل الميكانيزم.
 // -------------------------------------------------------------------------
 const PUBLISH_COMPUTED_API_URL = MATCHES_FEEDBACK_API_URL;
-// The backend fetches every GID sequentially (one gviz request at a time,
-// on purpose — see backend/Code.gs), so the total round trip for ~14
-// sheets can take longer than a single sheet used to. 60s gives it room.
-const DATA_API_TIMEOUT_MS = 60000;
+// لو الـ Drive cache (last_sync.json) لسه معمولش أول مرة (الـ trigger لسه ما
+// اشتغلش)، getLastSync بيرجع لمسار fallback: يسحب الـ 22 شيت لايف (fetchAll
+// متوازي) وده ممكن ياخد وقت أطول من الطبيعي — بديت 60s وزودتها لـ 90s
+// كهامش أمان لحد ما أول Sync مركزي يحصل ويبقى القراية بعد كده مجرد فتح ملف
+// جاهز من Drive (سريع جدًا).
+const DATA_API_TIMEOUT_MS = 90000;
 // -------------------------------------------------------------------------
 // SEGMENTATION PANEL (Admin Panel) — نفس الحسبة اللي في شيت EGY بالظبط
 // (Target/Actual/Achievement% لشهر يوليو)، بس بتتقرأ لايف من شيت

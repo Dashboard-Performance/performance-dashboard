@@ -112,7 +112,7 @@ var BACKUP_KEEP_LAST_N = 30;
  *    GET <deployment URL>?action=listComputed&key=YOUR_KEY   (see what's published)
  * ============================================================================
  */
-var COMPUTED_API_KEYS = ["CHANGE_ME_TO_A_SECRET_KEY"]; // <-- replace before sharing this URL with anyone
+var COMPUTED_API_KEYS = ["Admin-Panal-Center"]; // <-- replace before sharing this URL with anyone
 var COMPUTED_SNAPSHOTS_FOLDER_ID = ""; // leave "" to auto-create/reuse, like BACKUP_FOLDER_ID above
 var COMPUTED_SNAPSHOTS_FOLDER_NAME = "Performance Dashboard Computed Snapshots";
 
