@@ -766,7 +766,13 @@ var LAST_SYNC_GIDS = [
   "897709273"    // WAREHOUSE_REPACK_GID
 ];
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
-var LAST_SYNC_FILE_NAME = "last_sync.json";
+// .json.gz مش .json — بنخزن نسخة مضغوطة (Utilities.gzip) بدل نص خام، لأن
+// createFile(name, content, mimeType)/setContent() بيقفوا على "File ... exceeds
+// the maximum file size" لملفات النص اللي فوق حوالي 10MB، وداتا الـ 22 شيت
+// دي بسهولة بتعدي كده خام. تخزين Blob مضغوط بيتفادى الحد ده تمامًا، وبيبقى
+// أصغر وأسرع في القراءة كمان — نفس فكرة الـ gzip اللي مستخدمة أصلاً في
+// backupSnapshotToDrive() على الفرونت اند.
+var LAST_SYNC_FILE_NAME = "last_sync.json.gz";
 var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
 
 // دي اللي بتتنادى من الـ Time-driven trigger (راجع الكومنت فوق للـ setup) —
@@ -776,13 +782,14 @@ function runScheduledSync() {
   var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
   var folder = getOrCreateLastSyncFolder_();
   var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+  var gzBlob = Utilities.gzip(Utilities.newBlob(content, "application/json", LAST_SYNC_FILE_NAME));
 
+  // مفيش setBytes() على DriveApp.File للملفات الـ binary — أسهل وأضمن طريقة
+  // هي نمسح أي نسخة قديمة (لو موجودة) وننشئ واحدة جديدة بدل ما نعدّل في مكانها.
   var existing = folder.getFilesByName(LAST_SYNC_FILE_NAME);
-  if (existing.hasNext()) {
-    existing.next().setContent(content);
-  } else {
-    folder.createFile(LAST_SYNC_FILE_NAME, content, MimeType.PLAIN_TEXT);
-  }
+  while (existing.hasNext()) { existing.next().setTrashed(true); }
+  folder.createFile(gzBlob);
+
   PropertiesService.getScriptProperties().setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
 }
 
@@ -791,7 +798,8 @@ function handleGetLastSync(e) {
     var folder = getOrCreateLastSyncFolder_();
     var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
     if (files.hasNext()) {
-      return ContentService.createTextOutput(files.next().getBlob().getDataAsString()).setMimeType(ContentService.MimeType.JSON);
+      var text = Utilities.ungzip(files.next().getBlob()).getDataAsString();
+      return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
     }
     // Fallback: لسه مفيش أي مزامنة مركزية اتسجلت (الـ trigger لسه ما اشتغلش
     // ولا مرة، أو تم حذف الملف) — بنرجع لجلب لايف عادي عشان الداشبورد يفضل
