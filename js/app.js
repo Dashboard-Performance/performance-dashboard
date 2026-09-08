@@ -12551,16 +12551,25 @@ async function loadData(isManualRefresh = false) {
     // فتح كل سكشن/تحميل، وده كان بيسبب 404s متقطعة (Failed to load resource)
     // على طلبات backup_chunk و publish_computed_batch. تسلسلهم بيقلل الذروة.
     //
-    // guard إضافي: لو loadData() اتنادت تاني (مثلاً بولينج المزامنة المركزية
-    // كل دقيقة، أو الريفريش الساعاتي) قبل ما دورة backup+publish اللي قبلها
-    // تخلص، مانبدأش دورة جديدة فوق القديمة — ده كان سبب رئيسي في الـ 404s:
-    // لو الدورتين اشتغلوا في نفس الوقت، بيبقى فيه ضعف عدد الطلبات المتزامنة
-    // على نفس الـ Apps Script deployment. الدورة الجديدة بتتأجل لحد ما القديمة
-    // تخلص بدل ما تتجاهل خالص، عشان آخر نسخة من الداتا برضه توصل للـ backup/API.
-    if (loadData._bgChainTail === undefined) loadData._bgChainTail = Promise.resolve();
-    loadData._bgChainTail = loadData._bgChainTail.then(() =>
-      backupSnapshotToDrive(snapshot).then(() => publishComputedSnapshots())
-    ).catch((e) => console.warn("[background publish chain] failed (non-fatal):", e && e.message));
+    // بطلب صريح: الداشبورد بقى تقيل — أكبر سبب إن backup+publish (حوالي 26
+    // طلب وحسابات كتير زي allocationLocking بـ 20 ألف صف) كانوا بيتعملوا في
+    // *كل* loadData()، حتى لو الداتا الجاية مطابقة تمامًا للي قبلها (مثلاً
+    // بولينج المزامنة المركزية بيعمل loadData(false) كل ما فيه تحديث، وده
+    // بقى كل ~15 دقيقة بدل مرة في الساعة زي الأول — يعني الحمل ده بقى أكتر
+    // من قبل). دلوقتي بيتعملوا بس لو الداتا فعلاً اتغيّرت (dataChanged) —
+    // مفيش أي فايدة نعمل backup/publish لنفس الأرقام اللي اتبعتت قبل كده.
+    if (dataChanged) {
+      // guard إضافي: لو loadData() اتنادت تاني (مثلاً بولينج المزامنة المركزية
+      // كل دقيقة، أو الريفريش الساعاتي) قبل ما دورة backup+publish اللي قبلها
+      // تخلص، مانبدأش دورة جديدة فوق القديمة — ده كان سبب رئيسي في الـ 404s:
+      // لو الدورتين اشتغلوا في نفس الوقت، بيبقى فيه ضعف عدد الطلبات المتزامنة
+      // على نفس الـ Apps Script deployment. الدورة الجديدة بتتأجل لحد ما القديمة
+      // تخلص بدل ما تتجاهل خالص، عشان آخر نسخة من الداتا برضه توصل للـ backup/API.
+      if (loadData._bgChainTail === undefined) loadData._bgChainTail = Promise.resolve();
+      loadData._bgChainTail = loadData._bgChainTail.then(() =>
+        backupSnapshotToDrive(snapshot).then(() => publishComputedSnapshots())
+      ).catch((e) => console.warn("[background publish chain] failed (non-fatal):", e && e.message));
+    }
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     // بنعرض توقيت المزامنة المركزية الجاي من السيرفر (snapshot.serverFetchedAt)
