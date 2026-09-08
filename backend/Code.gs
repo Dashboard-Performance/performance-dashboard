@@ -664,6 +664,8 @@ function pruneOldBackups(folder) {
 function doGet(e) {
   var action = e && e.parameter ? e.parameter.action : null;
   if (action === "getData") return handleGetData(e);
+  if (action === "getLastSync") return handleGetLastSync(e);
+  if (action === "getLastSyncMeta") return handleGetLastSyncMeta(e);
   if (action === "getComputed") return handleGetComputed(e);
   if (action === "listComputed") return handleListComputed(e);
   return jsonResponse({ success: false, message: "Unknown action." });
@@ -675,34 +677,144 @@ function handleGetData(e) {
     if (!gidsParam) return jsonResponse({ success: false, message: "No gids provided." });
 
     var requestedGids = gidsParam.split(",").map(function (g) { return g.trim(); }).filter(Boolean);
-
-    // بطلب صريح لتسريع المزامنة من غير ما نأثر على شكل الرد للـ frontend
-    // خالص: بنستخدم UrlFetchApp.fetchAll() عشان نجيب كل الشيتات الـ GIDs دي
-    // مرة واحدة بالتوازي (Parallel) بدل ما نلف عليهم واحد واحد بالتتابع
-    // (Sequential) زي ما كان قبل كده. الفرق الأساسي عن مشكلة الـ JSONP
-    // القديمة (اللي كانت بترمي "Timeout on GID" errors): ده تنفيذ متوازي من
-    // سيرفر Apps Script نفسه (server-to-server)، مش عشرات الطلبات من متصفح
-    // المستخدم مباشرة لـ docs.google.com — فمفيش نفس الـ rate limiting.
-    // fetchAll() لسه بيرجع نتيجة لكل request حتى لو بعضها فشل (بفضل
-    // muteHttpExceptions:true)، فمفيش خطر إن فشل شيت واحد يوقع الطلب كله.
-    var requests = requestedGids.map(function (gid) {
-      return {
-        url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
-        muteHttpExceptions: true,
-        followRedirects: true
-      };
-    });
-    var responses = UrlFetchApp.fetchAll(requests);
-
-    var result = {};
-    requestedGids.forEach(function (gid, i) {
-      result[gid] = parseGvizResponse(responses[i]);
-    });
-
-    return jsonResponse({ success: true, fetchedAt: new Date().toISOString(), sheets: result });
+    var payload = fetchSheetsPayload_(requestedGids);
+    return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
+}
+
+// بيجيب كل الـ GIDs المطلوبة بالتوازي (UrlFetchApp.fetchAll) ويرجّع
+// {fetchedAt, sheets} — استخدمها handleGetData (بطلب gids ديناميكي من
+// الفرونت اند) وبرضو runScheduledSync تحت (بقائمة GIDs ثابتة SYNC_GIDS)،
+// عشان الاتنين يستخدموا نفس منطق الجلب والتحويل بالظبط من غير تكرار كود.
+//
+// بطلب صريح لتسريع المزامنة من غير ما نأثر على شكل الرد للـ frontend خالص:
+// بنستخدم UrlFetchApp.fetchAll() عشان نجيب كل الشيتات الـ GIDs دي مرة واحدة
+// بالتوازي (Parallel) بدل ما نلف عليهم واحد واحد بالتتابع (Sequential) زي
+// ما كان قبل كده. الفرق الأساسي عن مشكلة الـ JSONP القديمة (اللي كانت
+// بترمي "Timeout on GID" errors): ده تنفيذ متوازي من سيرفر Apps Script
+// نفسه (server-to-server)، مش عشرات الطلبات من متصفح المستخدم مباشرة لـ
+// docs.google.com — فمفيش نفس الـ rate limiting. fetchAll() لسه بيرجع
+// نتيجة لكل request حتى لو بعضها فشل (بفضل muteHttpExceptions:true)، فمفيش
+// خطر إن فشل شيت واحد يوقع الطلب كله.
+function fetchSheetsPayload_(gids) {
+  var requests = gids.map(function (gid) {
+    return {
+      url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
+      muteHttpExceptions: true,
+      followRedirects: true
+    };
+  });
+  var responses = UrlFetchApp.fetchAll(requests);
+
+  var sheets = {};
+  gids.forEach(function (gid, i) {
+    sheets[gid] = parseGvizResponse(responses[i]);
+  });
+
+  return { fetchedAt: new Date().toISOString(), sheets: sheets };
+}
+
+/**
+ * ============================================================================
+ *  CENTRAL SCHEDULED SYNC — بطلب صريح: عشان كل المستخدمين يشوفوا نفس
+ *  الأرقام بالظبط في نفس اللحظة (مش كل واحد بيسحب الداتا لوحده وقت ما يفتح
+ *  هو بالذات)، السيرفر (مش المتصفح) هو اللي بيسحب كل الشيتات على معاد ثابت
+ *  (Time-driven trigger، كل 15 دقيقة بطلب صريح)، ويخزّن آخر نسخة في Drive.
+ *  كل المستخدمين بعد كده بس بيقروا نفس النسخة المخزّنة دي (action=getLastSync)
+ *  بدل ما كل واحد يعمل 22 gviz request لوحده — أسرع بكتير على المتصفح
+ *  (تحميل صغير من Drive بدل عشرات الـ requests)، ومفيش أي فرق بين شخصين
+ *  بيفتحوا الداشبورد في نفس اللحظة.
+ *
+ *  ⚠️ SETUP MANUAL مطلوب مرة واحدة بس (الكود لوحده مش كفاية): من داخل
+ *  محرر Apps Script (نفس المكان اللي بتلزق فيه الكود ده) → أيقونة الساعة
+ *  على الشمال (Triggers) → + Add Trigger → اختار function: runScheduledSync
+ *  → Select event source: Time-driven → Select type: Minutes timer → اختار
+ *  "Every 15 minutes" → Save. من غير الخطوة دي، runScheduledSync() مش
+ *  هيتنفذ لوحده أبدًا (كود Apps Script من غير trigger فعلي متسجل مبيشتغلش
+ *  تلقائي بس لمجرد إنه موجود في الملف).
+ *
+ *  لحد ما الـ trigger الأول يشتغل (أو لو فشل لأي سبب)، handleGetLastSync
+ *  تحت بترجع لجلب لايف عادي (fallback) بدل ما توقف الداشبورد.
+ * ============================================================================
+ */
+// نفس ترتيب وقيم ALL_SHEET_GIDS في js/app.js بالظبط (قيم حرفية عشان الملف
+// ده مستقل ومفيهوش أي اعتماد على متغيرات فرونت اند).
+var LAST_SYNC_GIDS = [
+  "2099497960",  // MAIN_GID
+  "115442405",   // TARGETS_GID
+  "891214324",   // SEGMENTATION_GID
+  "2042936628",  // TARGETS_ACM_GID
+  "1780730573",  // INVENTORY_GID
+  "1779314157",  // PRODUCTS_GID
+  "1656655269",  // CAT_TARGETS_GID
+  "892918900",   // ACM_SALES_PLAN_GID
+  "1304674893",  // NEW_SEGMENTATION_GID
+  "565878313",   // INBOUND_GID
+  "531154071",   // PRODUCTS_INFO_GID
+  "22283311",    // BEGIN_INV_GID
+  "548859670",   // SELLTHROUGH_NEEDED_GID
+  "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
+  "1620722565",  // SINGLE_SKU_TARGETS_GID
+  "1724469150",  // COGS_GID
+  "2085802038",  // AVAILABILITY_LOCKING_GID
+  String(PRODUCTS_MATCHES_GID), // 1298408207 — نفس المتغير المعرّف فوق في الملف
+  "461854229",   // MERCHANT_SKU_DAILY_GID
+  "620123165",   // MERCHANT_SEGMENTATION_GID
+  "1289659887",  // WEEKLY_INVENTORY_GID
+  "897709273"    // WAREHOUSE_REPACK_GID
+];
+var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
+var LAST_SYNC_FILE_NAME = "last_sync.json";
+var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
+
+// دي اللي بتتنادى من الـ Time-driven trigger (راجع الكومنت فوق للـ setup) —
+// مش بتترجع أي حاجة للمتصفح، بتشتغل في الخلفية على سيرفر جوجل بالكامل، فمش
+// ممكن "تهنج" الويب سايت خالص — مفيش أي متصفح مستخدم واقف مستني الفانكشن دي.
+function runScheduledSync() {
+  var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
+  var folder = getOrCreateLastSyncFolder_();
+  var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+
+  var existing = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+  if (existing.hasNext()) {
+    existing.next().setContent(content);
+  } else {
+    folder.createFile(LAST_SYNC_FILE_NAME, content, MimeType.PLAIN_TEXT);
+  }
+  PropertiesService.getScriptProperties().setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
+}
+
+function handleGetLastSync(e) {
+  try {
+    var folder = getOrCreateLastSyncFolder_();
+    var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+    if (files.hasNext()) {
+      return ContentService.createTextOutput(files.next().getBlob().getDataAsString()).setMimeType(ContentService.MimeType.JSON);
+    }
+    // Fallback: لسه مفيش أي مزامنة مركزية اتسجلت (الـ trigger لسه ما اشتغلش
+    // ولا مرة، أو تم حذف الملف) — بنرجع لجلب لايف عادي عشان الداشبورد يفضل
+    // شغال، بدل ما يوقف لحد ما الـ trigger يشتغل.
+    var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
+    return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+// رد صغير وسريع (مفيهوش أي داتا، بس التوقيت) — الفرونت اند بيسأل بيه كل
+// دقيقة عشان يعرف لو حصلت مزامنة مركزية جديدة من غير ما يضطر يحمّل كل
+// النسخة الكاملة (اللي ممكن تكون كذا ميجا) في كل تشييك.
+function handleGetLastSyncMeta(e) {
+  var fetchedAt = PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null;
+  return jsonResponse({ success: true, fetchedAt: fetchedAt });
+}
+
+function getOrCreateLastSyncFolder_() {
+  var existing = DriveApp.getFoldersByName(LAST_SYNC_FOLDER_NAME);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(LAST_SYNC_FOLDER_NAME);
 }
 
 // بيحوّل رد HTTP خام من gviz (زي اللي fetchAll() بيرجعه لكل request) لنفس

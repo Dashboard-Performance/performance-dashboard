@@ -141,7 +141,7 @@ const MERCHANT_SKU_DAILY_GID = "461854229";
 // Leave this empty ("") to keep the old per-sheet JSONP path as a fallback
 // — the app works either way, but JSONP is the one that was failing.
 // -------------------------------------------------------------------------
-const DATA_API_URL = "";
+const DATA_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
 // نفس رابط الـ Apps Script Web App الموجود في js/auth.js (CONFIG.API_URL) —
 // مستخدم هنا بس عشان يبعت فيدباك الـ Recommended Tracker (save_match_feedback)
 // لل backend، اللي بيكتبه لايف في شيت الماتشات (PRODUCTS_MATCHES_GID).
@@ -12226,17 +12226,31 @@ const ALL_SHEET_GIDS = [
   WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID
 ].filter(Boolean);
 
-// Single round trip to the Apps Script backend (backend/Code.gs doGet).
+// آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
+// فاتحين الداشبورد) — بيتحدث في كل fetchAllSheetsViaBackend() ناجحة، وبيتقرا
+// من setSyncStatus/loadData بدل Date.now() المحلي، عشان "Up to date" اللي
+// ظاهر لأي حد يبقى نفس التوقيت بالظبط عند أي حد تاني، مش وقت المتصفح بتاعه.
+let SERVER_LAST_FETCHED_AT = null;
+
+// Single round trip to the Apps Script backend (backend/Code.gs doGet) —
+// بطلب صريح: كل اليوزرز لازم يشوفوا نفس الأرقام بالظبط في نفس اللحظة، بدل ما
+// كل واحد يسحب الداتا لايف لوحده وقت ما يفتح الصفحة هو بالذات. فبدل
+// action=getData (اللي بيعمل 22 gviz request لايف كل مرة)، بنستخدم
+// action=getLastSync اللي بيرجّع آخر نسخة اتسحبت مركزيًا من السيرفر نفسه
+// (Time-driven trigger كل 15 دقيقة — راجع backend/Code.gs)، فكل اليوزرز
+// بيقروا نفس النسخة المخزّنة بالظبط. أسرع كمان (تحميل جاهز من Drive بدل
+// عشرات الـ gviz requests)، فمينفعش "يهنج" حاجة — أصلاً أخف من الطريقة القديمة.
 // Returns { [gid]: {table:{rows}} | null }, same shape loadSheetViaJsonp
 // used to resolve with, so parse*Sheet() below needs no changes.
 async function fetchAllSheetsViaBackend() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const url = `${DATA_API_URL}?action=getData&gids=${ALL_SHEET_GIDS.join(",")}`;
+    const url = `${DATA_API_URL}?action=getLastSync`;
     const res = await fetch(url, { method: "GET", signal: controller.signal });
     const json = await res.json();
-    if (!json.success) throw new Error(json.message || "Backend getData failed");
+    if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
+    if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
     return json.sheets;
   } finally {
     clearTimeout(timer);
@@ -12386,7 +12400,11 @@ async function fetchAllSheetsSnapshot() {
     merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
-    staleGids // sheets that failed every retry and are still showing old data
+    staleGids, // sheets that failed every retry and are still showing old data
+    // توقيت المزامنة المركزية من السيرفر (نفسه لكل اليوزرز) — لو مش موجود
+    // (مسار fallback القديم اللي بيسحب لايف من غير backend)، بنرجع Date.now()
+    // المحلي عشان الشاشة تعرض توقيت منطقي برضه.
+    serverFetchedAt: SERVER_LAST_FETCHED_AT || Date.now()
   };
 }
 
@@ -12524,19 +12542,31 @@ async function loadData(isManualRefresh = false) {
     applySnapshotToState(snapshot);
     await renderCurrentState();
     saveDataToCache(snapshot);
-    backupSnapshotToDrive(snapshot); // fire-and-forget; internally async (gzip), never awaited so it can't block the UI
-    publishComputedSnapshots(); // fire-and-forget — publishes the live computed tables for the external Computed Data API
+    // فire-and-forget بالنسبة لباقي loadData() (متستناش قبل ما تكمل)، لكن
+    // اتعمل sequence هنا (backup الأول وبعدين publish) بدل ما الاتنين يطلقوا
+    // POSTs على نفس Apps Script deployment في نفس اللحظة بالظبط — ده كان بيرفع
+    // عدد التنفيذات المتزامنة (concurrent executions) على نفس السكريبت لحظة
+    // فتح كل سكشن/تحميل، وده كان بيسبب 404s متقطعة (Failed to load resource)
+    // على طلبات backup_chunk و publish_computed_batch. تسلسلهم بيقلل الذروة.
+    (async () => {
+      await backupSnapshotToDrive(snapshot);
+      await publishComputedSnapshots();
+    })();
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
+    // بنعرض توقيت المزامنة المركزية الجاي من السيرفر (snapshot.serverFetchedAt)
+    // بدل Date.now() المحلي — عشان أي يوزر فاتح الداشبورد يشوف نفس التوقيت
+    // بالظبط اللي يوزر تاني شايفه في نفس اللحظة (مش وقت فتح كل متصفح لوحده).
+    const syncTs = snapshot.serverFetchedAt || Date.now();
     if (snapshot.staleGids && snapshot.staleGids.length > 0) {
       const names = snapshot.staleGids.map((gid) => GID_LABELS[gid] || gid).join(", ");
-      setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())} — ⚠ didn't refresh: ${names} (showing previous data for those)`);
+      setSyncStatus(`Live — updated ${formatCacheTimestamp(syncTs)} — ⚠ didn't refresh: ${names} (showing previous data for those)`);
       showToast();
     } else if (dataChanged) {
-      setSyncStatus(`Live — updated ${formatCacheTimestamp(Date.now())}`);
+      setSyncStatus(`Live — updated ${formatCacheTimestamp(syncTs)}`);
       showToast();
     } else {
-      setSyncStatus(`Up to date — ${formatCacheTimestamp(Date.now())}`);
+      setSyncStatus(`Up to date — ${formatCacheTimestamp(syncTs)}`);
     }
   } catch (error) {
     console.error("System Sync Error:", error);
@@ -12893,15 +12923,55 @@ function downloadTableAsCsv(tableEl, fileName) {
 }
 
 // -------------------------------------------------------------------------
-// AUTO REFRESH — كل ساعة، بس مش "كل ساعة من وقت ما الصفحة اتفتحت" (كل واحد
-// هيترفرش في وقت مختلف حسب امتى فتح التاب بتاعه). بدل كده بنحسب الوقت
-// المتبقي لحد أقرب "ساعة مضبوطة" على الساعة الحقيقية (Wall clock — زي
-// 3:00:00, 4:00:00...) ونعمل أول ريفريش بالظبط عليها، وبعدين كل ساعة ثابتة
-// من بعدها. طالما ساعة كل جهاز مضبوطة صح (النظام العادي)، كل اليوزرز اللي
-// فاتحين الداشبورد هيترفرشوا مع بعض في نفس الدقيقة بالظبط، بغض النظر إمتى
-// كل واحد فتح الصفحة هو نفسه. الريفريش نفسه بيستخدم loadData(false) —
-// يعني بصمت في الخلفية (مفيش سبينر/فلاش كامل للصفحة)، وبيبني على نفس منطق
-// "Live — updated" الموجود أصلاً لو الداتا فعلاً اتغيرت.
+// CENTRAL SYNC DETECTION — بطلب صريح: كل اليوزرز يشوفوا نفس الأرقام في نفس
+// اللحظة، من غير ما حد يستنى يعمل رفرش يدوي، ومن غير ما ده "يهنج" الموقع
+// خالص. السيرفر (Apps Script trigger، كل 15 دقيقة) هو اللي بيسحب الداتا
+// ويخزّنها مركزيًا — الفرونت اند هنا بس بيسأل كل دقيقة سؤال خفيف جدًا
+// (action=getLastSyncMeta: مجرد قراءة توقيت واحد مخزّن، مفيهوش أي gviz
+// requests ولا تحميل داتا) "فيه نسخة مركزية أحدث من اللي عندي؟"، ولو الإجابة
+// "أيوه" بيعمل loadData(false) بصمت في الخلفية (بدون سبينر ولا فلاش) —
+// اللي نفسها بقت خفيفة جدًا دلوقتي لأنها بتقرا نسخة جاهزة من Drive (getLastSync)
+// بدل ما تعمل 22 gviz request لايف زي الأول. مفيش أي حمل تقيل بيحصل جوه
+// المتصفح نفسه في أي مرحلة من المراحل دي.
+// كل دقيقة بولينج خفيف = مفيش أي فرصة يتأخر أي يوزر أكتر من دقيقة عن آخر
+// مزامنة مركزية اتعملت، من غير ما نحمّل السيرفر أو المتصفح بحاجة تقيلة.
+// -------------------------------------------------------------------------
+const LAST_SYNC_META_POLL_MS = 60 * 1000; // بيشيك كل دقيقة (طلب خفيف جدًا)
+let lastSyncMetaBaseline = null;
+let lastSyncMetaCheckInFlight = false;
+
+async function fetchLastSyncMeta() {
+  try {
+    const url = `${DATA_API_URL}?action=getLastSyncMeta`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const json = await res.json();
+    return (json && json.success) ? (json.fetchedAt || null) : null;
+  } catch (e) {
+    return null; // شبكة بطيئة/فشل مؤقت — نتجاهل ونجرب تاني بعد دقيقة
+  }
+}
+
+async function lastSyncMetaPollTick() {
+  if (!DATA_API_URL || lastSyncMetaCheckInFlight) return;
+  lastSyncMetaCheckInFlight = true;
+  try {
+    const current = await fetchLastSyncMeta();
+    if (!current) return; // لسه مفيش أي مزامنة مركزية اتسجلت (trigger لسه ما اشتغلش)
+    if (lastSyncMetaBaseline === null) { lastSyncMetaBaseline = current; return; } // أول تشييك — بس بنسجل الـ baseline
+    if (current !== lastSyncMetaBaseline) {
+      lastSyncMetaBaseline = current;
+      loadData(false); // مزامنة مركزية جديدة — نجيبها بصمت في الخلفية
+    }
+  } finally {
+    lastSyncMetaCheckInFlight = false;
+  }
+}
+
+// -------------------------------------------------------------------------
+// FALLBACK ساعة ثابتة — لو لأي سبب البولينج فوق فشل أو الـ trigger المركزي
+// اتأخر، برضه في ريفريش بصمت كل ساعة مضبوطة (Wall clock) كشبكة أمان، بنفس
+// منطق "كل اليوزرز يترفرشوا مع بعض" القديم. مش هيتعارض مع البولينج فوق —
+// أصلاً بقى خفيف جدًا دلوقتي (getLastSync بيقرا نسخة جاهزة من Drive).
 // -------------------------------------------------------------------------
 function scheduleAutoRefresh() {
   const now = new Date();
@@ -12918,3 +12988,4 @@ function scheduleAutoRefresh() {
 setupTicker();
 loadData(false);
 scheduleAutoRefresh();
+setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
