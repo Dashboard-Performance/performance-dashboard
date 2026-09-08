@@ -698,20 +698,41 @@ function handleGetData(e) {
 // docs.google.com — فمفيش نفس الـ rate limiting. fetchAll() لسه بيرجع
 // نتيجة لكل request حتى لو بعضها فشل (بفضل muteHttpExceptions:true)، فمفيش
 // خطر إن فشل شيت واحد يوقع الطلب كله.
+function gvizRequest_(gid) {
+  return {
+    url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
+    muteHttpExceptions: true,
+    followRedirects: true
+  };
+}
+
+// بطلب صريح بعد ما "Inventory & Products Performance" ظهر فيها SKU NAME
+// "Unknown" و STOCK صفر لمعظم الصفوف: لو أي شيت من الـ gviz فشل مرة واحدة
+// بس (rate limit/timeout مؤقت من جوجل، نادر لكن بيحصل)، مكناش بنعمل أي
+// retry هنا (على عكس المسار القديم اللي كان بيعمل loadSheetWithRetry لكل
+// شيت من المتصفح)، فالـ null بتاعه كان بيتسجل كأنه نتيجة نهائية. مع المزامنة
+// المركزية الجديدة، الفشل المؤقت ده بقى بيأثر على *كل* اليوزرز (مش يوزر واحد
+// بس زي زمان)، فبقى مهم أكتر إننا نعمل retry هنا. محاولة تانية بس للي فشل.
 function fetchSheetsPayload_(gids) {
-  var requests = gids.map(function (gid) {
-    return {
-      url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
-      muteHttpExceptions: true,
-      followRedirects: true
-    };
-  });
+  var requests = gids.map(gvizRequest_);
   var responses = UrlFetchApp.fetchAll(requests);
 
   var sheets = {};
+  var failedGids = [];
   gids.forEach(function (gid, i) {
-    sheets[gid] = parseGvizResponse(responses[i]);
+    var parsed = parseGvizResponse(responses[i]);
+    sheets[gid] = parsed;
+    if (parsed === null) failedGids.push(gid);
   });
+
+  if (failedGids.length) {
+    Utilities.sleep(1000); // فرصة صغيرة قبل المحاولة التانية لو كان rate limit مؤقت
+    var retryResponses = UrlFetchApp.fetchAll(failedGids.map(gvizRequest_));
+    failedGids.forEach(function (gid, i) {
+      var parsed = parseGvizResponse(retryResponses[i]);
+      if (parsed !== null) sheets[gid] = parsed;
+    });
+  }
 
   return { fetchedAt: new Date().toISOString(), sheets: sheets };
 }
@@ -781,6 +802,21 @@ var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
 function runScheduledSync() {
   var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
   var folder = getOrCreateLastSyncFolder_();
+
+  // لو أي شيت لسه null حتى بعد الـ retry جوه fetchSheetsPayload_ (فشل مرتين
+  // ورا بعض — نادر جدًا)، منسمحش إن الـ null ده يمسح آخر نسخة كويسة كانت
+  // متخزنة قبل كده لنفس الشيت — وإلا كل اليوزرز هيشوفوا "Unknown"/صفر لحد
+  // الدورة الجاية بعد 15 دقيقة. بدل كده بنحافظ على آخر نسخة معروفة صالحة لحد
+  // ما الشيت ده يرجع يشتغل تاني.
+  var previous = readLastSyncPayload_(folder);
+  if (previous && previous.sheets) {
+    LAST_SYNC_GIDS.forEach(function (gid) {
+      if (payload.sheets[gid] === null && previous.sheets[gid] != null) {
+        payload.sheets[gid] = previous.sheets[gid];
+      }
+    });
+  }
+
   var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
   // ⚠️ لازم تحدد الاسم صراحةً كـ باراميتر تاني هنا — Utilities.gzip(blob) من
   // غيره بيسمي الملف "archive.gz" تلقائيًا (بغض النظر عن اسم الـ blob الأصلي)،
@@ -798,6 +834,21 @@ function runScheduledSync() {
   folder.createFile(gzBlob);
 
   PropertiesService.getScriptProperties().setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
+}
+
+// بيقرا آخر نسخة مخزّنة في last_sync.json.gz لو موجودة، وبيرجع null لو
+// مفيش ملف أو الملف اتعطب لأي سبب — مستخدمة في runScheduledSync() (عشان
+// تحافظ على آخر قيمة معروفة لأي شيت يفشل مؤقتًا) وفي handleGetLastSync().
+function readLastSyncPayload_(folder) {
+  try {
+    var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+    if (!files.hasNext()) return null;
+    var text = Utilities.ungzip(files.next().getBlob()).getDataAsString();
+    var parsed = JSON.parse(text);
+    return (parsed && parsed.sheets) ? parsed : null;
+  } catch (err) {
+    return null; // ملف متعطب/مش JSON صالح — نتعامل معاه كإنه مش موجود
+  }
 }
 
 function handleGetLastSync(e) {
