@@ -5994,7 +5994,21 @@ function buildDebundleProductMap(debundleRows, cogsMap) {
   productMap.forEach(mappings => {
     let bundleCogsTotal = 0;
     mappings.forEach(m => { m.cogs = ((cogsMap && cogsMap.get(m.singleId)) || 0) * m.quantity; bundleCogsTotal += m.cogs; });
-    mappings.forEach(m => { m.cogsWeight = bundleCogsTotal > 0 ? (m.cogs / bundleCogsTotal) : 0; });
+    // لو مفيش بيانات COGS خالص لأي Single جوه البندل ده (bundleCogsTotal = 0،
+    // يعني كل الـ singles مالهاش سعر تكلفة مسجل)، كنا قبل كده بندي كل واحد
+    // فيهم وزن = 0 — ومعناها عمليًا إن الـ GMV/CM3/PPM بتاع البندل ده بيختفي
+    // بالكامل من كل حساب بيوزعه على الـ singles (بيتضرب في صفر)، من غير أي
+    // NaN أو تحذير يبان — خطأ صامت. بدل كده، لو bundleCogsTotal = 0 بنرجع
+    // نوزع بالكمية (Quantity) بدل COGS — نفس منطق التوزيع لكن بمقياس تاني
+    // متاح دايمًا (quantity افتراضيًا 1 لكل صف)، عشان مجموع الأوزان يفضل =1
+    // وميضيعش جزء من الـ GMV. لو الكميات نفسها كلها صفر (نادر جدًا)، بنوزع
+    // بالتساوي بين كل الـ singles جوه البندل.
+    const bundleQtyTotal = mappings.reduce((sum, m) => sum + (m.quantity || 0), 0);
+    mappings.forEach(m => {
+      if (bundleCogsTotal > 0) m.cogsWeight = m.cogs / bundleCogsTotal;
+      else if (bundleQtyTotal > 0) m.cogsWeight = (m.quantity || 0) / bundleQtyTotal;
+      else m.cogsWeight = 1 / mappings.length;
+    });
   });
   return { productMap, singlesList, stockBySingle };
 }
@@ -6040,6 +6054,20 @@ function computeCommercialDebundlized() {
   const elapsedDays = today.getDate() || 1;
   const currentMonthDays = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const daysUntilYesterday = Math.max(1, elapsedDays - 1);
+  // Delivered GMV (b.deliveredGmv تحت) بيتجمع بس من الصفوف اللي عدّت كات
+  // أوف الـ CM3 (CM3_LAG_DAYS = 5 أيام) — يعني الداتا "الناضجة" بتاعته
+  // بتوصل لحد "آخر يوم عدّى عليه 5 أيام" بس، مش لحد امبارح زي باقي
+  // المقاييس (Placed/Confirmed/Delivered Pieces). لو استخدمنا نفس
+  // daysUntilYesterday/elapsedDays بتوعهم في حساب الـ MTD Target والـ Run
+  // Rate بتوع الـ GMV، هيبقى المقام (عدد الأيام) أكبر من عدد الأيام اللي
+  // فعلاً موجود ليها داتا ناضجة، فالـ Achievement%/Run Rate هيظهروا أوطى
+  // من الحقيقة (خصوصًا أول الشهر). فبنحسب "أيام الـ GMV الناضجة" لوحدها =
+  // نفس الأيام اللي كات أوف الـ CM3 بيغطيها (elapsedDays - CM3_LAG_DAYS)،
+  // ونستخدمها هي بس (مش daysUntilYesterday/elapsedDays العاديين) لمقياس
+  // الـ GMV تحديدًا — عشان "يوم كامل" فعلاً يتقارن بـ "يوم كامل" من نفس
+  // نوع الداتا (ناضجة مقابل ناضجة)، مش "يوم كامل" مقابل داتا لسه بترنج.
+  const gmvMatureDays = Math.max(0, elapsedDays - CM3_LAG_DAYS);
+  const gmvRunRateDays = Math.max(1, gmvMatureDays);
 
   const buckets = new Map();
   function getBucket(id) {
@@ -6131,7 +6159,9 @@ function computeCommercialDebundlized() {
     const placedM = cdzBuildMetric(placedDailyTarget, b.mtdPlaced, daysUntilYesterday, elapsedDays, currentMonthDays);
     const confirmedM = cdzBuildMetric(confirmedDailyTarget, b.mtdConfirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
     const deliveredM = cdzBuildMetric(dlvPcsDailyTarget, b.mtdDelivered, daysUntilYesterday, elapsedDays, currentMonthDays);
-    const gmvM = cdzBuildMetric(dlvGmvDailyTarget, b.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
+    // Delivered GMV بيستخدم gmvMatureDays/gmvRunRateDays بدل daysUntilYesterday/
+    // elapsedDays العاديين — راجع تعليق gmvMatureDays فوق لسبب الفرق.
+    const gmvM = cdzBuildMetric(dlvGmvDailyTarget, b.deliveredGmv, gmvMatureDays, gmvRunRateDays, currentMonthDays);
 
     // Aliases (زي ما كانت قبل كده) عشان أي كود تاني أو ترتيب بيعتمد على
     // mtdTarget/mtdActual/mtdAchPct/runRate العام يفضل شغال — دول بيمثلوا
@@ -11788,7 +11818,7 @@ segDefRow({ id: "r5", section: "HVM (Champions)", label: "Demoted -", unit: "cou
 segDefRow({ id: "r6", section: "HVM (Champions)", label: "Demoted to loyal MVM", unit: "count", sub: true,
   target: () => 1, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r7", section: "HVM (Champions)", label: "Demoted to potential loyal MVM", unit: "count", sub: true,
-  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r8", section: "HVM (Champions)", label: "Demoted to LVM", unit: "count", sub: true,
   target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Demoted from champions to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r9", section: "HVM (Champions)", label: "Retained", unit: "count",
@@ -11805,13 +11835,15 @@ segDefRow({ id: "r12", section: "HVM (Champions)", label: "Promoted +", unit: "c
   actual: (ctx) => ctx.A("r13") + ctx.A("r14") + ctx.A("r15"),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r12"), ctx.T("r12")) }) });
 segDefRow({ id: "r13", section: "HVM (Champions)", label: "Promoted from loyal MVM", unit: "count", sub: true,
-  target: () => 6, actual: (ctx) => ctx.sum("count", { status: "promoted from loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "promoted from loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r14", section: "HVM (Champions)", label: "Promoted from potential loyal MVM", unit: "count", sub: true,
-  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "promoted from potential loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "promoted from potential loyals to champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r15", section: "HVM (Champions)", label: "Promoted from LVM", unit: "count", sub: true,
   target: () => 0, actual: (ctx) => ctx.sum("count", { status: "promoted from LVM to Champions" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r16", section: "HVM (Champions)", label: "Total merchants", unit: "count", top: true,
-  target: (ctx) => ctx.T("r3") + ctx.T("r10") + ctx.T("r11") + ctx.T("r12") - ctx.T("r4") - ctx.T("r5"),
+  // مطابق لصيغة الإكسيل الحقيقية (=U12+U11+U10+U9): Promoted+New+Re-activated+Retained
+  // — مش Last month+Re-activated+New+Promoted-Churned-Demoted زي ما كانت قبل كده.
+  target: (ctx) => ctx.T("r9") + ctx.T("r10") + ctx.T("r11") + ctx.T("r12"),
   actual: (ctx) => ctx.sum("count", { subSegment: "Champions" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r16"), ctx.T("r16")) }) });
 segDefRow({ id: "r18", section: "HVM (Champions)", label: "Total confirmed orders", unit: "count",
@@ -11824,19 +11856,19 @@ segDefRow({ id: "r20", section: "HVM (Champions)", label: "Confirmed GMV", unit:
   target: (ctx) => ctx.T("r18") * ctx.T("r21"), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Champions" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r20"), ctx.T("r20")) }) });
 segDefRow({ id: "r21", section: "HVM (Champions)", label: "Confirmed AOV", unit: "money",
-  target: () => 1020, actual: (ctx) => safeRatio(ctx.A("r20"), ctx.A("r18")) || 0,
+  target: () => 1000, actual: (ctx) => safeRatio(ctx.A("r20"), ctx.A("r18")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r21"), ctx.T("r21")) }) });
 segDefRow({ id: "r22", section: "HVM (Champions)", label: "Total Delivered orders", unit: "count",
   target: (ctx) => ctx.T("r18") * ctx.T("r23"), actual: (ctx) => ctx.sum("dlvOrders", { subSegment: "Champions" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r22"), ctx.T("r22")) }) });
 segDefRow({ id: "r23", section: "HVM (Champions)", label: "DR%", unit: "percent",
-  target: () => 0.5, actual: (ctx) => safeRatio(ctx.A("r22"), ctx.A("r18")) || 0,
+  target: () => 0.51, actual: (ctx) => safeRatio(ctx.A("r22"), ctx.A("r18")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r23"), ctx.T("r23")) }) });
 segDefRow({ id: "r24", section: "HVM (Champions)", label: "Delivered GMV", unit: "money",
   target: (ctx) => ctx.T("r22") * ctx.T("r25"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Champions" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r24"), ctx.T("r24")) }) });
 segDefRow({ id: "r25", section: "HVM (Champions)", label: "Delivered AOV", unit: "money",
-  target: () => 995, actual: (ctx) => safeRatio(ctx.A("r24"), ctx.A("r22")) || 0,
+  target: () => 992, actual: (ctx) => safeRatio(ctx.A("r24"), ctx.A("r22")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r25"), ctx.T("r25")) }) });
 
 // ---- Loyal MVM --------------------------------------------------------
@@ -11847,24 +11879,28 @@ segDefRow({ id: "r29", section: "Loyal MVM", label: "Churned -", unit: "count",
   target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Churned from loyals" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r29"), ctx.A("r29")) }) });
 segDefRow({ id: "r30", section: "Loyal MVM", label: "Demoted -", unit: "count",
-  target: (ctx) => ctx.T("r31") + ctx.T("r32") + ctx.T("r33"), actual: (ctx) => ctx.A("r31") + ctx.A("r32"),
+  // الإكسيل بيحط رقم ثابت هنا (5) مش مجموع الفرعيين (31+32+33) — التارجت
+  // المجمّع مش دايمًا مساوي لمجموع تارجتس الفروع في الشيت الأصلي.
+  target: () => 5, actual: (ctx) => ctx.A("r31") + ctx.A("r32"),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.T("r30"), ctx.A("r30")) }) });
 segDefRow({ id: "r31", section: "Loyal MVM", label: "Demoted to potential loyal MVM", unit: "count", sub: true,
   target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Demoted from loyals to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r32", section: "Loyal MVM", label: "Demoted to LVM", unit: "count", sub: true,
-  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Demoted from loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
+  target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Demoted from loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r33", section: "Loyal MVM", label: "Promoted to Champions -", unit: "count",
-  target: () => 6, actual: (ctx) => ctx.A("r13"), ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r33"), ctx.T("r33")) }) });
+  target: () => 2, actual: (ctx) => ctx.A("r13"), ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r33"), ctx.T("r33")) }) });
 segDefRow({ id: "r34", section: "Loyal MVM", label: "Retained", unit: "count",
-  target: () => 13, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  // مطابق لصيغة الإكسيل (=U28-U30-U33) بدل رقم ثابت — كده بيفضل صح تلقائيًا
+  // حتى لو "Last month merchants" (r28) اتغيرت الشهر الجاي.
+  target: (ctx) => ctx.T("r28") - ctx.T("r30") - ctx.T("r33"), actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r34"), ctx.T("r34")) }) });
 segDefRow({ id: "r35", section: "Loyal MVM", label: "Demoted from Champions +", unit: "count",
   target: () => 1, actual: (ctx) => ctx.A("r6"), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r36", section: "Loyal MVM", label: "Re-activated +", unit: "count",
-  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  target: () => 0, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r36"), ctx.T("r36")) }) });
 segDefRow({ id: "r37", section: "Loyal MVM", label: "New +", unit: "count",
-  target: () => 6, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  target: () => 5, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r37"), ctx.T("r37")) }) });
 segDefRow({ id: "r38", section: "Loyal MVM", label: "Promoted +", unit: "count",
   target: (ctx) => ctx.T("r39") + ctx.T("r40"), actual: (ctx) => ctx.A("r39") + ctx.A("r40"),
@@ -11878,16 +11914,16 @@ segDefRow({ id: "r41", section: "Loyal MVM", label: "Total merchants", unit: "co
   actual: (ctx, m) => ctx.sum("count", { subSegment: "Loyal" }, m || SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r41"), ctx.T("r41")) }) });
 segDefRow({ id: "r43", section: "Loyal MVM", label: "Total confirmed orders", unit: "count",
-  target: (ctx) => ctx.T("r41") * 606, actual: (ctx) => ctx.sum("orders", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
+  target: (ctx) => ctx.T("r41") * ctx.T("r44"), actual: (ctx) => ctx.sum("orders", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r43"), ctx.T("r43")) }) });
 segDefRow({ id: "r44", section: "Loyal MVM", label: "Confirmed orders per merchant", unit: "count",
-  target: () => 636.41, actual: (ctx) => safeRatio(ctx.A("r43"), ctx.A("r41")) || 0,
+  target: () => 540, actual: (ctx) => safeRatio(ctx.A("r43"), ctx.A("r41")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r44"), ctx.T("r44")) }) });
 segDefRow({ id: "r45", section: "Loyal MVM", label: "Confirmed GMV", unit: "money",
   target: (ctx) => ctx.T("r43") * ctx.T("r46"), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r45"), ctx.T("r45")) }) });
 segDefRow({ id: "r46", section: "Loyal MVM", label: "Confirmed AOV", unit: "money",
-  target: () => 867.10, actual: (ctx) => safeRatio(ctx.A("r45"), ctx.A("r43")) || 0,
+  target: () => 887.6049693, actual: (ctx) => safeRatio(ctx.A("r45"), ctx.A("r43")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r46"), ctx.T("r46")) }) });
 segDefRow({ id: "r47", section: "Loyal MVM", label: "Total Delivered orders", unit: "count",
   target: (ctx) => ctx.T("r43") * ctx.T("r48"), actual: (ctx) => ctx.sum("dlvOrders", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
@@ -11899,7 +11935,7 @@ segDefRow({ id: "r49", section: "Loyal MVM", label: "Delivered GMV", unit: "mone
   target: (ctx) => ctx.T("r47") * ctx.T("r50"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r49"), ctx.T("r49")) }) });
 segDefRow({ id: "r50", section: "Loyal MVM", label: "Delivered AOV", unit: "money",
-  target: () => 830, actual: (ctx) => safeRatio(ctx.A("r49"), ctx.A("r47")) || 0,
+  target: () => 740, actual: (ctx) => safeRatio(ctx.A("r49"), ctx.A("r47")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r50"), ctx.T("r50")) }) });
 
 // ---- Potential Loyal MVM ------------------------------------------------
@@ -11907,17 +11943,18 @@ segDefRow({ id: "r53", section: "Potential Loyal MVM", label: "Last month mercha
   target: (ctx) => ctx.A("r66", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("count", { subSegment: "Potential Loyal" }, SEG_PANEL_PREV_MONTH),
   ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r54", section: "Potential Loyal MVM", label: "Churned -", unit: "count",
-  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "Churned from potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
+  target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Churned from potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
 segDefRow({ id: "r55", section: "Potential Loyal MVM", label: "Demoted -", unit: "count",
-  target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Demoted from potential loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
+  target: () => 4, actual: (ctx) => ctx.sum("count", { status: "Demoted from potential loyals to LVM" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
 segDefRow({ id: "r56", section: "Potential Loyal MVM", label: "Promoted to higher segments -", unit: "count",
   target: (ctx) => ctx.T("r57") + ctx.T("r58"), actual: (ctx) => ctx.A("r57") + ctx.A("r58"), ach: () => ({ kind: "literal", ratio: 0 }) });
 segDefRow({ id: "r57", section: "Potential Loyal MVM", label: "Promoted to Champions", unit: "count", sub: true,
-  target: () => 0, actual: (ctx) => ctx.A("r14"), ach: () => ({ kind: "dash" }) });
+  target: () => 1, actual: (ctx) => ctx.A("r14"), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r58", section: "Potential Loyal MVM", label: "Promoted to Loyal MVM", unit: "count", sub: true,
-  target: () => 6, actual: (ctx) => ctx.A("r39"), ach: () => ({ kind: "dash" }) });
+  target: () => 5, actual: (ctx) => ctx.A("r39"), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r59", section: "Potential Loyal MVM", label: "Retained", unit: "count",
-  target: () => 5, actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  // مطابق لصيغة الإكسيل (=U53-U54-U55-U56).
+  target: (ctx) => ctx.T("r53") - ctx.T("r54") - ctx.T("r55") - ctx.T("r56"), actual: (ctx) => ctx.sum("count", { status: "Retained", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r59"), ctx.T("r59")) }) });
 segDefRow({ id: "r60", section: "Potential Loyal MVM", label: "Demoted from higher segments +", unit: "count",
   target: () => 3, actual: (ctx) => ctx.A("r61") + ctx.A("r62"), ach: () => ({ kind: "dash" }) });
@@ -11928,7 +11965,7 @@ segDefRow({ id: "r62", section: "Potential Loyal MVM", label: "Demoted from Loya
 segDefRow({ id: "r63", section: "Potential Loyal MVM", label: "Re-activated +", unit: "count",
   target: () => 3, actual: (ctx) => ctx.sum("count", { status: "Re-activated", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
 segDefRow({ id: "r64", section: "Potential Loyal MVM", label: "New +", unit: "count",
-  target: () => 1, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
+  target: () => 2, actual: (ctx) => ctx.sum("count", { status: "New merchant", subSegment: "Potential Loyal" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 1 }) });
 segDefRow({ id: "r65", section: "Potential Loyal MVM", label: "Promoted +", unit: "count",
   target: () => 2, actual: (ctx) => ctx.sum("count", { status: "promoted from LVM to potential loyals" }, SEG_PANEL_MONTH), ach: () => ({ kind: "literal", ratio: 0 }) });
 segDefRow({ id: "r66", section: "Potential Loyal MVM", label: "Total merchants", unit: "count", top: true,
@@ -11939,10 +11976,13 @@ segDefRow({ id: "r68", section: "Potential Loyal MVM", label: "Total confirmed o
   target: (ctx) => ctx.T("r69") * ctx.T("r66"), actual: (ctx) => ctx.sum("orders", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r68"), ctx.T("r68")) }) });
 segDefRow({ id: "r69", section: "Potential Loyal MVM", label: "Confirmed orders per merchant", unit: "count",
-  target: () => 227.29, actual: (ctx) => safeRatio(ctx.A("r68"), ctx.A("r66")) || 0,
+  target: () => 203.0769231, actual: (ctx) => safeRatio(ctx.A("r68"), ctx.A("r66")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r69"), ctx.T("r69")) }) });
 segDefRow({ id: "r70", section: "Potential Loyal MVM", label: "Confirmed GMV", unit: "money",
-  target: (ctx) => ctx.T("r68") * ctx.A("r71", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
+  // مطابق لصيغة الإكسيل (=U68*S71): بيضرب في الـ AOV الفعلي المرجعي (S71،
+  // آخر AOV حقيقي مسجل) لا في actual r71 بتاعنا للشهر اللي فات (اللي كان
+  // بيدي رقم مختلف تمامًا عن الإكسيل).
+  target: (ctx) => ctx.T("r68") * 824.6859848, actual: (ctx) => ctx.sum("cnfGmv", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r70"), ctx.T("r70")) }) });
 segDefRow({ id: "r71", section: "Potential Loyal MVM", label: "Confirmed AOV", unit: "money",
   target: (ctx) => safeRatio(ctx.T("r70"), ctx.T("r68")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r70", m), ctx.A("r68", m)) || 0,
@@ -11957,7 +11997,7 @@ segDefRow({ id: "r74", section: "Potential Loyal MVM", label: "Delivered GMV", u
   target: (ctx) => ctx.T("r72") * ctx.T("r75"), actual: (ctx) => ctx.sum("dlvGmv", { subSegment: "Potential Loyal" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r74"), ctx.T("r74")) }) });
 segDefRow({ id: "r75", section: "Potential Loyal MVM", label: "Delivered AOV", unit: "money",
-  target: () => 1036, actual: (ctx) => safeRatio(ctx.A("r74"), ctx.A("r72")) || 0,
+  target: () => 600, actual: (ctx) => safeRatio(ctx.A("r74"), ctx.A("r72")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r75"), ctx.T("r75")) }) });
 
 // ---- LVM (Low Value / Occasional / Promising) --------------------------
@@ -11965,7 +12005,7 @@ segDefRow({ id: "r75", section: "Potential Loyal MVM", label: "Delivered AOV", u
 // ثابت واحد (Total merchants بتاع شهر أبريل) — بالظبط زي خلية $I$78 في شيت
 // الإكسيل الأصلي (مرجع ثابت مش بيتغير مع الشهر).
 segDefRow({ id: "r78", section: "LVM", label: "Last month merchants", unit: "count", top: true,
-  target: () => 521, actual: (ctx) => ctx.A("r79") + ctx.A("r80") + ctx.A("r81"), ach: () => ({ kind: "dash" }) });
+  target: () => 505, actual: (ctx) => ctx.A("r79") + ctx.A("r80") + ctx.A("r81"), ach: () => ({ kind: "dash" }) });
 segDefRow({ id: "r79", section: "LVM", label: "LVM (Low Value)", unit: "count", sub: true,
   target: () => 291, actual: (ctx) => ctx.sum("count", { subSegment: "Low Value" }, SEG_PANEL_PREV_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r79"), ctx.lvmBase()) }) });
@@ -12041,7 +12081,8 @@ segDefRow({ id: "r103", section: "LVM", label: "Confirmed orders per merchant", 
   target: () => 10, actual: (ctx) => safeRatio(ctx.A("r102"), ctx.A("r97")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r103"), ctx.T("r103")) }) });
 segDefRow({ id: "r104", section: "LVM", label: "Confirmed GMV", unit: "money",
-  target: (ctx) => ctx.T("r102") * ctx.A("r105", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("cnfGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
+  // مطابق لصيغة الإكسيل (=U102*S105) — راجع تعليق r70 لنفس السبب.
+  target: (ctx) => ctx.T("r102") * 963.3729839, actual: (ctx) => ctx.sum("cnfGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r104"), ctx.T("r104")) }) });
 segDefRow({ id: "r105", section: "LVM", label: "Confirmed AOV", unit: "money",
   target: (ctx) => safeRatio(ctx.T("r104"), ctx.T("r102")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r104", m), ctx.A("r102", m)) || 0,
@@ -12050,10 +12091,11 @@ segDefRow({ id: "r106", section: "LVM", label: "Total Delivered orders", unit: "
   target: (ctx) => ctx.T("r102") * ctx.T("r107"), actual: (ctx) => ctx.sum("dlvOrders", { segment: "LVM" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r106"), ctx.T("r106")) }) });
 segDefRow({ id: "r107", section: "LVM", label: "DR%", unit: "percent",
-  target: () => 0.48, actual: (ctx) => safeRatio(ctx.A("r106"), ctx.A("r102")) || 0,
+  target: () => 0.46, actual: (ctx) => safeRatio(ctx.A("r106"), ctx.A("r102")) || 0,
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r107"), ctx.T("r107")) }) });
 segDefRow({ id: "r108", section: "LVM", label: "Delivered GMV", unit: "money",
-  target: (ctx) => ctx.T("r106") * ctx.A("r109", SEG_PANEL_PREV_MONTH), actual: (ctx) => ctx.sum("dlvGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
+  // مطابق لصيغة الإكسيل (=U106*S109) — راجع تعليق r70 لنفس السبب.
+  target: (ctx) => ctx.T("r106") * 855.8784757, actual: (ctx) => ctx.sum("dlvGmv", { segment: "LVM" }, SEG_PANEL_MONTH),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r108"), ctx.T("r108")) }) });
 segDefRow({ id: "r109", section: "LVM", label: "Delivered AOV", unit: "money",
   target: (ctx) => safeRatio(ctx.T("r108"), ctx.T("r106")) || 0, actual: (ctx, m) => safeRatio(ctx.A("r108", m), ctx.A("r106", m)) || 0,
