@@ -676,9 +676,27 @@ function handleGetData(e) {
 
     var requestedGids = gidsParam.split(",").map(function (g) { return g.trim(); }).filter(Boolean);
 
+    // بطلب صريح لتسريع المزامنة من غير ما نأثر على شكل الرد للـ frontend
+    // خالص: بنستخدم UrlFetchApp.fetchAll() عشان نجيب كل الشيتات الـ GIDs دي
+    // مرة واحدة بالتوازي (Parallel) بدل ما نلف عليهم واحد واحد بالتتابع
+    // (Sequential) زي ما كان قبل كده. الفرق الأساسي عن مشكلة الـ JSONP
+    // القديمة (اللي كانت بترمي "Timeout on GID" errors): ده تنفيذ متوازي من
+    // سيرفر Apps Script نفسه (server-to-server)، مش عشرات الطلبات من متصفح
+    // المستخدم مباشرة لـ docs.google.com — فمفيش نفس الـ rate limiting.
+    // fetchAll() لسه بيرجع نتيجة لكل request حتى لو بعضها فشل (بفضل
+    // muteHttpExceptions:true)، فمفيش خطر إن فشل شيت واحد يوقع الطلب كله.
+    var requests = requestedGids.map(function (gid) {
+      return {
+        url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
+        muteHttpExceptions: true,
+        followRedirects: true
+      };
+    });
+    var responses = UrlFetchApp.fetchAll(requests);
+
     var result = {};
-    requestedGids.forEach(function (gid) {
-      result[gid] = fetchGvizTable(gid);
+    requestedGids.forEach(function (gid, i) {
+      result[gid] = parseGvizResponse(responses[i]);
     });
 
     return jsonResponse({ success: true, fetchedAt: new Date().toISOString(), sheets: result });
@@ -687,22 +705,18 @@ function handleGetData(e) {
   }
 }
 
-// Fetches ONE sheet's data from Google's own gviz endpoint — same endpoint
-// the old client-side JSONP calls used — but from the Apps Script server,
-// one GID at a time (sequential, inside this single forEach loop above),
-// so it never competes with 13 other simultaneous requests the way the
-// browser did. This is both faster AND avoids the rate limiting that
-// caused the original "Timeout on GID: ..." errors.
+// بيحوّل رد HTTP خام من gviz (زي اللي fetchAll() بيرجعه لكل request) لنفس
+// شكل الـ { table: { cols, rows } } اللي parse*Sheet() في app.js متعودة
+// عليه — نفس بالظبط اللي كان بيحصل جوه fetchGvizTable() القديمة، بس هنا
+// بياخد الـ response جاهز بدل ما يعمل fetch لوحده (عشان يتوافق مع
+// fetchAll()).
 //
 // (SpreadsheetApp.getDataRange().getValues() was tried first, but forces a
 // full formula recalculation of the sheet on every call, which is why it
 // was slow/hanging on the large MAIN sheet — gviz reads Google's already
 // -computed cache instead, which is why it's fast even for big sheets.)
-function fetchGvizTable(gid) {
-  var url = "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID +
-    "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json";
-  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
-  if (res.getResponseCode() !== 200) return null;
+function parseGvizResponse(res) {
+  if (!res || res.getResponseCode() !== 200) return null;
 
   var text = res.getContentText();
   var match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
