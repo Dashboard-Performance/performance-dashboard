@@ -6582,6 +6582,10 @@ function buildPurchasePlanEligibility() {
   return { isBundleByProductId, singlesInBundles };
 }
 
+// Purchase Plan: عدد أيام الـ DOH المستهدف اللي Qty To Buy المفروض تغطيه
+// (بناءً على Avg 3D) — لو حبيت تغيّره لعدد أيام تاني غير 10، غيّره هنا بس.
+const PURCHASE_PLAN_TARGET_DOH_DAYS = 10;
+
 function computePurchasePlanData() {
   const cdz = computeCommercialDebundlized();
   const repackMap = state.repackMap || new Map();
@@ -6610,19 +6614,30 @@ function computePurchasePlanData() {
     const repackQty = repackMap.get(m.singleId) || 0;
     const available = beginStock + repackQty + returnsPcs;
     const cost = cogsMap.get(m.singleId) || 0;
-    const qtyToBuy = Math.max(0, Math.round(needPcs - deliveredPcs - available));
-    const purchaseValue = qtyToBuy * cost;
     // DOH هنا بيستخدم confidentReturns3d (اللي هيتحدد فعليًا خلال 3 أيام)
     // بدل الـ Returns الكامل (5 أيام) بطلب صريح — "الريتيرن اللي متأكد
     // منه" بس، عشان الرقم يبقى محافظ (Conservative) مش متفائل زيادة.
     const dohStockBase = beginStock + repackQty + (confidentReturns3d || 0);
     const doh = avg3d > 0 ? Math.round(dohStockBase / avg3d) : Math.round(dohStockBase);
+    // Qty To Buy — بطلب صريح بقت مبنية على تغطية 10 أيام DOH (مش على Need
+    // Pcs بتاع البلان زي قبل كده): بنحسب كام قطعة لازم تتضاف لنفس أساس الـ
+    // DOH (dohStockBase) عشان تغطي 10 أيام بمعدل Avg 3D. لو الأساس الحالي
+    // أصلاً بيغطي 10 أيام أو أكتر، مفيش داعي تشتري (صفر). PURCHASE_PLAN_TARGET_DOH_DAYS
+    // ثابتة تحت عشان لو حبيت تغيّر عدد الأيام المستهدف يوم من الأيام.
+    const targetCoverPcs = PURCHASE_PLAN_TARGET_DOH_DAYS * avg3d;
+    const qtyToBuy = Math.max(0, Math.round(targetCoverPcs - dohStockBase));
+    const purchaseValue = qtyToBuy * cost;
+    // DOH After Qty Buy — الـ DOH المتوقع بعد الشراء (نفس أساس DOH + الكمية
+    // المشتراة، مقسومة على Avg 3D): بالتصميم هتساوي 10 بالظبط لو فعلاً
+    // اشتريت (qtyToBuy > 0)، أو تفضل زي الـ DOH الحالي لو أصلاً مغطي 10 يوم
+    // أو أكتر من غير شراء.
+    const dohAfterQtyBuy = avg3d > 0 ? Math.round((dohStockBase + qtyToBuy) / avg3d) : Math.round(dohStockBase + qtyToBuy);
 
     return {
       singleId: m.singleId, singleName: m.singleName, category: m.category,
       hasTarget: m.hasTarget, needPcs, deliveredPcs, returnsPcs,
       beginStock, repackQty, available, cost, qtyToBuy, purchaseValue,
-      avg3d, doh, crPct, drPct
+      avg3d, doh, dohAfterQtyBuy, crPct, drPct
     };
   });
 
@@ -6686,6 +6701,7 @@ function renderPaginatedPurchasePlanTable() {
       <td class="num font-bold text-green">${fmtMoneyCompactCell(m.purchaseValue)}</td>
       <td class="num text-dim">${fmtIntCell(m.avg3d)}</td>
       <td class="num font-bold text-dim">${fmtIntCell(m.doh)}</td>
+      <td class="num font-bold text-blue">${fmtIntCell(m.dohAfterQtyBuy)}</td>
     `;
     frag.appendChild(tr);
   });

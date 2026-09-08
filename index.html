@@ -903,10 +903,11 @@
                       <th onclick="sortPurchasePlan('repackQty')" class="num" style="cursor:pointer;" title="Damaged-box pieces for this SKU from the WareHouse sheet (Condition = &quot;Damaged BOX&quot;), summed from TOTAL_COUNT — treated as recoverable stock.">Repack</th>
                       <th onclick="sortPurchasePlan('available')" class="num" style="cursor:pointer;" title="Available = Begin Stock + Repack + Returns.">Available</th>
                       <th onclick="sortPurchasePlan('cost')" class="num" style="cursor:pointer;" title="Cost per piece, from the COGS sheet.">Cost</th>
-                      <th onclick="sortPurchasePlan('qtyToBuy')" class="num" style="cursor:pointer;" title="Qty To Buy = MAX(0, Need Pcs − Delivered Pcs − Available). Zero means what's already delivered plus what's available covers this month's need.">Qty To Buy</th>
+                      <th onclick="sortPurchasePlan('qtyToBuy')" class="num" style="cursor:pointer;" title="Qty To Buy = MAX(0, (10 × Avg 3D) − (Begin Stock + Repack + the portion of Returns you can be confident will actually come back within the next 3 days)). Sized to bring stock on hand up to 10 days of cover at the Avg 3D pace — zero means you're already covered for 10+ days.">Qty To Buy</th>
                       <th onclick="sortPurchasePlan('purchaseValue')" class="num" style="cursor:pointer;" title="Purchase Value = Qty To Buy × Cost.">Purchase Value</th>
                       <th onclick="sortPurchasePlan('avg3d')" class="num" style="cursor:pointer;" title="Overall Single SKU average confirmed pieces over the last 3 days, excluding today — includes demand pulled in from any bundle this Single is a component of.">Avg 3D</th>
                       <th onclick="sortPurchasePlan('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand = (Begin Stock + Repack + the portion of Returns you can be confident will actually come back within the next 3 days) ÷ Avg 3D (Overall Single SKU).">DOH</th>
+                      <th onclick="sortPurchasePlan('dohAfterQtyBuy')" class="num" style="cursor:pointer;" title="Days of stock on hand after buying Qty To Buy = (DOH stock base + Qty To Buy) ÷ Avg 3D. By design this lands on 10 days whenever Qty To Buy > 0 — stays equal to DOH when no purchase is needed.">DOH After Qty Buy</th>
                     </tr>
                   </thead>
                   <tbody id="purchasePlanTableBody"></tbody>
