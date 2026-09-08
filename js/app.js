@@ -9748,7 +9748,7 @@ function renderWeeklyInventoryTable() {
     const isExpanded = !!(state.weeklyInvExpandedSkus && state.weeklyInvExpandedSkus.has(r.sku));
     return `
     <tr>
-      <td class="font-mono text-dim" style="cursor:pointer;user-select:none;" title="Click to show/hide the bundles that contain this Single SKU." onclick="wiToggleSkuExpand('${escapeHtml(r.sku).replace(/'/g, "\\'")}')">${isExpanded ? "▾" : "▸"} ${escapeHtml(r.sku)}</td>
+      <td class="font-mono text-dim" style="cursor:pointer;user-select:none;" title="Click to show/hide the bundles that contain this Single SKU." onclick="wiToggleSkuExpand('${escapeHtml(r.sku).replace(/'/g, "\\'")}')">${wrapRawCell(0, `${isExpanded ? "▾" : "▸"} ${escapeHtml(r.sku)}`, r.sku)}</td>
       <td class="font-bold text-light truncate-cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
       <td class="text-dim truncate-cell" style="max-width:110px;" title="${escapeHtml(r.category)}">${escapeHtml(r.category)}</td>
       <td><span class="badge-outline ${r.availability === 'Out of Stock' ? 'red' : 'blue'}">${escapeHtml(r.availability)}</span></td>
@@ -12845,7 +12845,11 @@ function downloadTableAsCsv(tableEl, fileName) {
     // صفوف البيانات: من الـ tbody لو موجود (الحالة العادية في كل جداولنا)،
     // وإلا (نادرًا، جدول من غير thead/tbody صريحين) بنرجع لكل الصفوف زي
     // ما كانت الطريقة القديمة، عشان مفيش جدول يفضل من غير داونلود خالص.
-    const bodyRows = tbody ? Array.from(tbody.querySelectorAll("tr")) : (thead ? [] : Array.from(tableEl.querySelectorAll("tr")));
+    // صفوف الـ Bundle Expand بتاعة Weekly Inventory (لما تدوس على سهم الـ SKU
+    // بيفتحلك تحتها جدول فرعي بالبندلز) بتتشال من الداونلود — دي مش صف "Single
+    // SKU" حقيقي، وجواها جدول متداخل تاني هيلخبط أعمدة الـ CSV لو اتضم معاها.
+    const bodyRows = (tbody ? Array.from(tbody.querySelectorAll("tr")) : (thead ? [] : Array.from(tableEl.querySelectorAll("tr"))))
+        .filter(tr => !tr.classList.contains("wi-bundle-expand-row"));
     bodyRows.forEach(tr => {
         const cells = Array.from(tr.querySelectorAll("td, th"));
         const row = cells.map(cellExportValue);
