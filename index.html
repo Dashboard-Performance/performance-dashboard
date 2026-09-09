@@ -2072,8 +2072,14 @@
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
-                  <h2>Poor Matches</h2>
-                  <p>Bad matches only, ranked by Impact Pieces — Merchant × SKU combos dragging NDR% down vs their Sub-Category</p>
+                  <h2 id="poorMatchesTitle">Poor Matches</h2>
+                  <p id="poorMatchesDesc">Bad matches only, ranked by Impact Pieces — Merchant × SKU combos dragging NDR% down vs their Sub-Category</p>
+                </div>
+                <div class="table-controls">
+                  <div class="filter-group" role="tablist" aria-label="Show Bad or Good matches">
+                    <button type="button" id="pmToggleBad" class="segmented-btn active" data-pm-mode="bad" title="Matches more than 3pts below their Sub-Category benchmark.">Bad Matches</button>
+                    <button type="button" id="pmToggleGood" class="segmented-btn" data-pm-mode="good" title="Matches at or above their Sub-Category benchmark.">Good Matches</button>
+                  </div>
                 </div>
                 <div class="table-controls">
                   <div class="filter-group section-date-filter" data-section-date="poorMatches" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
@@ -2101,8 +2107,8 @@
                       <th onclick="sortPoorMatches('placed')" class="num" style="cursor:pointer;" title="Total pieces placed by this merchant × SKU, rows within 5 days of the latest data only.">Placed Pieces</th>
                       <th onclick="sortPoorMatches('ndrPct')" class="num" style="cursor:pointer;" title="This match's own Delivered ÷ Placed, 5-day cutoff.">NDR%</th>
                       <th onclick="sortPoorMatches('ndrBenchmark')" class="num" style="cursor:pointer;" title="NDR% of every other match in the same sub-category (this match excluded), 5-day cutoff.">Benchmark NDR%</th>
-                      <th onclick="sortPoorMatches('impactPieces')" class="num" style="cursor:pointer;" title="Placed Pieces × (Benchmark NDR% − own NDR%) — extra pieces that would've delivered at the sub-category's rate.">Impact Pieces</th>
-                      <th class="center" title="Always &quot;Bad&quot; here — this table only lists matches more than 3 points below benchmark.">Status</th>
+                      <th id="thPoorMatchesImpact" onclick="sortPoorMatches(poorMatchesState.viewMode === 'good' ? 'goodImpactPieces' : 'impactPieces')" class="num" style="cursor:pointer;" title="Placed Pieces × (Benchmark NDR% − own NDR%) — extra pieces that would've delivered at the sub-category's rate.">Impact Pieces</th>
+                      <th id="thPoorMatchesStatus" class="center" title="Always &quot;Bad&quot; here — this table only lists matches more than 3 points below benchmark.">Status</th>
                     </tr>
                   </thead>
                   <tbody id="poorMatchesTableBody"></tbody>

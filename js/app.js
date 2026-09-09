@@ -307,7 +307,8 @@ const mpNewMatchesState = {
 // ماتشات (Merchant × SKU) أداؤها في الـ NDR% أقل بشكل ملحوظ من باقي نفس
 // الساب-كاتيجوري بتاعتها، وبالتالي مسؤولة عن جزء من الـ "Missed Deliveries".
 const poorMatchesState = {
-  data: [], filtered: [], sortKey: "impactPieces", sortDir: "desc", page: 0, summary: null
+  data: [], filtered: [], sortKey: "impactPieces", sortDir: "desc", page: 0, summary: null,
+  viewMode: "bad" // "bad" | "good" — بطلب صريح: عرض الـ Good Matches كمان جنب الـ Bad
 };
 // Availability Locking (تحت Poor Matches): جدول تفصيلي على مستوى كل قفل
 // (Merchant × SKU) على حدة — الملخص على مستوى الكاتيجوري نفسه مش paginated
@@ -7717,6 +7718,11 @@ function buildPoorMatchesFromRows(rows) {
     const gapFrac = ndrBenchmarkFrac - (m.ndrPct / 100);
     m.status = gapFrac > POOR_MATCHES_NDR_GAP_THRESHOLD ? "Bad" : "Good";
     m.impactPieces = m.status === "Bad" ? m.placed * gapFrac : 0;
+    // بطلب صريح: عايز يشوف الـ Good Matches كمان (مش الـ Bad بس). "Impact
+    // Pieces" هنا لنفس المنطق بالعكس — عدد القطع الزيادة اللي اتوصلت فوق
+    // بنشمارك الساب كاتيجوري بتاعها (كل ما negative gapFrac أكبر، يعني الماتش
+    // أحسن من زمايلها بمراحل). صفر لو الماتش Good بس مش متفوق فعليًا (gapFrac >= 0).
+    m.goodImpactPieces = m.status === "Good" ? m.placed * Math.max(0, -gapFrac) : 0;
   });
 
   return matches;
@@ -10188,8 +10194,9 @@ function sortPoorMatches(key) {
 
 function applyPoorMatchesSearchAndSort() {
   const term = $("searchPoorMatchesInput") ? $("searchPoorMatchesInput").value.trim().toLowerCase() : "";
-  // الجدول بيعرض بس الماتشات "Bad" (السيئة) — ده أصلاً معنى "Poor Matches".
-  let base = poorMatchesState.data.filter(m => m.status === "Bad");
+  // بطلب صريح: تبديل بين الماتشات "Bad" (زي الأول) والماتشات "Good" —
+  // pmToggleBad/pmToggleGood بيغيّروا poorMatchesState.viewMode.
+  let base = poorMatchesState.data.filter(m => m.status === (poorMatchesState.viewMode === "good" ? "Good" : "Bad"));
   poorMatchesState.filtered = base.filter(m => {
     if (!term) return true;
     return (m.productName && m.productName.toLowerCase().includes(term)) || (m.sku && String(m.sku).toLowerCase().includes(term)) ||
@@ -10205,6 +10212,10 @@ function applyPoorMatchesSearchAndSort() {
 
 function renderPaginatedPoorMatchesTable() {
   const tbody = $("poorMatchesTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const isGood = poorMatchesState.viewMode === "good";
+  const impactKey = isGood ? "goodImpactPieces" : "impactPieces";
+  const impactCls = isGood ? "text-green" : "text-red";
+  const statusBadgeCls = isGood ? "green" : "red";
   const start = poorMatchesState.page * PAGE_SIZE;
   const pageRows = poorMatchesState.filtered.slice(start, start + PAGE_SIZE);
   pageRows.forEach(m => {
@@ -10220,17 +10231,49 @@ function renderPaginatedPoorMatchesTable() {
       <td class="num font-bold">${fmtIntCell(m.placed)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.ndrBenchmark)}</td>
-      <td class="num font-bold text-red">${fmtIntCell(Math.round(m.impactPieces))}</td>
-      <td class="center"><span class="badge-outline red">${m.status}</span></td>
+      <td class="num font-bold ${impactCls}">${fmtIntCell(Math.round(m[impactKey]))}</td>
+      <td class="center"><span class="badge-outline ${statusBadgeCls}">${m.status}</span></td>
     `;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(poorMatchesState.filtered.length / PAGE_SIZE));
-  if ($("rowCountPoorMatches")) $("rowCountPoorMatches").textContent = `${fmtInt.format(poorMatchesState.filtered.length)} Poor Matches`;
+  if ($("rowCountPoorMatches")) $("rowCountPoorMatches").textContent = `${fmtInt.format(poorMatchesState.filtered.length)} ${isGood ? "Good Matches" : "Poor Matches"}`;
   if ($("pageIndicatorPoorMatches")) $("pageIndicatorPoorMatches").textContent = `Page ${poorMatchesState.page + 1} of ${totalPages}`;
   if ($("prevPagePoorMatches")) $("prevPagePoorMatches").disabled = poorMatchesState.page === 0;
   if ($("nextPagePoorMatches")) $("nextPagePoorMatches").disabled = poorMatchesState.page >= totalPages - 1;
 }
+
+// بطلب صريح: تبديل Bad/Good Matches — بيغيّر viewMode، الـ sortKey الافتراضي
+// (impactPieces للـ Bad، goodImpactPieces للـ Good)، وعنوان/تلميح الجدول،
+// وبعدين يعيد الفلترة والترتيب من الأول.
+function setPoorMatchesViewMode(mode) {
+  if (poorMatchesState.viewMode === mode) return;
+  poorMatchesState.viewMode = mode;
+  poorMatchesState.sortKey = mode === "good" ? "goodImpactPieces" : "impactPieces";
+  poorMatchesState.sortDir = "desc";
+
+  const badBtn = $("pmToggleBad"), goodBtn = $("pmToggleGood");
+  if (badBtn) badBtn.classList.toggle("active", mode === "bad");
+  if (goodBtn) goodBtn.classList.toggle("active", mode === "good");
+
+  const titleEl = $("poorMatchesTitle"), descEl = $("poorMatchesDesc");
+  const impactTh = $("thPoorMatchesImpact"), statusTh = $("thPoorMatchesStatus");
+  if (mode === "good") {
+    if (titleEl) titleEl.textContent = "Good Matches";
+    if (descEl) descEl.textContent = "Good matches only, ranked by Impact Pieces — Merchant × SKU combos beating their Sub-Category benchmark";
+    if (impactTh) impactTh.title = "Placed Pieces × (own NDR% − Benchmark NDR%) — extra pieces delivered beyond the sub-category's rate.";
+    if (statusTh) statusTh.title = "Always \"Good\" here — this table only lists matches at or above their sub-category benchmark.";
+  } else {
+    if (titleEl) titleEl.textContent = "Poor Matches";
+    if (descEl) descEl.textContent = "Bad matches only, ranked by Impact Pieces — Merchant × SKU combos dragging NDR% down vs their Sub-Category";
+    if (impactTh) impactTh.title = "Placed Pieces × (Benchmark NDR% − own NDR%) — extra pieces that would've delivered at the sub-category's rate.";
+    if (statusTh) statusTh.title = "Always \"Bad\" here — this table only lists matches more than 3 points below benchmark.";
+  }
+
+  applyPoorMatchesSearchAndSort();
+}
+if ($("pmToggleBad")) $("pmToggleBad").addEventListener("click", () => setPoorMatchesViewMode("bad"));
+if ($("pmToggleGood")) $("pmToggleGood").addEventListener("click", () => setPoorMatchesViewMode("good"));
 
 // كروت وجدول الملخص (زي تاب NDR_Summary بالظبط: Total Placed/Delivered/NDR،
 // Missed Deliveries، Expected Delivered/NDR، وجدول Good/Bad/Total).
