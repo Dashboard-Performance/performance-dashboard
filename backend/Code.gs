@@ -666,6 +666,7 @@ function doGet(e) {
   if (action === "getData") return handleGetData(e);
   if (action === "getLastSync") return handleGetLastSync(e);
   if (action === "getLastSyncMeta") return handleGetLastSyncMeta(e);
+  if (action === "getLastSyncDebug") return handleGetLastSyncDebug(e);
   if (action === "getComputed") return handleGetComputed(e);
   if (action === "listComputed") return handleListComputed(e);
   return jsonResponse({ success: false, message: "Unknown action." });
@@ -851,19 +852,33 @@ function readLastSyncPayload_(folder) {
   }
 }
 
+// بطلب صريح بعد ما الداشبورد بقت بتاخد وقت طويل جدًا وبتعمل timeout
+// (AbortError) — الداتا المجمّعة من الـ 22 شيت (بعضها فوق 90 ألف صف زي
+// Beginning Inventory) بقت عشرات الميجا كنص خام. كنا بنفك الضغط (ungzip)
+// هنا على السيرفر وبعدين نبعت النص الخام الضخم ده كامل للمتصفح — ده تقيل
+// جدًا على الاتنين (فك الضغط على Apps Script، وتحميل النص الخام الضخم على
+// المتصفح). الحل: نبعت الـ bytes المضغوطة (base64) زي ما هي من غير أي فك
+// ضغط هنا خالص، والمتصفح هو اللي يفك الضغط بنفسه (DecompressionStream —
+// نفس آلية الضغط المستخدمة أصلاً في backupSnapshotToDrive على الفرونت اند).
+// ده بيقلل حجم النقل عبر الشبكة بمقدار كبير (JSON مضغوط عادة 5-10 أضعاف
+// أصغر) وبيلغي فك الضغط من على السيرفر خالص.
 function handleGetLastSync(e) {
   try {
     var folder = getOrCreateLastSyncFolder_();
     var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
     if (files.hasNext()) {
-      var text = Utilities.ungzip(files.next().getBlob()).getDataAsString();
-      return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
+      var gzBlob = files.next().getBlob();
+      var fetchedAt = PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null;
+      var base64 = Utilities.base64Encode(gzBlob.getBytes());
+      return jsonResponse({ success: true, fetchedAt: fetchedAt, gzBase64: base64 });
     }
     // Fallback: لسه مفيش أي مزامنة مركزية اتسجلت (الـ trigger لسه ما اشتغلش
     // ولا مرة، أو تم حذف الملف) — بنرجع لجلب لايف عادي عشان الداشبورد يفضل
-    // شغال، بدل ما يوقف لحد ما الـ trigger يشتغل.
+    // شغال، بدل ما يوقف لحد ما الـ trigger يشتغل. برضه بنضغط قبل ما نبعت.
     var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
-    return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+    var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+    var gz = Utilities.gzip(Utilities.newBlob(content, "application/json"));
+    return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, gzBase64: Utilities.base64Encode(gz.getBytes()) });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
@@ -875,6 +890,49 @@ function handleGetLastSync(e) {
 function handleGetLastSyncMeta(e) {
   var fetchedAt = PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null;
   return jsonResponse({ success: true, fetchedAt: fetchedAt });
+}
+
+// أسماء مفهومة لكل GID — بس عشان نتائج getLastSyncDebug تبقى قابلة للقراءة
+// (نفس القائمة اللي في js/app.js GID_LABELS، بس مكررة هنا لأن الملفين مش
+// بيشاركوا متغيرات).
+var LAST_SYNC_GID_LABELS_ = {
+  "2099497960": "Main", "115442405": "Targets", "891214324": "Segmentation",
+  "2042936628": "Targets ACM", "1780730573": "Inventory", "1779314157": "Products",
+  "1656655269": "Category Targets", "892918900": "Sales Plan-ACM",
+  "1304674893": "New Segmentation", "565878313": "Inbound",
+  "531154071": "Products Info", "22283311": "Beginning Inventory",
+  "548859670": "Sell-through Needed", "1409034448": "Products Debundle Map",
+  "1620722565": "Single SKU Targets", "1724469150": "COGS",
+  "2085802038": "Availability Locking", "1298408207": "Products & Matches",
+  "461854229": "Merchant SKU Daily", "620123165": "Merchant Segmentation",
+  "1289659887": "Weekly Inventory", "897709273": "Warehouse Repack"
+};
+
+// تشخيص: بيرجع حالة كل شيت (لسه Null ولا فيه صفوف، وعددها) من غير ما ينزّل
+// كل الداتا الضخمة — عشان نعرف بالظبط أنهي شيت اللي فاضي في النسخة المركزية
+// المخزّنة دلوقتي، من غير لا نحمّل ولا نبعت كذا ميجا.
+function handleGetLastSyncDebug(e) {
+  try {
+    var folder = getOrCreateLastSyncFolder_();
+    var cached = readLastSyncPayload_(folder);
+    var source = cached ? "cached_file" : "live_fallback";
+    var payload = cached || fetchSheetsPayload_(LAST_SYNC_GIDS);
+
+    var report = LAST_SYNC_GIDS.map(function (gid) {
+      var sheet = payload.sheets ? payload.sheets[gid] : undefined;
+      var rows = (sheet && sheet.table && sheet.table.rows) ? sheet.table.rows.length : null;
+      return {
+        gid: gid,
+        label: LAST_SYNC_GID_LABELS_[gid] || gid,
+        status: sheet ? "ok" : "NULL/EMPTY",
+        rowCount: rows
+      };
+    });
+
+    return jsonResponse({ success: true, source: source, fetchedAt: payload.fetchedAt, sheets: report });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
 }
 
 function getOrCreateLastSyncFolder_() {

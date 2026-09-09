@@ -12244,6 +12244,20 @@ let SERVER_LAST_FETCHED_AT = null;
 // عشرات الـ gviz requests)، فمينفعش "يهنج" حاجة — أصلاً أخف من الطريقة القديمة.
 // Returns { [gid]: {table:{rows}} | null }, same shape loadSheetViaJsonp
 // used to resolve with, so parse*Sheet() below needs no changes.
+// عكس gzipToBase64() فوق — بياخد base64 لبيانات مضغوطة (gzip) وبيرجعها نص
+// عادي تاني. بطلب صريح بعد ما الداشبورد بقت بتاخد وقت طويل جدًا/بتعمل
+// timeout: السيرفر بقى بيبعت الـ bytes المضغوطة زي ما هي (من غير فك ضغط
+// عنده)، والمتصفح هو اللي بيفك الضغط هنا — ده بيقلل حجم النقل عبر الشبكة
+// بمقدار كبير (5-10 أضعاف أصغر عادة) بدل ما نستنى نص JSON خام ضخم أوي.
+async function ungzipFromBase64(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const buf = await new Response(stream).arrayBuffer();
+  return new TextDecoder("utf-8").decode(buf);
+}
+
 async function fetchAllSheetsViaBackend() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
@@ -12253,7 +12267,22 @@ async function fetchAllSheetsViaBackend() {
     const json = await res.json();
     if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
     if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
-    return json.sheets;
+    // النسخة الجديدة من الباك اند بترجع gzBase64 (مضغوط) بدل sheets مباشرة —
+    // لو لسه نسخة قديمة من الباك اند شغالة (لسه معملتش redeploy)، json.sheets
+    // ممكن يكون موجود برضه (توافق قديم)، فبنتعامل مع الحالتين.
+    let sheets;
+    if (json.gzBase64) {
+      const text = await ungzipFromBase64(json.gzBase64);
+      const parsed = JSON.parse(text);
+      sheets = parsed.sheets;
+    } else {
+      sheets = json.sheets;
+    }
+    // دفاعي: لو الرد رجع من غير sheets خالص (شكل غير متوقع — مثلاً باك اند
+    // قديم/نص مقصوص)، لازم نرمي error واضح هنا بدل ما نسيب الكود يكسر بعد
+    // كده بـ "Cannot read properties of undefined" غامضة صعب تشخيصها.
+    if (!sheets) throw new Error("Backend getLastSync returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
+    return sheets;
   } finally {
     clearTimeout(timer);
   }
