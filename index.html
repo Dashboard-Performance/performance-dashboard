@@ -1869,6 +1869,8 @@
                       <th onclick="sortMpMatches('merchantId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier.">Merchant ID</th>
                       <th onclick="sortMpMatches('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">Merchant Name</th>
                       <th onclick="sortMpMatches('acm')" style="cursor:pointer; max-width:120px;" title="Account/Category Manager for this SKU.">ACM</th>
+                      <th onclick="sortMpMatches('stock')" class="num text-dim" style="cursor:pointer;" title="Current stock quantity on hand for this SKU (Overall Debundled).">Stock</th>
+                      <th onclick="sortMpMatches('doh')" class="num text-dim" style="cursor:pointer;" title="Days of stock on hand — same logic as PPM Analyst / Products: Stock ÷ average daily demand (last 3 days), pooled across this SKU standalone and every bundle it's part of. For a bundle SKU, uses the lowest-DOH (bottleneck) constituent Single SKU with actual demand.">DOH</th>
                       <th onclick="sortMpMatches('totalPlaced')" class="num" style="cursor:pointer;" title="Total placed pieces for this merchant × product. No cutoff applied.">Total Placed</th>
                       <th onclick="sortMpMatches('totalConfirmed')" class="num text-blue" style="cursor:pointer;" title="Total confirmed pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Confirmed</th>
                       <th onclick="sortMpMatches('totalDelivered')" class="num text-green" style="cursor:pointer;" title="Total delivered pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Delivered</th>

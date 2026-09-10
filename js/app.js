@@ -7580,6 +7580,12 @@ function prepareMpMatchesData() {
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(mainRows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع CM3_LAG_DAYS أيام
 
+  // Stock/DOH — بطلب صريح: نفس المنطق بالظبط المستخدم في PPM Analyst /
+  // Products (buildDebundledStockDohIndex → getStockDoh) — يعني الديماند
+  // مجمّعة على مستوى الـ SKU الأصلي (Overall Debundled، بما فيها أي بندلات
+  // فيها نفس الـ Single)، مش بس ديماند الماتش ده لوحده.
+  const { getStockDoh } = buildDebundledStockDohIndex(mainRowsAll);
+
   const map = new Map();
   const productConfirmedTotals = new Map();
 
@@ -7636,7 +7642,8 @@ function prepareMpMatchesData() {
     const cm3PerPiece = e.totalDelivered ? (e.cm3 / e.totalDelivered) : 0;
     const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
     totalGmv += e.deliveredGmv; totalCm3 += e.cm3; totalCm3Gmv += e.cm3Gmv;
-    return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, cm3PerPiece, cm3Pct };
+    const { stock, doh } = getStockDoh(e.productId);
+    return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, cm3PerPiece, cm3Pct, stock, doh };
   });
 
   // CM3% الإجمالي: لازم ياخد نفس أساس الـ CM3 (كات أوف الـ4 أيام) في البسط
@@ -9977,6 +9984,8 @@ function renderPaginatedMpMatchesTable() {
       <td class="font-mono text-dim">${m.merchantId}</td>
       <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
       <td class="text-dim truncate-cell" style="max-width:120px;" title="${m.acm}">${m.acm}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.stock))}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="num font-bold">${fmtIntCell(m.totalPlaced)}</td>
       <td class="num text-blue">${fmtIntCell(m.totalConfirmed)}</td>
       <td class="num text-green">${fmtIntCell(m.totalDelivered)}</td>

@@ -797,25 +797,72 @@ var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
 var LAST_SYNC_FILE_NAME = "last_sync.json.gz";
 var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
 
+// بصمة رخيصة لشيت (بدل مقارنة عميقة لكل الصفوف، بطيئة جدًا لشيت فيه عشرات
+// الآلاف من الصفوف): عدد الصفوف + طول أول/آخر صف + طول الأعمدة. مش مضمونة
+// 100% (احتمال ضئيل جدًا يتطابق fingerprint لنسختين فعلاً مختلفتين)، لكنها
+// كافية عمليًا لاكتشاف "الشيت لسه بيتغيّر وقت القراءة" (فورمولا/IMPORTRANGE/
+// ريفريش لسه شغال) من غير ما تبطّئ runScheduledSync بمقارنة كل خلية.
+function sheetFingerprint_(sheet) {
+  if (!sheet || !sheet.table || !sheet.table.rows) return null;
+  var rows = sheet.table.rows;
+  var n = rows.length;
+  var first = n ? JSON.stringify(rows[0]) : "";
+  var last = n ? JSON.stringify(rows[n - 1]) : "";
+  return n + "|" + first.length + "|" + last.length + "|" + JSON.stringify(sheet.table.cols || []).length;
+}
+
+// بطلب صريح: لو الشيت (Main أو أي شيت تاني) لسه بيعمل ريفريش/إعادة حساب
+// (فورمولا، IMPORTRANGE، Query...) بالظبط لحظة ما runScheduledSync بيقرا
+// منه، ممكن ياخد "لقطة" نص-متغيرة (بعض الخلايا اتحدثت، وبعضها لسه القديم) —
+// ده أخطر من فشل القراءة تمامًا (اللي عندنا حماية منه فوق) لأنه رد ناجح
+// (200 OK) لكن غلط. الحل: نقرا كل شيت **مرتين** بفاصل كام ثانية، ونقارن
+// بصمة كل شيت بين القراءتين. لو متطابقة، يبقى الشيت مستقر وقت القراءة، نثق
+// فيه. لو مختلفة (لسه بيتغير)، منستخدمهوش خالص — بنرجع لآخر نسخة مستقرة
+// معروفة من الدورة اللي فاتت، بدل ما ننشر لقطة نص-متغيرة لكل اليوزرز.
+var SYNC_STABILITY_WAIT_MS = 6000;
+function fetchSheetsPayloadStable_(gids, previousSheets) {
+  var first = fetchSheetsPayload_(gids);
+  Utilities.sleep(SYNC_STABILITY_WAIT_MS);
+  var second = fetchSheetsPayload_(gids);
+
+  var sheets = {};
+  var unstableGids = [];
+  gids.forEach(function (gid) {
+    var a = first.sheets[gid], b = second.sheets[gid];
+    var fpA = sheetFingerprint_(a), fpB = sheetFingerprint_(b);
+    if (b && fpB !== null && fpA === fpB) {
+      sheets[gid] = b; // القراءتين متطابقتين — الشيت كان مستقر وقت القراءة
+    } else if (previousSheets && previousSheets[gid] != null) {
+      // لسه بيتغيّر (أو إحدى القراءتين فشلت) — نحافظ على آخر نسخة مستقرة
+      // معروفة بدل ما ننشر نسخة نص-متغيرة أو فاضية لكل الناس.
+      sheets[gid] = previousSheets[gid];
+      unstableGids.push(gid);
+    } else {
+      // مفيش نسخة سابقة نرجعلها أصلاً (أول تشغيلة) — مضطرين ناخد آخر قراءة
+      // زي ما هي بدل ما نسيب الشيت فاضي تمامًا.
+      sheets[gid] = b || a;
+      if (!(b && fpB !== null && fpA === fpB)) unstableGids.push(gid);
+    }
+  });
+
+  return { fetchedAt: second.fetchedAt, sheets: sheets, unstableGids: unstableGids };
+}
+
 // دي اللي بتتنادى من الـ Time-driven trigger (راجع الكومنت فوق للـ setup) —
 // مش بتترجع أي حاجة للمتصفح، بتشتغل في الخلفية على سيرفر جوجل بالكامل، فمش
 // ممكن "تهنج" الويب سايت خالص — مفيش أي متصفح مستخدم واقف مستني الفانكشن دي.
 function runScheduledSync() {
-  var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
   var folder = getOrCreateLastSyncFolder_();
-
-  // لو أي شيت لسه null حتى بعد الـ retry جوه fetchSheetsPayload_ (فشل مرتين
-  // ورا بعض — نادر جدًا)، منسمحش إن الـ null ده يمسح آخر نسخة كويسة كانت
-  // متخزنة قبل كده لنفس الشيت — وإلا كل اليوزرز هيشوفوا "Unknown"/صفر لحد
-  // الدورة الجاية بعد 15 دقيقة. بدل كده بنحافظ على آخر نسخة معروفة صالحة لحد
-  // ما الشيت ده يرجع يشتغل تاني.
   var previous = readLastSyncPayload_(folder);
-  if (previous && previous.sheets) {
-    LAST_SYNC_GIDS.forEach(function (gid) {
-      if (payload.sheets[gid] === null && previous.sheets[gid] != null) {
-        payload.sheets[gid] = previous.sheets[gid];
-      }
-    });
+  var payload = fetchSheetsPayloadStable_(LAST_SYNC_GIDS, previous ? previous.sheets : null);
+
+  if (payload.unstableGids && payload.unstableGids.length) {
+    // بنسجلهم في Script Properties (مش أكتر من كده — بس عشان لو حبيت تتأكد
+    // بعدين أي شيت كان "بيتغير" وقت آخر تشغيلة، تقدر تشوفه من غير ما تدوّر
+    // في الـ Executions log).
+    PropertiesService.getScriptProperties().setProperty("last_sync_unstable_gids_v1", payload.unstableGids.join(","));
+  } else {
+    PropertiesService.getScriptProperties().deleteProperty("last_sync_unstable_gids_v1");
   }
 
   var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
@@ -888,8 +935,13 @@ function handleGetLastSync(e) {
 // دقيقة عشان يعرف لو حصلت مزامنة مركزية جديدة من غير ما يضطر يحمّل كل
 // النسخة الكاملة (اللي ممكن تكون كذا ميجا) في كل تشييك.
 function handleGetLastSyncMeta(e) {
-  var fetchedAt = PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null;
-  return jsonResponse({ success: true, fetchedAt: fetchedAt });
+  var props = PropertiesService.getScriptProperties();
+  var fetchedAt = props.getProperty(LAST_SYNC_META_PROP_KEY) || null;
+  // لو أي شيت كان لسه "بيتغير" وقت آخر تشغيلة (راجع fetchSheetsPayloadStable_)
+  // وبالتالي فضل على آخر نسخة مستقرة معروفة بدل النسخة الجديدة — بيظهر هنا،
+  // عشان تقدر تتابع من غير ما تدور في الـ Executions log.
+  var unstable = props.getProperty("last_sync_unstable_gids_v1") || null;
+  return jsonResponse({ success: true, fetchedAt: fetchedAt, unstableGids: unstable ? unstable.split(",") : [] });
 }
 
 // أسماء مفهومة لكل GID — بس عشان نتائج getLastSyncDebug تبقى قابلة للقراءة
@@ -929,7 +981,10 @@ function handleGetLastSyncDebug(e) {
       };
     });
 
-    return jsonResponse({ success: true, source: source, fetchedAt: payload.fetchedAt, sheets: report });
+    var unstable = PropertiesService.getScriptProperties().getProperty("last_sync_unstable_gids_v1") || "";
+    var unstableLabeled = unstable ? unstable.split(",").map(function (gid) { return LAST_SYNC_GID_LABELS_[gid] || gid; }) : [];
+
+    return jsonResponse({ success: true, source: source, fetchedAt: payload.fetchedAt, sheets: report, unstableAtLastRun: unstableLabeled });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
