@@ -6084,7 +6084,7 @@ function computeCommercialDebundlized() {
 
   const buckets = new Map();
   function getBucket(id) {
-    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0 });
+    if (!buckets.has(id)) buckets.set(id, { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, pendingConfNear3d: 0, placedByDate: new Map() });
     return buckets.get(id);
   }
 
@@ -6131,12 +6131,22 @@ function computeCommercialDebundlized() {
     // PPM (Total) و PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس
     // CM3/Delivered GMV اللي لسه بياخدوا كات أوف الـ CM3_LAG_DAYS فوق.
     b.ppm += (r.ppm || 0);
+    // Active Days / LAST ASP PLACED — بطلب صريح، من غير أي كات أوف. بنسجل
+    // إجمالي Placed Pieces/GMV لكل يوم لوحده (ممكن أكتر من merchant في نفس
+    // اليوم لنفس الـ SKU، فبنجمعهم في نفس الـ entry). نفس الخريطة دي مستخدمة
+    // للاتنين تحت: عدد الأيام اللي فيها المجموع > 1 (Active Days)، وآخر يوم
+    // فيه Placed فعلاً (LAST ASP PLACED).
+    if (r.placedPieces > 0) {
+      const dEntry = b.placedByDate.get(rTime) || { gmv: 0, pieces: 0 };
+      dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
+      b.placedByDate.set(rTime, dEntry);
+    }
   });
 
   const targets = state.singleSkuTargets || {};
   const result = [];
   skuList.forEach((skuInfo, productId) => {
-    const b = buckets.get(productId) || { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0 };
+    const b = buckets.get(productId) || { placed: 0, confirmed: 0, delivered: 0, mtdPlaced: 0, mtdConfirmed: 0, mtdDelivered: 0, deliveredGmv: 0, cm3: 0, cm3Gmv: 0, ppm: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, conf3d: 0, placedByDate: new Map() };
     const crPct = b.crPlaced ? (b.crConfirmed / b.crPlaced) * 100 : 0;
     const drPct = b.drConfirmed ? (b.drDelivered / b.drConfirmed) * 100 : 0;
     const ndrPct = (crPct * drPct) / 100;
@@ -6220,6 +6230,22 @@ function computeCommercialDebundlized() {
     // كله، عشان يمثل احتياج الشهر بالكامل.
     const needPcsFullMonth = confirmedDailyTarget ? Math.round(confirmedDailyTarget * currentMonthDays) : 0;
 
+    // Active Days — بطلب صريح: عدد الأيام اللي الـ SKU اشتغل فيها فعلاً (رفع
+    // Placed أكتر من 1 قطعة، مجموع كل الماتشات لنفس اليوم)، من b.placedByDate
+    // اللي جمعناها فوق.
+    let activeDays = 0;
+    b.placedByDate.forEach(entry => { if (entry.pieces > 1) activeDays++; });
+
+    // LAST ASP PLACED — Placed GMV ÷ Placed Pieces بتوع آخر يوم بس فيه Placed
+    // فعلاً (أحدث تاريخ في b.placedByDate)، نفس منطق LAST ASP PLACED في
+    // PPM Analyst بالظبط — مش مجموع/متوسط الشهر كله.
+    let lastAspPlaced = 0;
+    if (b.placedByDate.size) {
+      let lastTime = -Infinity, lastEntry = null;
+      b.placedByDate.forEach((entry, t) => { if (t > lastTime) { lastTime = t; lastEntry = entry; } });
+      if (lastEntry && lastEntry.pieces > 0) lastAspPlaced = lastEntry.gmv / lastEntry.pieces;
+    }
+
     result.push({
       singleId: productId, singleName: skuInfo.name,
       category: (targetInfo && targetInfo.category) || (state.inventoryMap[productId] ? state.inventoryMap[productId].category : "") || "Uncategorized",
@@ -6227,7 +6253,7 @@ function computeCommercialDebundlized() {
       // هنا عشان تقدر تتأكد بعينك من حساب MTD Target = Placed Daily × Days Until
       // Yesterday (نفس اللي شارحينه في التعليق فوق).
       placedDailyRaw: placedDailyTarget,
-      stock: Math.round(stock || 0), doh,
+      stock: Math.round(stock || 0), doh, activeDays,
       hasTarget, dailyTarget, mtdTarget, mtdActual, mtdAchPct, runRate, finalStatus,
       metrics: { placed: placedM, confirmed: confirmedM, delivered: deliveredM, gmv: gmvM },
       // فلات كوبيز لكل جروب عشان الترتيب (sortCdz) يقدر ياخد القيمة بـ row[key] مباشرة.
@@ -6238,7 +6264,7 @@ function computeCommercialDebundlized() {
       totalPlaced: b.placed, totalConfirmed: b.confirmed, totalDelivered: b.delivered,
       crPct, drPct, ndrPct, pendingConfirmed, expectedReturns, confidentReturns3d, avg3dConfirmed,
       confirmedDailyTarget, currentMonthDays, needPcsFullMonth,
-      deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece
+      deliveredGmv: b.deliveredGmv, cm3: b.cm3, cm3Pct, cm3PerPiece, ppm: b.ppm, ppmPerPiece, lastAspPlaced
     });
   });
   return { rows: result, overallDeliveredGmv, overallCm3, daysUntilYesterday };
@@ -6446,6 +6472,7 @@ function renderPaginatedCdzTable() {
       <td class="num text-dim">${m.placedDailyRaw !== null && m.placedDailyRaw !== undefined ? fmtIntCell(Math.round(m.placedDailyRaw)) : "-"}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
+      <td class="num">${fmtIntCell(m.activeDays)}</td>
       ${cdzMetricCellsHtml(m.metrics.placed, false)}
       ${cdzMetricCellsHtml(m.metrics.confirmed, false)}
       ${cdzMetricCellsHtml(m.metrics.delivered, false)}
@@ -6454,6 +6481,7 @@ function renderPaginatedCdzTable() {
       <td class="num"><span class="badge-outline ${getDrBadgeColor(m.drPct)}">${fmtPctCell(m.drPct)}</span></td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
       <td class="num font-bold ${m.expectedReturns > 0 ? 'text-red' : 'text-dim'}">${fmtIntCell(m.expectedReturns)}</td>
+      <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.lastAspPlaced)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
       <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.ppm)}</td>

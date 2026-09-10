@@ -826,6 +826,7 @@
                       <th rowspan="2" onclick="sortCdz('placedDailyRaw')" class="num" style="cursor:pointer;" title="Raw Placed Daily target for this SKU, read straight from the plan sheet. MTD Target (Placed group) = this × Days Until Yesterday. Click to sort.">Placed Daily</th>
                       <th rowspan="2" onclick="sortCdz('stock')" class="num" style="cursor:pointer;" title="Current stock quantity on hand. Click to sort.">Stock</th>
                       <th rowspan="2" onclick="sortCdz('doh')" class="num" style="cursor:pointer;" title="Days of stock on hand: Stock ÷ average confirmed pieces over the last 3 days. Click to sort.">DOH</th>
+                      <th rowspan="2" onclick="sortCdz('activeDays')" class="num" style="cursor:pointer;" title="Number of distinct days this SKU had more than 1 Placed piece (summed across merchants), no cutoff applied. Click to sort.">Active Days</th>
                       <th colspan="4" class="center" title="Pieces placed on orders for this SKU. No cutoff applied.">Placed Pieces</th>
                       <th colspan="4" class="center" title="Pieces confirmed for this SKU. No cutoff applied.">Confirmed Pieces</th>
                       <th colspan="4" class="center" title="Pieces delivered for this SKU. No cutoff applied.">Delivered Pieces</th>
@@ -834,6 +835,7 @@
                       <th rowspan="2" onclick="sortCdz('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces, excluding the most recent 5 days.">DR%</th>
                       <th rowspan="2" onclick="sortCdz('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%, carrying both the 2-day and 5-day cutoffs.">NDR%</th>
                       <th rowspan="2" onclick="sortCdz('expectedReturns')" class="num text-red" style="cursor:pointer;" title="Actual projected pieces expected to come back as returns within the next 5 days — Confirmed pieces still inside the 5-day DR cutoff (pendingConfirmed = Confirmed − DR-eligible Confirmed) × this SKU's own historical return rate (100% − DR%).">Expected Returns</th>
+                      <th rowspan="2" onclick="sortCdz('lastAspPlaced')" class="num text-purple" style="cursor:pointer;" title="Placed GMV ÷ Placed Pieces on the single most recent day this SKU actually had a Placed piece (no cutoff) — not a monthly average.">LAST ASP PLACED</th>
                       <th rowspan="2" onclick="sortCdz('cm3')" class="num" style="cursor:pointer;" title="Total contribution margin for this SKU, excluding the most recent 5 days.">Total CM3</th>
                       <th rowspan="2" onclick="sortCdz('cm3PerPiece')" class="num" style="cursor:pointer;" title="Total CM3 ÷ delivered pieces, both under the 5-day cutoff.">CM3/Piece</th>
                       <th rowspan="2" onclick="sortCdz('ppm')" class="num" style="cursor:pointer;" title="Total promotional spend (PPM) for this SKU. No cutoff applied.">Total PPM</th>
