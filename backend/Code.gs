@@ -840,6 +840,21 @@ function computeSyncContentHash_(sheets, gids) {
 // فيه. لو مختلفة (لسه بيتغير)، منستخدمهوش خالص — بنرجع لآخر نسخة مستقرة
 // معروفة من الدورة اللي فاتت، بدل ما ننشر لقطة نص-متغيرة لكل اليوزرز.
 var SYNC_STABILITY_WAIT_MS = 6000;
+
+// بطلب صريح ("ليه لو عملت فلتر ف الشيت الأساسي الداتا بتطلع ناقصة؟"): فلتر
+// عادي (Data → Create a filter) شغال وقت القراءة بيخفي صفوف من كل الناس
+// بما فيهم قراءة الـ gviz نفسها — يعني القراءتين (فوق) هيطلعوا بنفس العدد
+// "المفلتر" بالظبط ومتطابقين تمامًا مع بعض، فالـ stability check لوحدها مش
+// هتمسك الحالة دي (الشيت "مستقر" وقت القراءة، بس مستقر على نسخة ناقصة).
+// الحماية الإضافية هنا: نقارن عدد الصفوف الجديد بآخر نسخة معروفة (Drive) —
+// لو نزل فجأة وبنسبة كبيرة، نعتبرها مشبوهة (على الأغلب فلتر متسي شغال) ونرجع
+// لآخر نسخة مستقرة بدل ما ننشر نسخة ناقصة لكل اليوزرز.
+var SUSPICIOUS_ROW_DROP_RATIO = 0.5;   // نزول لأقل من 50% من المعروف قبل كده = مشبوه
+var MIN_ROWS_FOR_DROP_CHECK = 20;      // شيتات صغيرة جدًا مبنتفحصش (فروق طبيعية عادية)
+function sheetRowCount_(sheet) {
+  return (sheet && sheet.table && sheet.table.rows) ? sheet.table.rows.length : 0;
+}
+
 function fetchSheetsPayloadStable_(gids, previousSheets) {
   var first = fetchSheetsPayload_(gids);
   Utilities.sleep(SYNC_STABILITY_WAIT_MS);
@@ -850,8 +865,22 @@ function fetchSheetsPayloadStable_(gids, previousSheets) {
   gids.forEach(function (gid) {
     var a = first.sheets[gid], b = second.sheets[gid];
     var fpA = sheetFingerprint_(a), fpB = sheetFingerprint_(b);
-    if (b && fpB !== null && fpA === fpB) {
-      sheets[gid] = b; // القراءتين متطابقتين — الشيت كان مستقر وقت القراءة
+    var isStable = (b && fpB !== null && fpA === fpB);
+
+    if (isStable) {
+      var prevSheet = previousSheets ? previousSheets[gid] : null;
+      var prevCount = prevSheet ? sheetRowCount_(prevSheet) : 0;
+      var newCount = sheetRowCount_(b);
+      var suspicious = prevSheet && prevCount >= MIN_ROWS_FOR_DROP_CHECK && newCount < (prevCount * SUSPICIOUS_ROW_DROP_RATIO);
+      if (suspicious) {
+        // مستقر (نفس البصمة في القراءتين) لكن العدد نزل فجأة وبشكل كبير عن
+        // آخر نسخة معروفة — على الأغلب فلتر شغال على الشيت وقت القراءة.
+        // منثقش فيه، نفضل على آخر نسخة كويسة معروفة.
+        sheets[gid] = prevSheet;
+        unstableGids.push(gid);
+      } else {
+        sheets[gid] = b; // القراءتين متطابقتين والعدد منطقي — الشيت كان مستقر وقت القراءة
+      }
     } else if (previousSheets && previousSheets[gid] != null) {
       // لسه بيتغيّر (أو إحدى القراءتين فشلت) — نحافظ على آخر نسخة مستقرة
       // معروفة بدل ما ننشر نسخة نص-متغيرة أو فاضية لكل الناس.
@@ -861,7 +890,7 @@ function fetchSheetsPayloadStable_(gids, previousSheets) {
       // مفيش نسخة سابقة نرجعلها أصلاً (أول تشغيلة) — مضطرين ناخد آخر قراءة
       // زي ما هي بدل ما نسيب الشيت فاضي تمامًا.
       sheets[gid] = b || a;
-      if (!(b && fpB !== null && fpA === fpB)) unstableGids.push(gid);
+      if (!isStable) unstableGids.push(gid);
     }
   });
 

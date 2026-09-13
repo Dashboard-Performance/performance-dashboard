@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -12356,35 +12356,57 @@ async function ungzipFromBase64(base64) {
   return new TextDecoder("utf-8").decode(buf);
 }
 
-// بطلب صريح: الغينا الكاش/المزامنة المركزية (Drive last_sync.json.gz) خالص
-// من هنا. دلوقتي كل loadData() بيعمل live fetch مباشر من الشيت نفسه بتاع
-// action=getData (بيستخدم fetchSheetsPayload_ في الباك اند — نفس منطق
-// gviz/UrlFetchApp.fetchAll المتوازي، بس من غير أي كاش/Drive/gzip/base64
-// في النص). يعني كل مرة الداشبورد بتتفتح أو تعمل رفرش، بتقرا القيم اللي في
-// الشيت في نفس اللحظة دي بالظبط — بدون أي طبقة كاش بينها وبين المصدر.
-// (ملحوظة: ده بيرجعنا لنفس السلوك اللي كان قبل ما نضيف runScheduledSync/
-// last_sync — الميزة إنها لايف 100%، العيب إن أي ضغط/تزامن على نفس
-// الـ deployment (لوجين، heartbeat، ...) ممكن يأثر على سرعتها زي الأول.)
+// =========================================================================
+// PROFESSIONAL FIX (v1.1.1) — القراءة الأساسية للداشبورد رجعت تعتمد على
+// النسخة المركزية المخزّنة (action=getLastSync)، مش لايف مباشر لكل يوزر
+// (action=getData) — وده قرار متعمد بعد تجربة الاتنين، مش رجوع عشوائي:
+//
+// 1) الأمان من "اللاج/التهنيج" وقت الزحمة: أي عدد يوزرز فاتحين/بيعملوا
+//    رفرش في نفس اللحظة بيقروا نفس الملف الجاهز من Drive (قراءة خفيفة جدًا،
+//    من غير أي gviz request للشيت نفسه) — عكس اللايف المباشر اللي كل فتحة
+//    فيه بتعمل 22 طلب مستقلة على نفس الـ deployment، وده اللي كان بيسبب
+//    اللاج/التعليق مع الزحمة (حد Apps Script الأقصى لعدد التنفيذات
+//    المتوازية على نفس الـ deployment — حد منصة، مش حاجة نتحكم فيها بالكود).
+// 2) الأمان من "الأرقام الغلط": النسخة المركزية بتتبني في runScheduledSync
+//    (كل 15 دقيقة) عن طريق fetchSheetsPayloadStable_ اللي بتقرا كل شيت
+//    مرتين بفاصل 6 ثواني وتتأكد إنه مستقر (مش لسه بيعمل ريفريش/فورمولا وقت
+//    القراءة)، وكمان بتعمل فحص إضافي (v1.1.1): لو عدد صفوف أي شيت نزل فجأة
+//    وبنسبة كبيرة عن آخر نسخة معروفة (زي حد ناسي فلتر شغال على الشيت) —
+//    بترفضها وترجع لآخر نسخة سليمة معروفة بدل ما تنشر نسخة ناقصة لكل الناس.
+// 3) الفشل العابر (رد HTML بدل JSON من مسار script.googleusercontent.com/
+//    macros/echo بتاع جوجل للردود الكبيرة): بيتعالج تلقائيًا بإعادة محاولة
+//    (retry) في fetchAllSheetsViaBackend تحت — بدون أي تدخل يدوي من اليوزر.
+//
+// النتيجة: قراءة شبه-لايف (بتاخر بحد أقصى مدة الـ trigger، حاليًا 15 دقيقة)
+// لكن محمية بالكامل من الزحمة والأرقام الغلط والفشل العابر الثلاثة دول
+// مع بعض — وده الأهم عمليًا من "لايف 100%" اللي بيفتح باب اللاج مع الزحمة.
+// =========================================================================
 async function fetchAllSheetsViaBackendOnce() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const url = `${DATA_API_URL}?action=getData&gids=${ALL_SHEET_GIDS.join(",")}`;
+    const url = `${DATA_API_URL}?action=getLastSync`;
     const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
-    // ⚠️ نفس ملاحظة الفشل العابر اللي كانت موجودة مع getLastSync: أحيانًا
-    // جوجل بترجع صفحة HTML (<!DOCTYPE ...>) بدل JSON لو الرد كبير وحصل فشل
-    // عابر في مسار script.googleusercontent.com/macros/echo. بنتعامل معاه
-    // كفشل قابل لإعادة المحاولة (retryable) في fetchAllSheetsViaBackend تحت.
+    // ⚠️ لما رد Apps Script يبقى كبير (الحالة العادية هنا — كذا ميجا base64)،
+    // جوجل أحيانًا بيحوّل الرد فعليًا لصفحة وسيطة على
+    // script.googleusercontent.com/macros/echo، ولو الصفحة الوسيطة دي فشلت
+    // (404 عابر تحت ضغط/انتهاء صلاحية اللينك)، اللي بيرجع مش JSON خالص —
+    // بيرجع صفحة HTML عادية (<!DOCTYPE ...>) فـ res.json() بيرمي SyntaxError
+    // "Unexpected token '<'". ده فشل عابر بحت من مسار جوجل نفسه، مش خطأ في
+    // الباك اند ولا في الداتا — الحل نتعامل معاه كفشل نعيد المحاولة بسببه
+    // (retryable) في fetchAllSheetsViaBackend تحت، بدل ما نسيب اليوزر يضطر
+    // يدوس Refresh يدوي زي ما كان بيحصل.
     let json;
     try {
       json = await res.json();
     } catch (parseErr) {
       throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
     }
-    if (!json.success) throw new Error(json.message || "Backend getData failed");
+    if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
     if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
-    // action=getData بيرجع sheets مباشرة (من غير gzip/base64) — بس سايبين
-    // فرع gzBase64 هنا للتوافق لو يوم من الأيام رجّعنا الكاش تاني.
+    // النسخة الجديدة من الباك اند بترجع gzBase64 (مضغوط) بدل sheets مباشرة —
+    // لو لسه نسخة قديمة من الباك اند شغالة (لسه معملتش redeploy)، json.sheets
+    // ممكن يكون موجود برضه (توافق قديم)، فبنتعامل مع الحالتين.
     let sheets;
     if (json.gzBase64) {
       const text = await ungzipFromBase64(json.gzBase64);
@@ -12396,7 +12418,7 @@ async function fetchAllSheetsViaBackendOnce() {
     // دفاعي: لو الرد رجع من غير sheets خالص (شكل غير متوقع — مثلاً باك اند
     // قديم/نص مقصوص)، لازم نرمي error واضح هنا بدل ما نسيب الكود يكسر بعد
     // كده بـ "Cannot read properties of undefined" غامضة صعب تشخيصها.
-    if (!sheets) throw new Error("Backend getData returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
+    if (!sheets) throw new Error("Backend getLastSync returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
     return sheets;
   } finally {
     clearTimeout(timer);
@@ -13181,10 +13203,10 @@ function scheduleAutoRefresh() {
 setupTicker();
 loadData(false);
 scheduleAutoRefresh();
-// بطلب صريح: الغينا الاعتماد على الكاش/المزامنة المركزية خالص (fetchAllSheetsViaBackendOnce
-// بقى بيقرا لايف من الشيت في كل مرة عن طريق action=getData)، فبقى بولينج
-// getLastSyncMeta هنا مالوش لازمة — كان أصلاً مبني على فكرة "فيه نسخة كاش
-// جديدة اتحطت في Drive؟"، ومفيش كاش نعتمد عليه دلوقتي. سايبين الفنكشن نفسها
-// موجودة فوق (مش شايلينها) لو حبينا نرجع نفعّلها تاني في المستقبل — بس مش
-// بتتنادى تلقائي دلوقتي.
-// setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
+// v1.1.1: رجّعنا الاعتماد على النسخة المركزية (getLastSync)، فبولينج
+// getLastSyncMeta بقى مفيد تاني: سؤال خفيف جدًا كل دقيقة "فيه نسخة مركزية
+// جديدة فعلاً؟" (الباك اند بيرجع فرق حقيقي بس لو الداتا اتغيرت فعلاً — راجع
+// computeSyncContentHash_ في runScheduledSync)، ولو الإجابة "أيوه" بيعمل
+// loadData(false) بصمت في الخلفية. ده اللي بيدي إحساس شبه-لايف من غير ما
+// أي يوزر يحتاج يستنى الرفرش الصامت كل نص ساعة أو يدوس Refresh يدوي.
+setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
