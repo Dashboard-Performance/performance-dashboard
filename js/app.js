@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -2902,6 +2902,10 @@ function preparePpmAnalystProductsData() {
   const todayMs = today.getTime();
   const crCutoffMs = todayMs - (2 * 86400000);
   const drCutoffMs = todayMs - (5 * 86400000);
+  // CM3/TOTAL CM3/CM3% — بطلب صريح، نفس منطق PPM Analyst/Single بالظبط:
+  // كات أوف الـ CM3 (CM3_LAG_DAYS يوم) بس على العمود ده، باقي الأعمدة (زي
+  // فوق) من غير أي كات أوف.
+  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
 
   // DOH بيتحسب من كل تاريخ MAIN_GID (آخر 3 أيام فعليين)، مش بس صفوف الشهر
   // الحالي — بنفس منطق Recommended Tracker بالظبط.
@@ -2911,7 +2915,7 @@ function preparePpmAnalystProductsData() {
   const getBucket = (sku) => {
     let b = bySku.get(sku);
     if (!b) {
-      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, confirmedPieces: 0, placedGmv: 0, placedPieces: 0, placedByDate: new Map() };
+      b = { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, ppm: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, deliveredGmv: 0, deliveredPieces: 0, confirmedPieces: 0, placedGmv: 0, placedPieces: 0, placedByDate: new Map(), cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0 };
       bySku.set(sku, b);
     }
     return b;
@@ -2947,6 +2951,13 @@ function preparePpmAnalystProductsData() {
     // تخص PPM متبقاش عليها كات أوف، مش بس Total PPM).
     b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
     b.ppmPerPieceWeight += (r.deliveredPieces || 0);
+    // TOTAL CM3 (وCM3/PCS وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت
+    // كات أوف الـ CM3، نفس PPM Analyst/Single بالظبط.
+    if (isCm3RowEligible(r, cm3CutoffTs, "ppmProducts")) {
+      b.cm3 += (r.cm3 || 0);
+      b.cm3Gmv += (r.deliveredGmv || 0);
+      b.cm3DeliveredPieces += (r.deliveredPieces || 0);
+    }
   });
 
   // AVG LAST 3D / AVG LAST 7D / AVG 15D — بطلب صريح لازم يكونوا على أساس
@@ -3012,6 +3023,9 @@ function preparePpmAnalystProductsData() {
     const avgLast3d = (confirmed3dBySku.get(sku) || 0) / 3;
     const avgLast7d = (confirmed7dBySku.get(sku) || 0) / 7;
     const avgLast15d = (confirmed15dBySku.get(sku) || 0) / 15;
+    // CM3/PCS = CM3 ÷ Delivered Pcs (بتوع نفس نطاق كات أوف الـ CM3)، CM3% = CM3 ÷ Delivered GMV (نفس النطاق).
+    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
+    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
 
     rows.push({
       skuId: sku, skuName: inv.skuName || prod.name || sku, category: inv.category || prod.category || "Uncategorized",
@@ -3022,6 +3036,7 @@ function preparePpmAnalystProductsData() {
       totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
       placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0),
       avgLast3d, avgLast7d, avgLast15d,
+      cm3: b.cm3, cm3PerPiece, cm3Pct,
       contrPpmPct
     });
   });
@@ -3097,6 +3112,9 @@ function renderPaginatedPpmAnalystTable() {
       <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
       <td class="num">${fmtPctCell(m.ppmPct)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num">${fmtPctCell(m.cm3Pct)}</td>
       <td class="num text-dim">${fmtIntCell(m.totalDeliveredPcs)}</td>
       <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
       <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
