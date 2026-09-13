@@ -785,7 +785,8 @@ var LAST_SYNC_GIDS = [
   "461854229",   // MERCHANT_SKU_DAILY_GID
   "620123165",   // MERCHANT_SEGMENTATION_GID
   "1289659887",  // WEEKLY_INVENTORY_GID
-  "897709273"    // WAREHOUSE_REPACK_GID
+  "897709273",   // WAREHOUSE_REPACK_GID
+  "964398740"    // CONFIRMED_BY_DAY_GID (تاب Confirmed by Day الجاهز: Day0..Day30)
 ];
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
 // .json.gz مش .json — بنخزن نسخة مضغوطة (Utilities.gzip) بدل نص خام، لأن

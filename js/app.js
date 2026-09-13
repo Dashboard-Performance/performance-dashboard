@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.8";
+const APP_VERSION = "1.1.10";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -72,6 +72,27 @@ const WAREHOUSE_REPACK_GID = "897709273";
 //   INBOUND_VS_SOLD           = REMAINING_FROM_BEGINNING / Inbound Qty
 // -------------------------------------------------------------------------
 const WEEKLY_INVENTORY_GID = "1289659887";
+
+// -------------------------------------------------------------------------
+// CONFIRMED BY DAY (تاب جاهز مستقل، طلب صريح): PRODUCT_ID | SKU_NAME |
+// CATEGORY_L1 | _0_DAY | _1_DAY | ... | _30_DAY — عمود _N_DAY = إجمالي
+// CONFIRMED_PIECES بتاع الـ PRODUCT_ID ده من N يوم بالظبط (_0_DAY =
+// النهاردة، _1_DAY = امبارح، ... _30_DAY = من 30 يوم)، يعني بيغطي آخر 31
+// يوم (النهاردة + 30 يوم اللي فاتوا).
+//
+// بيستخدم كمصدر أسرع/جاهز لعمود "Confirmed Qty (7d)" في Weekly Inventory &
+// Inbound (wiSumConfirmedInRange تحت) طول ما الفترة المطلوبة (الأسبوع
+// الافتراضي أو فلتر Sale Start/End الحر) بالكامل جوه آخر 30 يوم من النهاردة.
+// لو الفترة رجعت لأبعد من كده (أو جزء منها برة الشباك ده)، بيرجع تلقائيًا
+// لحساب MAIN_GID القديم (debundled عبر allParsedRows) زي الأول بالظبط —
+// مفيش أي فرق في الشكل النهائي غير مصدر الرقم.
+//
+// نفس منطق الديبندلينج المستخدم مع MAIN_GID بالظبط: لو PRODUCT_ID في الصف
+// ده بندل (ليه mapping في شيت PRODUCTS_DEBUNDLE_MAP_GID)، بيتوزع رقم اليوم
+// على كل Single SKU مكوّن منه (× PRODUCT_QUANTITY بتاعه)، مش يتحسب على
+// نفس الـ PRODUCT_ID كما هو.
+// -------------------------------------------------------------------------
+const CONFIRMED_BY_DAY_GID = "964398740";
 
 // -------------------------------------------------------------------------
 // COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
@@ -302,6 +323,7 @@ const state = {
   // Weekly Inventory & Inbound (Admin Panel)
   weeklyInventoryRows: [],   // شيت WEEKLY_INVENTORY_GID الخام: [{sku, name, byDate: Map(dateLabel -> qty)}]
   weeklyInventoryDateCols: [], // [{label, ts}] بترتيب الشيت (الأقدم للأحدث)
+  confirmedByDayRows: [],    // تاب CONFIRMED_BY_DAY_GID الخام: [{productId, name, category, days:[d0..d30]}]
   weeklyInvWeeks: [],        // الأسابيع المحسوبة (أحدث أولاً): [{weekStart, label, rows:[...]}]
   weeklyInvSearch: "",
   weeklyInvMonthOptions: [], // [{key, date}] شهور فيها أسابيع فعلاً
@@ -4341,6 +4363,27 @@ function wiParseHeaderDate(label) {
     d = new Date(now.getFullYear() - 1, monthIdx, day);
   }
   return d.getTime();
+}
+
+// -------------------------------------------------------------------------
+// تاب "Confirmed by Day" الجاهز (CONFIRMED_BY_DAY_GID): PRODUCT_ID |
+// SKU_NAME | CATEGORY_L1 | _0_DAY | _1_DAY | ... | _30_DAY. بنرجع array
+// بسيط [{productId, name, category, days:[d0, d1, ..., d30]}] — days[i] هو
+// قيمة عمود _i_DAY (i أيام قبل النهاردة، 0 = النهاردة).
+// -------------------------------------------------------------------------
+function parseConfirmedByDaySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]).trim();
+    if (!productId || productId.toUpperCase() === "PRODUCT_ID") continue;
+    const days = [];
+    for (let i = 3; i < c.length; i++) days.push(cellNumber(c[i]));
+    rows.push({ productId, name: cellText(c[1]).trim(), category: cellText(c[2]).trim(), days });
+  }
+  return rows;
 }
 
 // -------------------------------------------------------------------------
@@ -9086,21 +9129,6 @@ function prepareWeeklyInventoryWeeks() {
   //    في MAIN_GID. أي PRODUCT_ID مش موجود في خريطة الديبندلايز أصلاً
   //    (مفيش مابينج ليه) بيترصد على نفسه زي ما هو (fallback).
   const { productMap: wiDebundleMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-  const confirmedByWeek = new Map();
-  (state.allParsedRows || []).forEach(row => {
-    if (!row.sku || !row.timestamp) return;
-    const weekStart = wiWeekStart(row.timestamp);
-    const mappings = wiDebundleMap.get(row.sku);
-    if (mappings && mappings.length) {
-      mappings.forEach(mp => {
-        const key = mp.singleId + "|" + weekStart;
-        confirmedByWeek.set(key, (confirmedByWeek.get(key) || 0) + (row.confirmedPieces || 0) * (mp.quantity || 1));
-      });
-    } else {
-      const key = row.sku + "|" + weekStart;
-      confirmedByWeek.set(key, (confirmedByWeek.get(key) || 0) + (row.confirmedPieces || 0));
-    }
-  });
 
   // 3ب) فهرس Confirmed يومي (لا أسبوعي): "sku|dayTs" مش موجود كخريطة نصية،
   //     بل sku -> Map(dayTs -> إجمالي CONFIRMED_PIECES في اليوم ده)، بنفس
@@ -9124,6 +9152,52 @@ function prepareWeeklyInventoryWeeks() {
     }
   });
   state.weeklyInvConfirmedBySkuDay = confirmedBySkuDay;
+
+  // 3ج) نفس الفكرة (Confirmed يومي Debundled) لكن من تاب "Confirmed by Day"
+  // الجاهز (CONFIRMED_BY_DAY_GID: PRODUCT_ID/SKU_NAME/CATEGORY_L1 +
+  // _0_DAY..._30_DAY) بدل ما نجمعها إحنا من MAIN_GID — بيدّي رقم جاهز
+  // ودقيق لآخر 31 يوم (النهاردة لحد 30 يوم اللي فاتوا)، بنفس منطق الديبندلينج
+  // فوق بالظبط (PRODUCT_ID اللي هو بندل بيوزع رقم اليوم على كل Single SKU
+  // مكوّن منه × PRODUCT_QUANTITY بتاعه). wiSumConfirmedInRange تحت هي اللي
+  // بتقرر تقرا من هنا ولا من confirmedBySkuDay فوق، على حسب الفترة المطلوبة.
+  // _0_DAY = النهاردة، _1_DAY = امبارح، ... _30_DAY = من 30 يوم بالظبط.
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+  const todayTs0 = today0.getTime();
+  const confirmedBySkuDayFromTab = new Map();
+  (state.confirmedByDayRows || []).forEach(cRow => {
+    if (!cRow.productId) return;
+    const mappings = wiDebundleMap.get(cRow.productId);
+    (cRow.days || []).forEach((qty, offset) => {
+      if (!qty) return;
+      const dayTs = todayTs0 - offset * 86400000;
+      if (mappings && mappings.length) {
+        mappings.forEach(mp => {
+          let m = confirmedBySkuDayFromTab.get(mp.singleId);
+          if (!m) { m = new Map(); confirmedBySkuDayFromTab.set(mp.singleId, m); }
+          m.set(dayTs, (m.get(dayTs) || 0) + qty * (mp.quantity || 1));
+        });
+      } else {
+        let m = confirmedBySkuDayFromTab.get(cRow.productId);
+        if (!m) { m = new Map(); confirmedBySkuDayFromTab.set(cRow.productId, m); }
+        m.set(dayTs, (m.get(dayTs) || 0) + qty);
+      }
+    });
+  });
+  state.weeklyInvConfirmedBySkuDayFromTab = confirmedBySkuDayFromTab;
+  // الشباك اللي التاب ده بيغطيه فعلاً: من 30 يوم لحد آخر لحظة في يوم النهاردة.
+  // أي فترة مطلوبة برة الشباك ده (كليًا أو جزئيًا) بترجع لـ confirmedBySkuDay فوق.
+  // ملحوظة مهمة: بنفعّل الشباك ده بس لو فعلاً وصلنا صفوف من التاب الجديد
+  // (يعني الـ Backend اتعمله ديبلوي والـ Sync سحب الـ GID الجديد فعلاً) — لو
+  // لسه فاضي (Backend لسه قديم، أو أول Sync بعد الديبلوي لسه ماحصلش)، بنسيب
+  // الشباك null عشان wiSumConfirmedInRange يرجع تلقائيًا لحساب Main القديم
+  // بدل ما يرجع 0 وهمي من تاب لسه مفيهوش داتا.
+  if ((state.confirmedByDayRows || []).length > 0) {
+    state.weeklyInvConfirmedByDayWindowStart = todayTs0 - 30 * 86400000;
+    state.weeklyInvConfirmedByDayWindowEnd = todayTs0 + 86399999;
+  } else {
+    state.weeklyInvConfirmedByDayWindowStart = null;
+    state.weeklyInvConfirmedByDayWindowEnd = null;
+  }
 
   // 5) Category / Current Stock (Overall) / DOH / Cogs — لكل SKU لوحده (ثابتين
   //    مش مرتبطين بأسبوع معين)، بنفس مصدر ومنطق Sellthrough Rate Panel بالظبط
@@ -9156,7 +9230,7 @@ function prepareWeeklyInventoryWeeks() {
       const inboundQty = inboundByWeek.get(invRow.sku + "|" + weekStart) || 0;
       const inboundDatesRaw = inboundDatesByWeek.get(invRow.sku + "|" + weekStart) || [];
       const inboundDates = [...inboundDatesRaw].sort((a, b) => a.ts - b.ts).map(d => d.text);
-      const confirmedQty = confirmedByWeek.get(invRow.sku + "|" + weekStart) || 0;
+      const confirmedQty = wiSumConfirmedInRange(invRow.sku, weekStart, weekStart + 6 * 86400000);
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
       const inboundVsSold = inboundQty > 0 ? (remainingFromBeginning / inboundQty) * 100 : null;
@@ -9246,8 +9320,24 @@ function wiSumInboundInRange(sku, startTs, endTs) {
   return { qty, dates };
 }
 // إجمالي الـ Confirmed (Debundled Overall) لـ SKU معين، بين تاريخين شاملين
-// الطرفين (مبني على state.weeklyInvConfirmedBySkuDay اليومي).
+// الطرفين. المصدر:
+//   • لو الفترة المطلوبة (startTs..endTs) بالكامل جوه الشباك اللي تاب
+//     "Confirmed by Day" الجاهز بيغطيه (آخر 30 يوم من النهاردة — راجع
+//     state.weeklyInvConfirmedByDayWindowStart/End، متحسبين في
+//     prepareWeeklyInventoryWeeks فوق) → بتتقرا من
+//     state.weeklyInvConfirmedBySkuDayFromTab (التاب الجاهز مباشرة، أسرع/أدق).
+//   • غير كده (الفترة رجعت لأبعد من 30 يوم، كليًا أو جزئيًا) → ترجع تلقائيًا
+//     لحساب MAIN_GID القديم (state.weeklyInvConfirmedBySkuDay، debundled عبر
+//     allParsedRows) زي الأول بالظبط.
 function wiSumConfirmedInRange(sku, startTs, endTs) {
+  const winStart = state.weeklyInvConfirmedByDayWindowStart;
+  const winEnd = state.weeklyInvConfirmedByDayWindowEnd;
+  if (winStart != null && winEnd != null && startTs >= winStart && endTs <= winEnd) {
+    const mTab = (state.weeklyInvConfirmedBySkuDayFromTab || new Map()).get(sku);
+    let sumTab = 0;
+    if (mTab) mTab.forEach((qty, ts) => { if (ts >= startTs && ts <= endTs) sumTab += qty; });
+    return sumTab;
+  }
   const m = (state.weeklyInvConfirmedBySkuDay || new Map()).get(sku);
   if (!m) return 0;
   let sum = 0;
@@ -12448,7 +12538,7 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID
+  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID
 ].filter(Boolean);
 
 // آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
@@ -12700,6 +12790,7 @@ async function fetchAllSheetsSnapshot() {
   const merchantSegPayload = sheets[MERCHANT_SEGMENTATION_GID];
   const weeklyInventoryPayload = sheets[WEEKLY_INVENTORY_GID];
   const warehouseRepackPayload = sheets[WAREHOUSE_REPACK_GID];
+  const confirmedByDayPayload = sheets[CONFIRMED_BY_DAY_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -12734,6 +12825,7 @@ async function fetchAllSheetsSnapshot() {
     merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
+    confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
     staleGids, // sheets that failed every retry and are still showing old data
     // توقيت المزامنة المركزية من السيرفر (نفسه لكل اليوزرز) — لو مش موجود
     // (مسار fallback القديم اللي بيسحب لايف من غير backend)، بنرجع Date.now()
@@ -12809,6 +12901,7 @@ function applySnapshotToState(snapshot) {
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
+  state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
   // Weekly Inventory & Inbound (Admin Panel) — لو الشيت اتغيّر (عمود يوم جديد
   // اتضاف مثلاً)، لازم نعيد بناء الأسابيع تاني بدل ما تفضل عارضة داتا قديمة.
   {
