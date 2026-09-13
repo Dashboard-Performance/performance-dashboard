@@ -38,6 +38,13 @@
 
 const CACHE_KEY_PAYLOAD = "last_sync_payload_v1";
 const CACHE_KEY_META = "last_sync_meta_v1";
+// تاب "Confirmed by Day" (Weekly Inventory & Inbound) — بيتقرا هنا مباشرة
+// من Google Sheets (gviz) بدل ما يعدي على Apps Script خالص، عشان يبقى
+// مستقل تمامًا عن أي مشكلة Deploy في الباك اند (اللي واجهناها فعليًا).
+// نفس الـ Cron كل 5 دقايق (تحت في scheduled()) بيحدّثه، وأي طلب من أي
+// يوزر بيتخدم من الـ KV Cache ده فورًا.
+const CACHE_KEY_CONFIRMED_BY_DAY = "confirmed_by_day_v1";
+const CONFIRMED_BY_DAY_GID = "964398740";
 
 function corsHeaders() {
   return {
@@ -103,6 +110,53 @@ async function handleGetLastSyncMeta(env) {
   }
 }
 
+// بيقرا شيت واحد مباشرة من Google Sheets (gviz) — نفس بالظبط الطريقة
+// القديمة اللي كانت مستخدمة قبل ما نعمل الباك اند المركزي، بس هنا شغالة
+// من على سيرفر Cloudflare (مش من متصفح كل يوزر لوحده). النتيجة بترجع بنفس
+// شكل { table: { cols, rows } } اللي parseConfirmedByDaySheet() في app.js
+// متعودة عليه، فمفيش أي تغيير مطلوب في منطق الـ parsing.
+async function fetchGvizSheet(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&tqx=out:json`;
+  const res = await fetch(url, { cf: { cacheTtl: 0 } });
+  if (!res.ok) throw new Error(`gviz responded with status ${res.status}`);
+  const text = await res.text();
+  const match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if (!match) throw new Error("Unexpected gviz response shape (sheet/gid not public or wrong id?)");
+  // gviz بيرجّع Date(y,m,d,...) حرفي مش JSON صالح. الباك اند (Code.gs) بيحلها
+  // بـ eval() لأن Apps Script بيسمح بيه — لكن Cloudflare Workers بيمنع
+  // eval()/new Function() تمامًا افتراضيًا ("Code generation from strings
+  // disallowed"). التاب ده (Confirmed by Day) مفيهوش أي عمود تاريخ أصلاً
+  // (بس PRODUCT_ID/SKU_NAME/CATEGORY_L1 + أرقام)، فبدل eval بنستبدل أي
+  // Date(...) لو ظهر بنص عادي (JSON صالح) — من غير ما نحتاج نفكه فعليًا
+  // لتاريخ حقيقي، لأننا أصلاً مش بنستخدم قيمته.
+  const jsonSafeText = match[1].replace(/Date\([^)]*\)/g, (m) => JSON.stringify(m));
+  const parsed = JSON.parse(jsonSafeText);
+  if (parsed && parsed.status === "error") throw new Error("gviz returned status=error for gid " + gid);
+  return parsed;
+}
+
+async function refreshConfirmedByDayCache(env) {
+  const sheetId = env.SHEET_ID;
+  if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
+  const table = await fetchGvizSheet(sheetId, CONFIRMED_BY_DAY_GID);
+  const payload = { success: true, fetchedAt: new Date().toISOString(), table };
+  await env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY, JSON.stringify(payload));
+  return payload;
+}
+
+async function handleGetConfirmedByDay(env) {
+  try {
+    let cached = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY);
+    if (!cached) {
+      const fresh = await refreshConfirmedByDayCache(env);
+      return jsonResponse(fresh);
+    }
+    return new Response(cached, { headers: corsHeaders() });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -114,12 +168,13 @@ export default {
 
     if (action === "getLastSync") return handleGetLastSync(env);
     if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
+    if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
@@ -131,9 +186,14 @@ export default {
   // لليوزرز عادي لحد المحاولة الناجحة اللي بعدها.
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
-      refreshCache(env).catch((err) => {
-        console.error("[scheduled refresh] failed (will retry next cron tick):", err && err.message);
-      })
+      Promise.all([
+        refreshCache(env).catch((err) => {
+          console.error("[scheduled refresh] failed (will retry next cron tick):", err && err.message);
+        }),
+        refreshConfirmedByDayCache(env).catch((err) => {
+          console.error("[scheduled refresh confirmedByDay] failed (will retry next cron tick):", err && err.message);
+        }),
+      ])
     );
   },
 };

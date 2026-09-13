@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.15";
+const APP_VERSION = "1.1.17";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -12715,6 +12715,27 @@ const GID_LABELS = {
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)"
 };
 
+// بيجيب تاب "Confirmed by Day" مباشرة من الـ Cloudflare Worker
+// (action=getConfirmedByDay) — الـ Worker نفسه بيقرأه لايف من Google
+// Sheets (gviz) على مستواه هو ويكاشيه في KV، فمفيش أي اعتماد على Apps
+// Script/Code.gs ولا على أي Deploy خالص. بيرجع نفس شكل { table: { cols,
+// rows } } اللي parseConfirmedByDaySheet() متعودة عليه.
+async function fetchConfirmedByDayViaWorker() {
+  if (!SYNC_CDN_URL) throw new Error("SYNC_CDN_URL not configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+  try {
+    const url = `${SYNC_CDN_URL}?action=getConfirmedByDay`;
+    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
+    const json = await res.json();
+    if (!json || !json.success) throw new Error((json && json.message) || "Worker getConfirmedByDay failed");
+    if (!json.table) throw new Error("Worker getConfirmedByDay returned no table data");
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
 // global state, so it is safe to call in the background while old data is
 // still on screen.
@@ -12786,20 +12807,26 @@ async function fetchAllSheetsSnapshot() {
   }
 
   // ---------------------------------------------------------------------
-  // Workaround مؤقت (شيله لما الباك اند يتظبط ويرجّع 964398740/الـ GID
-  // الجديد جوه getLastSync عادي): تاب "Confirmed by Day" لسه مش موجود في
-  // LAST_SYNC_GIDS بتاعة النسخة المنشورة فعليًا على السيرفر (مشكلة Deploy
-  // عند العميل)، فبنجيبه هنا لايف مباشرة بنفس مسار gviz القديم
-  // (loadSheetWithRetry → loadSheetViaJsonp) اللي بيكلم Google Sheets
-  // مباشرة من المتصفح، من غير أي اعتماد على الباك اند (Code.gs) ولا على
-  // أي Deploy خالص — فبيشتغل فورًا بغض النظر عن مشكلة الـ Sync المركزي.
-  // لو الباك اند اتظبط بعدين ورجع الـ GID ده من getLastSync، السطر ده
-  // هيتخطى نفسه تلقائيًا (الشرط تحت) ومفيش أي تعارض.
+  // Workaround (شيله لو يوم من الأيام الباك اند اتظبط وبقى راجع
+  // 964398740 جوه getLastSync عادي): تاب "Confirmed by Day" لسه مش موجود
+  // في LAST_SYNC_GIDS بتاعة النسخة المنشورة فعليًا على السيرفر (مشكلة
+  // Deploy عند العميل)، فبنجيبه من مصدر منفصل تمامًا عن الباك اند —
+  // Cloudflare Worker نفسه (action=getConfirmedByDay) بقى بيقرأ الشيت ده
+  // مباشرة من Google Sheets (gviz) على مستواه هو، ويكاشيه في KV ويحدّثه
+  // كل 5 دقايق بنفس الـ Cron بتاع getLastSync — فمفيش أي اعتماد على
+  // Apps Script/Code.gs ولا على أي Deploy خالص لباك اند التاب ده. لو
+  // SYNC_CDN_URL (رابط الـ Worker) مش متظبط لأي سبب، بيرجع تلقائيًا لنفس
+  // مسار gviz المباشر من المتصفح (loadSheetWithRetry) كـ fallback.
   if (CONFIRMED_BY_DAY_GID && !sheets[CONFIRMED_BY_DAY_GID]) {
     try {
-      sheets[CONFIRMED_BY_DAY_GID] = await loadSheetWithRetry(CONFIRMED_BY_DAY_GID);
+      sheets[CONFIRMED_BY_DAY_GID] = await fetchConfirmedByDayViaWorker();
     } catch (err) {
-      console.warn("[Confirmed by Day] live fetch failed:", err);
+      console.warn("[Confirmed by Day] Cloudflare Worker fetch failed, falling back to direct gviz:", err);
+      try {
+        sheets[CONFIRMED_BY_DAY_GID] = await loadSheetWithRetry(CONFIRMED_BY_DAY_GID);
+      } catch (err2) {
+        console.warn("[Confirmed by Day] direct gviz fallback also failed:", err2);
+      }
     }
   }
 
