@@ -466,9 +466,16 @@
    *  5) Presence — heartbeat for everyone, "who's online" widget for
    *     PRESENCE_ADMIN_EMAIL only
    * ------------------------------------------------------------------ */
+  // v1.1.3: التاب لما يبقى مخفي (تاب تاني مفتوح، أو التاب ده في الخلفية)،
+  // المتصفح بيعلّق الشبكة عليه (ERR_NETWORK_IO_SUSPENDED) — مفيش داعي نحاول
+  // نبعت heartbeat/presence أصلاً وقتها، بنسيبهم يستأنفوا أول ما التاب يرجع مرئي.
+  function isTabVisible() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  }
+
   function startPresence(user) {
     sendHeartbeat(user);
-    setInterval(() => sendHeartbeat(user), CONFIG.HEARTBEAT_INTERVAL_MS);
+    setInterval(() => { if (isTabVisible()) sendHeartbeat(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
 
     if (String(user.email || "").trim().toLowerCase() === CONFIG.PRESENCE_ADMIN_EMAIL.toLowerCase()) {
       injectPresenceStyles();
@@ -564,7 +571,7 @@
     });
 
     refreshPresence(user);
-    setInterval(() => refreshPresence(user), CONFIG.HEARTBEAT_INTERVAL_MS);
+    setInterval(() => { if (isTabVisible()) refreshPresence(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
   }
 
   function refreshPresence(user) {

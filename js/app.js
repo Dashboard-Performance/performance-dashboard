@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.3";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -13184,8 +13184,18 @@ async function fetchLastSyncMeta() {
   }
 }
 
+// v1.1.3: لما التاب يبقى في الخلفية فترة، المتصفح نفسه (Chrome خصوصًا)
+// بيعلّق الشبكة عليه توفيرًا للموارد — وده اللي بيطلع ERR_NETWORK_IO_SUSPENDED
+// في الكونسول (حماية جوه المتصفح نفسه، مش خطأ في السيرفر ولا في الكود، ومش
+// حاجة نقدر "نصلحها" بمعنى نلغيها). الحل العملي: نوقف الطلبات الدورية دي
+// تمامًا لما التاب يبقى مخفي (بدل ما نسيبها تحاول وتفشل)، ونعمل تشييك فوري
+// أول ما اليوزر يرجع للتاب تاني (راجع الـ visibilitychange listener تحت).
+function isTabVisible() {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 async function lastSyncMetaPollTick() {
-  if (!DATA_API_URL || lastSyncMetaCheckInFlight) return;
+  if (!DATA_API_URL || lastSyncMetaCheckInFlight || !isTabVisible()) return;
   lastSyncMetaCheckInFlight = true;
   try {
     const current = await fetchLastSyncMeta();
@@ -13215,9 +13225,18 @@ function scheduleAutoRefresh() {
   if (currentMinutes >= 30) next.setHours(next.getHours() + 1);
   const delay = next.getTime() - now.getTime();
   setTimeout(() => {
-    loadData(false);
-    setInterval(() => loadData(false), AUTO_REFRESH_INTERVAL_MS); // كل نص ساعة ثابتة من بعدها
+    if (isTabVisible()) loadData(false);
+    setInterval(() => { if (isTabVisible()) loadData(false); }, AUTO_REFRESH_INTERVAL_MS); // كل نص ساعة ثابتة من بعدها
   }, delay);
+}
+
+// v1.1.3: أول ما اليوزر يرجع للتاب بعد ما كانت مخفية، نعمل تشييك فوري بدل
+// ما نستنى الـ interval الجاي (اللي ممكن ياخد لحد دقيقة ونص/نص ساعة) — كده
+// لو حصل تغيير حقيقي وهو بعيد عن التاب، بيشوفه على طول أول ما يرجعله.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") lastSyncMetaPollTick();
+  });
 }
 
 setupTicker();
