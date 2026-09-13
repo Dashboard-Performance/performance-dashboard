@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.10";
+const APP_VERSION = "1.1.11";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -93,6 +93,12 @@ const WEEKLY_INVENTORY_GID = "1289659887";
 // نفس الـ PRODUCT_ID كما هو.
 // -------------------------------------------------------------------------
 const CONFIRMED_BY_DAY_GID = "964398740";
+// وضع اختبار مؤقت: لو true، wiSumConfirmedInRange مش هترجع تقرأ من Main
+// خالص مهما كان الرينج، وهتفضل تقرأ من تاب "Confirmed by Day" الجديد بس
+// (حتى لو جزء من الرينج برا آخر 30 يوم، هيرجع اللي لاقيه بس مش هيكمل من
+// Main) — ده عشان نتأكد إن مصدر التاب الجديد شغال صح لوحده من غير ما
+// الـ Fallback يغطي على أي مشكلة. لازم ترجعها false تاني بعد ما تخلص اختبار.
+const DEBUG_FORCE_CONFIRMED_FROM_TAB = true;
 
 // -------------------------------------------------------------------------
 // COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
@@ -9332,7 +9338,8 @@ function wiSumInboundInRange(sku, startTs, endTs) {
 function wiSumConfirmedInRange(sku, startTs, endTs) {
   const winStart = state.weeklyInvConfirmedByDayWindowStart;
   const winEnd = state.weeklyInvConfirmedByDayWindowEnd;
-  if (winStart != null && winEnd != null && startTs >= winStart && endTs <= winEnd) {
+  const inWindow = winStart != null && winEnd != null && startTs >= winStart && endTs <= winEnd;
+  if (inWindow || DEBUG_FORCE_CONFIRMED_FROM_TAB) {
     const mTab = (state.weeklyInvConfirmedBySkuDayFromTab || new Map()).get(sku);
     let sumTab = 0;
     if (mTab) mTab.forEach((qty, ts) => { if (ts >= startTs && ts <= endTs) sumTab += qty; });
