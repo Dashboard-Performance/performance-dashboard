@@ -47,7 +47,7 @@
     // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
     // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
     // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
-    HEARTBEAT_INTERVAL_MS: 45000,
+    HEARTBEAT_INTERVAL_MS: 20000,
   };
 
   /* ------------------------------------------------------------------ *
@@ -162,10 +162,12 @@
     return callApiOnce(payload).catch((err) => {
       const msg = (err && err.message) || "";
       const isTransient = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0;
-      if (isTransient && attempt < 2) {
-        // محاولة تانية واحدة بس بعد ثانية — كافية عادة لتجاوز الفشل العابر
-        // من غير ما نأخّر heartbeat/presence/login بشكل محسوس.
-        return new Promise((resolve) => setTimeout(resolve, 1000)).then(() => callApi(payload, attempt + 1));
+      if (isTransient && attempt < 3) {
+        // محاولتين إضافيتين (بدل واحدة) بفاصل بسيط — بما إن الـ Cloudflare
+        // Worker بقى بياخد طلبات القراءة الكبيرة عن Apps Script، فمفيش خوف
+        // من إن المحاولة الإضافية دي تزود الزحمة، وبتقلل احتمال ظهور فشل
+        // ظاهر لليوزر أكتر.
+        return new Promise((resolve) => setTimeout(resolve, 800 * attempt)).then(() => callApi(payload, attempt + 1));
       }
       if (isTransient) {
         throw new Error("Server is busy right now — please try again in a moment.");

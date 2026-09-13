@@ -1,0 +1,22 @@
+name = "performance-dashboard-sync-cache"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# بيشغّل الـ scheduled() handler جوه worker.js كل 5 دقايق — ده اللي بيسحب
+# نسخة جديدة من Apps Script ويحطها في الكاش (KV)، بدل ما كل يوزر يضرب
+# Apps Script بنفسه.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# ⚠️ لازم تستبدل الـ id ده بالـ id الحقيقي اللي هتاخده من أمر:
+#   wrangler kv namespace create "SYNC_CACHE"
+# (راجع الشرح فوق worker.js لخطوات كاملة)
+[[kv_namespaces]]
+binding = "SYNC_CACHE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[vars]
+# رابط الـ Apps Script Web App بتاعك — نفسه المستخدم في js/app.js (DATA_API_URL)
+# وjs/auth.js (CONFIG.API_URL). لو غيرت الـ deployment بتاع الباك اند يوم من
+# الأيام، لازم تحدّث القيمة هنا كمان.
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec"

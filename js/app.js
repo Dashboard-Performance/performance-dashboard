@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.8";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -142,6 +142,24 @@ const MERCHANT_SKU_DAILY_GID = "461854229";
 // — the app works either way, but JSONP is the one that was failing.
 // -------------------------------------------------------------------------
 const DATA_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
+// -------------------------------------------------------------------------
+// v1.1.6: SYNC_CDN_URL — طبقة كاش وسيطة اختيارية (Cloudflare Worker، راجع
+// مجلد cloudflare-worker/ جوه الـ zip) بتقف بين كل اليوزرز وبين Apps Script
+// لطلبات القراءة الكتيرة (getLastSync/getLastSyncMeta) بس. الفكرة: بدل ما
+// كل يوزر فاتح/بيعمل رفرش يضرب Apps Script مباشرة (وده اللي كان بيسبب الـ
+// 404/التعليق وقت الزحمة)، كل اليوزرز بيقروا من الـ Worker اللي بيرجّع
+// نسخة جاهزة من Cloudflare KV (سريع جدًا، مفيش أي حد أقصى تنفيذات متزامنة
+// زي Apps Script). الـ Worker نفسه هو اللي بيكلم Apps Script — مرة واحدة كل
+// 5 دقايق بس (مش مع كل يوزر)، فالضغط على Apps Script بيقل بشكل جذري.
+//
+// سيبها فاضية ("") لحد ما تعمل Deploy للـ Worker (خطوات التنصيب في الشرح
+// اللي بعتهولك) وتحط رابطه هنا — لحد وقتها الداشبورد شغالة زي ما هي بالظبط
+// (بتكلم Apps Script مباشرة عن طريق DATA_API_URL، من غير أي تغيير في
+// السلوك). أي حاجة تانية غير القراءة (لوجين، heartbeat، باك أب، نشر الـ
+// Computed API) لسه بتكلم Apps Script مباشرة زي ما هي — مش جزء من التغيير ده.
+// -------------------------------------------------------------------------
+const SYNC_CDN_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev";
+const SYNC_READ_BASE_URL = SYNC_CDN_URL || DATA_API_URL;
 // نفس رابط الـ Apps Script Web App الموجود في js/auth.js (CONFIG.API_URL) —
 // مستخدم هنا بس عشان يبعت فيدباك الـ Recommended Tracker (save_match_feedback)
 // لل backend، اللي بيكتبه لايف في شيت الماتشات (PRODUCTS_MATCHES_GID).
@@ -12492,7 +12510,7 @@ async function fetchAllSheetsViaBackendOnce() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const url = `${DATA_API_URL}?action=getLastSync`;
+    const url = `${SYNC_READ_BASE_URL}?action=getLastSync`;
     const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
     // ⚠️ لما رد Apps Script يبقى كبير (الحالة العادية هنا — كذا ميجا base64)،
     // جوجل أحيانًا بيحوّل الرد فعليًا لصفحة وسيطة على
@@ -12541,7 +12559,13 @@ async function fetchAllSheetsViaBackendOnce() {
 // حقيقية (زي success:false من الباك اند نفسه، أو انقطاع شكل الرد بين
 // النسختين) واللي إعادة المحاولة فيها مش هتغيّر حاجة.
 async function fetchAllSheetsViaBackend() {
-  const MAX_ATTEMPTS = 3;
+  // v1.1.5: كانت 3 محاولات بس بفاصل ثابت (1.5s/3s) — لو الفشل العابر استمر
+  // أكتر من كده (زحمة تنفيذات على نفس الـ deployment لفترة أطول شوية)، كنا
+  // بنستسلم بدري. دلوقتي 5 محاولات بـ backoff متزايد (1s/2s/4s/8s) — بيدي
+  // فرصة أكبر بكتير للفشل العابر إنه يعدي لوحده قبل ما نظهر أي حاجة لليوزر.
+  // كمان بطلنا نطبع console.warn لكل محاولة وسيطة — لو المحاولة اللي بعدها
+  // نجحت، مفيش أي داعي أصلاً نسجل حاجة في الكونسول (نجحت بصمت زي ما المفروض).
+  const MAX_ATTEMPTS = 5;
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -12551,10 +12575,16 @@ async function fetchAllSheetsViaBackend() {
       const msg = (err && err.message) || "";
       const isRetryable = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0 || (err && err.name === "TypeError");
       if (attempt < MAX_ATTEMPTS && isRetryable) {
-        console.warn(`[fetchAllSheetsViaBackend] transient failure (attempt ${attempt}/${MAX_ATTEMPTS}), retrying...`, err);
-        await new Promise(r => setTimeout(r, 1500 * attempt));
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
         continue;
       }
+      // ⚠️ الإيرور الأحمر "Failed to load resource: 404" اللي بتشوفه في
+      // الكونسول جنب اللوج ده مش حاجة أي كود جافاسكريبت يقدر يمنعها — دي
+      // بتتطبع من المتصفح نفسه (Network layer) لحظة ما أي طلب يرجع بحالة غير
+      // 2xx، قبل ما الكود بتاعنا حتى ياخد فرصة يشتغل. نفس الحاجة بتحصل في أي
+      // موقع تاني في الدنيا. اللي في إيدينا نعمله هو إننا نتعافى منها تلقائي
+      // (زي فوق) عشان متوصلكش كأخطاء فعلية — مش إننا نمنع المتصفح من تسجيلها.
+      console.warn(`[fetchAllSheetsViaBackend] failed after ${MAX_ATTEMPTS} attempts — giving up.`, err);
       throw err;
     }
   }
@@ -13264,7 +13294,7 @@ let lastSyncMetaCheckInFlight = false;
 
 async function fetchLastSyncMeta() {
   try {
-    const url = `${DATA_API_URL}?action=getLastSyncMeta`;
+    const url = `${SYNC_READ_BASE_URL}?action=getLastSyncMeta`;
     const res = await fetch(url, { method: "GET", cache: "no-store" });
     const json = await res.json();
     return (json && json.success) ? (json.fetchedAt || null) : null;
