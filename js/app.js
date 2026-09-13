@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.11";
+const APP_VERSION = "1.1.15";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -9190,6 +9190,16 @@ function prepareWeeklyInventoryWeeks() {
     });
   });
   state.weeklyInvConfirmedBySkuDayFromTab = confirmedBySkuDayFromTab;
+  // لوج تشخيصي مؤقت (شيله لما تخلص اختبار) — يوريك هل التاب الجديد فعلاً
+  // وصل من الـ Sync ولا لسه فاضي، وهل الديبندلينج لاقى مطابقة صح.
+  if (DEBUG_FORCE_CONFIRMED_FROM_TAB) {
+    console.log(
+      "[DEBUG confirmedByDay] rows فاضية من التاب =", (state.confirmedByDayRows || []).length,
+      "| عدد SKUs بعد الديبندلينج =", confirmedBySkuDayFromTab.size,
+      "| أول 3 صفوف خام:", (state.confirmedByDayRows || []).slice(0, 3),
+      "| أول 5 SKU keys بعد الديبندلينج:", [...confirmedBySkuDayFromTab.keys()].slice(0, 5)
+    );
+  }
   // الشباك اللي التاب ده بيغطيه فعلاً: من 30 يوم لحد آخر لحظة في يوم النهاردة.
   // أي فترة مطلوبة برة الشباك ده (كليًا أو جزئيًا) بترجع لـ confirmedBySkuDay فوق.
   // ملحوظة مهمة: بنفعّل الشباك ده بس لو فعلاً وصلنا صفوف من التاب الجديد
@@ -12773,6 +12783,24 @@ async function fetchAllSheetsSnapshot() {
       [WAREHOUSE_REPACK_GID]: warehouseRepackPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
+  }
+
+  // ---------------------------------------------------------------------
+  // Workaround مؤقت (شيله لما الباك اند يتظبط ويرجّع 964398740/الـ GID
+  // الجديد جوه getLastSync عادي): تاب "Confirmed by Day" لسه مش موجود في
+  // LAST_SYNC_GIDS بتاعة النسخة المنشورة فعليًا على السيرفر (مشكلة Deploy
+  // عند العميل)، فبنجيبه هنا لايف مباشرة بنفس مسار gviz القديم
+  // (loadSheetWithRetry → loadSheetViaJsonp) اللي بيكلم Google Sheets
+  // مباشرة من المتصفح، من غير أي اعتماد على الباك اند (Code.gs) ولا على
+  // أي Deploy خالص — فبيشتغل فورًا بغض النظر عن مشكلة الـ Sync المركزي.
+  // لو الباك اند اتظبط بعدين ورجع الـ GID ده من getLastSync، السطر ده
+  // هيتخطى نفسه تلقائيًا (الشرط تحت) ومفيش أي تعارض.
+  if (CONFIRMED_BY_DAY_GID && !sheets[CONFIRMED_BY_DAY_GID]) {
+    try {
+      sheets[CONFIRMED_BY_DAY_GID] = await loadSheetWithRetry(CONFIRMED_BY_DAY_GID);
+    } catch (err) {
+      console.warn("[Confirmed by Day] live fetch failed:", err);
+    }
   }
 
   const mainPayload = sheets[MAIN_GID];
