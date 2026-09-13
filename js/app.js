@@ -418,8 +418,17 @@ async function autoRefreshPollTick() {
   if (current !== autoRefreshBaseline) showAutoRefreshBanner();
 }
 
-startAutoRefreshBaseline();
-setInterval(autoRefreshPollTick, AUTO_REFRESH_POLL_MS);
+// بطلب صريح: لو الصفحة متفتحة محليًا (دبل كليك على index.html من على
+// الجهاز مباشرة، file:///C:/...) بدل ما تكون شغالة من سيرفر حقيقي (http/https)،
+// أي fetch() لملفات الموقع نفسها بيترفض بـ CORS ("origin 'null'") — دي حماية
+// من المتصفح نفسه، مش حاجة نقدر نلغيها من الكود. الميزة دي أصلاً مالهاش
+// معنى في وضع محلي (مفيش "نسخة جديدة على السيرفر" تتقارن بيها)، فبنقفلها
+// خالص لو البروتوكول file: عشان الإيرورز دي متظهرش في الكونسول من غير أي
+// تأثير على الموقع الحقيقي أونلاين (لسه شغالة زي ما هي هناك).
+if (window.location.protocol !== "file:") {
+  startAutoRefreshBaseline();
+  setInterval(autoRefreshPollTick, AUTO_REFRESH_POLL_MS);
+}
 
 // =========================================================================
 // PER-SECTION DATE RANGE FILTER (Start Date / End Date) — بطلب صريح: مفيش
@@ -12347,32 +12356,35 @@ async function ungzipFromBase64(base64) {
   return new TextDecoder("utf-8").decode(buf);
 }
 
+// بطلب صريح: الغينا الكاش/المزامنة المركزية (Drive last_sync.json.gz) خالص
+// من هنا. دلوقتي كل loadData() بيعمل live fetch مباشر من الشيت نفسه بتاع
+// action=getData (بيستخدم fetchSheetsPayload_ في الباك اند — نفس منطق
+// gviz/UrlFetchApp.fetchAll المتوازي، بس من غير أي كاش/Drive/gzip/base64
+// في النص). يعني كل مرة الداشبورد بتتفتح أو تعمل رفرش، بتقرا القيم اللي في
+// الشيت في نفس اللحظة دي بالظبط — بدون أي طبقة كاش بينها وبين المصدر.
+// (ملحوظة: ده بيرجعنا لنفس السلوك اللي كان قبل ما نضيف runScheduledSync/
+// last_sync — الميزة إنها لايف 100%، العيب إن أي ضغط/تزامن على نفس
+// الـ deployment (لوجين، heartbeat، ...) ممكن يأثر على سرعتها زي الأول.)
 async function fetchAllSheetsViaBackendOnce() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const url = `${DATA_API_URL}?action=getLastSync`;
+    const url = `${DATA_API_URL}?action=getData&gids=${ALL_SHEET_GIDS.join(",")}`;
     const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
-    // ⚠️ لما رد Apps Script يبقى كبير (الحالة العادية هنا — كذا ميجا base64)،
-    // جوجل أحيانًا بيحوّل الرد فعليًا لصفحة وسيطة على
-    // script.googleusercontent.com/macros/echo، ولو الصفحة الوسيطة دي فشلت
-    // (404 عابر تحت ضغط/انتهاء صلاحية اللينك)، اللي بيرجع مش JSON خالص —
-    // بيرجع صفحة HTML عادية (<!DOCTYPE ...>) فـ res.json() بيرمي SyntaxError
-    // "Unexpected token '<'". ده فشل عابر بحت من مسار جوجل نفسه، مش خطأ في
-    // الباك اند ولا في الداتا — الحل نتعامل معاه كفشل نعيد المحاولة بسببه
-    // (retryable) في fetchAllSheetsViaBackend تحت، بدل ما نسيب اليوزر يضطر
-    // يدوس Refresh يدوي زي ما كان بيحصل.
+    // ⚠️ نفس ملاحظة الفشل العابر اللي كانت موجودة مع getLastSync: أحيانًا
+    // جوجل بترجع صفحة HTML (<!DOCTYPE ...>) بدل JSON لو الرد كبير وحصل فشل
+    // عابر في مسار script.googleusercontent.com/macros/echo. بنتعامل معاه
+    // كفشل قابل لإعادة المحاولة (retryable) في fetchAllSheetsViaBackend تحت.
     let json;
     try {
       json = await res.json();
     } catch (parseErr) {
       throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
     }
-    if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
+    if (!json.success) throw new Error(json.message || "Backend getData failed");
     if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
-    // النسخة الجديدة من الباك اند بترجع gzBase64 (مضغوط) بدل sheets مباشرة —
-    // لو لسه نسخة قديمة من الباك اند شغالة (لسه معملتش redeploy)، json.sheets
-    // ممكن يكون موجود برضه (توافق قديم)، فبنتعامل مع الحالتين.
+    // action=getData بيرجع sheets مباشرة (من غير gzip/base64) — بس سايبين
+    // فرع gzBase64 هنا للتوافق لو يوم من الأيام رجّعنا الكاش تاني.
     let sheets;
     if (json.gzBase64) {
       const text = await ungzipFromBase64(json.gzBase64);
@@ -12384,7 +12396,7 @@ async function fetchAllSheetsViaBackendOnce() {
     // دفاعي: لو الرد رجع من غير sheets خالص (شكل غير متوقع — مثلاً باك اند
     // قديم/نص مقصوص)، لازم نرمي error واضح هنا بدل ما نسيب الكود يكسر بعد
     // كده بـ "Cannot read properties of undefined" غامضة صعب تشخيصها.
-    if (!sheets) throw new Error("Backend getLastSync returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
+    if (!sheets) throw new Error("Backend getData returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
     return sheets;
   } finally {
     clearTimeout(timer);
@@ -13147,24 +13159,32 @@ async function lastSyncMetaPollTick() {
 }
 
 // -------------------------------------------------------------------------
-// FALLBACK ساعة ثابتة — لو لأي سبب البولينج فوق فشل أو الـ trigger المركزي
-// اتأخر، برضه في ريفريش بصمت كل ساعة مضبوطة (Wall clock) كشبكة أمان، بنفس
-// منطق "كل اليوزرز يترفرشوا مع بعض" القديم. مش هيتعارض مع البولينج فوق —
-// أصلاً بقى خفيف جدًا دلوقتي (getLastSync بيقرا نسخة جاهزة من Drive).
+// رفرش صامت تلقائي كل نص ساعة مضبوطة (Wall clock — بطلب صريح، كانت كل
+// ساعة قبل كده). بيتظبط على أقرب :00 أو :30 جاية عشان كل اليوزرز يترفرشوا
+// مع بعض في نفس اللحظة (زي منطق "كل اليوزرز يشوفوا نفس التحديث" القديم).
 // -------------------------------------------------------------------------
+const AUTO_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // نص ساعة
 function scheduleAutoRefresh() {
   const now = new Date();
   const next = new Date(now);
-  next.setMinutes(0, 0, 0);
-  next.setHours(next.getHours() + 1); // أقرب ساعة مضبوطة جاية
+  next.setSeconds(0, 0);
+  const currentMinutes = next.getMinutes();
+  next.setMinutes(currentMinutes < 30 ? 30 : 0);
+  if (currentMinutes >= 30) next.setHours(next.getHours() + 1);
   const delay = next.getTime() - now.getTime();
   setTimeout(() => {
     loadData(false);
-    setInterval(() => loadData(false), 60 * 60 * 1000); // كل ساعة ثابتة من بعدها
+    setInterval(() => loadData(false), AUTO_REFRESH_INTERVAL_MS); // كل نص ساعة ثابتة من بعدها
   }, delay);
 }
 
 setupTicker();
 loadData(false);
 scheduleAutoRefresh();
-setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
+// بطلب صريح: الغينا الاعتماد على الكاش/المزامنة المركزية خالص (fetchAllSheetsViaBackendOnce
+// بقى بيقرا لايف من الشيت في كل مرة عن طريق action=getData)، فبقى بولينج
+// getLastSyncMeta هنا مالوش لازمة — كان أصلاً مبني على فكرة "فيه نسخة كاش
+// جديدة اتحطت في Drive؟"، ومفيش كاش نعتمد عليه دلوقتي. سايبين الفنكشن نفسها
+// موجودة فوق (مش شايلينها) لو حبينا نرجع نفعّلها تاني في المستقبل — بس مش
+// بتتنادى تلقائي دلوقتي.
+// setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
