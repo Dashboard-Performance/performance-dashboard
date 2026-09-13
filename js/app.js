@@ -12347,13 +12347,27 @@ async function ungzipFromBase64(base64) {
   return new TextDecoder("utf-8").decode(buf);
 }
 
-async function fetchAllSheetsViaBackend() {
+async function fetchAllSheetsViaBackendOnce() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
     const url = `${DATA_API_URL}?action=getLastSync`;
-    const res = await fetch(url, { method: "GET", signal: controller.signal });
-    const json = await res.json();
+    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
+    // ⚠️ لما رد Apps Script يبقى كبير (الحالة العادية هنا — كذا ميجا base64)،
+    // جوجل أحيانًا بيحوّل الرد فعليًا لصفحة وسيطة على
+    // script.googleusercontent.com/macros/echo، ولو الصفحة الوسيطة دي فشلت
+    // (404 عابر تحت ضغط/انتهاء صلاحية اللينك)، اللي بيرجع مش JSON خالص —
+    // بيرجع صفحة HTML عادية (<!DOCTYPE ...>) فـ res.json() بيرمي SyntaxError
+    // "Unexpected token '<'". ده فشل عابر بحت من مسار جوجل نفسه، مش خطأ في
+    // الباك اند ولا في الداتا — الحل نتعامل معاه كفشل نعيد المحاولة بسببه
+    // (retryable) في fetchAllSheetsViaBackend تحت، بدل ما نسيب اليوزر يضطر
+    // يدوس Refresh يدوي زي ما كان بيحصل.
+    let json;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
+    }
     if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
     if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
     // النسخة الجديدة من الباك اند بترجع gzBase64 (مضغوط) بدل sheets مباشرة —
@@ -12375,6 +12389,35 @@ async function fetchAllSheetsViaBackend() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// بطلب صريح بعد ما ظهر إن جوجل أحيانًا بيرجع صفحة HTML بدل JSON (فشل عابر في
+// مسار script.googleusercontent.com/macros/echo بتاع الردود الكبيرة) وده
+// كان بيوقف الرفرش التلقائي تمامًا لحد ما اليوزر يدوس زرار Refresh يدوي —
+// دلوقتي بنعيد المحاولة تلقائيًا (لحد 3 مرات، بفاصل بسيط بينهم) قبل ما
+// نستسلم ونعرض رسالة خطأ فعلية. مش بنعيد المحاولة على أي نوع خطأ — بس على
+// الفشل العابر (رد HTML بدل JSON) أو مشاكل شبكة عادية، مش على أخطاء تطبيقية
+// حقيقية (زي success:false من الباك اند نفسه، أو انقطاع شكل الرد بين
+// النسختين) واللي إعادة المحاولة فيها مش هتغيّر حاجة.
+async function fetchAllSheetsViaBackend() {
+  const MAX_ATTEMPTS = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fetchAllSheetsViaBackendOnce();
+    } catch (err) {
+      lastErr = err;
+      const msg = (err && err.message) || "";
+      const isRetryable = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0 || (err && err.name === "TypeError");
+      if (attempt < MAX_ATTEMPTS && isRetryable) {
+        console.warn(`[fetchAllSheetsViaBackend] transient failure (attempt ${attempt}/${MAX_ATTEMPTS}), retrying...`, err);
+        await new Promise(r => setTimeout(r, 1500 * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 // Human-readable names for the sync-status banner when a specific sheet
