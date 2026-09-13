@@ -3262,9 +3262,17 @@ function preparePpmAnalystSingleData() {
     const avgLast3d = (confirmed3dBySingle.get(singleId) || 0) / 3;
     const avgLast7d = (confirmed7dBySingle.get(singleId) || 0) / 7;
 
+    // ACTIVE DAYS — عدد الأيام الشهر ده اللي الـ Single ده اشتغل فيها (Placed
+    // Pieces > 1)، Overall: b.placedByDate اتبني فوق من monthRows.forEach عن
+    // طريق mappingsFor(r.sku) اللي بيوزّع صفوف البندل على الـ Singles اللي
+    // جواه، يعني بيحسب يوم البندل برضو حتى لو الـ Single ده متباعش لوحده.
+    let activeDays = 0;
+    b.placedByDate.forEach(entry => { if (entry.pieces > 1) activeDays++; });
+
     rows.push({
       skuId: singleId, skuName: singlesList.get(singleId) || inv.skuName || prod.name || singleId,
       category: inv.category || prod.category || "Uncategorized",
+      activeDays,
       placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0), deliveredPieces: Math.round(b.deliveredPieces || 0),
       avgLast3d, avgLast7d,
       crPct, drPct, ndrPct,
@@ -3333,6 +3341,7 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="font-mono text-dim">${m.skuId}</td>
       <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
       <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="num text-dim">${fmtIntCell(m.activeDays)}</td>
       <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
       <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
       <td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td>

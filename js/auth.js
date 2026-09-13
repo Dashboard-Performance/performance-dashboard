@@ -108,22 +108,38 @@
     return re.test(String(email || "").trim());
   }
 
+  // بطلب صريح: مفيش أي timeout هنا زمان — لو نفس الـ Apps Script deployment
+  // (اللي بيستقبل كمان المزامنة المركزية/الـ backup/نشر الـ Computed API/
+  // heartbeats) كان مزنوق ومتأخر في الرد، طلب اللوجن كان بيفضل معلق "للأبد"
+  // من غير أي رسالة خطأ — وبما إن الصفحة كلها مخفية لحد ما اللوجن ينجح، ده
+  // كان بيبان زي إن الشاشة كلها "اتجمدت". الـ 25 ثانية دي كافية جدًا لطلب
+  // لوجن عادي (حتى لو السيرفر مزحوم شوية)، وبترجع رسالة واضحة بدل ما تفضل
+  // مستنية من غير نهاية.
+  const AUTH_API_TIMEOUT_MS = 25000;
+
   function callApi(payload) {
     if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
       return Promise.reject(
         new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
       );
     }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AUTH_API_TIMEOUT_MS);
     return fetch(CONFIG.API_URL, {
       method: "POST",
       // text/plain avoids a CORS pre-flight request against Apps Script
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     })
       .then((res) => res.json())
-      .catch(() => {
+      .catch((err) => {
+        if (err && err.name === "AbortError") {
+          throw new Error("Server is busy right now — please try again in a moment.");
+        }
         throw new Error("Could not reach the server. Please check your connection.");
-      });
+      })
+      .finally(() => clearTimeout(timer));
   }
 
   /* ------------------------------------------------------------------ *

@@ -811,6 +811,26 @@ function sheetFingerprint_(sheet) {
   return n + "|" + first.length + "|" + last.length + "|" + JSON.stringify(sheet.table.cols || []).length;
 }
 
+// بطلب صريح: عايزين الداشبورد يعرف "الداتا اتغيرت فعلاً" مش بس "الـ trigger
+// اشتغل تاني" — لو سبتنا LAST_SYNC_META_PROP_KEY يتحدّث في كل تشغيلة (زي ما
+// كان قبل كده)، الفرونت اند هيعمل loadData(false) صامت كل 15 دقيقة حتى لو
+// محصلش أي تغيير حقيقي في الداتا. الحل: بصمة واحدة رخيصة (مش hash عميق لكل
+// خلية) لكل الـ 22 شيت مع بعض، مبنية على نفس sheetFingerprint_ فوق (عدد
+// صفوف + أطوال أول/آخر صف لكل شيت) — كافية عمليًا لاكتشاف أي تغيير حقيقي في
+// أي شيت من الـ 22، من غير ما تبطّئ runScheduledSync بمقارنة كل خلية بخلية.
+function computeSyncContentHash_(sheets, gids) {
+  var parts = gids.map(function (gid) {
+    return gid + ":" + (sheetFingerprint_(sheets[gid]) || "null");
+  });
+  var raw = parts.join("|");
+  var digestBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
+  return digestBytes.map(function (b) {
+    var v = (b < 0) ? b + 256 : b;
+    var hex = v.toString(16);
+    return hex.length === 1 ? "0" + hex : hex;
+  }).join("");
+}
+
 // بطلب صريح: لو الشيت (Main أو أي شيت تاني) لسه بيعمل ريفريش/إعادة حساب
 // (فورمولا، IMPORTRANGE، Query...) بالظبط لحظة ما runScheduledSync بيقرا
 // منه، ممكن ياخد "لقطة" نص-متغيرة (بعض الخلايا اتحدثت، وبعضها لسه القديم) —
@@ -881,7 +901,19 @@ function runScheduledSync() {
   while (oldArchive.hasNext()) { oldArchive.next().setTrashed(true); }
   folder.createFile(gzBlob);
 
-  PropertiesService.getScriptProperties().setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
+  // بطلب صريح: منحدّثش LAST_SYNC_META_PROP_KEY (اللي بيراقبه الفرونت اند كل
+  // دقيقة عن طريق getLastSyncMeta) غير لو الداتا اتغيرت فعلاً عن آخر تشغيلة
+  // (مقارنة بصمة الداتا نفسها، مش مجرد إن الـ trigger اشتغل). لو نفس الداتا
+  // بالظبط، بنسيب فيها التوقيت القديم زي ما هو — يعني مفيش أي رفرش هيحصل عند
+  // اليوزرز غير لما يبقى فيه تغيير حقيقي.
+  var props = PropertiesService.getScriptProperties();
+  var contentHash = computeSyncContentHash_(payload.sheets, LAST_SYNC_GIDS);
+  var previousHash = props.getProperty("last_sync_content_hash_v1");
+  var isFirstRunEver = !props.getProperty(LAST_SYNC_META_PROP_KEY);
+  props.setProperty("last_sync_content_hash_v1", contentHash);
+  if (isFirstRunEver || previousHash !== contentHash) {
+    props.setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
+  }
 }
 
 // بيقرا آخر نسخة مخزّنة في last_sync.json.gz لو موجودة، وبيرجع null لو
