@@ -44,7 +44,10 @@
     // panel itself is never built for them, and the backend refuses to hand
     // the list back to any other email regardless.
     PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
-    HEARTBEAT_INTERVAL_MS: 30000,
+    // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
+    // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
+    // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
+    HEARTBEAT_INTERVAL_MS: 45000,
   };
 
   /* ------------------------------------------------------------------ *
@@ -117,7 +120,15 @@
   // مستنية من غير نهاية.
   const AUTH_API_TIMEOUT_MS = 25000;
 
-  function callApi(payload) {
+  // v1.1.1: ⚠️ ردود أي Apps Script Web App (كبيرة أو صغيرة — حتى heartbeat
+  // الصغيرة دي) بتتوصّل فعليًا عن طريق تحويل داخلي لمسار
+  // script.googleusercontent.com/macros/echo. لو التنفيذ ورا الرابط ده اتأخر
+  // بسبب زحمة تنفيذات متزامنة على نفس الـ deployment (heartbeat + presence +
+  // sync + backup + login كلهم بيشاركوا نفس الرابط)، بيرجع 404 (صفحة HTML)
+  // بدل الرد الحقيقي، فـ res.json() بيرمي SyntaxError. ده فشل عابر بحت من
+  // عند جوجل، مش خطأ في بياناتنا — بنتعامل معاه بمحاولة تانية سريعة (retry)
+  // تلقائية في callApi() تحت، بدل ما نسيب heartbeat/presence "يفوتوا" بلاش.
+  function callApiOnce(payload) {
     if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
       return Promise.reject(
         new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
@@ -132,14 +143,35 @@
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
-      .then((res) => res.json())
-      .catch((err) => {
-        if (err && err.name === "AbortError") {
-          throw new Error("Server is busy right now — please try again in a moment.");
+      .then(
+        (res) => res.json().catch((parseErr) => {
+          throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
+        }),
+        (fetchErr) => {
+          if (fetchErr && fetchErr.name === "AbortError") {
+            throw new Error("Server is busy right now — please try again in a moment.");
+          }
+          throw new Error("Could not reach the server. Please check your connection.");
         }
-        throw new Error("Could not reach the server. Please check your connection.");
-      })
+      )
       .finally(() => clearTimeout(timer));
+  }
+
+  function callApi(payload, attempt) {
+    attempt = attempt || 1;
+    return callApiOnce(payload).catch((err) => {
+      const msg = (err && err.message) || "";
+      const isTransient = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0;
+      if (isTransient && attempt < 2) {
+        // محاولة تانية واحدة بس بعد ثانية — كافية عادة لتجاوز الفشل العابر
+        // من غير ما نأخّر heartbeat/presence/login بشكل محسوس.
+        return new Promise((resolve) => setTimeout(resolve, 1000)).then(() => callApi(payload, attempt + 1));
+      }
+      if (isTransient) {
+        throw new Error("Server is busy right now — please try again in a moment.");
+      }
+      throw err;
+    });
   }
 
   /* ------------------------------------------------------------------ *
