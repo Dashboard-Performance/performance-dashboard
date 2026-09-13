@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.3";
+const APP_VERSION = "1.1.4";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1081,11 +1081,100 @@ async function gzipToBase64(str) {
   return { base64: btoa(binary), byteLength: bytes.length };
 }
 
+// =========================================================================
+// v1.1.4: الشاشة كانت بتجمد فعليًا لدرجة إن كروم بيعرض تحذير "Page
+// Unresponsive — Wait/Exit"، وده بيحصل بعد "[Drive backup] all N chunk(s)
+// sent" في الغالب — يعني وقت الدورة اللي بعدها (JSON.stringify لنسخة كاملة
+// من الداتا ممكن توصل عشرات الميجا نص خام + gzip + تحويلها base64) كانوا
+// شغالين بالكامل بشكل Synchronous على الـ Main Thread، نفس الـ Thread
+// المسؤول عن رسم الصفحة والاستجابة لأي حركة من اليوزر — فلو الخطوة دي
+// أخدت كذا ثانية، المتصفح بيعتبر الصفحة "مش بترد" ويعرض التحذير ده.
+//
+// الحل: نقلنا الخطوة التقيلة دي بالكامل (JSON.stringify + gzip + base64)
+// لـ Web Worker منفصل — Thread تاني كامل، بعيد خالص عن الشاشة. الداتا
+// بتتبعت للـ Worker عن طريق postMessage (بتستخدم structured clone الأصلي
+// جوه المتصفح، أسرع بكتير من JSON.stringify على مستوى الجافاسكريبت)، وكل
+// الحساب التقيل بيحصل جوه الـ Worker، فالمتصفح يفضل يرسم ويستجيب عادي
+// مهما كانت الداتا كبيرة. لو المتصفح قديم ومش بيدعم Web Worker أصلاً، بنرجع
+// تلقائيًا للطريقة القديمة على الـ main thread (أبطأ للشاشة، بس أفضل من
+// إلغاء الباك أب خالص).
+// =========================================================================
+let backupWorker = null;
+let backupWorkerReqId = 0;
+const backupWorkerPending = new Map();
+
+function getBackupWorker() {
+  if (backupWorker) return backupWorker;
+  if (typeof Worker === "undefined") return null; // متصفح قديم جدًا — مفيش Web Worker
+  try {
+    const workerSrc = `
+      self.onmessage = async function (e) {
+        const { id, savedAt, data } = e.data;
+        try {
+          if (typeof CompressionStream === "undefined") {
+            self.postMessage({ id, error: "NO_COMPRESSION_STREAM" });
+            return;
+          }
+          const json = JSON.stringify({ savedAt: savedAt, data: data });
+          const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+          const buf = await new Response(stream).arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = "";
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+          }
+          self.postMessage({ id: id, base64: btoa(binary), byteLength: bytes.length });
+        } catch (err) {
+          self.postMessage({ id: id, error: (err && err.message) || String(err) });
+        }
+      };
+    `;
+    const blob = new Blob([workerSrc], { type: "application/javascript" });
+    backupWorker = new Worker(URL.createObjectURL(blob));
+    backupWorker.onmessage = (e) => {
+      const { id } = e.data || {};
+      const resolve = backupWorkerPending.get(id);
+      if (resolve) { backupWorkerPending.delete(id); resolve(e.data); }
+    };
+    backupWorker.onerror = (err) => {
+      console.warn("[Drive backup worker] error (falling back to main thread next time):", err && err.message);
+      // أي طلبات لسه مستنية رد من الـ Worker المكسور ده، لازم نفكها بدل ما تفضل معلقة للأبد.
+      backupWorkerPending.forEach((resolve) => resolve({ error: "WORKER_ERROR" }));
+      backupWorkerPending.clear();
+      backupWorker = null; // الطلب الجاي هيحاول يعمل Worker جديد من الأول
+    };
+    return backupWorker;
+  } catch (e) {
+    console.warn("[Drive backup worker] could not be created (falling back to main thread):", e && e.message);
+    return null;
+  }
+}
+
+function gzipSnapshotInWorker(savedAt, data) {
+  return new Promise((resolve) => {
+    const worker = getBackupWorker();
+    if (!worker) { resolve(null); return; } // مفيش Worker — الـ caller هيرجع للطريقة القديمة
+    const id = ++backupWorkerReqId;
+    backupWorkerPending.set(id, resolve);
+    worker.postMessage({ id, savedAt, data });
+  });
+}
+
 async function backupSnapshotToDrive(snapshot) {
   if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
   try {
-    const json = JSON.stringify({ savedAt: Date.now(), data: snapshot });
-    const gz = await gzipToBase64(json);
+    const savedAt = Date.now();
+    let gz = null;
+    const workerResult = await gzipSnapshotInWorker(savedAt, snapshot);
+    if (workerResult && !workerResult.error) {
+      gz = { base64: workerResult.base64, byteLength: workerResult.byteLength };
+    } else {
+      // Fallback: مفيش Web Worker أو فشل (متصفح قديم جدًا) — نرجع للطريقة
+      // القديمة على الـ main thread بدل ما نلغي الباك أب خالص.
+      const json = JSON.stringify({ savedAt, data: snapshot });
+      gz = await gzipToBase64(json);
+    }
     if (!gz) { console.warn("[Drive backup] skipped — browser doesn't support CompressionStream."); return; }
     if (gz.byteLength > DRIVE_BACKUP_MAX_BYTES) {
       console.warn(`[Drive backup] skipped (non-fatal): ${(gz.byteLength / 1e6).toFixed(1)}MB gzipped, over the ${(DRIVE_BACKUP_MAX_BYTES / 1e6).toFixed(1)}MB sanity limit.`);
