@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.20";
+const APP_VERSION = "1.1.21";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5200,10 +5200,10 @@ function renderIncentiveMerchantsPanel() {
   const monthLabel = rows.length ? rows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   if ($("incMerchMonthLabel")) $("incMerchMonthLabel").textContent = monthLabel;
-  if ($("incMerchTotal")) $("incMerchTotal").textContent = fmtIntCell(totalMerchants);
-  if ($("incMerchAchieved")) $("incMerchAchieved").textContent = `${fmtIntCell(achievedCount)} / ${fmtIntCell(totalMerchants)}`;
-  if ($("incMerchOnTrack")) $("incMerchOnTrack").textContent = `${fmtIntCell(onTrackCount)} / ${fmtIntCell(totalMerchants)}`;
-  if ($("incMerchAtRisk")) $("incMerchAtRisk").textContent = fmtIntCell(atRiskCount);
+  if ($("incMerchTotal")) $("incMerchTotal").textContent = fmtInt.format(totalMerchants);
+  if ($("incMerchAchieved")) $("incMerchAchieved").textContent = `${fmtInt.format(achievedCount)} / ${fmtInt.format(totalMerchants)}`;
+  if ($("incMerchOnTrack")) $("incMerchOnTrack").textContent = `${fmtInt.format(onTrackCount)} / ${fmtInt.format(totalMerchants)}`;
+  if ($("incMerchAtRisk")) $("incMerchAtRisk").textContent = fmtInt.format(atRiskCount);
   if ($("incMerchEarnedBonus")) $("incMerchEarnedBonus").textContent = fmtMoneyCompact(totalEarnedBonus);
   if ($("incMerchProjectedBonus")) $("incMerchProjectedBonus").textContent = fmtMoneyCompact(totalProjectedBonus);
 
