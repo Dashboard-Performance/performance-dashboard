@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.28";
+const APP_VERSION = "1.1.29";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5274,14 +5274,14 @@ function renderIncentiveMerchantsPanel() {
           <td class="num text-dim">${fmtIntCell(Math.round(r.targetConfirmedMTD))}</td>
           <td class="num text-green font-bold">${fmtIntCell(Math.round(r.mtdConfirmed))}</td>
           <td class="num text-orange">${fmtIntCell(Math.round(r.runRateConfirmed))}</td>
-          <td class="num">${r.attainmentActualPct.toFixed(1)}%</td>
-          <td class="num">${r.attainmentRunRatePct.toFixed(1)}%</td>
+          <td class="num">${fmtPctCell(r.attainmentActualPct)}</td>
+          <td class="num">${fmtPctCell(r.attainmentRunRatePct)}</td>
           <td><span class="badge-status ${statusClass}">${statusLabel}</span></td>
-          <td class="num text-dim">${fmtMoneyCompact(r.bonusPerExtraOrder)}</td>
+          <td class="num text-dim">${fmtMoneyCompactCell(r.bonusPerExtraOrder)}</td>
           <td class="num text-green">${fmtIntCell(Math.round(r.extraOrdersActual))}</td>
-          <td class="num text-green font-bold">${fmtMoneyCompact(r.earnedBonusActual)}</td>
-          <td class="num text-purple">${fmtMoneyCompact(r.bonusTarget)}</td>
-          <td class="num text-orange font-bold">${fmtMoneyCompact(r.totalBonus)}</td>
+          <td class="num text-green font-bold">${fmtMoneyCompactCell(r.earnedBonusActual)}</td>
+          <td class="num text-purple">${fmtMoneyCompactCell(r.bonusTarget)}</td>
+          <td class="num text-orange font-bold">${fmtMoneyCompactCell(r.totalBonus)}</td>
         `;
         tbody.appendChild(tr);
       });
