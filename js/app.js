@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.26";
+const APP_VERSION = "1.1.27";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5272,8 +5272,8 @@ function renderIncentiveMerchantsPanel() {
           <td>${r.incentiveTier || "-"}</td>
           <td class="num">${fmtIntCell(r.targetConfirmedOrders)}</td>
           <td class="num text-dim">${fmtIntCell(Math.round(r.targetConfirmedMTD))}</td>
-          <td class="num text-blue font-bold">${fmtIntCell(Math.round(r.mtdConfirmed))}</td>
-          <td class="num text-purple">${fmtIntCell(Math.round(r.runRateConfirmed))}</td>
+          <td class="num text-green font-bold">${fmtIntCell(Math.round(r.mtdConfirmed))}</td>
+          <td class="num text-orange">${fmtIntCell(Math.round(r.runRateConfirmed))}</td>
           <td class="num">${r.attainmentActualPct.toFixed(1)}%</td>
           <td class="num">${r.attainmentRunRatePct.toFixed(1)}%</td>
           <td><span class="badge-status ${statusClass}">${statusLabel}</span></td>
