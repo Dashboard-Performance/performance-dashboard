@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.27";
+const APP_VERSION = "1.1.28";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -13517,8 +13517,10 @@ confirmDownloadBtn.addEventListener("click", () => {
         ppmAnalyst: ppmAnalystState.page,
         ppmAnalystSingle: ppmAnalystSingleState.page,
         prodAn: prodAnState.page,
-        pma: pmaState.page
+        pma: pmaState.page,
+        incMerch: state.incentiveMerchantsPage
     };
+    const originalIncMerchPageSize = state.incentiveMerchantsPageSize;
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
@@ -13526,6 +13528,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     allocationLockingState.page = 0;
     healthyLockingState.page = 0; healthyUnlockingState.page = 0;
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
+    state.incentiveMerchantsPage = 0; state.incentiveMerchantsPageSize = 999999;
     PAGE_SIZE = 999999;
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
@@ -13550,6 +13553,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
     if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
     if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
+    if (typeof renderIncentiveMerchantsPanel === 'function') renderIncentiveMerchantsPanel();
 
     // Wait for DOM to render all rows
     setTimeout(() => {
@@ -13578,6 +13582,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         ppmAnalystSingleState.page = originalPage.ppmAnalystSingle;
         prodAnState.page = originalPage.prodAn;
         pmaState.page = originalPage.pma;
+        state.incentiveMerchantsPage = originalPage.incMerch;
+        state.incentiveMerchantsPageSize = originalIncMerchPageSize;
 
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -13601,6 +13607,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
         if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
         if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
+        if (typeof renderIncentiveMerchantsPanel === 'function') renderIncentiveMerchantsPanel();
     }, 150);
 });
 
