@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.23";
+const APP_VERSION = "1.1.26";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -351,6 +351,8 @@ const state = {
   incentiveMerchantsRows: [],
   incentiveMerchantsPrepared: [], // بعد ضم الأداء الفعلي (MTD/Run Rate) من MERCHANT_SEGMENTATION_GID
   incentiveMerchantsSearch: "",
+  incentiveMerchantsPage: 0,
+  incentiveMerchantsPageSize: 10,
   weeklyInvWeeks: [],        // الأسابيع المحسوبة (أحدث أولاً): [{weekStart, label, rows:[...]}]
   weeklyInvSearch: "",
   weeklyInvMonthOptions: [], // [{key, date}] شهور فيها أسابيع فعلاً
@@ -4678,6 +4680,7 @@ async function updateDashboard(rows) {
   if ($("viewHealthyLocking") && $("viewHealthyLocking").classList.contains("active-view")) prepareHealthyLockingData();
   if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
   if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
+  if ($("viewIncMerchants") && $("viewIncMerchants").classList.contains("active-view")) renderIncentiveMerchantsPanel();
   await yieldToMainThread();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
   renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
@@ -5210,7 +5213,12 @@ function prepareIncentiveMerchantsData() {
 
 function renderIncentiveMerchantsPanel() {
   prepareIncentiveMerchantsData();
-  const rows = state.incentiveMerchantsPrepared || [];
+  // فلتر الـ ACM العام فوق الصفحة (acmSelect) — نفس الفلتر المستخدم في كل
+  // الجداول التانية، بطلب صريح: لو اختار ACM معين هنا، الجدول والسامري فوقه
+  // يبقوا محسوبين على تجار الـ ACM ده بس.
+  const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const allRows = state.incentiveMerchantsPrepared || [];
+  const rows = selectedAcm === "All" ? allRows : allRows.filter(r => r.acmName === selectedAcm);
   const search = (state.incentiveMerchantsSearch || "").trim().toLowerCase();
   const filtered = search
     ? rows.filter(r => (r.merchantId || "").toLowerCase().includes(search) || (r.merchantName || "").toLowerCase().includes(search))
@@ -5223,7 +5231,7 @@ function renderIncentiveMerchantsPanel() {
   const totalEarnedBonus = rows.reduce((s, r) => s + (r.earnedBonusActual || 0), 0);
   const totalBonusTarget = rows.reduce((s, r) => s + (r.bonusTarget || 0), 0);
   const totalBonusAll = rows.reduce((s, r) => s + (r.totalBonus || 0), 0);
-  const monthLabel = rows.length ? rows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const monthLabel = allRows.length ? allRows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   if ($("incMerchMonthLabel")) $("incMerchMonthLabel").textContent = monthLabel;
   if ($("incMerchTotal")) $("incMerchTotal").textContent = fmtInt.format(totalMerchants);
@@ -5234,13 +5242,26 @@ function renderIncentiveMerchantsPanel() {
   if ($("incMerchProjectedBonus")) $("incMerchProjectedBonus").textContent = fmtMoneyCompact(totalBonusTarget);
   if ($("incMerchTotalBonus")) $("incMerchTotalBonus").textContent = fmtMoneyCompact(totalBonusAll);
 
+  // Pagination — 10 صف في الصفحة، بطلب صريح عشان مطولش وينزل تحت أوي.
+  const pageSize = state.incentiveMerchantsPageSize || 10;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  if (state.incentiveMerchantsPage >= totalPages) state.incentiveMerchantsPage = totalPages - 1;
+  if (state.incentiveMerchantsPage < 0) state.incentiveMerchantsPage = 0;
+  const pageStart = state.incentiveMerchantsPage * pageSize;
+  const pageRows = filtered.slice(pageStart, pageStart + pageSize);
+
+  if ($("rowCountIncMerch")) $("rowCountIncMerch").textContent = `${fmtInt.format(filtered.length)} Merchants`;
+  if ($("pageIndicatorIncMerch")) $("pageIndicatorIncMerch").textContent = `Page ${state.incentiveMerchantsPage + 1} of ${totalPages}`;
+  if ($("prevPageIncMerch")) $("prevPageIncMerch").disabled = state.incentiveMerchantsPage === 0;
+  if ($("nextPageIncMerch")) $("nextPageIncMerch").disabled = state.incentiveMerchantsPage >= totalPages - 1;
+
   const tbody = $("incMerchTableBody");
   if (tbody) {
     tbody.innerHTML = "";
-    if (filtered.length === 0) {
+    if (pageRows.length === 0) {
       tbody.innerHTML = `<tr><td colspan="16" class="text-dim center">No incentive merchants found.</td></tr>`;
     } else {
-      filtered.forEach(r => {
+      pageRows.forEach(r => {
         const statusLabel = r.status === "achieved" ? "Target Achieved" : (r.status === "on-track" ? "On Track (Run Rate)" : "At Risk");
         const statusClass = r.status === "achieved" ? "spike" : (r.status === "on-track" ? "new-match" : "decline");
         const tr = document.createElement("tr");
@@ -5272,9 +5293,12 @@ const incMerchSearchInput = $("searchIncMerchInput");
 if (incMerchSearchInput) {
   incMerchSearchInput.addEventListener("input", (e) => {
     state.incentiveMerchantsSearch = e.target.value || "";
+    state.incentiveMerchantsPage = 0;
     renderIncentiveMerchantsPanel();
   });
 }
+if ($("prevPageIncMerch")) $("prevPageIncMerch").addEventListener("click", () => { if (state.incentiveMerchantsPage > 0) { state.incentiveMerchantsPage -= 1; renderIncentiveMerchantsPanel(); } });
+if ($("nextPageIncMerch")) $("nextPageIncMerch").addEventListener("click", () => { state.incentiveMerchantsPage += 1; renderIncentiveMerchantsPanel(); });
 
 function renderOverallTargetSummary() {
   let totalTarget = 0; let totalDelivered = 0; let totalRunRate = 0;
@@ -13358,6 +13382,9 @@ document.querySelectorAll("#inventoryTable thead th").forEach((th) => { if (th.d
 
 if($("monthSelect")) $("monthSelect").addEventListener("change", applyFilters);
 if($("acmSelect")) $("acmSelect").addEventListener("change", applyFilters);
+// لو غيّر فلتر الـ ACM العام وهو فاتح صفحة Incentive Merchants، يرجع Page 1
+// بدل ما يفضل واقف في صفحة رقمها أكبر من عدد صفحات النتيجة الجديدة (بعد الفلترة).
+if($("acmSelect")) $("acmSelect").addEventListener("change", () => { state.incentiveMerchantsPage = 0; });
 if($("refreshBtn")) $("refreshBtn").addEventListener("click", () => loadData(true));
 if($("retryBtn")) $("retryBtn").addEventListener("click", () => loadData(true));
 
