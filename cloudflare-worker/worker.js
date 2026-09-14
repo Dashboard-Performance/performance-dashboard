@@ -45,6 +45,12 @@ const CACHE_KEY_META = "last_sync_meta_v1";
 // يوزر بيتخدم من الـ KV Cache ده فورًا.
 const CACHE_KEY_CONFIRMED_BY_DAY = "confirmed_by_day_v1";
 const CONFIRMED_BY_DAY_GID = "964398740";
+// تاب "Incentive Merchants" (Incentives Tracker) — نفس فكرة Confirmed by Day
+// فوق بالظبط: بيتقرا هنا مباشرة من Google Sheets (gviz)، مستقل تمامًا عن
+// Apps Script، عشان نتجنب نفس مشكلة الـ Deploy اللي واجهناها مع GID
+// 964398740 قبل كده.
+const CACHE_KEY_INCENTIVE_MERCHANTS = "incentive_merchants_v1";
+const INCENTIVE_MERCHANTS_GID = "1548963809";
 
 function corsHeaders() {
   return {
@@ -157,6 +163,28 @@ async function handleGetConfirmedByDay(env) {
   }
 }
 
+async function refreshIncentiveMerchantsCache(env) {
+  const sheetId = env.SHEET_ID;
+  if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
+  const table = await fetchGvizSheet(sheetId, INCENTIVE_MERCHANTS_GID);
+  const payload = { success: true, fetchedAt: new Date().toISOString(), table };
+  await env.SYNC_CACHE.put(CACHE_KEY_INCENTIVE_MERCHANTS, JSON.stringify(payload));
+  return payload;
+}
+
+async function handleGetIncentiveMerchants(env) {
+  try {
+    let cached = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS);
+    if (!cached) {
+      const fresh = await refreshIncentiveMerchantsCache(env);
+      return jsonResponse(fresh);
+    }
+    return new Response(cached, { headers: corsHeaders() });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -169,12 +197,13 @@ export default {
     if (action === "getLastSync") return handleGetLastSync(env);
     if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
     if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
+    if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
@@ -192,6 +221,9 @@ export default {
         }),
         refreshConfirmedByDayCache(env).catch((err) => {
           console.error("[scheduled refresh confirmedByDay] failed (will retry next cron tick):", err && err.message);
+        }),
+        refreshIncentiveMerchantsCache(env).catch((err) => {
+          console.error("[scheduled refresh incentiveMerchants] failed (will retry next cron tick):", err && err.message);
         }),
       ])
     );

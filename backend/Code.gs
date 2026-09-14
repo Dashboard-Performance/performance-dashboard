@@ -786,20 +786,10 @@ var LAST_SYNC_GIDS = [
   "620123165",   // MERCHANT_SEGMENTATION_GID
   "1289659887",  // WEEKLY_INVENTORY_GID
   "897709273",   // WAREHOUSE_REPACK_GID
-  "964398740"    // CONFIRMED_BY_DAY_GID (تاب Confirmed by Day الجاهز: Day0..Day30)
+  "964398740",   // CONFIRMED_BY_DAY_GID (تاب Confirmed by Day الجاهز: Day0..Day30)
+  "1548963809"   // INCENTIVE_MERCHANTS_GID (Incentives Tracker — Incentive Merchants)
 ];
 
-// دالة اختبار مؤقتة (شيلها بعد ما تخلص تشخيص) — شغّلها يدوي من المحرر
-// (اختارها من الـ dropdown اللي فوق واضغط Run) وبعدين شوف النتيجة من
-// View > Logs (أو Ctrl+Enter). الهدف: نتأكد إن الكود "المحفوظ" دلوقتي في
-// المحرر فعلاً فيه الـ GID الجديد ولا لأ — من غير أي اعتماد على Deploy ولا
-// على رابط الـ exec خالص (يعني حتى لو مشكلة الديبلوي لسه موجودة، الاختبار
-// ده هيوريك الحقيقة).
-function testGidsList() {
-  Logger.log("عدد الـ GIDs: " + LAST_SYNC_GIDS.length);
-  Logger.log("القايمة كاملة: " + LAST_SYNC_GIDS.join(", "));
-  Logger.log("فيه 964398740؟ " + (LAST_SYNC_GIDS.indexOf("964398740") !== -1));
-}
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
 // .json.gz مش .json — بنخزن نسخة مضغوطة (Utilities.gzip) بدل نص خام، لأن
 // createFile(name, content, mimeType)/setContent() بيقفوا على "File ... exceeds
@@ -1032,7 +1022,7 @@ var LAST_SYNC_GID_LABELS_ = {
   "2085802038": "Availability Locking", "1298408207": "Products & Matches",
   "461854229": "Merchant SKU Daily", "620123165": "Merchant Segmentation",
   "1289659887": "Weekly Inventory", "897709273": "Warehouse Repack",
-  "964398740": "Confirmed by Day"
+  "964398740": "Confirmed by Day", "1548963809": "Incentive Merchants"
 };
 
 // تشخيص: بيرجع حالة كل شيت (لسه Null ولا فيه صفوف، وعددها) من غير ما ينزّل

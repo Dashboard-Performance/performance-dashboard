@@ -66,6 +66,15 @@
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navIncentivesToggle">
+            <span class="nav-icon"></span>Incentives Tracker
+            <span class="nav-caret" id="navIncentivesCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="incentivesSubmenu">
+            <a class="nav-item-sub" id="navIncMerchants">Incentive Merchants</a>
+          </div>
+        </div>
+        <div class="nav-dropdown-wrapper">
           <a class="nav-item" id="navAdminToggle">
             <span class="nav-icon"></span>Admin Panel
             <span class="nav-caret" id="navAdminCaret">▼</span>
@@ -2013,6 +2022,85 @@
                   <span id="pageIndicatorMpNewMatches">Page 1 of 1</span>
                   <button id="nextPageMpNewMatches" class="btn btn-outline small">Next</button>
                 </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- INCENTIVE MERCHANTS (under Incentives Tracker) -->
+        <div id="viewIncMerchants" class="view-section hidden">
+          <section class="mb-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-purple">
+                <h2>Incentive Merchants</h2>
+                <p>Monthly Confirmed Orders target &amp; bonus per merchant — Actual (MTD) vs. Run Rate for <span id="incMerchMonthLabel">this month</span></p>
+              </div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Merchants Tracked <span class="icon-users"></span></div>
+                <div class="metric-value" id="incMerchTotal">0</div>
+                <div class="metric-sub text-dim">Incentives Tracker</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Achieved Target (Actual) <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="incMerchAchieved">0 / 0</div>
+                <div class="metric-sub text-dim">MTD Confirmed Orders ≥ Target</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-blue">Projected to Achieve (Run Rate) <span class="icon-trend"></span></div>
+                <div class="metric-value text-blue" id="incMerchOnTrack">0 / 0</div>
+                <div class="metric-sub text-dim">Includes merchants already achieved</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">At Risk <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="incMerchAtRisk">0</div>
+                <div class="metric-sub text-dim">Run Rate still below Target</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-green">Earned Bonus (Actual) <span class="icon-dollar text-green"></span></div>
+                <div class="metric-value text-green" id="incMerchEarnedBonus">EGP 0</div>
+                <div class="metric-sub text-dim">Sum of Extra Orders (MTD) × Bonus/Order</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-purple">Projected Bonus (Run Rate) <span class="icon-dollar text-purple"></span></div>
+                <div class="metric-value text-purple" id="incMerchProjectedBonus">EGP 0</div>
+                <div class="metric-sub text-dim">If current pace holds until EOM</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Incentive Merchants — Detail</h2>
+                  <p>Target Confirmed Orders vs. Actual (MTD) &amp; Run Rate, with bonus earned/projected per merchant</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchIncMerchInput" type="search" placeholder="Search Merchant ID or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="incMerchTable">
+                  <thead>
+                    <tr>
+                      <th class="font-mono" title="Merchant identifier.">Merchant ID</th>
+                      <th class="truncate-cell" title="Merchant's display name.">Merchant Name</th>
+                      <th title="Incentive Tier from the config sheet.">Tier</th>
+                      <th class="num" title="Target Confirmed Orders for this month.">Target Confirmed</th>
+                      <th class="num text-blue" title="Confirmed Orders so far this month (Month-to-Date).">Confirmed (MTD)</th>
+                      <th class="num text-purple" title="MTD Confirmed Orders projected to end of month, based on days elapsed so far (excluding today).">Run Rate (EOM)</th>
+                      <th class="num" title="Confirmed (MTD) ÷ Target.">Attainment % (Actual)</th>
+                      <th class="num" title="Run Rate (EOM) ÷ Target.">Attainment % (Run Rate)</th>
+                      <th title="Achieved = MTD already hit target. On Track = projected to hit target by EOM. At Risk = projected to miss it.">Status</th>
+                      <th class="num text-dim" title="Bonus per Confirmed Order above target, from the config sheet.">Bonus/Extra Order</th>
+                      <th class="num text-green" title="max(0, Confirmed MTD − Target).">Extra Orders (MTD)</th>
+                      <th class="num text-green" title="Extra Orders (MTD) × Bonus/Extra Order — bonus earned so far.">Earned Bonus (MTD)</th>
+                      <th class="num text-purple" title="max(0, Run Rate − Target) × Bonus/Extra Order — projected bonus if pace holds to EOM.">Projected Bonus (Run Rate)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="incMerchTableBody"></tbody>
+                </table>
               </div>
             </div>
           </section>

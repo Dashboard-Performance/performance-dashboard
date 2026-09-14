@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.17";
+const APP_VERSION = "1.1.20";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -98,7 +98,24 @@ const CONFIRMED_BY_DAY_GID = "964398740";
 // (حتى لو جزء من الرينج برا آخر 30 يوم، هيرجع اللي لاقيه بس مش هيكمل من
 // Main) — ده عشان نتأكد إن مصدر التاب الجديد شغال صح لوحده من غير ما
 // الـ Fallback يغطي على أي مشكلة. لازم ترجعها false تاني بعد ما تخلص اختبار.
-const DEBUG_FORCE_CONFIRMED_FROM_TAB = true;
+const DEBUG_FORCE_CONFIRMED_FROM_TAB = false;
+
+// -------------------------------------------------------------------------
+// INCENTIVES TRACKER — Incentive Merchants (جروب جديد في الـ Sidebar، تحت
+// Marketplace). شيت "Incentive Merchants" الخام (INCENTIVE_MERCHANTS_GID،
+// gid=1548963809): Merchant ID | Merchant Name | Incentive Status |
+// Incentive Tier | Target Confirmed Orders | Bonus / Extra Order (EGP) |
+// Total Incentive (EGP) — ده التارجت الشهري بتاع كل تاجر + قيمة البونص لكل
+// أوردر كونفيرمد زيادة عن التارجت. زي CONFIRMED_BY_DAY_GID فوق، بيتقرا
+// مباشرة من الـ Cloudflare Worker (action=getIncentiveMerchants) مستقل
+// تمامًا عن Apps Script، عشان نتفادى نفس مشكلة الـ Deploy القديمة.
+// الأداء الفعلي (Confirmed Orders MTD) بيتاخد من نفس شيت "Merchant
+// Segmentation" الموجود أصلاً (MERCHANT_SEGMENTATION_GID، gid=620123165)
+// لشهر النهارده الحالي، والـ Run Rate بيتحسب بنفس منطق RR Confirmed
+// المستخدم في Merchant Segmentation & Projections (segElapsedDays = عدد
+// الأيام لحد امبارح بس، totalDays = عدد أيام الشهر).
+// -------------------------------------------------------------------------
+const INCENTIVE_MERCHANTS_GID = "1548963809";
 
 // -------------------------------------------------------------------------
 // COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
@@ -330,6 +347,10 @@ const state = {
   weeklyInventoryRows: [],   // شيت WEEKLY_INVENTORY_GID الخام: [{sku, name, byDate: Map(dateLabel -> qty)}]
   weeklyInventoryDateCols: [], // [{label, ts}] بترتيب الشيت (الأقدم للأحدث)
   confirmedByDayRows: [],    // تاب CONFIRMED_BY_DAY_GID الخام: [{productId, name, category, days:[d0..d30]}]
+  // Incentives Tracker (Incentive Merchants) — شيت INCENTIVE_MERCHANTS_GID الخام
+  incentiveMerchantsRows: [],
+  incentiveMerchantsPrepared: [], // بعد ضم الأداء الفعلي (MTD/Run Rate) من MERCHANT_SEGMENTATION_GID
+  incentiveMerchantsSearch: "",
   weeklyInvWeeks: [],        // الأسابيع المحسوبة (أحدث أولاً): [{weekStart, label, rows:[...]}]
   weeklyInvSearch: "",
   weeklyInvMonthOptions: [], // [{key, date}] شهور فيها أسابيع فعلاً
@@ -622,11 +643,21 @@ const navAdminCaret = $("navAdminCaret");
 const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
+const navIncentivesToggle = $("navIncentivesToggle");
+const incentivesSubmenu = $("incentivesSubmenu");
+const navIncentivesCaret = $("navIncentivesCaret");
+const navIncMerchants = $("navIncMerchants");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
     marketplaceSubmenu.classList.toggle("hidden");
     if(navMarketplaceCaret) navMarketplaceCaret.classList.toggle("rotate");
+  });
+}
+if (navIncentivesToggle) {
+  navIncentivesToggle.addEventListener("click", () => {
+    incentivesSubmenu.classList.toggle("hidden");
+    if(navIncentivesCaret) navIncentivesCaret.classList.toggle("rotate");
   });
 }
 if (navAcmToggle) {
@@ -675,6 +706,7 @@ function switchView(viewName) {
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
+  if(navIncMerchants) navIncMerchants.classList.remove("active");
 
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); }
@@ -712,6 +744,11 @@ function switchView(viewName) {
       if(navWeeklyInventory) navWeeklyInventory.classList.add("active");
       renderWeeklyInventoryPanel();
   }
+  else if (viewName === "incentiveMerchants") {
+      activeSection = $("viewIncMerchants");
+      if(navIncMerchants) navIncMerchants.classList.add("active");
+      renderIncentiveMerchantsPanel();
+  }
 
   if (activeSection) {
     activeSection.classList.remove("hidden");
@@ -744,6 +781,7 @@ if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
+if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
 // -------------------------------------------------------------------------
 // ADMIN PANEL — بوابة الباسورد (admin1). لو اتفتحت مرة في نفس الجلسة (tab)
@@ -4393,6 +4431,33 @@ function parseConfirmedByDaySheet(payload) {
 }
 
 // -------------------------------------------------------------------------
+// شيت "Incentive Merchants" (INCENTIVE_MERCHANTS_GID، gid=1548963809).
+// أعمدة (0-based): 0 Merchant ID | 1 Merchant Name | 2 Incentive Status |
+// 3 Incentive Tier | 4 Target Confirmed Orders | 5 Bonus / Extra Order (EGP) |
+// 6 Total Incentive (EGP).
+// -------------------------------------------------------------------------
+function parseIncentiveMerchantsSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const merchantId = cellText(c[0]).trim();
+    if (!merchantId || merchantId.toUpperCase() === "MERCHANT ID" || merchantId.toUpperCase() === "MERCHANT_ID") continue;
+    rows.push({
+      merchantId,
+      merchantName: cellText(c[1]).trim(),
+      incentiveStatus: cellText(c[2]).trim(),
+      incentiveTier: cellText(c[3]).trim(),
+      targetConfirmedOrders: cellNumber(c[4]),
+      bonusPerExtraOrder: cellNumber(c[5]),
+      totalIncentive: cellNumber(c[6])
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
 // شيت "EGY Beginning Inventory #4132" (BEGIN_INV_GID)
 // أعمدة بالترتيب: PRODUCT_ID | QTY | MONTH | PRODUCT_NAME | CATEGORY_L1
 // -------------------------------------------------------------------------
@@ -5064,6 +5129,120 @@ function prepareMerchantTableData(rows) {
       targetGmv, targetPlaced, achievedPct, runRate,
       currentSegment, segConfirmed, rrConfirmed, projectedSegment
     };
+  });
+}
+
+// =========================================================================
+// INCENTIVES TRACKER — Incentive Merchants
+// -------------------------------------------------------------------------
+// بيضم شيت الكونفيج (INCENTIVE_MERCHANTS_GID: Target Confirmed Orders +
+// Bonus/Extra Order) مع الأداء الفعلي لشهر النهارده الحالي (MTD) من نفس
+// شيت "Merchant Segmentation" (MERCHANT_SEGMENTATION_GID) المستخدم في
+// Merchant Segmentation & Projections، وبيحسب Run Rate بنفس منطق RR
+// Confirmed هناك بالظبط (segElapsedDays = أيام الشهر لحد امبارح بس، عشان
+// بيانات النهارده لسه مش كاملة).
+// =========================================================================
+function prepareIncentiveMerchantsData() {
+  const now = new Date();
+  const currentMonthStr = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const elapsedDays = now.getDate() || 1;
+  // بعكس prepareMerchantTableData (اللي بتطرح يوم النهارده عشان بياناته لسه
+  // مش كاملة): هنا الـ MTD Confirmed جاي من شيت شهري إجمالي (مش يومي)، يعني
+  // مفيش طريقة نفصل "بس لحد امبارح" من "شامل النهارده" أصلاً — الرقم اللي
+  // وصلنا فيه هو نفسه لحد النهارده. فبنقسم على عدد الأيام لحد النهارده
+  // (شامل)، مش لحد امبارح.
+  const segElapsedDays = Math.max(elapsedDays, 1);
+
+  // Confirmed Orders MTD لكل تاجر لشهر النهارده الحالي بس
+  const mtdConfirmedMap = new Map();
+  (state.merchantSegSourceRows || []).forEach(r => {
+    if (!r.merchantId || r.monthYear !== currentMonthStr) return;
+    mtdConfirmedMap.set(r.merchantId, (mtdConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
+  });
+
+  state.incentiveMerchantsPrepared = (state.incentiveMerchantsRows || []).map(row => {
+    const mtdConfirmed = mtdConfirmedMap.get(row.merchantId) || 0;
+    const runRateConfirmed = (mtdConfirmed / segElapsedDays) * totalDays;
+    const target = row.targetConfirmedOrders || 0;
+    const attainmentActualPct = target > 0 ? (mtdConfirmed / target) * 100 : (mtdConfirmed > 0 ? 100 : 0);
+    const attainmentRunRatePct = target > 0 ? (runRateConfirmed / target) * 100 : (runRateConfirmed > 0 ? 100 : 0);
+    const achieved = mtdConfirmed >= target;
+    const onTrack = !achieved && runRateConfirmed >= target;
+    const status = achieved ? "achieved" : (onTrack ? "on-track" : "at-risk");
+    const extraOrdersActual = Math.max(0, mtdConfirmed - target);
+    const extraOrdersRunRate = Math.max(0, runRateConfirmed - target);
+    const earnedBonusActual = extraOrdersActual * (row.bonusPerExtraOrder || 0);
+    const projectedBonusRunRate = extraOrdersRunRate * (row.bonusPerExtraOrder || 0);
+    return {
+      ...row,
+      currentMonthStr, mtdConfirmed, runRateConfirmed,
+      attainmentActualPct, attainmentRunRatePct, status,
+      extraOrdersActual, extraOrdersRunRate, earnedBonusActual, projectedBonusRunRate
+    };
+  }).sort((a, b) => b.attainmentRunRatePct - a.attainmentRunRatePct);
+}
+
+function renderIncentiveMerchantsPanel() {
+  prepareIncentiveMerchantsData();
+  const rows = state.incentiveMerchantsPrepared || [];
+  const search = (state.incentiveMerchantsSearch || "").trim().toLowerCase();
+  const filtered = search
+    ? rows.filter(r => (r.merchantId || "").toLowerCase().includes(search) || (r.merchantName || "").toLowerCase().includes(search))
+    : rows;
+
+  const totalMerchants = rows.length;
+  const achievedCount = rows.filter(r => r.status === "achieved").length;
+  const onTrackCount = rows.filter(r => r.status === "achieved" || r.status === "on-track").length; // متوقع يحقق التارجت على الـ Run Rate (شامل اللي حققوا فعلاً)
+  const atRiskCount = rows.filter(r => r.status === "at-risk").length;
+  const totalEarnedBonus = rows.reduce((s, r) => s + (r.earnedBonusActual || 0), 0);
+  const totalProjectedBonus = rows.reduce((s, r) => s + (r.projectedBonusRunRate || 0), 0);
+  const monthLabel = rows.length ? rows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  if ($("incMerchMonthLabel")) $("incMerchMonthLabel").textContent = monthLabel;
+  if ($("incMerchTotal")) $("incMerchTotal").textContent = fmtIntCell(totalMerchants);
+  if ($("incMerchAchieved")) $("incMerchAchieved").textContent = `${fmtIntCell(achievedCount)} / ${fmtIntCell(totalMerchants)}`;
+  if ($("incMerchOnTrack")) $("incMerchOnTrack").textContent = `${fmtIntCell(onTrackCount)} / ${fmtIntCell(totalMerchants)}`;
+  if ($("incMerchAtRisk")) $("incMerchAtRisk").textContent = fmtIntCell(atRiskCount);
+  if ($("incMerchEarnedBonus")) $("incMerchEarnedBonus").textContent = fmtMoneyCompact(totalEarnedBonus);
+  if ($("incMerchProjectedBonus")) $("incMerchProjectedBonus").textContent = fmtMoneyCompact(totalProjectedBonus);
+
+  const tbody = $("incMerchTableBody");
+  if (tbody) {
+    tbody.innerHTML = "";
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="13" class="text-dim center">No incentive merchants found.</td></tr>`;
+    } else {
+      filtered.forEach(r => {
+        const statusLabel = r.status === "achieved" ? "Target Achieved" : (r.status === "on-track" ? "On Track (Run Rate)" : "At Risk");
+        const statusClass = r.status === "achieved" ? "spike" : (r.status === "on-track" ? "new-match" : "decline");
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="font-mono">${r.merchantId}</td>
+          <td class="truncate-cell font-bold text-light">${r.merchantName}</td>
+          <td>${r.incentiveTier || "-"}</td>
+          <td class="num">${fmtIntCell(r.targetConfirmedOrders)}</td>
+          <td class="num text-blue font-bold">${fmtIntCell(Math.round(r.mtdConfirmed))}</td>
+          <td class="num text-purple">${fmtIntCell(Math.round(r.runRateConfirmed))}</td>
+          <td class="num">${r.attainmentActualPct.toFixed(1)}%</td>
+          <td class="num">${r.attainmentRunRatePct.toFixed(1)}%</td>
+          <td><span class="badge-status ${statusClass}">${statusLabel}</span></td>
+          <td class="num text-dim">${fmtMoneyCompact(r.bonusPerExtraOrder)}</td>
+          <td class="num text-green">${fmtIntCell(Math.round(r.extraOrdersActual))}</td>
+          <td class="num text-green font-bold">${fmtMoneyCompact(r.earnedBonusActual)}</td>
+          <td class="num text-purple">${fmtMoneyCompact(r.projectedBonusRunRate)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+  }
+}
+
+const incMerchSearchInput = $("searchIncMerchInput");
+if (incMerchSearchInput) {
+  incMerchSearchInput.addEventListener("input", (e) => {
+    state.incentiveMerchantsSearch = e.target.value || "";
+    renderIncentiveMerchantsPanel();
   });
 }
 
@@ -9190,16 +9369,6 @@ function prepareWeeklyInventoryWeeks() {
     });
   });
   state.weeklyInvConfirmedBySkuDayFromTab = confirmedBySkuDayFromTab;
-  // لوج تشخيصي مؤقت (شيله لما تخلص اختبار) — يوريك هل التاب الجديد فعلاً
-  // وصل من الـ Sync ولا لسه فاضي، وهل الديبندلينج لاقى مطابقة صح.
-  if (DEBUG_FORCE_CONFIRMED_FROM_TAB) {
-    console.log(
-      "[DEBUG confirmedByDay] rows فاضية من التاب =", (state.confirmedByDayRows || []).length,
-      "| عدد SKUs بعد الديبندلينج =", confirmedBySkuDayFromTab.size,
-      "| أول 3 صفوف خام:", (state.confirmedByDayRows || []).slice(0, 3),
-      "| أول 5 SKU keys بعد الديبندلينج:", [...confirmedBySkuDayFromTab.keys()].slice(0, 5)
-    );
-  }
   // الشباك اللي التاب ده بيغطيه فعلاً: من 30 يوم لحد آخر لحظة في يوم النهاردة.
   // أي فترة مطلوبة برة الشباك ده (كليًا أو جزئيًا) بترجع لـ confirmedBySkuDay فوق.
   // ملحوظة مهمة: بنفعّل الشباك ده بس لو فعلاً وصلنا صفوف من التاب الجديد
@@ -12555,7 +12724,7 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID
+  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID
 ].filter(Boolean);
 
 // آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
@@ -12712,7 +12881,8 @@ const GID_LABELS = {
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
-  [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)"
+  [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
+  [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)"
 };
 
 // بيجيب تاب "Confirmed by Day" مباشرة من الـ Cloudflare Worker
@@ -12730,6 +12900,25 @@ async function fetchConfirmedByDayViaWorker() {
     const json = await res.json();
     if (!json || !json.success) throw new Error((json && json.message) || "Worker getConfirmedByDay failed");
     if (!json.table) throw new Error("Worker getConfirmedByDay returned no table data");
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// بيجيب شيت "Incentive Merchants" (Incentives Tracker) مباشرة من الـ
+// Cloudflare Worker (action=getIncentiveMerchants) — نفس فكرة
+// fetchConfirmedByDayViaWorker فوق بالظبط، مستقل تمامًا عن Apps Script.
+async function fetchIncentiveMerchantsViaWorker() {
+  if (!SYNC_CDN_URL) throw new Error("SYNC_CDN_URL not configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+  try {
+    const url = `${SYNC_CDN_URL}?action=getIncentiveMerchants`;
+    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
+    const json = await res.json();
+    if (!json || !json.success) throw new Error((json && json.message) || "Worker getIncentiveMerchants failed");
+    if (!json.table) throw new Error("Worker getIncentiveMerchants returned no table data");
     return json.table;
   } finally {
     clearTimeout(timer);
@@ -12830,6 +13019,22 @@ async function fetchAllSheetsSnapshot() {
     }
   }
 
+  // نفس الـ Workaround فوق بالظبط، بس لشيت "Incentive Merchants"
+  // (Incentives Tracker) — بيتقرا من الـ Cloudflare Worker مباشرة، مستقل
+  // عن Apps Script/LAST_SYNC_GIDS خالص.
+  if (INCENTIVE_MERCHANTS_GID && !sheets[INCENTIVE_MERCHANTS_GID]) {
+    try {
+      sheets[INCENTIVE_MERCHANTS_GID] = await fetchIncentiveMerchantsViaWorker();
+    } catch (err) {
+      console.warn("[Incentive Merchants] Cloudflare Worker fetch failed, falling back to direct gviz:", err);
+      try {
+        sheets[INCENTIVE_MERCHANTS_GID] = await loadSheetWithRetry(INCENTIVE_MERCHANTS_GID);
+      } catch (err2) {
+        console.warn("[Incentive Merchants] direct gviz fallback also failed:", err2);
+      }
+    }
+  }
+
   const mainPayload = sheets[MAIN_GID];
   const targetsPayload = sheets[TARGETS_GID];
   const segPayload = sheets[SEGMENTATION_GID];
@@ -12853,6 +13058,7 @@ async function fetchAllSheetsSnapshot() {
   const weeklyInventoryPayload = sheets[WEEKLY_INVENTORY_GID];
   const warehouseRepackPayload = sheets[WAREHOUSE_REPACK_GID];
   const confirmedByDayPayload = sheets[CONFIRMED_BY_DAY_GID];
+  const incentiveMerchantsPayload = sheets[INCENTIVE_MERCHANTS_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
 
   const allParsedRows = parseMainSheet(mainPayload);
@@ -12888,6 +13094,7 @@ async function fetchAllSheetsSnapshot() {
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
     confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
+    incentiveMerchantsRows: incentiveMerchantsPayload ? parseIncentiveMerchantsSheet(incentiveMerchantsPayload) : state.incentiveMerchantsRows, // <-- Incentives Tracker (Incentive Merchants)
     staleGids, // sheets that failed every retry and are still showing old data
     // توقيت المزامنة المركزية من السيرفر (نفسه لكل اليوزرز) — لو مش موجود
     // (مسار fallback القديم اللي بيسحب لايف من غير backend)، بنرجع Date.now()
@@ -12964,6 +13171,7 @@ function applySnapshotToState(snapshot) {
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
+  state.incentiveMerchantsRows = snapshot.incentiveMerchantsRows || state.incentiveMerchantsRows || []; // <-- Incentives Tracker (Incentive Merchants)
   // Weekly Inventory & Inbound (Admin Panel) — لو الشيت اتغيّر (عمود يوم جديد
   // اتضاف مثلاً)، لازم نعيد بناء الأسابيع تاني بدل ما تفضل عارضة داتا قديمة.
   {
