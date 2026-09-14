@@ -2062,9 +2062,14 @@
                 <div class="metric-sub text-dim">Sum of Extra Orders (MTD) × Bonus/Order</div>
               </div>
               <div class="metric-card hover-glow">
-                <div class="metric-title text-purple">Projected Bonus (Run Rate) <span class="icon-dollar text-purple"></span></div>
+                <div class="metric-title text-purple">Bonus (Target) <span class="icon-dollar text-purple"></span></div>
                 <div class="metric-value text-purple" id="incMerchProjectedBonus">EGP 0</div>
-                <div class="metric-sub text-dim">If current pace holds until EOM</div>
+                <div class="metric-sub text-dim">Target × Bonus/Per Order, if Run Rate hits target</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-orange">Total Bonus <span class="icon-dollar text-orange"></span></div>
+                <div class="metric-value text-orange" id="incMerchTotalBonus">EGP 0</div>
+                <div class="metric-sub text-dim">Bonus (Target) + Earned Bonus (MTD)</div>
               </div>
             </div>
           </section>
@@ -2086,17 +2091,20 @@
                     <tr>
                       <th class="font-mono" title="Merchant identifier.">Merchant ID</th>
                       <th class="truncate-cell" title="Merchant's display name.">Merchant Name</th>
+                      <th title="Account manager responsible for this merchant (latest known month, from Merchant Segmentation).">ACM</th>
                       <th title="Incentive Tier from the config sheet.">Tier</th>
                       <th class="num" title="Target Confirmed Orders for this month.">Target Confirmed</th>
+                      <th class="num text-dim" title="Target Confirmed Orders pro-rated to today (Target ÷ days in month × days elapsed) — the pace needed so far.">Target Confirmed MTD</th>
                       <th class="num text-blue" title="Confirmed Orders so far this month (Month-to-Date).">Confirmed (MTD)</th>
-                      <th class="num text-purple" title="MTD Confirmed Orders projected to end of month, based on days elapsed so far (excluding today).">Run Rate (EOM)</th>
+                      <th class="num text-purple" title="MTD Confirmed Orders projected to end of month, based on days elapsed so far.">Run Rate (EOM)</th>
                       <th class="num" title="Confirmed (MTD) ÷ Target.">Attainment % (Actual)</th>
                       <th class="num" title="Run Rate (EOM) ÷ Target.">Attainment % (Run Rate)</th>
                       <th title="Achieved = MTD already hit target. On Track = projected to hit target by EOM. At Risk = projected to miss it.">Status</th>
-                      <th class="num text-dim" title="Bonus per Confirmed Order above target, from the config sheet.">Bonus/Extra Order</th>
-                      <th class="num text-green" title="max(0, Confirmed MTD − Target).">Extra Orders (MTD)</th>
-                      <th class="num text-green" title="Extra Orders (MTD) × Bonus/Extra Order — bonus earned so far.">Earned Bonus (MTD)</th>
-                      <th class="num text-purple" title="max(0, Run Rate − Target) × Bonus/Extra Order — projected bonus if pace holds to EOM.">Projected Bonus (Run Rate)</th>
+                      <th class="num text-dim" title="Bonus per Confirmed Order, from the config sheet.">Bonus/Per Order</th>
+                      <th class="num text-green" title="max(0, Confirmed MTD − Target) — orders confirmed above target so far.">Extra Orders (MTD)</th>
+                      <th class="num text-green" title="Extra Orders (MTD) × Bonus/Per Order — bonus earned so far on orders above target.">Earned Bonus (MTD)</th>
+                      <th class="num text-purple" title="If Run Rate is projected to hit the Target: Target Confirmed Orders × Bonus/Per Order. Zero otherwise.">Bonus (Target)</th>
+                      <th class="num text-orange" title="Bonus (Target) + Earned Bonus (MTD).">Total Bonus</th>
                     </tr>
                   </thead>
                   <tbody id="incMerchTableBody"></tbody>

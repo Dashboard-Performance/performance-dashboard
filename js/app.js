@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.21";
+const APP_VERSION = "1.1.23";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5161,24 +5161,49 @@ function prepareIncentiveMerchantsData() {
     mtdConfirmedMap.set(r.merchantId, (mtdConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
   });
 
+  // ACM بتاع كل تاجر — من نفس شيت Merchant Segmentation (أحدث شهر متاح ليه
+  // بيانات، مش بس شهر النهارده، عشان أي تاجر جديد لسه ملوش صف الشهر ده
+  // برضو يظهر ليه ACM من آخر شهر معروف).
+  const acmMap = new Map(); const acmLatestTs = new Map();
+  (state.merchantSegSourceRows || []).forEach(r => {
+    if (!r.merchantId || !r.acmName) return;
+    const ts = new Date(r.monthYear).getTime(); const rowTs = isNaN(ts) ? 0 : ts;
+    if (!acmLatestTs.has(r.merchantId) || rowTs >= acmLatestTs.get(r.merchantId)) {
+      acmLatestTs.set(r.merchantId, rowTs);
+      acmMap.set(r.merchantId, r.acmName);
+    }
+  });
+
   state.incentiveMerchantsPrepared = (state.incentiveMerchantsRows || []).map(row => {
+    const acmName = acmMap.get(row.merchantId) || "Unassigned";
     const mtdConfirmed = mtdConfirmedMap.get(row.merchantId) || 0;
     const runRateConfirmed = (mtdConfirmed / segElapsedDays) * totalDays;
     const target = row.targetConfirmedOrders || 0;
+    // Target Confirmed MTD: التارجت الشهري بتاعه موزّع بالتناسب على عدد
+    // الأيام اللي عدت من الشهر لحد النهارده — عشان تتقارن بيه Confirmed
+    // (MTD) وتشوف هوا ماشي بالسرعة المطلوبة ولا لأ.
+    const targetConfirmedMTD = (target / totalDays) * segElapsedDays;
     const attainmentActualPct = target > 0 ? (mtdConfirmed / target) * 100 : (mtdConfirmed > 0 ? 100 : 0);
     const attainmentRunRatePct = target > 0 ? (runRateConfirmed / target) * 100 : (runRateConfirmed > 0 ? 100 : 0);
     const achieved = mtdConfirmed >= target;
     const onTrack = !achieved && runRateConfirmed >= target;
     const status = achieved ? "achieved" : (onTrack ? "on-track" : "at-risk");
+    // Extra Orders (MTD) / Earned Bonus (MTD): بونص الأوردرات اللي فعلاً
+    // فوق التارجت لحد النهارده — بيتحسب زي ما هو من الأول.
     const extraOrdersActual = Math.max(0, mtdConfirmed - target);
-    const extraOrdersRunRate = Math.max(0, runRateConfirmed - target);
     const earnedBonusActual = extraOrdersActual * (row.bonusPerExtraOrder || 0);
-    const projectedBonusRunRate = extraOrdersRunRate * (row.bonusPerExtraOrder || 0);
+    // Bonus (Target): لو الـ Run Rate بيقول إنه هيحقق التارجت فعلاً (وصل
+    // أو هيوصله)، بياخد بونص التارجت كامل: التارجت نفسه (Target Confirmed
+    // Orders) × Bonus/Per Order — مش بس على الأوردرات الزيادة.
+    const projectedToHitTarget = target > 0 && runRateConfirmed >= target;
+    const bonusTarget = projectedToHitTarget ? target * (row.bonusPerExtraOrder || 0) : 0;
+    // Total Bonus = بونص التارجت + بونص الأوردرات الزيادة الفعلية (MTD).
+    const totalBonus = bonusTarget + earnedBonusActual;
     return {
       ...row,
-      currentMonthStr, mtdConfirmed, runRateConfirmed,
+      currentMonthStr, acmName, mtdConfirmed, runRateConfirmed, targetConfirmedMTD,
       attainmentActualPct, attainmentRunRatePct, status,
-      extraOrdersActual, extraOrdersRunRate, earnedBonusActual, projectedBonusRunRate
+      extraOrdersActual, earnedBonusActual, bonusTarget, totalBonus
     };
   }).sort((a, b) => b.attainmentRunRatePct - a.attainmentRunRatePct);
 }
@@ -5196,7 +5221,8 @@ function renderIncentiveMerchantsPanel() {
   const onTrackCount = rows.filter(r => r.status === "achieved" || r.status === "on-track").length; // متوقع يحقق التارجت على الـ Run Rate (شامل اللي حققوا فعلاً)
   const atRiskCount = rows.filter(r => r.status === "at-risk").length;
   const totalEarnedBonus = rows.reduce((s, r) => s + (r.earnedBonusActual || 0), 0);
-  const totalProjectedBonus = rows.reduce((s, r) => s + (r.projectedBonusRunRate || 0), 0);
+  const totalBonusTarget = rows.reduce((s, r) => s + (r.bonusTarget || 0), 0);
+  const totalBonusAll = rows.reduce((s, r) => s + (r.totalBonus || 0), 0);
   const monthLabel = rows.length ? rows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   if ($("incMerchMonthLabel")) $("incMerchMonthLabel").textContent = monthLabel;
@@ -5205,13 +5231,14 @@ function renderIncentiveMerchantsPanel() {
   if ($("incMerchOnTrack")) $("incMerchOnTrack").textContent = `${fmtInt.format(onTrackCount)} / ${fmtInt.format(totalMerchants)}`;
   if ($("incMerchAtRisk")) $("incMerchAtRisk").textContent = fmtInt.format(atRiskCount);
   if ($("incMerchEarnedBonus")) $("incMerchEarnedBonus").textContent = fmtMoneyCompact(totalEarnedBonus);
-  if ($("incMerchProjectedBonus")) $("incMerchProjectedBonus").textContent = fmtMoneyCompact(totalProjectedBonus);
+  if ($("incMerchProjectedBonus")) $("incMerchProjectedBonus").textContent = fmtMoneyCompact(totalBonusTarget);
+  if ($("incMerchTotalBonus")) $("incMerchTotalBonus").textContent = fmtMoneyCompact(totalBonusAll);
 
   const tbody = $("incMerchTableBody");
   if (tbody) {
     tbody.innerHTML = "";
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="13" class="text-dim center">No incentive merchants found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="16" class="text-dim center">No incentive merchants found.</td></tr>`;
     } else {
       filtered.forEach(r => {
         const statusLabel = r.status === "achieved" ? "Target Achieved" : (r.status === "on-track" ? "On Track (Run Rate)" : "At Risk");
@@ -5220,8 +5247,10 @@ function renderIncentiveMerchantsPanel() {
         tr.innerHTML = `
           <td class="font-mono">${r.merchantId}</td>
           <td class="truncate-cell font-bold text-light">${r.merchantName}</td>
+          <td class="text-dim">${r.acmName}</td>
           <td>${r.incentiveTier || "-"}</td>
           <td class="num">${fmtIntCell(r.targetConfirmedOrders)}</td>
+          <td class="num text-dim">${fmtIntCell(Math.round(r.targetConfirmedMTD))}</td>
           <td class="num text-blue font-bold">${fmtIntCell(Math.round(r.mtdConfirmed))}</td>
           <td class="num text-purple">${fmtIntCell(Math.round(r.runRateConfirmed))}</td>
           <td class="num">${r.attainmentActualPct.toFixed(1)}%</td>
@@ -5230,7 +5259,8 @@ function renderIncentiveMerchantsPanel() {
           <td class="num text-dim">${fmtMoneyCompact(r.bonusPerExtraOrder)}</td>
           <td class="num text-green">${fmtIntCell(Math.round(r.extraOrdersActual))}</td>
           <td class="num text-green font-bold">${fmtMoneyCompact(r.earnedBonusActual)}</td>
-          <td class="num text-purple">${fmtMoneyCompact(r.projectedBonusRunRate)}</td>
+          <td class="num text-purple">${fmtMoneyCompact(r.bonusTarget)}</td>
+          <td class="num text-orange font-bold">${fmtMoneyCompact(r.totalBonus)}</td>
         `;
         tbody.appendChild(tr);
       });
