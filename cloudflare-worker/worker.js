@@ -51,6 +51,19 @@ const CONFIRMED_BY_DAY_GID = "964398740";
 // 964398740 قبل كده.
 const CACHE_KEY_INCENTIVE_MERCHANTS = "incentive_merchants_v1";
 const INCENTIVE_MERCHANTS_GID = "1548963809";
+// شيت الـ Main (المصدر الأساسي لكل الداشبورد تقريبًا) — بيتقرا هنا مباشرة
+// من Google Sheets (gviz) بدل ما يعتمد بس على نسخة Apps Script المجمّعة
+// (getLastSync). السبب (بطلب صريح): لو اليوزر بيعمل تعديل/لصق داتا في
+// الشيت وقت ما الـ Cron بتاع Apps Script بيشتغل، ممكن ياخد لقطة نص-متغيرة.
+// هنا بنعمل "stability check" مستقل: كل Cron tick (كل 5 دقايق) بنسحب نسخة
+// جديدة ونقارن بصمتها ببصمة آخر تشغيلة (مش نفس التشغيلة — بين تشغيلتين
+// متتاليتين، يعني فاصل 5 دقايق حقيقي)، ومنعتبرش الشيت "مستقر" ونستخدمه إلا
+// لو البصمتين متطابقتين. لو لسه بيتغيّر، بنفضل نخدّم آخر نسخة مستقرة معروفة
+// بدل ما ننشر نسخة نص-متغيرة. البصمة نفسها (عدد الصفوف + أطوال أول/آخر صف)
+// زي fetchSheetsPayloadStable_/sheetFingerprint_ في backend/Code.gs بالظبط.
+const CACHE_KEY_MAIN = "main_sheet_v1";              // آخر نسخة "مستقرة" مؤكدة — دي اللي بتتخدم لليوزرز
+const CACHE_KEY_MAIN_CANDIDATE = "main_sheet_candidate_v1"; // آخر قراءة خام (لمقارنة التشغيلة الجاية بيها)
+const MAIN_GID = "2099497960";
 
 function corsHeaders() {
   return {
@@ -131,12 +144,26 @@ async function fetchGvizSheet(sheetId, gid) {
   // gviz بيرجّع Date(y,m,d,...) حرفي مش JSON صالح. الباك اند (Code.gs) بيحلها
   // بـ eval() لأن Apps Script بيسمح بيه — لكن Cloudflare Workers بيمنع
   // eval()/new Function() تمامًا افتراضيًا ("Code generation from strings
-  // disallowed"). التاب ده (Confirmed by Day) مفيهوش أي عمود تاريخ أصلاً
-  // (بس PRODUCT_ID/SKU_NAME/CATEGORY_L1 + أرقام)، فبدل eval بنستبدل أي
-  // Date(...) لو ظهر بنص عادي (JSON صالح) — من غير ما نحتاج نفكه فعليًا
-  // لتاريخ حقيقي، لأننا أصلاً مش بنستخدم قيمته.
-  const jsonSafeText = match[1].replace(/Date\([^)]*\)/g, (m) => JSON.stringify(m));
-  const parsed = JSON.parse(jsonSafeText);
+  // disallowed"). فبدل eval بنستبدل أي Date(...) جايه فعلاً كـ *قيمة* (يعني
+  // بعد "v": مباشرة) بنص JSON صالح — من غير ما نحتاج نفكه فعليًا لتاريخ
+  // حقيقي، لأننا أصلاً مش بنستخدم قيمته (الفرونت اند بيقرا الـ "f" المنسّق
+  // بس، مش "v"). العلامة "v": شرط عشان منستبدلش أي نص عادي جوه string لو
+  // حصل واحتوى على كلمة "Date(" بالصدفة (زي اسم منتج فيه أقواس).
+  const jsonSafeText = match[1].replace(/"v":Date\(([^)]*)\)/g, (m, inner) => '"v":"Date(' + inner + ')"');
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonSafeText);
+  } catch (parseErr) {
+    // نطلع سياق حوالين مكان الخطأ بالظبط عشان نقدر نشخص أي مشكلة تانية في
+    // شكل الداتا من غير ما نحتاج نجيب الـ raw response يدويًا.
+    const posMatch = /position (\d+)/.exec(parseErr.message);
+    const pos = posMatch ? parseInt(posMatch[1], 10) : null;
+    const snippet = pos !== null ? jsonSafeText.slice(Math.max(0, pos - 120), pos + 120) : "";
+    throw new Error(
+      "Failed to parse gviz JSON for gid " + gid + ": " + parseErr.message +
+      (snippet ? " | context: ..." + snippet + "..." : "")
+    );
+  }
   if (parsed && parsed.status === "error") throw new Error("gviz returned status=error for gid " + gid);
   return parsed;
 }
@@ -185,6 +212,66 @@ async function handleGetIncentiveMerchants(env) {
   }
 }
 
+// نفس sheetFingerprint_ في backend/Code.gs بالظبط — بصمة رخيصة (عدد الصفوف
+// + أطوال أول/آخر صف + طول الأعمدة) بدل مقارنة كل خلية بخلية، كافية عمليًا
+// لاكتشاف أي تعديل حقيقي في الشيت من غير ما تبطّئ الـ Worker.
+function sheetFingerprint(table) {
+  if (!table || !table.rows) return null;
+  const rows = table.rows;
+  const n = rows.length;
+  const first = n ? JSON.stringify(rows[0]) : "";
+  const last = n ? JSON.stringify(rows[n - 1]) : "";
+  return n + "|" + first.length + "|" + last.length + "|" + JSON.stringify(table.cols || []).length;
+}
+
+async function refreshMainCache(env) {
+  const sheetId = env.SHEET_ID;
+  if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
+  const table = await fetchGvizSheet(sheetId, MAIN_GID);
+  const fp = sheetFingerprint(table);
+  const nowIso = new Date().toISOString();
+
+  const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE);
+  const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
+
+  // نسجّل القراءة الخام دي كـ "مرشح" للمرة الجاية، في كل الأحوال — عشان
+  // التشغيلة اللي بعدها (كل 5 دقايق) تقارن نفسها بيها.
+  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso }));
+
+  if (fp !== null && candidate && candidate.fingerprint === fp) {
+    // البصمة اتطابقت مع آخر تشغيلة (فاصل 5 دقايق حقيقي بينهم) — الشيت
+    // مستقر، مفيش تعديل شغال عليه دلوقتي. آمن نخدّمه لليوزرز.
+    const payload = { success: true, fetchedAt: nowIso, stable: true, table };
+    await env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(payload));
+    return payload;
+  }
+
+  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي. نرجع آخر
+  // نسخة "مستقرة" معروفة بدل ما نعرض لقطة نص-متغيرة.
+  const existingStableRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN);
+  if (existingStableRaw) return JSON.parse(existingStableRaw);
+
+  // مفيش أي نسخة مستقرة اتسجلت قبل كده خالص (أول تشغيلة من عمر الـ Worker) —
+  // مضطرين نستخدم القراءة دي زي ما هي عشان الداشبورد مايفضلش فاضي، بس
+  // بعلامة stable:false توضح إنها لسه ماتأكدتش.
+  const bootstrapPayload = { success: true, fetchedAt: nowIso, stable: false, table };
+  await env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(bootstrapPayload));
+  return bootstrapPayload;
+}
+
+async function handleGetMain(env) {
+  try {
+    let cached = await env.SYNC_CACHE.get(CACHE_KEY_MAIN);
+    if (!cached) {
+      const fresh = await refreshMainCache(env);
+      return jsonResponse(fresh);
+    }
+    return new Response(cached, { headers: corsHeaders() });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -198,12 +285,13 @@ export default {
     if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
     if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
+    if (action === "getMain") return handleGetMain(env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
@@ -224,6 +312,9 @@ export default {
         }),
         refreshIncentiveMerchantsCache(env).catch((err) => {
           console.error("[scheduled refresh incentiveMerchants] failed (will retry next cron tick):", err && err.message);
+        }),
+        refreshMainCache(env).catch((err) => {
+          console.error("[scheduled refresh main] failed (will retry next cron tick):", err && err.message);
         }),
       ])
     );

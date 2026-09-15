@@ -763,8 +763,13 @@ function fetchSheetsPayload_(gids) {
  */
 // نفس ترتيب وقيم ALL_SHEET_GIDS في js/app.js بالظبط (قيم حرفية عشان الملف
 // ده مستقل ومفيهوش أي اعتماد على متغيرات فرونت اند).
+// ملحوظة: شيت الـ Main (2099497960) اتشال من هنا عمدًا — بقى بيتقرا حصريًا
+// من الـ Cloudflare Worker (فيه الـ stability check المستقل بتاعه)، والفرونت
+// إند مبقاش بيرجعله من Apps Script خالص لو الـ Worker فشل. شيله من هنا كمان
+// بيخفف حمل الـ Apps Script trigger لأنه كان بيتقرا مرتين كل 15 دقيقة (مرة
+// جوه fetchSheetsPayloadStable_ اللي بتعمل double-read لكل الـ GIDs) وهوا
+// أكبر شيت في الداشبورد كله.
 var LAST_SYNC_GIDS = [
-  "2099497960",  // MAIN_GID
   "115442405",   // TARGETS_GID
   "891214324",   // SEGMENTATION_GID
   "2042936628",  // TARGETS_ACM_GID

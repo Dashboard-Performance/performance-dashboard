@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.29";
+const APP_VERSION = "1.1.31";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -12979,6 +12979,31 @@ async function fetchIncentiveMerchantsViaWorker() {
   }
 }
 
+// بيجيب شيت الـ Main مباشرة من الـ Cloudflare Worker (action=getMain) —
+// الفرق عن fetchConfirmedByDayViaWorker/fetchIncentiveMerchantsViaWorker
+// فوق إن الـ Worker هنا بيعمل "stability check" مستقل بتاعه هو (يقارن
+// بصمة الشيت بين تشغيلتين متتاليتين للـ Cron، كل 5 دقايق — راجع الشرح فوق
+// MAIN_GID في cloudflare-worker/worker.js)، بطلب صريح: لو حد بيعدّل/بيلصق
+// داتا في شيت الـ Main، الـ Worker مايرجعش لقطة نص-متغيرة — بيفضل يرجّع آخر
+// نسخة "مستقرة" معروفة لحد ما التعديل يخلص ويستقر الشيت فعليًا. مستقل
+// تمامًا عن نسخة Apps Script المجمّعة (getLastSync)، اللي كمان عندها
+// stability check لوحدها لكن بفاصل 6 ثواني بس جوه نفس التنفيذة.
+async function fetchMainSheetViaWorker() {
+  if (!SYNC_CDN_URL) throw new Error("SYNC_CDN_URL not configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+  try {
+    const url = `${SYNC_CDN_URL}?action=getMain`;
+    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
+    const json = await res.json();
+    if (!json || !json.success) throw new Error((json && json.message) || "Worker getMain failed");
+    if (!json.table) throw new Error("Worker getMain returned no table data");
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
 // global state, so it is safe to call in the background while old data is
 // still on screen.
@@ -13085,6 +13110,28 @@ async function fetchAllSheetsSnapshot() {
         sheets[INCENTIVE_MERCHANTS_GID] = await loadSheetWithRetry(INCENTIVE_MERCHANTS_GID);
       } catch (err2) {
         console.warn("[Incentive Merchants] direct gviz fallback also failed:", err2);
+      }
+    }
+  }
+
+  // شيت الـ Main — بقى بيتقرا حصريًا برا Apps Script خالص (نفس باترن
+  // Incentive Merchants/Confirmed by Day فوق): أولًا نمسح أي قيمة جاية من
+  // Apps Script عشان منسبهاش fallback ضمني، وبعدين نجرب الـ Worker (فيه
+  // الـ stability check المستقل بتاعه، راجع تعليق fetchMainSheetViaWorker)،
+  // ولو فشل نجرب قراءة gviz مباشرة من المتصفح. لو الاتنين فشلوا، sheets[MAIN_GID]
+  // بيفضل undefined عمدًا — يعني الداشبورد هيرمي "No data streams detected."
+  // بدل ما يستخدم نسخة قديمة/جزئية من Apps Script.
+  if (MAIN_GID) {
+    delete sheets[MAIN_GID];
+    try {
+      const mainTable = await fetchMainSheetViaWorker();
+      if (mainTable) sheets[MAIN_GID] = mainTable;
+    } catch (err) {
+      console.warn("[Main Sheet] Cloudflare Worker fetch failed, falling back to direct gviz:", err);
+      try {
+        sheets[MAIN_GID] = await loadSheetWithRetry(MAIN_GID);
+      } catch (err2) {
+        console.warn("[Main Sheet] direct gviz fallback also failed:", err2);
       }
     }
   }
