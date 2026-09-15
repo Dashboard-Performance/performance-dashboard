@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.35";
+const APP_VERSION = "1.1.36";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -653,6 +653,7 @@ const navSyncStatus = $("navSyncStatus");
 const syncStatusModal = $("syncStatusModal");
 const syncStatusBody = $("syncStatusBody");
 const syncStatusRefresh = $("syncStatusRefresh");
+const syncStatusForceRefresh = $("syncStatusForceRefresh");
 const syncStatusClose = $("syncStatusClose");
 
 if (navMarketplaceToggle) {
@@ -809,6 +810,34 @@ if (navSyncStatus) {
   });
 }
 if (syncStatusRefresh) syncStatusRefresh.addEventListener("click", () => loadAndRenderSyncStatus());
+// v1.1.35: بدل ما تستنى الـ cron التلقائي (كل 5 دقايق) عشان تتأكد إن
+// التعديل فعلاً اتسحب، الزرار ده بيسحب نسخة جديدة فورًا دلوقتي من التلات
+// شيتات مع بعض (لسه بيمر بنفس شرط الاستقرار — راجع تعليق forceRefresh جوه
+// worker.js)، وبعدين بيعمل reload لحالة المودال على طول عشان تشوف النتيجة
+// من غير أي استنى.
+if (syncStatusForceRefresh) {
+  syncStatusForceRefresh.addEventListener("click", async () => {
+    if (!SYNC_CDN_URL) return;
+    const user = getLoggedInUser();
+    const email = user && user.email ? user.email : "";
+    syncStatusForceRefresh.disabled = true;
+    const originalText = syncStatusForceRefresh.textContent;
+    syncStatusForceRefresh.textContent = "Refreshing…";
+    try {
+      const res = await fetch(`${SYNC_CDN_URL}?action=forceRefresh&email=${encodeURIComponent(email)}`, { method: "GET", cache: "no-store" });
+      const json = await res.json();
+      if (!json || !json.success) {
+        alert("Force refresh failed: " + ((json && json.message) || "unknown error"));
+      }
+    } catch (err) {
+      alert("Force refresh failed: " + ((err && err.message) || String(err)));
+    } finally {
+      syncStatusForceRefresh.disabled = false;
+      syncStatusForceRefresh.textContent = originalText;
+      loadAndRenderSyncStatus();
+    }
+  });
+}
 if (syncStatusClose) syncStatusClose.addEventListener("click", () => { if (syncStatusModal) syncStatusModal.classList.add("hidden"); });
 if (syncStatusModal) {
   syncStatusModal.addEventListener("click", (e) => { if (e.target === syncStatusModal) syncStatusModal.classList.add("hidden"); });

@@ -70,6 +70,10 @@ const CACHE_KEY_MAIN_CANDIDATE = "main_sheet_candidate_v1"; // آخر قراءة
 // "Failed to fetch": الـ CPU limit بتاع الـ Worker كان بيتعدى والتنفيذ
 // بيتقفل فجأة من غير ما يرجع رد خالص (مش حتى إيرور JSON عادي).
 const CACHE_KEY_MAIN_META = "main_sheet_meta_v1";
+// v1.1.35: نفس الإيميل بالظبط المستخدم كـ PRESENCE_ADMIN_EMAIL في js/auth.js
+// وbackend/Code.gs — بوابة بسيطة (مش أمان حقيقي، بس كافية هنا لأن أقصى ضرر
+// ممكن يحصل هو حد يعمل refresh قبل معاده بشوية) لأكشن forceRefresh تحت.
+const MANAGER_EMAIL = "youssef.hanafy@taager.com";
 // v1.1.33: لو refreshMainCache فشلت جوه scheduled() (مثلاً الشيت كبير جدًا
 // وتعدى حد الـ KV، أو gviz رجع رد غريب)، الفشل كان بيتسجل بس في console.error
 // (مش شايفينه إلا لو شغّلت wrangler tail لحظتها). دلوقتي بنسجله هنا كمان عشان
@@ -297,6 +301,39 @@ async function handleGetMain(env) {
   }
 }
 
+// v1.1.35: بدل ما تستنى الـ cron التلقائي (كل 5 دقايق)، الأكشن ده بيسحب
+// نسخة جديدة فورًا دلوقتي من التلات شيتات مع بعض ويحدّث الكاش المشترك على
+// طول — أي يوزر بيفتح الداشبورد بعدها هيشوف النتيجة على طول (لو استقرت).
+// بوابة بسيطة بإيميل الـ Manager (نفس فكرة "Worker Sync Status" في الفرونت
+// اند). المهم: ده مش bypass لشرط الاستقرار — لسه بيمر بنفس منطق المقارنة
+// بين بصمتين متتاليتين جوه refreshMainCache بالظبط، بس بيخلي "المتتاليتين"
+// تحصل دلوقتي بدل ما تستنى 5 دقايق.
+async function handleForceRefresh(request, env) {
+  const url = new URL(request.url);
+  const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (email !== MANAGER_EMAIL.toLowerCase()) {
+    return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  }
+  try {
+    const [main, confirmedByDay, incentiveMerchants] = await Promise.all([
+      refreshMainCache(env),
+      refreshConfirmedByDayCache(env),
+      refreshIncentiveMerchantsCache(env),
+    ]);
+    // منرجعش الجداول الكاملة هنا (ممكن تبقى عشرات الـ MB) — بس ملخص خفيف
+    // يورّي حصل إيه، الفرونت اند هيعمل getMainMeta/getConfirmedByDay/
+    // getIncentiveMerchants عادي بعد كده عشان يجيب التفاصيل الكاملة.
+    return jsonResponse({
+      success: true,
+      main: { stable: !!main.stable, fetchedAt: main.fetchedAt || null, skippedReparse: !!main.skippedReparse },
+      confirmedByDay: { fetchedAt: confirmedByDay.fetchedAt || null },
+      incentiveMerchants: { fetchedAt: incentiveMerchants.fetchedAt || null },
+    });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
+}
+
 // v1.1.33: نسخة خفيفة جدًا من getMain — من غير الجدول الكامل (اللي ممكن
 // يبقى عشرات الـ MB)، بس metadata (stable/fetchedAt/عدد الصفوف/آخر خطأ لو
 // فيه). الهدف: تسمح لكل اليوزرز (مش بس الـ Manager) إنهم يعملوا "poll" خفيف
@@ -337,12 +374,13 @@ export default {
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
     if (action === "getMain") return handleGetMain(env);
     if (action === "getMainMeta") return handleGetMainMeta(env);
+    if (action === "forceRefresh") return handleForceRefresh(request, env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta/forceRefresh — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
