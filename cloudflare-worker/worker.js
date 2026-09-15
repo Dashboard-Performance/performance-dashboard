@@ -244,12 +244,21 @@ async function refreshMainCache(env) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
   const table = await fetchGvizSheet(sheetId, MAIN_GID);
-  const fp = sheetFingerprint(table);
+  // ⚠️ تصحيح مهم: fetchGvizSheet بيرجع الـ wrapper الخارجي كامل
+  // ({version,reqId,status,sig,table:{cols,rows}})، مش {cols,rows} مباشرة.
+  // sheetFingerprint (وحساب عدد الصفوف تحت) لازم يشتغلوا على table.table
+  // (المستوى الداخلي الفعلي) — كنا بنمرر الـ wrapper الخارجي غلط، فكانت
+  // sheetFingerprint بترجع null على طول (table.rows مكنش موجود خالص على
+  // الـ wrapper)، يعني الشرط "البصمتين متطابقتين" مستحيل يتحقق أبدًا —
+  // ده كان السبب الحقيقي وراء إنها "مش بتستقر" مهما استنينا أو عملنا
+  // Force Refresh.
+  const innerTable = table && table.table ? table.table : null;
+  const fp = sheetFingerprint(innerTable);
   const nowIso = new Date().toISOString();
 
   const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE);
   const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
-  const attemptRowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
+  const attemptRowCount = innerTable && Array.isArray(innerTable.rows) ? innerTable.rows.length : null;
 
   // نسجّل القراءة الخام دي كـ "مرشح" للمرة الجاية، في كل الأحوال — عشان
   // التشغيلة اللي بعدها (كل 5 دقايق) تقارن نفسها بيها. rowCount هنا بس
@@ -261,7 +270,7 @@ async function refreshMainCache(env) {
     // البصمة اتطابقت مع آخر تشغيلة (فاصل 5 دقايق حقيقي بينهم) — الشيت
     // مستقر، مفيش تعديل شغال عليه دلوقتي. آمن نخدّمه لليوزرز.
     const payload = { success: true, fetchedAt: nowIso, stable: true, table };
-    const rowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
+    const rowCount = attemptRowCount;
     await Promise.all([
       env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(payload)),
       env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: true, fetchedAt: nowIso, rowCount })),
@@ -283,7 +292,7 @@ async function refreshMainCache(env) {
   // مضطرين نستخدم القراءة دي زي ما هي عشان الداشبورد مايفضلش فاضي، بس
   // بعلامة stable:false توضح إنها لسه ماتأكدتش.
   const bootstrapPayload = { success: true, fetchedAt: nowIso, stable: false, table };
-  const bootstrapRowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
+  const bootstrapRowCount = attemptRowCount;
   await Promise.all([
     env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(bootstrapPayload)),
     env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: false, fetchedAt: nowIso, rowCount: bootstrapRowCount })),
