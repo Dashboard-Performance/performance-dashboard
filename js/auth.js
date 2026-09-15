@@ -47,7 +47,11 @@
     // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
     // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
     // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
-    HEARTBEAT_INTERVAL_MS: 20000,
+    // v1.1.32: من 20 ثانية لـ 30 — بيقلل عدد الطلبات المتزامنة على نفس
+    // الـ deployment أكتر (راجع startPresence/buildPresenceWidget تحت كمان
+    // — دلوقتي مفصولين عن بعض بفاصل زمني عشان ميضربوش الباك اند في نفس
+    // اللحظة بالظبط).
+    HEARTBEAT_INTERVAL_MS: 30000,
   };
 
   /* ------------------------------------------------------------------ *
@@ -475,8 +479,12 @@
     return typeof document === "undefined" || document.visibilityState !== "hidden";
   }
 
+  // v1.1.32: فاصل بسيط (4 ثواني) قبل أول heartbeat — عشان ميضربش نفس
+  // اللحظة بالظبط اللي فيها loadData الأساسية بتضرب الباك اند وقت تحميل
+  // الصفحة (كانت الاتنين بيحصلوا سوا عند t=0، ده كان بيزود احتمال الـ 404
+  // العابر). الـ setInterval بعد كده بيفضل شغال بنفس الفاصل الزمني عادي.
   function startPresence(user) {
-    sendHeartbeat(user);
+    setTimeout(() => sendHeartbeat(user), 4000);
     setInterval(() => { if (isTabVisible()) sendHeartbeat(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
 
     if (String(user.email || "").trim().toLowerCase() === CONFIG.PRESENCE_ADMIN_EMAIL.toLowerCase()) {
@@ -572,7 +580,12 @@
       if (!widget.contains(e.target)) panel.classList.add("hidden");
     });
 
-    refreshPresence(user);
+    // v1.1.32: فاصل تاني (14 ثانية) — بعيد عن أول heartbeat (4 ثواني) وعن
+    // نص الدورة (15 ثانية) عشان الـ presence refresh والـ heartbeat يفضلوا
+    // بعيدين عن بعض على مدار الوقت، مش بس أول مرة (الاتنين بيشتغلوا بنفس
+    // الفاصل الزمني الكامل HEARTBEAT_INTERVAL_MS، فالفرق الأولي ده بيفضل
+    // ثابت طول عمر الصفحة).
+    setTimeout(() => refreshPresence(user), 14000);
     setInterval(() => { if (isTabVisible()) refreshPresence(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
   }
 

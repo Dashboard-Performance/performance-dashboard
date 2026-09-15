@@ -85,6 +85,10 @@
             <a class="nav-item-sub" id="navWeeklyInventory">Weekly Inventory &amp; Inbound</a>
           </div>
         </div>
+        <!-- ظاهر بس للـ Manager (نفس الإيميل المحدد في PRESENCE_ADMIN_EMAIL
+             جوه js/auth.js وbackend/Code.gs) — مخفي افتراضيًا وبيتظهر من
+             app.js لو الإيميل اللي عامل login بيه مطابق. -->
+        <a class="nav-item hidden" id="navSyncStatus"><span class="nav-icon"></span>Worker Sync Status</a>
       </nav>
       <div class="sidebar-footer">
         <div id="sidebarStatus">Live System Sync</div>
@@ -3132,6 +3136,19 @@
       <div class="modal-actions">
         <button id="adminPasswordCancel" class="btn btn-outline">Cancel</button>
         <button id="adminPasswordSubmit" class="btn btn-primary">Unlock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORKER SYNC STATUS MODAL (Manager only) -->
+  <div id="syncStatusModal" class="modal hidden">
+    <div class="modal-content" style="max-width:600px;">
+      <h3>⚙️ Worker Sync Status</h3>
+      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">حالة قراءة الشيتات من Cloudflare Worker مباشرة (Main / Confirmed by Day / Incentive Merchants).</p>
+      <div id="syncStatusBody" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button id="syncStatusRefresh" class="btn btn-outline">Refresh</button>
+        <button id="syncStatusClose" class="btn btn-primary">Close</button>
       </div>
     </div>
   </div>

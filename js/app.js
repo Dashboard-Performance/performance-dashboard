@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.31";
+const APP_VERSION = "1.1.33";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -649,6 +649,11 @@ const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
 const navIncentivesCaret = $("navIncentivesCaret");
 const navIncMerchants = $("navIncMerchants");
+const navSyncStatus = $("navSyncStatus");
+const syncStatusModal = $("syncStatusModal");
+const syncStatusBody = $("syncStatusBody");
+const syncStatusRefresh = $("syncStatusRefresh");
+const syncStatusClose = $("syncStatusClose");
 
 if (navMarketplaceToggle) {
   navMarketplaceToggle.addEventListener("click", () => {
@@ -679,6 +684,123 @@ if (navAdminToggle) {
     adminSubmenu.classList.toggle("hidden");
     if(navAdminCaret) navAdminCaret.classList.toggle("rotate");
   });
+}
+
+// -------------------------------------------------------------------------
+// Worker Sync Status — ظاهر بس للـ Manager (نفس PRESENCE_ADMIN_EMAIL في
+// js/auth.js وbackend/Code.gs). بيوريله حالة كل شيت بيتقرا من Cloudflare
+// Worker مباشرة (Main/Confirmed by Day/Incentive Merchants): stable ولا
+// لسه بيتأكد، آخر وقت اتقرا فيه، وعدد الصفوف — من غير ما يحتاج يفتح لينك
+// الـ Worker يدوي.
+const SYNC_STATUS_MANAGER_EMAIL = "youssef.hanafy@taager.com";
+
+function revealSyncStatusNavIfManager() {
+  if (!navSyncStatus) return;
+  const user = getLoggedInUser();
+  const email = user && user.email ? String(user.email).trim().toLowerCase() : "";
+  if (email === SYNC_STATUS_MANAGER_EMAIL.toLowerCase()) {
+    navSyncStatus.classList.remove("hidden");
+  } else {
+    navSyncStatus.classList.add("hidden");
+  }
+}
+// أول ما الملف يتحمل بنحاول فورًا (لو الـ session موجودة في localStorage
+// من أول لحظة)، وده بيتنفذ برضو تاني مرة تحت داخل init/بعد أول تحميل
+// للداتا احتياطًا لو getLoggedInUser مرجعش حاجة أول مرة.
+revealSyncStatusNavIfManager();
+
+const SYNC_STATUS_TARGETS = [
+  { key: "main", label: "Main (2099497960)", action: "getMain" },
+  { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay" },
+  { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants" },
+];
+
+function syncStatusTimeAgo(iso) {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (!t || isNaN(t)) return "—";
+  const diffSec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (diffSec < 60) return diffSec + "s ago";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return diffMin + "m ago";
+  const diffHr = Math.round(diffMin / 60);
+  return diffHr + "h ago";
+}
+
+async function fetchOneSyncStatus(target) {
+  if (!SYNC_CDN_URL) return { ...target, ok: false, error: "SYNC_CDN_URL not configured" };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+    let json;
+    try {
+      const res = await fetch(`${SYNC_CDN_URL}?action=${target.action}`, { method: "GET", signal: controller.signal, cache: "no-store" });
+      json = await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!json || !json.success) return { ...target, ok: false, error: (json && json.message) || "unknown error" };
+    // الشكل زي ما بيرجعه الـ Worker: { success, fetchedAt, stable, table: <gviz payload كامل> }
+    // وجوه الـ gviz payload نفسه فيه .table.rows/.table.cols (تعشيش مزدوج مقصود).
+    const rowCount = json.table && json.table.table && Array.isArray(json.table.table.rows) ? json.table.table.rows.length : null;
+    return {
+      ...target,
+      ok: true,
+      stable: json.stable === undefined ? null : !!json.stable,
+      fetchedAt: json.fetchedAt || null,
+      rowCount,
+    };
+  } catch (err) {
+    return { ...target, ok: false, error: (err && err.message) || String(err) };
+  }
+}
+
+function renderSyncStatusRow(r) {
+  const box = document.createElement("div");
+  box.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);";
+  if (!r.ok) {
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-size:13px;">${escapeHtml(r.label)}</strong>
+        <span style="color:#ef4444;font-size:12px;font-family:'JetBrains Mono',monospace;">❌ Failed</span>
+      </div>
+      <div style="color:#a1a1aa;font-size:11px;font-family:'JetBrains Mono',monospace;margin-top:4px;">${escapeHtml(r.error || "")}</div>
+    `;
+    return box;
+  }
+  const stableBadge = r.stable === null ? `<span style="color:#a1a1aa;">—</span>` :
+    r.stable ? `<span style="color:#22c55e;">✅ Stable</span>` : `<span style="color:#f59e0b;">⏳ Not stable yet</span>`;
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong style="font-size:13px;">${escapeHtml(r.label)}</strong>
+      <span style="font-size:12px;font-family:'JetBrains Mono',monospace;">${stableBadge}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;color:#a1a1aa;font-size:11px;font-family:'JetBrains Mono',monospace;margin-top:4px;">
+      <span>Last fetched: ${escapeHtml(syncStatusTimeAgo(r.fetchedAt))}</span>
+      <span>Rows: ${r.rowCount === null ? "—" : fmtInt.format(r.rowCount)}</span>
+    </div>
+  `;
+  return box;
+}
+
+async function loadAndRenderSyncStatus() {
+  if (!syncStatusBody) return;
+  syncStatusBody.innerHTML = `<div class="text-dim" style="font-size:12px;">Loading…</div>`;
+  const results = await Promise.all(SYNC_STATUS_TARGETS.map(fetchOneSyncStatus));
+  syncStatusBody.innerHTML = "";
+  results.forEach(r => syncStatusBody.appendChild(renderSyncStatusRow(r)));
+}
+
+if (navSyncStatus) {
+  navSyncStatus.addEventListener("click", () => {
+    if (syncStatusModal) syncStatusModal.classList.remove("hidden");
+    loadAndRenderSyncStatus();
+  });
+}
+if (syncStatusRefresh) syncStatusRefresh.addEventListener("click", () => loadAndRenderSyncStatus());
+if (syncStatusClose) syncStatusClose.addEventListener("click", () => { if (syncStatusModal) syncStatusModal.classList.add("hidden"); });
+if (syncStatusModal) {
+  syncStatusModal.addEventListener("click", (e) => { if (e.target === syncStatusModal) syncStatusModal.classList.add("hidden"); });
 }
 
 function switchView(viewName) {
@@ -13841,4 +13963,10 @@ scheduleAutoRefresh();
 // computeSyncContentHash_ في runScheduledSync)، ولو الإجابة "أيوه" بيعمل
 // loadData(false) بصمت في الخلفية. ده اللي بيدي إحساس شبه-لايف من غير ما
 // أي يوزر يحتاج يستنى الرفرش الصامت كل نص ساعة أو يدوس Refresh يدوي.
-setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
+// v1.1.32: بدل ما نبدأ الـ interval فورًا (اللي كان بيخلي كل تيك تالت (كل
+// 90 ثانية) يقع بالظبط على نفس لحظة تيك الـ heartbeat بتاع auth.js — 90
+// مضاعف لـ 30 — بنضيف فاصل بداية بسيط (12 ثانية) عشان التيكات متتقابلش
+// مع بعض بشكل دوري على طول عمر الصفحة.
+setTimeout(() => {
+  setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
+}, 12000);
