@@ -249,10 +249,13 @@ async function refreshMainCache(env) {
 
   const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE);
   const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
+  const attemptRowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
 
   // نسجّل القراءة الخام دي كـ "مرشح" للمرة الجاية، في كل الأحوال — عشان
-  // التشغيلة اللي بعدها (كل 5 دقايق) تقارن نفسها بيها.
-  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso }));
+  // التشغيلة اللي بعدها (كل 5 دقايق) تقارن نفسها بيها. rowCount هنا بس
+  // عشان نوريه في getMainMeta كـ "آخر محاولة" حتى لو لسه ماتطابقتش —
+  // عشان توضح إن الـ Worker شغال وبيحاول فعلاً، مش واقف.
+  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount: attemptRowCount }));
 
   if (fp !== null && candidate && candidate.fingerprint === fp) {
     // البصمة اتطابقت مع آخر تشغيلة (فاصل 5 دقايق حقيقي بينهم) — الشيت
@@ -344,16 +347,22 @@ async function handleGetMainMeta(env) {
     // بنقرا CACHE_KEY_MAIN_META الخفيفة بس (راجع تعليقها فوق) — مفيش أي
     // JSON.parse لجدول ضخم هنا خالص، القراءة دي رخيصة جدًا مهما كان حجم
     // شيت الـ Main.
-    const [metaRaw, errorRaw] = await Promise.all([
+    const [metaRaw, errorRaw, candidateRaw] = await Promise.all([
       env.SYNC_CACHE.get(CACHE_KEY_MAIN_META),
       env.SYNC_CACHE.get(CACHE_KEY_MAIN_ERROR),
+      env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE),
     ]);
     const lastError = errorRaw ? JSON.parse(errorRaw) : null;
+    // lastAttempt: آخر مرة الـ Worker حاول يقرا الشيت فعلاً، حتى لو لسه
+    // ماستقرتش (مطابقتش القراءة اللي قبلها) — عشان توضح إن فيه محاولات
+    // شغالة بالفعل، مش إن الـ Worker واقف.
+    const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
+    const lastAttempt = candidate ? { fetchedAt: candidate.fetchedAt || null, rowCount: candidate.rowCount === undefined ? null : candidate.rowCount } : null;
     if (!metaRaw) {
-      return jsonResponse({ success: true, stable: false, fetchedAt: null, rowCount: null, lastError });
+      return jsonResponse({ success: true, stable: false, fetchedAt: null, rowCount: null, lastError, lastAttempt });
     }
     const meta = JSON.parse(metaRaw);
-    return jsonResponse({ success: true, stable: !!meta.stable, fetchedAt: meta.fetchedAt || null, rowCount: meta.rowCount === undefined ? null : meta.rowCount, lastError });
+    return jsonResponse({ success: true, stable: !!meta.stable, fetchedAt: meta.fetchedAt || null, rowCount: meta.rowCount === undefined ? null : meta.rowCount, lastError, lastAttempt });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }

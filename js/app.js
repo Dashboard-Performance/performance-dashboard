@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.36";
+const APP_VERSION = "1.1.37";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -757,6 +757,7 @@ async function fetchOneSyncStatus(target) {
       fetchedAt: json.fetchedAt || null,
       rowCount,
       lastError: json.lastError || null,
+      lastAttempt: json.lastAttempt || null,
     };
   } catch (err) {
     return { ...target, ok: false, error: (err && err.message) || String(err) };
@@ -787,9 +788,14 @@ function renderSyncStatusRow(r) {
       <span style="font-size:12px;font-family:'JetBrains Mono',monospace;">${stableBadge}</span>
     </div>
     <div style="display:flex;justify-content:space-between;color:#a1a1aa;font-size:11px;font-family:'JetBrains Mono',monospace;margin-top:4px;">
-      <span>Last fetched: ${escapeHtml(syncStatusTimeAgo(r.fetchedAt))}</span>
+      <span>Last stable snapshot: ${escapeHtml(syncStatusTimeAgo(r.fetchedAt))}</span>
       <span>Rows: ${r.rowCount === null ? "—" : fmtInt.format(r.rowCount)}</span>
     </div>
+    ${r.lastAttempt ? `
+    <div style="display:flex;justify-content:space-between;color:#71717a;font-size:10px;font-family:'JetBrains Mono',monospace;margin-top:2px;">
+      <span>Last attempt (may be unstable): ${escapeHtml(syncStatusTimeAgo(r.lastAttempt.fetchedAt))}</span>
+      <span>Rows: ${r.lastAttempt.rowCount === null ? "—" : fmtInt.format(r.lastAttempt.rowCount)}</span>
+    </div>` : ""}
     ${errorLine}
   `;
   return box;
