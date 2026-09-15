@@ -63,6 +63,13 @@ const INCENTIVE_MERCHANTS_GID = "1548963809";
 // زي fetchSheetsPayloadStable_/sheetFingerprint_ في backend/Code.gs بالظبط.
 const CACHE_KEY_MAIN = "main_sheet_v1";              // آخر نسخة "مستقرة" مؤكدة — دي اللي بتتخدم لليوزرز
 const CACHE_KEY_MAIN_CANDIDATE = "main_sheet_candidate_v1"; // آخر قراءة خام (لمقارنة التشغيلة الجاية بيها)
+// v1.1.34 (تصحيح): {stable, fetchedAt, rowCount} خفيفة جدًا، منفصلة تمامًا
+// عن CACHE_KEY_MAIN الضخم — بتتحدث كل ما CACHE_KEY_MAIN يتحدث. الهدف إن
+// handleGetMainMeta/getMainMeta ميحتاجش يعمل JSON.parse لجدول ممكن يكون
+// عشرات الـ MB (33 ألف صف) بس عشان يجيب عدد الصفوف — ده كان بالظبط سبب
+// "Failed to fetch": الـ CPU limit بتاع الـ Worker كان بيتعدى والتنفيذ
+// بيتقفل فجأة من غير ما يرجع رد خالص (مش حتى إيرور JSON عادي).
+const CACHE_KEY_MAIN_META = "main_sheet_meta_v1";
 // v1.1.33: لو refreshMainCache فشلت جوه scheduled() (مثلاً الشيت كبير جدًا
 // وتعدى حد الـ KV، أو gviz رجع رد غريب)، الفشل كان بيتسجل بس في console.error
 // (مش شايفينه إلا لو شغّلت wrangler tail لحظتها). دلوقتي بنسجله هنا كمان عشان
@@ -247,20 +254,33 @@ async function refreshMainCache(env) {
     // البصمة اتطابقت مع آخر تشغيلة (فاصل 5 دقايق حقيقي بينهم) — الشيت
     // مستقر، مفيش تعديل شغال عليه دلوقتي. آمن نخدّمه لليوزرز.
     const payload = { success: true, fetchedAt: nowIso, stable: true, table };
-    await env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(payload));
+    const rowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
+    await Promise.all([
+      env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(payload)),
+      env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: true, fetchedAt: nowIso, rowCount })),
+    ]);
     return payload;
   }
 
-  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي. نرجع آخر
-  // نسخة "مستقرة" معروفة بدل ما نعرض لقطة نص-متغيرة.
-  const existingStableRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN);
-  if (existingStableRaw) return JSON.parse(existingStableRaw);
+  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي. بنفضل
+  // مستخدمين آخر نسخة "مستقرة" معروفة بدل ما ننشر لقطة نص-متغيرة — بس من
+  // غير ما نعمل JSON.parse للنسخة القديمة (اللي ممكن تبقى عشرات الـ MB)
+  // عشان بس نرجعها كـ return value محدش بيستخدمه أصلًا (الكولر الوحيد
+  // اللي بيوصل هنا فعليًا هو scheduled() تحت، وهو مش بيستخدم القيمة
+  // الراجعة خالص) — ده كان سبب حقيقي لتعدي الـ CPU limit وفشل الـ cron
+  // بصمت كل 5 دقايق.
+  const hasExisting = await env.SYNC_CACHE.get(CACHE_KEY_MAIN).then((v) => !!v);
+  if (hasExisting) return { success: true, stable: false, skippedReparse: true };
 
   // مفيش أي نسخة مستقرة اتسجلت قبل كده خالص (أول تشغيلة من عمر الـ Worker) —
   // مضطرين نستخدم القراءة دي زي ما هي عشان الداشبورد مايفضلش فاضي، بس
   // بعلامة stable:false توضح إنها لسه ماتأكدتش.
   const bootstrapPayload = { success: true, fetchedAt: nowIso, stable: false, table };
-  await env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(bootstrapPayload));
+  const bootstrapRowCount = table && table.rows && Array.isArray(table.rows) ? table.rows.length : null;
+  await Promise.all([
+    env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(bootstrapPayload)),
+    env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: false, fetchedAt: nowIso, rowCount: bootstrapRowCount })),
+  ]);
   return bootstrapPayload;
 }
 
@@ -284,17 +304,19 @@ async function handleGetMain(env) {
 // الضخم كامل كل مرة.
 async function handleGetMainMeta(env) {
   try {
-    const [cached, errorRaw] = await Promise.all([
-      env.SYNC_CACHE.get(CACHE_KEY_MAIN),
+    // بنقرا CACHE_KEY_MAIN_META الخفيفة بس (راجع تعليقها فوق) — مفيش أي
+    // JSON.parse لجدول ضخم هنا خالص، القراءة دي رخيصة جدًا مهما كان حجم
+    // شيت الـ Main.
+    const [metaRaw, errorRaw] = await Promise.all([
+      env.SYNC_CACHE.get(CACHE_KEY_MAIN_META),
       env.SYNC_CACHE.get(CACHE_KEY_MAIN_ERROR),
     ]);
     const lastError = errorRaw ? JSON.parse(errorRaw) : null;
-    if (!cached) {
+    if (!metaRaw) {
       return jsonResponse({ success: true, stable: false, fetchedAt: null, rowCount: null, lastError });
     }
-    const parsed = JSON.parse(cached);
-    const rowCount = parsed.table && parsed.table.table && Array.isArray(parsed.table.table.rows) ? parsed.table.table.rows.length : null;
-    return jsonResponse({ success: true, stable: !!parsed.stable, fetchedAt: parsed.fetchedAt || null, rowCount, lastError });
+    const meta = JSON.parse(metaRaw);
+    return jsonResponse({ success: true, stable: !!meta.stable, fetchedAt: meta.fetchedAt || null, rowCount: meta.rowCount === undefined ? null : meta.rowCount, lastError });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
