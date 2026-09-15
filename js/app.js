@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.33";
+const APP_VERSION = "1.1.34";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -710,7 +710,9 @@ function revealSyncStatusNavIfManager() {
 revealSyncStatusNavIfManager();
 
 const SYNC_STATUS_TARGETS = [
-  { key: "main", label: "Main (2099497960)", action: "getMain" },
+  // getMainMeta بدل getMain — نسخة خفيفة (metadata بس، من غير الجدول
+  // الضخم كامل) عشان مودال التشخيص ميحملش عشرات الـ MB كل مرة يتفتح.
+  { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true },
   { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay" },
   { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants" },
 ];
@@ -740,15 +742,20 @@ async function fetchOneSyncStatus(target) {
       clearTimeout(timer);
     }
     if (!json || !json.success) return { ...target, ok: false, error: (json && json.message) || "unknown error" };
-    // الشكل زي ما بيرجعه الـ Worker: { success, fetchedAt, stable, table: <gviz payload كامل> }
-    // وجوه الـ gviz payload نفسه فيه .table.rows/.table.cols (تعشيش مزدوج مقصود).
-    const rowCount = json.table && json.table.table && Array.isArray(json.table.table.rows) ? json.table.table.rows.length : null;
+    // getMainMeta بيرجع rowCount جاهز مباشرة. أما الأكشنز التقيلة (getConfirmedByDay/
+    // getIncentiveMerchants) بترجع الشكل: { success, fetchedAt, stable, table: <gviz
+    // payload كامل> } وجوه الـ gviz payload نفسه فيه .table.rows/.table.cols (تعشيش
+    // مزدوج مقصود).
+    const rowCount = target.lightweight
+      ? (json.rowCount === undefined ? null : json.rowCount)
+      : (json.table && json.table.table && Array.isArray(json.table.table.rows) ? json.table.table.rows.length : null);
     return {
       ...target,
       ok: true,
       stable: json.stable === undefined ? null : !!json.stable,
       fetchedAt: json.fetchedAt || null,
       rowCount,
+      lastError: json.lastError || null,
     };
   } catch (err) {
     return { ...target, ok: false, error: (err && err.message) || String(err) };
@@ -770,6 +777,9 @@ function renderSyncStatusRow(r) {
   }
   const stableBadge = r.stable === null ? `<span style="color:#a1a1aa;">—</span>` :
     r.stable ? `<span style="color:#22c55e;">✅ Stable</span>` : `<span style="color:#f59e0b;">⏳ Not stable yet</span>`;
+  const errorLine = r.lastError && r.lastError.message
+    ? `<div style="color:#ef4444;font-size:10px;font-family:'JetBrains Mono',monospace;margin-top:6px;">⚠ Last cron error (${escapeHtml(syncStatusTimeAgo(r.lastError.at))}): ${escapeHtml(r.lastError.message)}</div>`
+    : "";
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <strong style="font-size:13px;">${escapeHtml(r.label)}</strong>
@@ -779,6 +789,7 @@ function renderSyncStatusRow(r) {
       <span>Last fetched: ${escapeHtml(syncStatusTimeAgo(r.fetchedAt))}</span>
       <span>Rows: ${r.rowCount === null ? "—" : fmtInt.format(r.rowCount)}</span>
     </div>
+    ${errorLine}
   `;
   return box;
 }
@@ -13899,6 +13910,49 @@ async function fetchLastSyncMeta() {
   }
 }
 
+// -------------------------------------------------------------------------
+// v1.1.33: بعد ما شلنا شيت الـ Main من LAST_SYNC_GIDS بتاع Apps Script
+// (بقى بيتقرا من الـ Worker حصريًا)، getLastSyncMeta بقى مبقاش بيعرف لما
+// الـ Main يتحدّث — يعني اليوزر العادي كان مش هياخد نسخة جديدة من الـ Main
+// إلا لما يفتح الصفحة تاني أو بعد الرفرش الصامت كل نص ساعة، حتى لو الـ
+// Worker عنده نسخة "مستقرة" جديدة من زمان. البولينج الخفيف ده بيسد الفجوة
+// دي: بيسأل الـ Worker نفسه (مش Apps Script، فمفيش أي زيادة حمل على الـ
+// deployment) كل دقيقة ونص "فيه نسخة Main مستقرة جديدة؟"، ولو أيوه بيعمل
+// loadData(false) بصمت — بالظبط زي آلية getLastSyncMeta لباقي الشيتات.
+// بنتجاهل تمامًا أي حالة "not stable yet" هنا عشان منجيبش نسخة نص-متغيرة.
+// -------------------------------------------------------------------------
+const MAIN_META_POLL_MS = 90 * 1000;
+let mainMetaBaseline = null;
+let mainMetaCheckInFlight = false;
+
+async function fetchMainMeta() {
+  if (!SYNC_CDN_URL) return null;
+  try {
+    const res = await fetch(`${SYNC_CDN_URL}?action=getMainMeta`, { method: "GET", cache: "no-store" });
+    const json = await res.json();
+    if (!json || !json.success) return null;
+    return { stable: !!json.stable, fetchedAt: json.fetchedAt || null };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function mainMetaPollTick() {
+  if (!SYNC_CDN_URL || mainMetaCheckInFlight || !isTabVisible()) return;
+  mainMetaCheckInFlight = true;
+  try {
+    const current = await fetchMainMeta();
+    if (!current || !current.stable || !current.fetchedAt) return; // لسه مش مستقرة، منجيبهاش
+    if (mainMetaBaseline === null) { mainMetaBaseline = current.fetchedAt; return; } // أول تشييك — تسجيل baseline بس
+    if (current.fetchedAt !== mainMetaBaseline) {
+      mainMetaBaseline = current.fetchedAt;
+      loadData(false); // نسخة Main مستقرة جديدة — نجيبها بصمت في الخلفية
+    }
+  } finally {
+    mainMetaCheckInFlight = false;
+  }
+}
+
 // v1.1.3: لما التاب يبقى في الخلفية فترة، المتصفح نفسه (Chrome خصوصًا)
 // بيعلّق الشبكة عليه توفيرًا للموارد — وده اللي بيطلع ERR_NETWORK_IO_SUSPENDED
 // في الكونسول (حماية جوه المتصفح نفسه، مش خطأ في السيرفر ولا في الكود، ومش
@@ -13950,7 +14004,7 @@ function scheduleAutoRefresh() {
 // لو حصل تغيير حقيقي وهو بعيد عن التاب، بيشوفه على طول أول ما يرجعله.
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") lastSyncMetaPollTick();
+    if (document.visibilityState === "visible") { lastSyncMetaPollTick(); mainMetaPollTick(); }
   });
 }
 
@@ -13970,3 +14024,8 @@ scheduleAutoRefresh();
 setTimeout(() => {
   setInterval(lastSyncMetaPollTick, LAST_SYNC_META_POLL_MS);
 }, 12000);
+// فاصل بداية مختلف (28 ثانية) عن lastSyncMetaPollTick فوق — بيضرب الـ
+// Worker مش Apps Script، فمفيش داعي حقيقي للتفريق، بس أنضف كده.
+setTimeout(() => {
+  setInterval(mainMetaPollTick, MAIN_META_POLL_MS);
+}, 28000);

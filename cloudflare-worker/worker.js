@@ -63,6 +63,11 @@ const INCENTIVE_MERCHANTS_GID = "1548963809";
 // زي fetchSheetsPayloadStable_/sheetFingerprint_ في backend/Code.gs بالظبط.
 const CACHE_KEY_MAIN = "main_sheet_v1";              // آخر نسخة "مستقرة" مؤكدة — دي اللي بتتخدم لليوزرز
 const CACHE_KEY_MAIN_CANDIDATE = "main_sheet_candidate_v1"; // آخر قراءة خام (لمقارنة التشغيلة الجاية بيها)
+// v1.1.33: لو refreshMainCache فشلت جوه scheduled() (مثلاً الشيت كبير جدًا
+// وتعدى حد الـ KV، أو gviz رجع رد غريب)، الفشل كان بيتسجل بس في console.error
+// (مش شايفينه إلا لو شغّلت wrangler tail لحظتها). دلوقتي بنسجله هنا كمان عشان
+// يظهر في "Worker Sync Status" جوه الداشبورد من غير ما تحتاج CLI خالص.
+const CACHE_KEY_MAIN_ERROR = "main_sheet_error_v1";
 const MAIN_GID = "2099497960";
 
 function corsHeaders() {
@@ -272,6 +277,29 @@ async function handleGetMain(env) {
   }
 }
 
+// v1.1.33: نسخة خفيفة جدًا من getMain — من غير الجدول الكامل (اللي ممكن
+// يبقى عشرات الـ MB)، بس metadata (stable/fetchedAt/عدد الصفوف/آخر خطأ لو
+// فيه). الهدف: تسمح لكل اليوزرز (مش بس الـ Manager) إنهم يعملوا "poll" خفيف
+// كل شوية عشان يكتشفوا لما الـ Main تتحدث فعليًا، من غير ما يحمّلوا الجدول
+// الضخم كامل كل مرة.
+async function handleGetMainMeta(env) {
+  try {
+    const [cached, errorRaw] = await Promise.all([
+      env.SYNC_CACHE.get(CACHE_KEY_MAIN),
+      env.SYNC_CACHE.get(CACHE_KEY_MAIN_ERROR),
+    ]);
+    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
+    if (!cached) {
+      return jsonResponse({ success: true, stable: false, fetchedAt: null, rowCount: null, lastError });
+    }
+    const parsed = JSON.parse(cached);
+    const rowCount = parsed.table && parsed.table.table && Array.isArray(parsed.table.table.rows) ? parsed.table.table.rows.length : null;
+    return jsonResponse({ success: true, stable: !!parsed.stable, fetchedAt: parsed.fetchedAt || null, rowCount, lastError });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -286,12 +314,13 @@ export default {
     if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
     if (action === "getMain") return handleGetMain(env);
+    if (action === "getMainMeta") return handleGetMainMeta(env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
@@ -313,9 +342,16 @@ export default {
         refreshIncentiveMerchantsCache(env).catch((err) => {
           console.error("[scheduled refresh incentiveMerchants] failed (will retry next cron tick):", err && err.message);
         }),
-        refreshMainCache(env).catch((err) => {
-          console.error("[scheduled refresh main] failed (will retry next cron tick):", err && err.message);
-        }),
+        refreshMainCache(env).then(
+          () => env.SYNC_CACHE.delete(CACHE_KEY_MAIN_ERROR).catch(() => {}),
+          (err) => {
+            console.error("[scheduled refresh main] failed (will retry next cron tick):", err && err.message);
+            return env.SYNC_CACHE.put(
+              CACHE_KEY_MAIN_ERROR,
+              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
+            ).catch(() => {});
+          }
+        ),
       ])
     );
   },
