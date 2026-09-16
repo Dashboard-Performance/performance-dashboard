@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.41";
+const APP_VERSION = "1.1.42";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -830,6 +830,11 @@ if (syncStatusRefresh) syncStatusRefresh.addEventListener("click", () => loadAnd
 // شيتات مع بعض (لسه بيمر بنفس شرط الاستقرار — راجع تعليق forceRefresh جوه
 // worker.js)، وبعدين بيعمل reload لحالة المودال على طول عشان تشوف النتيجة
 // من غير أي استنى.
+// v1.1.42: الـ General Sync (22 شيت) بقى بيشتغل في الخلفية على الـ Worker
+// بعد الرد، مش قبله (كان بيسبب "Failed to fetch" لو اتحسب مع التلاتة
+// التانيين في نفس الوقت — راجع تعليق handleForceRefresh جوه worker.js).
+// يعني صف "General Sync" في المودال ممكن يفضل زي ما هو أول reload، ودوس
+// Refresh تاني بعد كام ثانية عشان تشوف نتيجته.
 if (syncStatusForceRefresh) {
   syncStatusForceRefresh.addEventListener("click", async () => {
     if (!SYNC_CDN_URL) return;

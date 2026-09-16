@@ -438,44 +438,65 @@ async function handleGetMain(env) {
   }
 }
 
-// v1.1.35: بدل ما تستنى الـ cron التلقائي (كل 5 دقايق)، الأكشن ده بيسحب
-// نسخة جديدة فورًا دلوقتي من التلات شيتات مع بعض ويحدّث الكاش المشترك على
-// طول — أي يوزر بيفتح الداشبورد بعدها هيشوف النتيجة على طول (لو استقرت).
+// v1.1.42: كان بيستنى الأربع تحديثات مع بعض (Main + Confirmed by Day +
+// Incentive Merchants + الـ General Sync بتاع الـ 22 شيت) قبل ما يرد —
+// قراءة وتحليل 22 شيت (بعضهم عشرات الآلاف من الصفوف، زي Beginning Inventory)
+// فوق Main (34 ألف صف) في نفس الـ request كانت بتعدّي حدود تنفيذ الـ Worker
+// (CPU/duration)، فالتنفيذ كان بيتقفل فجأة من غير ما يرجع أي رد خالص — ده
+// اللي المتصفح بيشوفه كـ "Failed to fetch" (نفس بالظبط سبب مشكلة getMainMeta
+// القديمة، راجع تعليق refreshMainCache فوق). الحل: منستناش الـ General Sync
+// (الأتقل بكتير، 22 شيت) قبل ما نرد — بنبعته لـ ctx.waitUntil() يشتغل في
+// الخلفية بعد ما نرجع رد سريع، والتلاتة التانيين (كل واحد شيت واحد بس، أخف
+// بكتير) بيفضلوا متستناة عادي عشان يبانوا في الرد على طول.
+//
 // بوابة بسيطة بإيميل الـ Manager (نفس فكرة "Worker Sync Status" في الفرونت
 // اند). المهم: ده مش bypass لشرط الاستقرار — لسه بيمر بنفس منطق المقارنة
-// بين بصمتين متتاليتين جوه refreshMainCache بالظبط، بس بيخلي "المتتاليتين"
-// تحصل دلوقتي بدل ما تستنى 5 دقايق.
-async function handleForceRefresh(request, env) {
+// بين بصمتين متتاليتين جوه refreshMainCache/refreshCache بالظبط، بس بيخلي
+// "المتتاليتين" تحصل دلوقتي بدل ما تستنى 5 دقايق.
+async function handleForceRefresh(request, env, ctx) {
   const url = new URL(request.url);
   const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
   if (email !== MANAGER_EMAIL.toLowerCase()) {
     return jsonResponse({ success: false, message: "Not authorized." }, 403);
   }
   try {
-    // v1.1.39: ضفنا refreshCache هنا كمان — ده الـ mirror العام بتاع getLastSync
-    // (الـ ~19 شيت الباقيين اللي بيتقروا من Apps Script مش من الـ Worker
-    // مباشرة، زي Inventory). قبل كده الزرار ده كان بيحدّث Main/Confirmed by
-    // Day/Incentive Merchants بس، فلو حد عمل ابديت/تشغيل يدوي لـ
-    // runScheduledSync في الاب اسكربت، كان لازم يستنى لحد 5 دقايق (الـ cron
-    // التلقائي بتاع الـ Worker) قبل ما يبان في الداشبورد حتى لو دوس Refresh
-    // يدوي — لأن الـ Refresh اليدوي بيقرا من كاش الـ Worker، مش من الاب
-    // اسكربت مباشرة.
-    const [main, confirmedByDay, incentiveMerchants, lastSync] = await Promise.all([
+    const [main, confirmedByDay, incentiveMerchants] = await Promise.all([
       refreshMainCache(env),
       refreshConfirmedByDayCache(env),
       refreshIncentiveMerchantsCache(env),
-      refreshCache(env).catch((err) => ({ success: false, message: (err && err.message) || String(err) })),
     ]);
+
+    // General Sync (22 شيت) بتشتغل في الخلفية بعد الرد — مش قبله. نسجّل
+    // نجاحها/فشلها في CACHE_KEY_ALLSHEETS_ERROR زي scheduled() بالظبط عشان
+    // تظهر في المودال حتى لو فشلت في الخلفية.
+    const generalSyncPromise = refreshCache(env).then(
+      () => env.SYNC_CACHE.delete(CACHE_KEY_ALLSHEETS_ERROR).catch(() => {}),
+      (err) => {
+        console.error("[forceRefresh general sync] failed:", err && err.message);
+        return env.SYNC_CACHE.put(
+          CACHE_KEY_ALLSHEETS_ERROR,
+          JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
+        ).catch(() => {});
+      }
+    );
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(generalSyncPromise);
+    } else {
+      // fallback نادر (لو ctx مش متاح لأي سبب) — لسه أحسن من قفل الرد كله
+      generalSyncPromise.catch(() => {});
+    }
+
     // منرجعش الجداول الكاملة هنا (ممكن تبقى عشرات الـ MB) — بس ملخص خفيف
     // يورّي حصل إيه، الفرونت اند هيعمل getMainMeta/getConfirmedByDay/
     // getIncentiveMerchants/getLastSyncMeta عادي بعد كده عشان يجيب التفاصيل
-    // الكاملة.
+    // الكاملة. الـ General Sync (lastSync) بيفضل شغال في الخلفية وقت ما
+    // بيوصل الرد ده — النتيجة بتظهر في المودال بعد كام ثانية، مش فورًا.
     return jsonResponse({
       success: true,
       main: { stable: !!main.stable, fetchedAt: main.fetchedAt || null, skippedReparse: !!main.skippedReparse },
       confirmedByDay: { fetchedAt: confirmedByDay.fetchedAt || null },
       incentiveMerchants: { fetchedAt: incentiveMerchants.fetchedAt || null },
-      lastSync: { success: !!lastSync.success, fetchedAt: lastSync.fetchedAt || null, message: lastSync.message || null },
+      lastSync: { started: true },
     });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
@@ -574,7 +595,7 @@ async function handleGetOnlineUsers(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
@@ -588,7 +609,7 @@ export default {
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
     if (action === "getMain") return handleGetMain(env);
     if (action === "getMainMeta") return handleGetMainMeta(env);
-    if (action === "forceRefresh") return handleForceRefresh(request, env);
+    if (action === "forceRefresh") return handleForceRefresh(request, env, ctx);
     if (action === "heartbeat") return handleHeartbeat(request, env);
     if (action === "getOnlineUsers") return handleGetOnlineUsers(request, env);
 
