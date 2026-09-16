@@ -2,11 +2,17 @@ name = "performance-dashboard-sync-cache"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
-# بيشغّل الـ scheduled() handler جوه worker.js كل 5 دقايق — ده اللي بيسحب
-# نسخة جديدة من Apps Script ويحطها في الكاش (KV)، بدل ما كل يوزر يضرب
-# Apps Script بنفسه.
+# v1.1.47: بعد ما شلنا الـ General Sync (21 شيت) من الـ Worker خالص، بقى
+# شغل الـ scheduled() handler خفيف جدًا (Main + Confirmed by Day + Incentive
+# Merchants بس، مفيش CPU error خالص عليهم) — فقدرنا نقلل الفاصل من 5 دقايق
+# لدقيقة واحدة من غير أي خطورة (الـ Worker مالوش سقف تنفيذات يومي زي Apps
+# Script، وعدد الطلبات ده لسه بعيد جدًا عن أي حد مجاني عند Cloudflare).
+# ⚠️ لو انت بتنشر بلصق الكود يدوي من Dashboard (مش wrangler deploy)، السطر
+# ده هنا مجرد مرجع — لازم كمان تعدّل الـ Cron Trigger من نفس صفحة الـ Worker
+# على Cloudflare: Triggers tab → Cron Triggers → عدّل من */5 * * * * لـ
+# * * * * *.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # ⚠️ لازم تستبدل الـ id ده بالـ id الحقيقي اللي هتاخده من أمر:
 #   wrangler kv namespace create "SYNC_CACHE"

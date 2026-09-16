@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.46";
+const APP_VERSION = "1.1.47";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -13972,7 +13972,10 @@ function downloadTableAsCsv(tableEl, fileName) {
 // (v1.1.1: من دقيقة لدقيقة ونص — بيقلل عدد الطلبات الخلفية اللي بتضرب نفس
 // الـ deployment زي heartbeat/presence بالظبط، من غير فرق محسوس في السرعة.)
 // -------------------------------------------------------------------------
-const LAST_SYNC_META_POLL_MS = 90 * 1000; // بيشيك كل دقيقة ونص (طلب خفيف جدًا)
+// v1.1.47: من 90 ثانية لـ 30 ثانية — طلب خفيف جدًا (getLastSyncMeta بس،
+// من غير أي تحميل داتا)، مفيش أي داعي نستنى دقيقة ونص عشان نكتشف إن فيه
+// نسخة جديدة اتسحبت.
+const LAST_SYNC_META_POLL_MS = 30 * 1000;
 let lastSyncMetaBaseline = null;
 let lastSyncMetaCheckInFlight = false;
 
@@ -14004,7 +14007,8 @@ async function fetchLastSyncMeta() {
 // loadData(false) بصمت — بالظبط زي آلية getLastSyncMeta لباقي الشيتات.
 // بنتجاهل تمامًا أي حالة "not stable yet" هنا عشان منجيبش نسخة نص-متغيرة.
 // -------------------------------------------------------------------------
-const MAIN_META_POLL_MS = 90 * 1000;
+// v1.1.47: من 90 ثانية لـ 30 ثانية — نفس السبب اللي فوق LAST_SYNC_META_POLL_MS.
+const MAIN_META_POLL_MS = 30 * 1000;
 let mainMetaBaseline = null;
 let mainMetaCheckInFlight = false;
 
