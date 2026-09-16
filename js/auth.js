@@ -44,6 +44,11 @@
     // panel itself is never built for them, and the backend refuses to hand
     // the list back to any other email regardless.
     PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
+    // v1.1.40: heartbeat/getOnlineUsers نقلوا بالكامل للـ Cloudflare Worker
+    // (مش Apps Script) — بيانات "مين أونلاين" مؤقتة بطبيعتها ومحتاجاش تتخزن
+    // في شيت جوجل، فده أخف على السيرفرين. نفس رابط SYNC_CDN_URL في js/app.js
+    // بالظبط (الملف ده مستقل عن app.js فمكرّرينه هنا).
+    WORKER_URL: "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev",
     // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
     // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
     // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
@@ -494,7 +499,9 @@
   }
 
   function sendHeartbeat(user) {
-    callApi({ action: "heartbeat", email: user.email, name: user.name }).catch(() => {
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=heartbeat&email=${encodeURIComponent(user.email)}&name=${encodeURIComponent(user.name || "")}`;
+    fetch(url, { method: "GET", cache: "no-store" }).catch(() => {
       /* silent — a missed heartbeat just means one skipped "online" tick */
     });
   }
@@ -590,7 +597,10 @@
   }
 
   function refreshPresence(user) {
-    callApi({ action: "get_online_users", requesterEmail: user.email })
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=getOnlineUsers&requesterEmail=${encodeURIComponent(user.email)}`;
+    fetch(url, { method: "GET", cache: "no-store" })
+      .then((res) => res.json())
       .then((res) => {
         if (!res || !res.success) return;
         renderPresence(res.users || [], res.now || Date.now());

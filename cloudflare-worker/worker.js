@@ -81,6 +81,49 @@ const MANAGER_EMAIL = "youssef.hanafy@taager.com";
 const CACHE_KEY_MAIN_ERROR = "main_sheet_error_v1";
 const MAIN_GID = "2099497960";
 
+// v1.1.40: باقي الـ 22 شيت (Inventory وكل حاجة تانية غير Main/Confirmed by
+// Day/Incentive Merchants) بقوا بيتقروا هنا مباشرة من Google Sheets (gviz)
+// بالظبط زي التلاتة فوق — بدل ما الـ Worker يستنى Apps Script (action=
+// getLastSync) يعمل القراءة ويرجعها. نفس القايمة بالظبط اللي في
+// LAST_SYNC_GIDS جوه backend/Code.gs (لازم تفضل متطابقة لو ضفت شيت جديد
+// هناك). Apps Script نفسه فضل موجود ومطلوب بس للكتابة/تسجيل الدخول — القراءة
+// بقت مستقلة تمامًا عنه.
+const ALL_MIRROR_GIDS = [
+  "115442405",   // TARGETS_GID
+  "891214324",   // SEGMENTATION_GID
+  "2042936628",  // TARGETS_ACM_GID
+  "1780730573",  // INVENTORY_GID
+  "1779314157",  // PRODUCTS_GID
+  "1656655269",  // CAT_TARGETS_GID
+  "892918900",   // ACM_SALES_PLAN_GID
+  "1304674893",  // NEW_SEGMENTATION_GID
+  "565878313",   // INBOUND_GID
+  "531154071",   // PRODUCTS_INFO_GID
+  "22283311",    // BEGIN_INV_GID
+  "548859670",   // SELLTHROUGH_NEEDED_GID
+  "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
+  "1620722565",  // SINGLE_SKU_TARGETS_GID
+  "1724469150",  // COGS_GID
+  "2085802038",  // AVAILABILITY_LOCKING_GID
+  "1298408207",  // PRODUCTS_MATCHES_GID
+  "461854229",   // MERCHANT_SKU_DAILY_GID
+  "620123165",   // MERCHANT_SEGMENTATION_GID
+  "1289659887",  // WEEKLY_INVENTORY_GID
+  "897709273",   // WAREHOUSE_REPACK_GID
+  "964398740",   // CONFIRMED_BY_DAY_GID (موجود هنا كمان لأن getLastSync القديم كان شامله)
+  "1548963809",  // INCENTIVE_MERCHANTS_GID (نفس الملاحظة فوق)
+];
+const CACHE_KEY_ALLSHEETS_CANDIDATE = "all_sheets_candidate_v1";
+
+// v1.1.40: نفس فكرة PRESENCE_ADMIN_EMAIL/heartbeat بتاعة js/auth.js وbackend/
+// Code.gs، بس اتنقلت هنا بالكامل — بيانات "مين أونلاين" مؤقتة بطبيعتها
+// (مش سجل دائم محتاج يتخزن في شيت)، فمفيش داعي تعدي على Apps Script أصلاً
+// عشانها. بنخزنها في نفس الـ KV.
+const CACHE_KEY_PRESENCE = "presence_map_v1";
+const PRESENCE_ONLINE_WINDOW_MS = 90 * 1000;
+const PRESENCE_STALE_MS = 15 * 60 * 1000;
+const ALLOWED_EMAIL_DOMAIN = "taager.com";
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -95,22 +138,82 @@ function jsonResponse(obj, status) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: corsHeaders() });
 }
 
-// بيسحب نسخة جديدة من Apps Script (action=getLastSync) ويخزّنها في KV —
-// النسخة الكاملة (gzBase64) وكمان نسخة خفيفة للـ meta (fetchedAt بس) عشان
-// getLastSyncMeta يفضل رخيص جدًا زي ما هو أصلاً.
+// v1.1.40 (إعادة كتابة كاملة): بدل ما نستنى Apps Script يقرا الـ 22 شيت
+// ويرجعهملنا مجمّعين (action=getLastSync)، بقينا نقراهم إحنا مباشرة من
+// Google (gviz) بالظبط زي Main/Confirmed by Day/Incentive Merchants —
+// Apps Script بقى مش جزء من مسار القراءة خالص. نفس فكرة الاستقرار
+// المستخدمة مع Main (مقارنة بصمة كل GID مع آخر تشغيلة، فاصل 5 دقايق حقيقي
+// بينهم) بس هنا لكل الـ 22 GID مع بعض: أي GID بصمته اتطابقت مع المرة اللي
+// فاتت بيتحدّث، وأي GID لسه بيتغيّر بنفضل خادمين آخر نسخة مستقرة معروفة
+// بتاعته لحد ما يستقر. الـ timestamp العام (fetchedAt) بيتحدث بس لو أي GID
+// فعليًا اتحدّث — نفس فكرة computeSyncContentHash_ بتاعة Code.gs (عشان
+// الفرونت اند miss يعملش رفرش كامل من غير داعي كل 5 دقايق).
 async function refreshCache(env) {
-  const res = await fetch(`${env.APPS_SCRIPT_URL}?action=getLastSync`, {
-    method: "GET",
-    cf: { cacheTtl: 0 },
+  const sheetId = env.SHEET_ID;
+  if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
+  const nowIso = new Date().toISOString();
+
+  const results = await Promise.all(ALL_MIRROR_GIDS.map(async (gid) => {
+    try {
+      const raw = await fetchGvizSheet(sheetId, gid);
+      const inner = raw && raw.table ? raw.table : null;
+      const fp = sheetFingerprint(inner);
+      return { gid, raw, fp, ok: true };
+    } catch (err) {
+      return { gid, ok: false, error: (err && err.message) || String(err) };
+    }
+  }));
+
+  const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_CANDIDATE);
+  const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
+  const newCandidateFingerprints = {};
+  results.forEach((r) => { if (r.ok) newCandidateFingerprints[r.gid] = r.fp; });
+  await env.SYNC_CACHE.put(
+    CACHE_KEY_ALLSHEETS_CANDIDATE,
+    JSON.stringify({ fingerprints: newCandidateFingerprints, fetchedAt: nowIso })
+  );
+
+  const existingPayloadRaw = await env.SYNC_CACHE.get(CACHE_KEY_PAYLOAD);
+  const existingPayload = existingPayloadRaw ? JSON.parse(existingPayloadRaw) : null;
+  const existingSheets = (existingPayload && existingPayload.sheets) || {};
+
+  const sheets = {};
+  const unstableGids = [];
+  results.forEach((r) => {
+    if (!r.ok) {
+      if (existingSheets[r.gid]) sheets[r.gid] = existingSheets[r.gid];
+      unstableGids.push(r.gid);
+      return;
+    }
+    const prevFp = candidate && candidate.fingerprints ? candidate.fingerprints[r.gid] : undefined;
+    if (r.fp !== null && prevFp !== undefined && prevFp === r.fp) {
+      sheets[r.gid] = r.raw; // البصمة اتطابقت مع آخر تشغيلة — مستقر، نخدّمه
+    } else if (existingSheets[r.gid]) {
+      sheets[r.gid] = existingSheets[r.gid]; // لسه بيتغيّر — نفضل آخر نسخة مستقرة معروفة
+      unstableGids.push(r.gid);
+    } else {
+      sheets[r.gid] = r.raw; // أول تشغيلة خالص لهذا الـ GID — مفيش بديل نرجعله
+      unstableGids.push(r.gid);
+    }
   });
-  if (!res.ok) throw new Error(`Apps Script responded with status ${res.status}`);
-  const json = await res.json();
-  if (!json || !json.success) throw new Error((json && json.message) || "Apps Script getLastSync returned success:false");
+
+  // منحدّثش fetchedAt العام غير لو حصل تغيير حقيقي في أي GID عن آخر نسخة
+  // "مخدومة" فعليًا — عشان lastSyncMetaPollTick بتاع الفرونت اند ميعملش
+  // رفرش كامل كل 5 دقايق من غير داعي.
+  const combinedFingerprint = JSON.stringify(
+    ALL_MIRROR_GIDS.map((gid) => gid + ":" + (sheets[gid] && sheets[gid].table ? sheetFingerprint(sheets[gid].table) : "null"))
+  );
+  const prevCombinedRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
+  const prevCombined = prevCombinedRaw ? JSON.parse(prevCombinedRaw) : null;
+  const contentChanged = !prevCombined || prevCombined.contentFingerprint !== combinedFingerprint;
+  const effectiveFetchedAt = contentChanged || !prevCombined ? nowIso : prevCombined.fetchedAt;
+
+  const json = { success: true, fetchedAt: effectiveFetchedAt, sheets, unstableGids };
 
   await env.SYNC_CACHE.put(CACHE_KEY_PAYLOAD, JSON.stringify(json));
   await env.SYNC_CACHE.put(
     CACHE_KEY_META,
-    JSON.stringify({ success: true, fetchedAt: json.fetchedAt, unstableGids: json.unstableGids || [] })
+    JSON.stringify({ success: true, fetchedAt: effectiveFetchedAt, unstableGids, contentFingerprint: combinedFingerprint })
   );
   return json;
 }
@@ -388,6 +491,66 @@ async function handleGetMainMeta(env) {
   }
 }
 
+function isAllowedEmail(email) {
+  const re = new RegExp("^[^\\s@]+@" + ALLOWED_EMAIL_DOMAIN.replace(".", "\\.") + "$", "i");
+  return re.test(String(email || "").trim());
+}
+
+async function getPresenceMap(env) {
+  const raw = await env.SYNC_CACHE.get(CACHE_KEY_PRESENCE);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function pruneStalePresence(map) {
+  const cutoff = Date.now() - PRESENCE_STALE_MS;
+  const cleaned = {};
+  Object.keys(map).forEach((email) => {
+    if (map[email] && map[email].lastSeen >= cutoff) cleaned[email] = map[email];
+  });
+  return cleaned;
+}
+
+// v1.1.40: نقلنا heartbeat/get_online_users هنا بالكامل (بدل ما يعدوا على
+// Apps Script) — بيانات "مين أونلاين" مؤقتة بطبيعتها ومحتاجاش تتخزن في
+// شيت جوجل خالص، فـ KV هنا كافي وأخف بكتير. نفس المنطق بالظبط اللي كان في
+// handleHeartbeat/handleGetOnlineUsers جوه backend/Code.gs (PRESENCE_ONLINE_
+// WINDOW_MS/PRESENCE_STALE_MS/PRESENCE_ADMIN_EMAIL).
+async function handleHeartbeat(request, env) {
+  const url = new URL(request.url);
+  const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  const name = String(url.searchParams.get("name") || "").trim();
+  if (!email || !isAllowedEmail(email)) {
+    return jsonResponse({ success: false, message: "Not authorized." });
+  }
+  const map = await getPresenceMap(env);
+  map[email] = { name: name || email, lastSeen: Date.now() };
+  await env.SYNC_CACHE.put(CACHE_KEY_PRESENCE, JSON.stringify(pruneStalePresence(map)));
+  return jsonResponse({ success: true });
+}
+
+async function handleGetOnlineUsers(request, env) {
+  const url = new URL(request.url);
+  const requesterEmail = String(url.searchParams.get("requesterEmail") || "").trim().toLowerCase();
+  if (requesterEmail !== MANAGER_EMAIL.toLowerCase()) {
+    return jsonResponse({ success: false, message: "Not authorized." });
+  }
+  const map = pruneStalePresence(await getPresenceMap(env));
+  const cutoff = Date.now() - PRESENCE_ONLINE_WINDOW_MS;
+  const online = [];
+  Object.keys(map).forEach((email) => {
+    const entry = map[email];
+    if (entry.lastSeen >= cutoff) online.push({ email, name: entry.name, lastSeen: entry.lastSeen });
+  });
+  online.sort((a, b) => b.lastSeen - a.lastSeen);
+  return jsonResponse({ success: true, now: Date.now(), users: online });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -404,12 +567,14 @@ export default {
     if (action === "getMain") return handleGetMain(env);
     if (action === "getMainMeta") return handleGetMainMeta(env);
     if (action === "forceRefresh") return handleForceRefresh(request, env);
+    if (action === "heartbeat") return handleHeartbeat(request, env);
+    if (action === "getOnlineUsers") return handleGetOnlineUsers(request, env);
 
     return jsonResponse(
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta/forceRefresh — every other action (login, heartbeat, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta/forceRefresh/heartbeat/getOnlineUsers — every other action (login, backup, computed publish) still goes directly to Apps Script.",
       },
       400
     );
