@@ -36,7 +36,6 @@
       وارفع app.js المحدث على Vercel.
    ========================================================================== */
 
-const CACHE_KEY_PAYLOAD = "last_sync_payload_v1";
 const CACHE_KEY_META = "last_sync_meta_v1";
 // تاب "Confirmed by Day" (Weekly Inventory & Inbound) — بيتقرا هنا مباشرة
 // من Google Sheets (gviz) بدل ما يعدي على Apps Script خالص، عشان يبقى
@@ -95,7 +94,19 @@ const MAIN_GID = "2099497960";
 // LAST_SYNC_GIDS جوه backend/Code.gs (لازم تفضل متطابقة لو ضفت شيت جديد
 // هناك). Apps Script نفسه فضل موجود ومطلوب بس للكتابة/تسجيل الدخول — القراءة
 // بقت مستقلة تمامًا عنه.
-const ALL_MIRROR_GIDS = [
+// v1.1.44: بعد ما اتأكدنا (Cloudflare Observability: CPU Time 2010ms على
+// تشغيلة واحدة) إن قراءة كل الـ 21 شيت الباقيين مع Main/Confirmed/Incentive
+// في نفس التنفيذة كانت بتعدّي حد الـ CPU بتاع الـ Worker وبتخليه يتقفل، بدل
+// ما نخلي الـ Worker يدور عليهم بالتتابع (دورة طويلة، ~35 دقيقة)، قسّمناهم:
+// الـ 10 شيت الأخف (هنا) لسه بيتقروا من الـ Worker مباشرة، والـ 11 شيت
+// الأتقل (فيهم Beginning Inventory، أكبر شيت في القايمة) رجعوا يتقروا من
+// Apps Script (backend/Code.gs: LAST_SYNC_GIDS + runScheduledSync، بنفس
+// اسم الأكشن getLastSync/getLastSyncMeta بس على رابط الـ Web App مش رابط
+// الـ Worker). الفرونت اند (js/app.js) بيقرا من المصدرين بالتوازي ويدمجهم،
+// فالاتنين بيحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق) بدل ما يستنوا بعض.
+// شلنا كمان 964398740 (Confirmed by Day) و1548963809 (Incentive Merchants)
+// من هنا زي v1.1.43 — ليهم كاش مستقل خاص بيهم فعلاً.
+const GENERAL_MIRROR_GIDS = [
   "115442405",   // TARGETS_GID
   "891214324",   // SEGMENTATION_GID
   "2042936628",  // TARGETS_ACM_GID
@@ -106,21 +117,16 @@ const ALL_MIRROR_GIDS = [
   "1304674893",  // NEW_SEGMENTATION_GID
   "565878313",   // INBOUND_GID
   "531154071",   // PRODUCTS_INFO_GID
-  "22283311",    // BEGIN_INV_GID
-  "548859670",   // SELLTHROUGH_NEEDED_GID
-  "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
-  "1620722565",  // SINGLE_SKU_TARGETS_GID
-  "1724469150",  // COGS_GID
-  "2085802038",  // AVAILABILITY_LOCKING_GID
-  "1298408207",  // PRODUCTS_MATCHES_GID
-  "461854229",   // MERCHANT_SKU_DAILY_GID
-  "620123165",   // MERCHANT_SEGMENTATION_GID
-  "1289659887",  // WEEKLY_INVENTORY_GID
-  "897709273",   // WAREHOUSE_REPACK_GID
-  "964398740",   // CONFIRMED_BY_DAY_GID (موجود هنا كمان لأن getLastSync القديم كان شامله)
-  "1548963809",  // INCENTIVE_MERCHANTS_GID (نفس الملاحظة فوق)
 ];
-const CACHE_KEY_ALLSHEETS_CANDIDATE = "all_sheets_candidate_v1";
+// دلوقتي 10 شيت بس، فبنعالجهم كلهم في تشغيلة واحدة (مفيش داعي لدوران على
+// دفعات صغيرة — أصلاً أخف نص، وبعد ما شلنا Beginning Inventory الضخم برا).
+// لو حصل أي إيرور CPU تاني حتى بعد كده، قلّل الرقم ده وهيرجع يدور على دفعات.
+const GENERAL_SYNC_BATCH_SIZE = GENERAL_MIRROR_GIDS.length;
+const CACHE_KEY_SHEET_PREFIX = "sheet_v1_";              // + gid — آخر نسخة "مستقرة" لكل شيت لوحده
+const CACHE_KEY_SHEET_CANDIDATE_PREFIX = "sheet_candidate_v1_"; // + gid — آخر قراءة خام (لمقارنة الدورة الجاية بيها)
+const CACHE_KEY_ALLSHEETS_ROTATION = "all_sheets_rotation_v1";  // {index} — مكان الدفعة الجاية في القايمة
+const CACHE_KEY_ALLSHEETS_UNSTABLE = "all_sheets_unstable_v1";  // array — أي GIDs لسه مش مستقرة/متأكدة
+const CACHE_KEY_ALLSHEETS_FPMAP = "all_sheets_fpmap_v1";        // {gid: fingerprint} لكل الشيتات المستقرة حاليًا (لاكتشاف تغيير حقيقي)
 // نفس فكرة CACHE_KEY_MAIN_ERROR — لو refreshCache (الـ mirror العام بتاع
 // getLastSyncMeta، اللي صف "General Sync" في المودال بيقراه) فشلت جوه
 // scheduled()، بتتسجل هنا عشان تظهر بدل ما تختفي في console.error بس.
@@ -163,8 +169,21 @@ async function refreshCache(env) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
   const nowIso = new Date().toISOString();
+  const n = GENERAL_MIRROR_GIDS.length;
 
-  const results = await Promise.all(ALL_MIRROR_GIDS.map(async (gid) => {
+  // دفعة صغيرة بس من الدوران — راجع الكومنت فوق GENERAL_SYNC_BATCH_SIZE.
+  const rotationRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_ROTATION);
+  const rotationIndex = rotationRaw ? (JSON.parse(rotationRaw).index || 0) % n : 0;
+  const batchGids = [];
+  for (let i = 0; i < GENERAL_SYNC_BATCH_SIZE && i < n; i++) {
+    batchGids.push(GENERAL_MIRROR_GIDS[(rotationIndex + i) % n]);
+  }
+  await env.SYNC_CACHE.put(
+    CACHE_KEY_ALLSHEETS_ROTATION,
+    JSON.stringify({ index: (rotationIndex + GENERAL_SYNC_BATCH_SIZE) % n })
+  );
+
+  const results = await Promise.all(batchGids.map(async (gid) => {
     try {
       const raw = await fetchGvizSheet(sheetId, gid);
       const inner = raw && raw.table ? raw.table : null;
@@ -175,73 +194,84 @@ async function refreshCache(env) {
     }
   }));
 
-  const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_CANDIDATE);
-  const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
-  const newCandidateFingerprints = {};
-  results.forEach((r) => { if (r.ok) newCandidateFingerprints[r.gid] = r.fp; });
-  await env.SYNC_CACHE.put(
-    CACHE_KEY_ALLSHEETS_CANDIDATE,
-    JSON.stringify({ fingerprints: newCandidateFingerprints, fetchedAt: nowIso })
-  );
+  const [unstableRaw, fpMapRaw] = await Promise.all([
+    env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_UNSTABLE),
+    env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_FPMAP),
+  ]);
+  // أول مرة خالص (مفيش أي تشغيلة قبل كده) — كل الـ GIDs unstable لحد ما دورها
+  // يجي ويتأكد.
+  const unstableSet = new Set(unstableRaw ? JSON.parse(unstableRaw) : GENERAL_MIRROR_GIDS);
+  const fpMap = fpMapRaw ? JSON.parse(fpMapRaw) : {};
+  let anyChanged = false;
 
-  const existingPayloadRaw = await env.SYNC_CACHE.get(CACHE_KEY_PAYLOAD);
-  const existingPayload = existingPayloadRaw ? JSON.parse(existingPayloadRaw) : null;
-  const existingSheets = (existingPayload && existingPayload.sheets) || {};
-
-  const sheets = {};
-  const unstableGids = [];
-  results.forEach((r) => {
+  for (const r of results) {
+    const candRaw = await env.SYNC_CACHE.get(CACHE_KEY_SHEET_CANDIDATE_PREFIX + r.gid);
+    const cand = candRaw ? JSON.parse(candRaw) : null;
     if (!r.ok) {
-      if (existingSheets[r.gid]) sheets[r.gid] = existingSheets[r.gid];
-      unstableGids.push(r.gid);
-      return;
+      unstableSet.add(r.gid);
+      continue;
     }
-    const prevFp = candidate && candidate.fingerprints ? candidate.fingerprints[r.gid] : undefined;
-    if (r.fp !== null && prevFp !== undefined && prevFp === r.fp) {
-      sheets[r.gid] = r.raw; // البصمة اتطابقت مع آخر تشغيلة — مستقر، نخدّمه
-    } else if (existingSheets[r.gid]) {
-      sheets[r.gid] = existingSheets[r.gid]; // لسه بيتغيّر — نفضل آخر نسخة مستقرة معروفة
-      unstableGids.push(r.gid);
+    await env.SYNC_CACHE.put(CACHE_KEY_SHEET_CANDIDATE_PREFIX + r.gid, JSON.stringify({ fingerprint: r.fp, fetchedAt: nowIso }));
+    if (r.fp !== null && cand && cand.fingerprint === r.fp) {
+      // البصمة اتطابقت مع آخر مرة الشيت ده اتقرا فيها (دورة كاملة قبل
+      // كده) — مستقر، نخدّمه.
+      await env.SYNC_CACHE.put(CACHE_KEY_SHEET_PREFIX + r.gid, JSON.stringify(r.raw));
+      unstableSet.delete(r.gid);
+      if (fpMap[r.gid] !== r.fp) {
+        anyChanged = true;
+        fpMap[r.gid] = r.fp;
+      }
     } else {
-      sheets[r.gid] = r.raw; // أول تشغيلة خالص لهذا الـ GID — مفيش بديل نرجعله
-      unstableGids.push(r.gid);
+      // لسه بيتغيّر (أو أول قراءة خالص لهذا الـ GID) — نفضل مستخدمين آخر
+      // نسخة مستقرة معروفة (لو موجودة أصلاً في CACHE_KEY_SHEET_PREFIX) لحد
+      // ما يستقر في دورة جاية.
+      unstableSet.add(r.gid);
     }
-  });
+  }
 
-  // منحدّثش fetchedAt العام غير لو حصل تغيير حقيقي في أي GID عن آخر نسخة
-  // "مخدومة" فعليًا — عشان lastSyncMetaPollTick بتاع الفرونت اند ميعملش
-  // رفرش كامل كل 5 دقايق من غير داعي.
-  const combinedFingerprint = JSON.stringify(
-    ALL_MIRROR_GIDS.map((gid) => gid + ":" + (sheets[gid] && sheets[gid].table ? sheetFingerprint(sheets[gid].table) : "null"))
-  );
-  const prevCombinedRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
-  const prevCombined = prevCombinedRaw ? JSON.parse(prevCombinedRaw) : null;
-  const contentChanged = !prevCombined || prevCombined.contentFingerprint !== combinedFingerprint;
-  const effectiveFetchedAt = contentChanged || !prevCombined ? nowIso : prevCombined.fetchedAt;
+  await Promise.all([
+    env.SYNC_CACHE.put(CACHE_KEY_ALLSHEETS_UNSTABLE, JSON.stringify(Array.from(unstableSet))),
+    env.SYNC_CACHE.put(CACHE_KEY_ALLSHEETS_FPMAP, JSON.stringify(fpMap)),
+  ]);
 
-  const json = { success: true, fetchedAt: effectiveFetchedAt, sheets, unstableGids };
-
-  await env.SYNC_CACHE.put(CACHE_KEY_PAYLOAD, JSON.stringify(json));
-  await env.SYNC_CACHE.put(
-    CACHE_KEY_META,
-    JSON.stringify({ success: true, fetchedAt: effectiveFetchedAt, unstableGids, contentFingerprint: combinedFingerprint })
-  );
-  return json;
+  // منحدّثش fetchedAt العام غير لو حصل تغيير حقيقي (شيت استقرّ على بصمة
+  // جديدة) — عشان lastSyncMetaPollTick بتاع الفرونت اند ميعملش رفرش كامل من
+  // غير داعي.
+  const prevMetaRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
+  const prevMeta = prevMetaRaw ? JSON.parse(prevMetaRaw) : null;
+  const effectiveFetchedAt = anyChanged || !prevMeta ? nowIso : prevMeta.fetchedAt;
+  const unstableGids = Array.from(unstableSet);
+  const metaJson = { success: true, fetchedAt: effectiveFetchedAt, unstableGids };
+  await env.SYNC_CACHE.put(CACHE_KEY_META, JSON.stringify(metaJson));
+  return metaJson;
 }
 
+// v1.1.43: كل شيت بقى متخزن لوحده (CACHE_KEY_SHEET_PREFIX+gid) بدل blob
+// واحد ضخم — فبنجمّعهم هنا وقت الطلب بس (لما يوزر فعلاً يفتح/يعمل رفرش
+// للداشبورد، مش كل 5 دقايق زي الكتابة). بنلزق كل قيمة KV (JSON صالح
+// أصلاً) جوه نص الرد يدويًا من غير JSON.parse/stringify للداتا الضخمة —
+// أرخص بكتير من تحليل عشرات الآلاف من الصفوف تاني وهي أصلاً متخزنة صح.
 async function handleGetLastSync(env) {
   try {
-    let cached = await env.SYNC_CACHE.get(CACHE_KEY_PAYLOAD);
-    if (!cached) {
-      // لسه مفيش أي نسخة متخزّنة خالص (أول تشغيلة قبل أول Cron) — نسحب
-      // واحدة لايف دلوقتي بدل ما نرجع فشل لليوزر الأول.
-      const fresh = await refreshCache(env);
-      return jsonResponse(fresh);
+    const metaRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
+    if (!metaRaw) {
+      // لسه مفيش ولا دورة واحدة خلصت (أول تشغيلة خالص للـ Worker) — بنرجع
+      // رد فاضي بدل ما نحاول نسحب الـ 20 شيت مع بعض لايف (ده بالظبط اللي
+      // كان بيسبب "Failed to fetch"/CPU limit). الفرونت اند عنده fallback
+      // مباشر لـ gviz لأي GID مش موجود.
+      return jsonResponse({ success: true, fetchedAt: null, sheets: {}, unstableGids: GENERAL_MIRROR_GIDS });
     }
-    return new Response(cached, { headers: corsHeaders() });
+    const meta = JSON.parse(metaRaw);
+    const rawEntries = await Promise.all(GENERAL_MIRROR_GIDS.map(async (gid) => {
+      const raw = await env.SYNC_CACHE.get(CACHE_KEY_SHEET_PREFIX + gid);
+      return raw ? [gid, raw] : null;
+    }));
+    const sheetsJson = "{" + rawEntries.filter(Boolean).map(([gid, raw]) => JSON.stringify(gid) + ":" + raw).join(",") + "}";
+    const body = '{"success":true,"fetchedAt":' + JSON.stringify(meta.fetchedAt || null) +
+      ',"sheets":' + sheetsJson +
+      ',"unstableGids":' + JSON.stringify(meta.unstableGids || []) + "}";
+    return new Response(body, { headers: corsHeaders() });
   } catch (err) {
-    // فشل السحب اللايف (نادر — بس لو حصل أول تشغيلة والسيرفر واقف) — مفيش
-    // حاجة نرجعها، نبلغ اليوزر بوضوح.
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
 }

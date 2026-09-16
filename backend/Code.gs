@@ -546,18 +546,27 @@ function pruneOldBackups(folder) {
 
 /**
  * ============================================================================
- *  DATA API — reduced to only what's still in active use.
+ *  DATA API — v1.1.44: قسّمنا الـ ~21 شيت الباقيين (غير Main/Confirmed by
+ *  Day/Incentive Merchants، اللي ليهم مسارهم الخاص) نُص/نُص بين Apps Script
+ *  والـ Cloudflare Worker، عشان الاتنين يحدّثوا في نفس الوقت تقريبًا (كل 5
+ *  دقايق) بدل ما الـ Worker لوحده يحتاج يدور على كل الشيتات بالتتابع (دورة
+ *  طويلة) عشان حد الـ CPU بتاعه (اتأكدنا فعليًا إن قراءة الـ 21 شيت مع Main/
+ *  Confirmed/Incentive مع بعض في تنفيذة واحدة على الـ Worker كانت محتاجة
+ *  ~2 ثانية CPU وبتخليه يتقفل).
  *
- *  All sheet READS (Main, Confirmed by Day, Incentive Merchants, Inventory,
- *  and the rest of the ~22 tabs) are now served directly by the Cloudflare
- *  Worker (cloudflare-worker/worker.js), which fetches Google's public gviz
- *  endpoint itself with its own per-sheet cross-tick stability checking and
- *  KV caching. Apps Script no longer does any scheduled/central sheet
- *  fetching or Drive-file caching for this — the old getData/getLastSync/
- *  getLastSyncMeta/getLastSyncDebug endpoints and the 15-minute
- *  runScheduledSync() trigger were removed since nothing calls them anymore
- *  (if you still have that time-driven trigger set up in this project, you
- *  can safely delete it from the Triggers page).
+ *  الـ 11 شيت الأتقل (فيهم Beginning Inventory، أكبر شيت في القايمة دي)
+ *  رجعوا يتقروا هنا (Apps Script، عنده وقت تنفيذ أكبر بكتير — لحد 6 دقايق)،
+ *  بنفس آلية الاستقرار القديمة (قراءتين بفاصل 6 ثواني، فحص نزول عدد الصفوف
+ *  المفاجئ)، ومخزّنين في ملف على Drive. الـ 10 شيت الباقيين (أخف) لسه بيتقروا
+ *  من الـ Worker مباشرة (راجع GENERAL_MIRROR_GIDS في worker.js).
+ *
+ *  الفرونت اند (js/app.js، fetchAllSheetsSnapshot) بيقرا من المصدرين مع بعض
+ *  بالتوازي ويدمجهم — مش واحد بديل التاني.
+ *
+ *  ⚠️ SETUP MANUAL مطلوب: من محرر Apps Script → أيقونة الساعة (Triggers) →
+ *  + Add Trigger → Function: runScheduledSync → Time-driven → Minutes timer
+ *  → Every 5 minutes → Save. من غير الخطوة دي، runScheduledSync() مش هيتنفذ
+ *  لوحده أبدًا.
  *
  *  Call: GET <deployment URL>?action=getComputed&section=..&table=..&key=..
  *        GET <deployment URL>?action=listComputed&key=..
@@ -565,9 +574,259 @@ function pruneOldBackups(folder) {
  */
 function doGet(e) {
   var action = e && e.parameter ? e.parameter.action : null;
+  if (action === "getLastSync") return handleGetLastSync(e);
+  if (action === "getLastSyncMeta") return handleGetLastSyncMeta(e);
+  if (action === "getLastSyncDebug") return handleGetLastSyncDebug(e);
   if (action === "getComputed") return handleGetComputed(e);
   if (action === "listComputed") return handleListComputed(e);
   return jsonResponse({ success: false, message: "Unknown action." });
+}
+
+// نفس LAST_SYNC_GID_LABELS_ تحت لكن الـ 11 GID اللي هنا بس (الأتقل، فيهم
+// Beginning Inventory) — النص الباقي (10 شيت أخف) بيتقروا من الـ Worker
+// مباشرة (GENERAL_MIRROR_GIDS في worker.js)، مش من هنا.
+var LAST_SYNC_GIDS = [
+  "22283311",    // BEGIN_INV_GID — أكبر شيت في القايمة، عمدًا هنا مش على الـ Worker
+  "548859670",   // SELLTHROUGH_NEEDED_GID
+  "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
+  "1620722565",  // SINGLE_SKU_TARGETS_GID
+  "1724469150",  // COGS_GID
+  "2085802038",  // AVAILABILITY_LOCKING_GID
+  String(PRODUCTS_MATCHES_GID), // 1298408207
+  "461854229",   // MERCHANT_SKU_DAILY_GID
+  "620123165",   // MERCHANT_SEGMENTATION_GID
+  "1289659887",  // WEEKLY_INVENTORY_GID
+  "897709273"    // WAREHOUSE_REPACK_GID
+];
+
+var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
+var LAST_SYNC_FILE_NAME = "last_sync.json.gz";
+var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
+
+// بصمة رخيصة لشيت (عدد الصفوف + طول أول/آخر صف + طول الأعمدة) — كافية
+// عمليًا لاكتشاف "الشيت لسه بيتغيّر وقت القراءة".
+function sheetFingerprint_(sheet) {
+  if (!sheet || !sheet.table || !sheet.table.rows) return null;
+  var rows = sheet.table.rows;
+  var n = rows.length;
+  var first = n ? JSON.stringify(rows[0]) : "";
+  var last = n ? JSON.stringify(rows[n - 1]) : "";
+  return n + "|" + first.length + "|" + last.length + "|" + JSON.stringify(sheet.table.cols || []).length;
+}
+
+function computeSyncContentHash_(sheets, gids) {
+  var parts = gids.map(function (gid) {
+    return gid + ":" + (sheetFingerprint_(sheets[gid]) || "null");
+  });
+  var raw = parts.join("|");
+  var digestBytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
+  return digestBytes.map(function (b) {
+    var v = (b < 0) ? b + 256 : b;
+    var hex = v.toString(16);
+    return hex.length === 1 ? "0" + hex : hex;
+  }).join("");
+}
+
+var SYNC_STABILITY_WAIT_MS = 6000;
+var SUSPICIOUS_ROW_DROP_RATIO = 0.5;
+var MIN_ROWS_FOR_DROP_CHECK = 20;
+function sheetRowCount_(sheet) {
+  return (sheet && sheet.table && sheet.table.rows) ? sheet.table.rows.length : 0;
+}
+
+function gvizRequest_(gid) {
+  return {
+    url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
+    muteHttpExceptions: true,
+    followRedirects: true
+  };
+}
+
+function fetchSheetsPayload_(gids) {
+  var requests = gids.map(gvizRequest_);
+  var responses = UrlFetchApp.fetchAll(requests);
+
+  var sheets = {};
+  var failedGids = [];
+  gids.forEach(function (gid, i) {
+    var parsed = parseGvizResponse(responses[i]);
+    sheets[gid] = parsed;
+    if (parsed === null) failedGids.push(gid);
+  });
+
+  if (failedGids.length) {
+    Utilities.sleep(1000);
+    var retryResponses = UrlFetchApp.fetchAll(failedGids.map(gvizRequest_));
+    failedGids.forEach(function (gid, i) {
+      var parsed = parseGvizResponse(retryResponses[i]);
+      if (parsed !== null) sheets[gid] = parsed;
+    });
+  }
+
+  return { fetchedAt: new Date().toISOString(), sheets: sheets };
+}
+
+function fetchSheetsPayloadStable_(gids, previousSheets) {
+  var first = fetchSheetsPayload_(gids);
+  Utilities.sleep(SYNC_STABILITY_WAIT_MS);
+  var second = fetchSheetsPayload_(gids);
+
+  var sheets = {};
+  var unstableGids = [];
+  gids.forEach(function (gid) {
+    var a = first.sheets[gid], b = second.sheets[gid];
+    var fpA = sheetFingerprint_(a), fpB = sheetFingerprint_(b);
+    var isStable = (b && fpB !== null && fpA === fpB);
+
+    if (isStable) {
+      var prevSheet = previousSheets ? previousSheets[gid] : null;
+      var prevCount = prevSheet ? sheetRowCount_(prevSheet) : 0;
+      var newCount = sheetRowCount_(b);
+      var suspicious = prevSheet && prevCount >= MIN_ROWS_FOR_DROP_CHECK && newCount < (prevCount * SUSPICIOUS_ROW_DROP_RATIO);
+      if (suspicious) {
+        sheets[gid] = prevSheet;
+        unstableGids.push(gid);
+      } else {
+        sheets[gid] = b;
+      }
+    } else if (previousSheets && previousSheets[gid] != null) {
+      sheets[gid] = previousSheets[gid];
+      unstableGids.push(gid);
+    } else {
+      sheets[gid] = b || a;
+      if (!isStable) unstableGids.push(gid);
+    }
+  });
+
+  return { fetchedAt: second.fetchedAt, sheets: sheets, unstableGids: unstableGids };
+}
+
+// بتتنادى من الـ Time-driven trigger (راجع الكومنت فوق doGet للـ setup).
+function runScheduledSync() {
+  var folder = getOrCreateLastSyncFolder_();
+  var previous = readLastSyncPayload_(folder);
+  var payload = fetchSheetsPayloadStable_(LAST_SYNC_GIDS, previous ? previous.sheets : null);
+
+  if (payload.unstableGids && payload.unstableGids.length) {
+    PropertiesService.getScriptProperties().setProperty("last_sync_unstable_gids_v1", payload.unstableGids.join(","));
+  } else {
+    PropertiesService.getScriptProperties().deleteProperty("last_sync_unstable_gids_v1");
+  }
+
+  var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+  var gzBlob = Utilities.gzip(Utilities.newBlob(content, "application/json"), LAST_SYNC_FILE_NAME);
+
+  var existing = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+  while (existing.hasNext()) { existing.next().setTrashed(true); }
+  var oldArchive = folder.getFilesByName("archive.gz");
+  while (oldArchive.hasNext()) { oldArchive.next().setTrashed(true); }
+  folder.createFile(gzBlob);
+
+  var props = PropertiesService.getScriptProperties();
+  var contentHash = computeSyncContentHash_(payload.sheets, LAST_SYNC_GIDS);
+  var previousHash = props.getProperty("last_sync_content_hash_v1");
+  var isFirstRunEver = !props.getProperty(LAST_SYNC_META_PROP_KEY);
+  props.setProperty("last_sync_content_hash_v1", contentHash);
+  if (isFirstRunEver || previousHash !== contentHash) {
+    props.setProperty(LAST_SYNC_META_PROP_KEY, payload.fetchedAt);
+  }
+}
+
+function readLastSyncPayload_(folder) {
+  try {
+    var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+    if (!files.hasNext()) return null;
+    var text = Utilities.ungzip(files.next().getBlob()).getDataAsString();
+    var parsed = JSON.parse(text);
+    return (parsed && parsed.sheets) ? parsed : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function handleGetLastSync(e) {
+  try {
+    var folder = getOrCreateLastSyncFolder_();
+    var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
+    if (files.hasNext()) {
+      var gzBlob = files.next().getBlob();
+      var fetchedAt = PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null;
+      var base64 = Utilities.base64Encode(gzBlob.getBytes());
+      return jsonResponse({ success: true, fetchedAt: fetchedAt, gzBase64: base64 });
+    }
+    // Fallback: لسه مفيش أي مزامنة مركزية اتسجلت — بنرجع لجلب لايف عادي.
+    var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
+    var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+    var gz = Utilities.gzip(Utilities.newBlob(content, "application/json"));
+    return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, gzBase64: Utilities.base64Encode(gz.getBytes()) });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+function handleGetLastSyncMeta(e) {
+  var props = PropertiesService.getScriptProperties();
+  var fetchedAt = props.getProperty(LAST_SYNC_META_PROP_KEY) || null;
+  var unstable = props.getProperty("last_sync_unstable_gids_v1") || null;
+  return jsonResponse({ success: true, fetchedAt: fetchedAt, unstableGids: unstable ? unstable.split(",") : [] });
+}
+
+var LAST_SYNC_GID_LABELS_ = {
+  "22283311": "Beginning Inventory", "548859670": "Sell-through Needed",
+  "1409034448": "Products Debundle Map", "1620722565": "Single SKU Targets",
+  "1724469150": "COGS", "2085802038": "Availability Locking",
+  "1298408207": "Products & Matches", "461854229": "Merchant SKU Daily",
+  "620123165": "Merchant Segmentation", "1289659887": "Weekly Inventory",
+  "897709273": "Warehouse Repack"
+};
+
+function handleGetLastSyncDebug(e) {
+  try {
+    var folder = getOrCreateLastSyncFolder_();
+    var cached = readLastSyncPayload_(folder);
+    var source = cached ? "cached_file" : "live_fallback";
+    var payload = cached || fetchSheetsPayload_(LAST_SYNC_GIDS);
+
+    var report = LAST_SYNC_GIDS.map(function (gid) {
+      var sheet = payload.sheets ? payload.sheets[gid] : undefined;
+      var rows = (sheet && sheet.table && sheet.table.rows) ? sheet.table.rows.length : null;
+      return {
+        gid: gid,
+        label: LAST_SYNC_GID_LABELS_[gid] || gid,
+        status: sheet ? "ok" : "NULL/EMPTY",
+        rowCount: rows
+      };
+    });
+
+    var unstable = PropertiesService.getScriptProperties().getProperty("last_sync_unstable_gids_v1") || "";
+    var unstableLabeled = unstable ? unstable.split(",").map(function (gid) { return LAST_SYNC_GID_LABELS_[gid] || gid; }) : [];
+
+    return jsonResponse({ success: true, source: source, fetchedAt: payload.fetchedAt, sheets: report, unstableAtLastRun: unstableLabeled });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+function getOrCreateLastSyncFolder_() {
+  var existing = DriveApp.getFoldersByName(LAST_SYNC_FOLDER_NAME);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(LAST_SYNC_FOLDER_NAME);
+}
+
+function parseGvizResponse(res) {
+  if (!res || res.getResponseCode() !== 200) return null;
+
+  var text = res.getContentText();
+  var match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if (!match) return null;
+
+  try {
+    var parsed = eval("(" + match[1] + ")");
+    if (parsed && parsed.status === "error") return null;
+    return parsed;
+  } catch (err) {
+    return null;
+  }
 }
 
 function handleSignup(payload) {

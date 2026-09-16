@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.42";
+const APP_VERSION = "1.1.44";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -203,7 +203,6 @@ const DATA_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YY
 // Computed API) لسه بتكلم Apps Script مباشرة زي ما هي — مش جزء من التغيير ده.
 // -------------------------------------------------------------------------
 const SYNC_CDN_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev";
-const SYNC_READ_BASE_URL = SYNC_CDN_URL || DATA_API_URL;
 // نفس رابط الـ Apps Script Web App الموجود في js/auth.js (CONFIG.API_URL) —
 // مستخدم هنا بس عشان يبعت فيدباك الـ Recommended Tracker (save_match_feedback)
 // لل backend، اللي بيكتبه لايف في شيت الماتشات (PRODUCTS_MATCHES_GID).
@@ -713,14 +712,16 @@ revealSyncStatusNavIfManager();
 const SYNC_STATUS_TARGETS = [
   // getMainMeta بدل getMain — نسخة خفيفة (metadata بس، من غير الجدول
   // الضخم كامل) عشان مودال التشخيص ميحملش عشرات الـ MB كل مرة يتفتح.
-  { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true },
-  { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay" },
-  { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants" },
-  // v1.1.39: باقي الـ ~19 شيت (من ضمنهم Inventory) بتعتمد على المسار ده —
-  // مرآة الـ Worker لـ getLastSync بتاع Apps Script (مش بتتقرا من الـ Worker
-  // مباشرة زي التلاتة فوق). لو الصف ده مش بيتحرك، يبقى المشكلة في
-  // runScheduledSync بتاع الاب اسكربت نفسه أو في الـ mirror ده.
-  { key: "lastSync", label: "General Sync (Inventory + ~19 other sheets)", action: "getLastSyncMeta", metaOnly: true },
+  { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true, base: "worker" },
+  { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay", base: "worker" },
+  { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants", base: "worker" },
+  // v1.1.44: الـ 21 شيت الباقيين (Inventory وغيره) اتقسّموا نُص/نُص بين
+  // الـ Worker (10 شيت أخف) وApps Script (11 شيت أتقل، فيهم Beginning
+  // Inventory) — عشان الاتنين يحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق)
+  // بدل ما الـ Worker لوحده يحتاج يدور عليهم بالتتابع. صفين منفصلين هنا
+  // عشان تقدر تشوف حالة كل مصدر لوحده.
+  { key: "generalWorker", label: "General Sync — Worker (10 sheets)", action: "getLastSyncMeta", metaOnly: true, base: "worker" },
+  { key: "generalAppsScript", label: "General Sync — Apps Script (11 sheets, incl. Beginning Inventory)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
 ];
 
 function syncStatusTimeAgo(iso) {
@@ -736,13 +737,18 @@ function syncStatusTimeAgo(iso) {
 }
 
 async function fetchOneSyncStatus(target) {
-  if (!SYNC_CDN_URL) return { ...target, ok: false, error: "SYNC_CDN_URL not configured" };
+  // v1.1.44: كل target بقى بيحدد مصدره (base: "worker" أو "appsScript") —
+  // الغالبية على الـ Worker زي الأول، وصف "General Sync — Apps Script" بس
+  // بيروح على DATA_API_URL (رابط الـ Web App).
+  const baseUrl = target.base === "appsScript" ? DATA_API_URL : SYNC_CDN_URL;
+  const baseUrlLabel = target.base === "appsScript" ? "DATA_API_URL" : "SYNC_CDN_URL";
+  if (!baseUrl) return { ...target, ok: false, error: `${baseUrlLabel} not configured` };
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
     let json;
     try {
-      const res = await fetch(`${SYNC_CDN_URL}?action=${target.action}`, { method: "GET", signal: controller.signal, cache: "no-store" });
+      const res = await fetch(`${baseUrl}?action=${target.action}`, { method: "GET", signal: controller.signal, cache: "no-store" });
       json = await res.json();
     } finally {
       clearTimeout(timer);
@@ -13018,11 +13024,20 @@ async function ungzipFromBase64(base64) {
 // لكن محمية بالكامل من الزحمة والأرقام الغلط والفشل العابر الثلاثة دول
 // مع بعض — وده الأهم عمليًا من "لايف 100%" اللي بيفتح باب اللاج مع الزحمة.
 // =========================================================================
-async function fetchAllSheetsViaBackendOnce() {
+// v1.1.44: الـ 21 شيت (غير Main/Confirmed by Day/Incentive Merchants) بقوا
+// مقسّمين نُص/نُص بين الـ Cloudflare Worker (10 شيت أخف، action=getLastSync
+// على SYNC_CDN_URL) وApps Script (11 شيت أتقل فيهم Beginning Inventory،
+// نفس action=getLastSync بس على DATA_API_URL) — راجع الكومنت فوق
+// GENERAL_MIRROR_GIDS في worker.js وفوق doGet في Code.gs لسبب التقسيم ده
+// (حد الـ CPU بتاع الـ Worker). بنقراهم بالتوازي مع بعض ونجمّعهم في sheets
+// واحد — الاتنين بيحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق) بدل ما أي
+// واحد فيهم يستنى التاني.
+async function fetchOneLastSyncSource(baseUrl, sourceLabel) {
+  if (!baseUrl) return { sheets: null, fetchedAt: null };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const url = `${SYNC_READ_BASE_URL}?action=getLastSync`;
+    const url = `${baseUrl}?action=getLastSync`;
     const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
     // ⚠️ لما رد Apps Script يبقى كبير (الحالة العادية هنا — كذا ميجا base64)،
     // جوجل أحيانًا بيحوّل الرد فعليًا لصفحة وسيطة على
@@ -13037,13 +13052,11 @@ async function fetchAllSheetsViaBackendOnce() {
     try {
       json = await res.json();
     } catch (parseErr) {
-      throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
+      throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message) + " [" + sourceLabel + "]");
     }
-    if (!json.success) throw new Error(json.message || "Backend getLastSync failed");
-    if (json.fetchedAt) SERVER_LAST_FETCHED_AT = json.fetchedAt;
-    // النسخة الجديدة من الباك اند بترجع gzBase64 (مضغوط) بدل sheets مباشرة —
-    // لو لسه نسخة قديمة من الباك اند شغالة (لسه معملتش redeploy)، json.sheets
-    // ممكن يكون موجود برضه (توافق قديم)، فبنتعامل مع الحالتين.
+    if (!json.success) throw new Error((json.message || "getLastSync failed") + " [" + sourceLabel + "]");
+    // Apps Script بيرجع gzBase64 (مضغوط)، الـ Worker بيرجع sheets مباشرة —
+    // بنتعامل مع الاتنين.
     let sheets;
     if (json.gzBase64) {
       const text = await ungzipFromBase64(json.gzBase64);
@@ -13052,14 +13065,41 @@ async function fetchAllSheetsViaBackendOnce() {
     } else {
       sheets = json.sheets;
     }
-    // دفاعي: لو الرد رجع من غير sheets خالص (شكل غير متوقع — مثلاً باك اند
-    // قديم/نص مقصوص)، لازم نرمي error واضح هنا بدل ما نسيب الكود يكسر بعد
-    // كده بـ "Cannot read properties of undefined" غامضة صعب تشخيصها.
-    if (!sheets) throw new Error("Backend getLastSync returned no sheets data (unexpected response shape — check that both backend/Code.gs and js/app.js are on the same deployed version).");
-    return sheets;
+    return { sheets: sheets || null, fetchedAt: json.fetchedAt || null };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchAllSheetsViaBackendOnce() {
+  const [workerResult, appsScriptResult] = await Promise.allSettled([
+    fetchOneLastSyncSource(SYNC_CDN_URL, "worker"),
+    fetchOneLastSyncSource(DATA_API_URL, "apps-script"),
+  ]);
+  const worker = workerResult.status === "fulfilled" ? workerResult.value : null;
+  const appsScript = appsScriptResult.status === "fulfilled" ? appsScriptResult.value : null;
+
+  if (!worker && !appsScript) {
+    // الاتنين فشلوا — نرمي إيرور المصدر الأول (لو كان فشل عابر
+    // TRANSIENT_NON_JSON_RESPONSE، fetchAllSheetsViaBackend تحت هيعيد
+    // المحاولة عادي، اللي هيحاول الاتنين تاني).
+    throw (workerResult.status === "rejected" ? workerResult.reason : appsScriptResult.reason)
+      || new Error("Both Worker and Apps Script getLastSync failed.");
+  }
+
+  const sheets = { ...(worker && worker.sheets), ...(appsScript && appsScript.sheets) };
+  const fetchedAtCandidates = [worker && worker.fetchedAt, appsScript && appsScript.fetchedAt].filter(Boolean);
+  if (fetchedAtCandidates.length) {
+    // أحدث fetchedAt بين المصدرين (المفروض الاتنين قريبين من بعض زمنيًا).
+    SERVER_LAST_FETCHED_AT = fetchedAtCandidates.sort().slice(-1)[0];
+  }
+  // دفاعي: لو الاتنين رجعوا من غير أي sheets خالص، لازم نرمي error واضح هنا
+  // بدل ما نسيب الكود يكسر بعد كده بـ "Cannot read properties of undefined"
+  // غامضة صعب تشخيصها.
+  if (!sheets || Object.keys(sheets).length === 0) {
+    throw new Error("Both Worker and Apps Script getLastSync returned no sheets data (unexpected response shape — check that worker.js/Code.gs/app.js are all on the same deployed version).");
+  }
+  return sheets;
 }
 
 // بطلب صريح بعد ما ظهر إن جوجل أحيانًا بيرجع صفحة HTML بدل JSON (فشل عابر في
@@ -13948,15 +13988,29 @@ const LAST_SYNC_META_POLL_MS = 90 * 1000; // بيشيك كل دقيقة ونص (
 let lastSyncMetaBaseline = null;
 let lastSyncMetaCheckInFlight = false;
 
-async function fetchLastSyncMeta() {
+// v1.1.44: بعد ما الـ 21 شيت اتقسّموا بين الـ Worker وApps Script (راجع
+// fetchOneLastSyncSource فوق)، بقى في مصدرين مستقلين ليهم getLastSyncMeta
+// خاص بكل واحد فيهم — بنسأل الاتنين مع بعض، ولو أي واحد فيهم عنده نسخة
+// أحدث بنعمل loadData(false) بصمت (مش شرط الاتنين يتغيروا مع بعض بالظبط،
+// كل مصدر بيحدّث في وقته).
+async function fetchOneLastSyncMeta(baseUrl) {
+  if (!baseUrl) return null;
   try {
-    const url = `${SYNC_READ_BASE_URL}?action=getLastSyncMeta`;
-    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const res = await fetch(`${baseUrl}?action=getLastSyncMeta`, { method: "GET", cache: "no-store" });
     const json = await res.json();
     return (json && json.success) ? (json.fetchedAt || null) : null;
   } catch (e) {
-    return null; // شبكة بطيئة/فشل مؤقت — نتجاهل ونجرب تاني بعد دقيقة
+    return null; // شبكة بطيئة/فشل مؤقت — نتجاهل ونجرب تاني بعد دقيقة ونص
   }
+}
+
+async function fetchLastSyncMeta() {
+  const [workerFetchedAt, appsScriptFetchedAt] = await Promise.all([
+    fetchOneLastSyncMeta(SYNC_CDN_URL),
+    fetchOneLastSyncMeta(DATA_API_URL),
+  ]);
+  if (!workerFetchedAt && !appsScriptFetchedAt) return null;
+  return workerFetchedAt + "|" + appsScriptFetchedAt; // combined baseline key
 }
 
 // -------------------------------------------------------------------------
@@ -14013,7 +14067,7 @@ function isTabVisible() {
 }
 
 async function lastSyncMetaPollTick() {
-  if (!DATA_API_URL || lastSyncMetaCheckInFlight || !isTabVisible()) return;
+  if ((!DATA_API_URL && !SYNC_CDN_URL) || lastSyncMetaCheckInFlight || !isTabVisible()) return;
   lastSyncMetaCheckInFlight = true;
   try {
     const current = await fetchLastSyncMeta();
