@@ -118,10 +118,16 @@ const GENERAL_MIRROR_GIDS = [
   "565878313",   // INBOUND_GID
   "531154071",   // PRODUCTS_INFO_GID
 ];
-// دلوقتي 10 شيت بس، فبنعالجهم كلهم في تشغيلة واحدة (مفيش داعي لدوران على
-// دفعات صغيرة — أصلاً أخف نص، وبعد ما شلنا Beginning Inventory الضخم برا).
-// لو حصل أي إيرور CPU تاني حتى بعد كده، قلّل الرقم ده وهيرجع يدور على دفعات.
-const GENERAL_SYNC_BATCH_SIZE = GENERAL_MIRROR_GIDS.length;
+// v1.1.45: جربنا نعالج الـ 10 شيت كلهم في تشغيلة واحدة (batch = العدد كله)
+// بعد ما شلنا Beginning Inventory، بس Observability أثبتت إنها لسه بتطلع
+// CPU Time: 2010ms وبتكراش في كل scheduled() tick (نفس الرقم بالظبط اللي
+// كان قبل أي فيكس — يعني ده على الأغلب الحد الحقيقي لل CPU budget بتاع
+// الـ Worker مش مجرد رقم عشوائي). السبب: scheduled() بيشغل Main (34k صف)
+// + Confirmed by Day + Incentive Merchants + الـ 10 شيت دول كلهم مع بعض
+// في invocation واحد بنفس الـ CPU budget. فرجعنا للدوران على دفعات صغيرة
+// (batch=3) زي v1.1.43 عشان كل تشغيلة تاخد وقت أقل. لو حصل CPU error تاني
+// حتى بعد كده، قلّل الرقم ده أكتر (2 أو 1).
+const GENERAL_SYNC_BATCH_SIZE = 3;
 const CACHE_KEY_SHEET_PREFIX = "sheet_v1_";              // + gid — آخر نسخة "مستقرة" لكل شيت لوحده
 const CACHE_KEY_SHEET_CANDIDATE_PREFIX = "sheet_candidate_v1_"; // + gid — آخر قراءة خام (لمقارنة الدورة الجاية بيها)
 const CACHE_KEY_ALLSHEETS_ROTATION = "all_sheets_rotation_v1";  // {index} — مكان الدفعة الجاية في القايمة
