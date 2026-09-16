@@ -546,22 +546,28 @@ function pruneOldBackups(folder) {
 
 /**
  * ============================================================================
- *  DATA API — v1.1.44: قسّمنا الـ ~21 شيت الباقيين (غير Main/Confirmed by
- *  Day/Incentive Merchants، اللي ليهم مسارهم الخاص) نُص/نُص بين Apps Script
- *  والـ Cloudflare Worker، عشان الاتنين يحدّثوا في نفس الوقت تقريبًا (كل 5
- *  دقايق) بدل ما الـ Worker لوحده يحتاج يدور على كل الشيتات بالتتابع (دورة
- *  طويلة) عشان حد الـ CPU بتاعه (اتأكدنا فعليًا إن قراءة الـ 21 شيت مع Main/
- *  Confirmed/Incentive مع بعض في تنفيذة واحدة على الـ Worker كانت محتاجة
- *  ~2 ثانية CPU وبتخليه يتقفل).
+ *  DATA API — v1.1.46: كل الـ 21 شيت الباقيين (غير Main/Confirmed by Day/
+ *  Incentive Merchants، اللي ليهم مسارهم الخاص على الـ Worker) بقوا بيتقروا
+ *  من هنا بس (Apps Script) — مش متقسمين مع الـ Cloudflare Worker زي الأول.
  *
- *  الـ 11 شيت الأتقل (فيهم Beginning Inventory، أكبر شيت في القايمة دي)
- *  رجعوا يتقروا هنا (Apps Script، عنده وقت تنفيذ أكبر بكتير — لحد 6 دقايق)،
- *  بنفس آلية الاستقرار القديمة (قراءتين بفاصل 6 ثواني، فحص نزول عدد الصفوف
- *  المفاجئ)، ومخزّنين في ملف على Drive. الـ 10 شيت الباقيين (أخف) لسه بيتقروا
- *  من الـ Worker مباشرة (راجع GENERAL_MIRROR_GIDS في worker.js).
+ *  السبب: كان مقسّم نُص/نُص عشان حد الـ CPU بتاع الـ Worker، لكن Cloudflare
+ *  Observability أثبتت إن الحد الحقيقي لخطة الـ Worker (Free) حوالي 10ms
+ *  CPU بس لكل تشغيلة cron — رقم ضيق جدًا مستحيل يكفي لقراءة/تحليل حتى شيت
+ *  واحد بشكل موثوق، فالـ Worker كان بيفشل (exceededCpu) في كل تشغيلة cron
+ *  تقريبًا، وده كان سبب إن "General Sync — Worker" في مودال "Worker Sync
+ *  Status" فاضل عالق/قديم دايمًا.
  *
- *  الفرونت اند (js/app.js، fetchAllSheetsSnapshot) بيقرا من المصدرين مع بعض
- *  بالتوازي ويدمجهم — مش واحد بديل التاني.
+ *  Apps Script (هنا، عن طريق Time-driven trigger) معندهوش نفس حد الـ
+ *  CPU-ms ده (وقت التنفيذ بيتحدد بالدقايق مش الـ milliseconds — لحد 6
+ *  دقايق)، فبقى هو المصدر الوحيد لكل الـ 21 شيت مع بعض، بنفس آلية الاستقرار
+ *  القديمة (قراءتين بفاصل 6 ثواني، فحص نزول عدد الصفوف المفاجئ)، ومخزّنين
+ *  في ملف على Drive. النتيجة: كل الـ 21 شيت دول بتتحدث فعليًا مع بعض في
+ *  نفس الوقت كل 5 دقايق، مش متقسمة بين مصدرين بتوقيتات مختلفة زي الأول.
+ *
+ *  الفرونت اند (js/app.js، fetchAllSheetsSnapshot) لسه بيقرا من DATA_API_URL
+ *  (هنا) وSYNC_CDN_URL (الـ Worker، لسه مسؤول عن Main/Confirmed by Day/
+ *  Incentive Merchants بس) بالتوازي ويدمجهم — الكود ده اتصمم أصلاً يقبل أي
+ *  توزيع بين المصدرين من غير أي تغيير.
  *
  *  ⚠️ SETUP MANUAL مطلوب: من محرر Apps Script → أيقونة الساعة (Triggers) →
  *  + Add Trigger → Function: runScheduledSync → Time-driven → Minutes timer
@@ -582,11 +588,20 @@ function doGet(e) {
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
-// نفس LAST_SYNC_GID_LABELS_ تحت لكن الـ 11 GID اللي هنا بس (الأتقل، فيهم
-// Beginning Inventory) — النص الباقي (10 شيت أخف) بيتقروا من الـ Worker
-// مباشرة (GENERAL_MIRROR_GIDS في worker.js)، مش من هنا.
+// v1.1.46: كل الـ 21 شيت (كل حاجة غير Main/Confirmed by Day/Incentive
+// Merchants) بقوا بيتقروا من هنا بس — مش متقسمين مع الـ Worker زي الأول
+// (راجع الكومنت فوق GENERAL_MIRROR_GIDS في worker.js). السبب: Cloudflare
+// Observability أثبتت إن الـ CPU budget الحقيقي لخطة الـ Worker (Free)
+// حوالي 10ms بس لكل تشغيلة cron، وده مستحيل يكفي لأي عدد شيتات حقيقي
+// (fetch + JSON.parse + fingerprint) — فكان الـ Worker بيفشل (exceededCpu)
+// في كل تشغيلة تقريبًا، وده سبب إن "General Sync — Worker" كان دايمًا
+// عالق/قديم. Apps Script (Time-driven trigger هنا) معندهوش نفس حد الـ
+// CPU-ms ده، فبقى هو المصدر الوحيد — بيقرا كل الـ 21 شيت مع بعض في تنفيذة
+// واحدة كل 5 دقايق (fetchSheetsPayloadStable_ تحت)، يعني كل الشيتات دي
+// بتتحدث فعليًا مع بعض في نفس الوقت، مش مقسّمة بين مصدرين مختلفين بتوقيتات
+// مختلفة زي الأول.
 var LAST_SYNC_GIDS = [
-  "22283311",    // BEGIN_INV_GID — أكبر شيت في القايمة، عمدًا هنا مش على الـ Worker
+  "22283311",    // BEGIN_INV_GID — أكبر شيت في القايمة
   "548859670",   // SELLTHROUGH_NEEDED_GID
   "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
   "1620722565",  // SINGLE_SKU_TARGETS_GID
@@ -596,7 +611,19 @@ var LAST_SYNC_GIDS = [
   "461854229",   // MERCHANT_SKU_DAILY_GID
   "620123165",   // MERCHANT_SEGMENTATION_GID
   "1289659887",  // WEEKLY_INVENTORY_GID
-  "897709273"    // WAREHOUSE_REPACK_GID
+  "897709273",   // WAREHOUSE_REPACK_GID
+  // v1.1.46: الـ 10 شيت دول كانوا بيتقروا من الـ Worker مباشرة
+  // (GENERAL_MIRROR_GIDS في worker.js) — دلوقتي بقوا هنا زي كل شيت تاني.
+  "115442405",   // TARGETS_GID
+  "891214324",   // SEGMENTATION_GID
+  "2042936628",  // TARGETS_ACM_GID
+  "1780730573",  // INVENTORY_GID
+  "1779314157",  // PRODUCTS_GID
+  "1656655269",  // CAT_TARGETS_GID
+  "892918900",   // ACM_SALES_PLAN_GID
+  "1304674893",  // NEW_SEGMENTATION_GID
+  "565878313",   // INBOUND_GID
+  "531154071"    // PRODUCTS_INFO_GID
 ];
 
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
@@ -777,7 +804,12 @@ var LAST_SYNC_GID_LABELS_ = {
   "1724469150": "COGS", "2085802038": "Availability Locking",
   "1298408207": "Products & Matches", "461854229": "Merchant SKU Daily",
   "620123165": "Merchant Segmentation", "1289659887": "Weekly Inventory",
-  "897709273": "Warehouse Repack"
+  "897709273": "Warehouse Repack",
+  "115442405": "Targets", "891214324": "Segmentation",
+  "2042936628": "Targets ACM", "1780730573": "Inventory",
+  "1779314157": "Products", "1656655269": "Category Targets",
+  "892918900": "ACM Sales Plan", "1304674893": "New Segmentation",
+  "565878313": "Inbound", "531154071": "Products Info"
 };
 
 function handleGetLastSyncDebug(e) {

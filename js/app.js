@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.45";
+const APP_VERSION = "1.1.46";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -188,13 +188,16 @@ const MERCHANT_SKU_DAILY_GID = "461854229";
 const DATA_API_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec";
 // -------------------------------------------------------------------------
 // v1.1.6: SYNC_CDN_URL — طبقة كاش وسيطة اختيارية (Cloudflare Worker، راجع
-// مجلد cloudflare-worker/ جوه الـ zip) بتقف بين كل اليوزرز وبين Apps Script
-// لطلبات القراءة الكتيرة (getLastSync/getLastSyncMeta) بس. الفكرة: بدل ما
-// كل يوزر فاتح/بيعمل رفرش يضرب Apps Script مباشرة (وده اللي كان بيسبب الـ
-// 404/التعليق وقت الزحمة)، كل اليوزرز بيقروا من الـ Worker اللي بيرجّع
-// نسخة جاهزة من Cloudflare KV (سريع جدًا، مفيش أي حد أقصى تنفيذات متزامنة
-// زي Apps Script). الـ Worker نفسه هو اللي بيكلم Apps Script — مرة واحدة كل
-// 5 دقايق بس (مش مع كل يوزر)، فالضغط على Apps Script بيقل بشكل جذري.
+// مجلد cloudflare-worker/ جوه الـ zip) بتقف بين كل اليوزرز وبين Google
+// Sheets لطلبات القراءة الكتيرة. الفكرة: بدل ما كل يوزر فاتح/بيعمل رفرش
+// يضرب Apps Script مباشرة (وده اللي كان بيسبب الـ 404/التعليق وقت الزحمة)،
+// كل اليوزرز بيقروا من الـ Worker اللي بيرجّع نسخة جاهزة من Cloudflare KV
+// (سريع جدًا، مفيش أي حد أقصى تنفيذات متزامنة زي Apps Script).
+// v1.1.46: الـ Worker بقى مسؤول بس عن Main/Confirmed by Day/Incentive
+// Merchants (getMain/getMainMeta/getConfirmedByDay/getIncentiveMerchants) —
+// باقي الـ 21 شيت (getLastSync/getLastSyncMeta) بقوا كلهم على Apps Script
+// بس (راجع الكومنت فوق LAST_SYNC_GIDS في Code.gs لسبب الفصل ده)، عشان حد
+// الـ CPU بتاع خطة الـ Worker Free كان بيخلي مزامنتهم تفشل باستمرار.
 //
 // سيبها فاضية ("") لحد ما تعمل Deploy للـ Worker (خطوات التنصيب في الشرح
 // اللي بعتهولك) وتحط رابطه هنا — لحد وقتها الداشبورد شغالة زي ما هي بالظبط
@@ -715,13 +718,13 @@ const SYNC_STATUS_TARGETS = [
   { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true, base: "worker" },
   { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay", base: "worker" },
   { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants", base: "worker" },
-  // v1.1.44: الـ 21 شيت الباقيين (Inventory وغيره) اتقسّموا نُص/نُص بين
-  // الـ Worker (10 شيت أخف) وApps Script (11 شيت أتقل، فيهم Beginning
-  // Inventory) — عشان الاتنين يحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق)
-  // بدل ما الـ Worker لوحده يحتاج يدور عليهم بالتتابع. صفين منفصلين هنا
-  // عشان تقدر تشوف حالة كل مصدر لوحده.
-  { key: "generalWorker", label: "General Sync — Worker (10 sheets)", action: "getLastSyncMeta", metaOnly: true, base: "worker" },
-  { key: "generalAppsScript", label: "General Sync — Apps Script (11 sheets, incl. Beginning Inventory)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
+  // v1.1.46: الـ 21 شيت الباقيين (Inventory وغيره) بقوا كلهم بيتقروا من
+  // Apps Script بس (مش متقسمين مع الـ Worker زي الأول) — الـ Worker كان
+  // الـ CPU budget بتاعه (~10ms/تشغيلة على خطة الـ Free) مش كافي لأي شغل
+  // حقيقي، فكان بيفشل كل 5 دقايق ("General Sync — Worker" فاضل عالق دايمًا
+  // في المودال). Apps Script مش عليه نفس القيد، فبقى المصدر الوحيد — وده
+  // كمان معناه إن الـ 21 شيت دول بيتحدثوا فعليًا مع بعض في نفس الوقت.
+  { key: "generalAppsScript", label: "General Sync — Apps Script (21 sheets, incl. Beginning Inventory)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
 ];
 
 function syncStatusTimeAgo(iso) {
@@ -836,11 +839,10 @@ if (syncStatusRefresh) syncStatusRefresh.addEventListener("click", () => loadAnd
 // شيتات مع بعض (لسه بيمر بنفس شرط الاستقرار — راجع تعليق forceRefresh جوه
 // worker.js)، وبعدين بيعمل reload لحالة المودال على طول عشان تشوف النتيجة
 // من غير أي استنى.
-// v1.1.42: الـ General Sync (22 شيت) بقى بيشتغل في الخلفية على الـ Worker
-// بعد الرد، مش قبله (كان بيسبب "Failed to fetch" لو اتحسب مع التلاتة
-// التانيين في نفس الوقت — راجع تعليق handleForceRefresh جوه worker.js).
-// يعني صف "General Sync" في المودال ممكن يفضل زي ما هو أول reload، ودوس
-// Refresh تاني بعد كام ثانية عشان تشوف نتيجته.
+// v1.1.46: الزرار ده بيحدّث بس Main/Confirmed by Day/Incentive Merchants
+// (التلاتة اللي لسه على الـ Worker). "General Sync — Apps Script" (الـ 21
+// شيت الباقيين) مالهاش forceRefresh فوري من هنا — بتتحدث تلقائي كل 5 دقايق
+// بمعاد الـ Apps Script trigger بتاعها (راجع runScheduledSync في Code.gs).
 if (syncStatusForceRefresh) {
   syncStatusForceRefresh.addEventListener("click", async () => {
     if (!SYNC_CDN_URL) return;
@@ -13024,14 +13026,12 @@ async function ungzipFromBase64(base64) {
 // لكن محمية بالكامل من الزحمة والأرقام الغلط والفشل العابر الثلاثة دول
 // مع بعض — وده الأهم عمليًا من "لايف 100%" اللي بيفتح باب اللاج مع الزحمة.
 // =========================================================================
-// v1.1.44: الـ 21 شيت (غير Main/Confirmed by Day/Incentive Merchants) بقوا
-// مقسّمين نُص/نُص بين الـ Cloudflare Worker (10 شيت أخف، action=getLastSync
-// على SYNC_CDN_URL) وApps Script (11 شيت أتقل فيهم Beginning Inventory،
-// نفس action=getLastSync بس على DATA_API_URL) — راجع الكومنت فوق
-// GENERAL_MIRROR_GIDS في worker.js وفوق doGet في Code.gs لسبب التقسيم ده
-// (حد الـ CPU بتاع الـ Worker). بنقراهم بالتوازي مع بعض ونجمّعهم في sheets
-// واحد — الاتنين بيحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق) بدل ما أي
-// واحد فيهم يستنى التاني.
+// v1.1.46: الـ 21 شيت (غير Main/Confirmed by Day/Incentive Merchants) بقوا
+// كلهم بيتقروا من Apps Script بس (action=getLastSync على DATA_API_URL) —
+// مش متقسمين مع الـ Cloudflare Worker زي الأول (كان الـ Worker بيفشل كل
+// تشغيلة cron لأن الـ CPU budget بتاعه ~10ms بس، راجع الكومنت فوق
+// LAST_SYNC_GIDS في Code.gs). الـ Worker مبقاش عنده أكشن getLastSync خالص
+// دلوقتي (راجع fetchAllSheetsViaBackendOnce تحت).
 async function fetchOneLastSyncSource(baseUrl, sourceLabel) {
   if (!baseUrl) return { sheets: null, fetchedAt: null };
   const controller = new AbortController();
@@ -13072,32 +13072,20 @@ async function fetchOneLastSyncSource(baseUrl, sourceLabel) {
 }
 
 async function fetchAllSheetsViaBackendOnce() {
-  const [workerResult, appsScriptResult] = await Promise.allSettled([
-    fetchOneLastSyncSource(SYNC_CDN_URL, "worker"),
-    fetchOneLastSyncSource(DATA_API_URL, "apps-script"),
-  ]);
-  const worker = workerResult.status === "fulfilled" ? workerResult.value : null;
-  const appsScript = appsScriptResult.status === "fulfilled" ? appsScriptResult.value : null;
+  // v1.1.46: مصدر واحد بس (Apps Script) — الـ Worker مبقاش عنده general
+  // sheet sync خالص (راجع الكومنت فوق). مفيش داعي لـ Promise.allSettled
+  // على مصدرين تاني.
+  const appsScript = await fetchOneLastSyncSource(DATA_API_URL, "apps-script");
 
-  if (!worker && !appsScript) {
-    // الاتنين فشلوا — نرمي إيرور المصدر الأول (لو كان فشل عابر
-    // TRANSIENT_NON_JSON_RESPONSE، fetchAllSheetsViaBackend تحت هيعيد
-    // المحاولة عادي، اللي هيحاول الاتنين تاني).
-    throw (workerResult.status === "rejected" ? workerResult.reason : appsScriptResult.reason)
-      || new Error("Both Worker and Apps Script getLastSync failed.");
+  const sheets = appsScript && appsScript.sheets;
+  if (appsScript && appsScript.fetchedAt) {
+    SERVER_LAST_FETCHED_AT = appsScript.fetchedAt;
   }
-
-  const sheets = { ...(worker && worker.sheets), ...(appsScript && appsScript.sheets) };
-  const fetchedAtCandidates = [worker && worker.fetchedAt, appsScript && appsScript.fetchedAt].filter(Boolean);
-  if (fetchedAtCandidates.length) {
-    // أحدث fetchedAt بين المصدرين (المفروض الاتنين قريبين من بعض زمنيًا).
-    SERVER_LAST_FETCHED_AT = fetchedAtCandidates.sort().slice(-1)[0];
-  }
-  // دفاعي: لو الاتنين رجعوا من غير أي sheets خالص، لازم نرمي error واضح هنا
-  // بدل ما نسيب الكود يكسر بعد كده بـ "Cannot read properties of undefined"
+  // دفاعي: لو رجع من غير أي sheets خالص، لازم نرمي error واضح هنا بدل ما
+  // نسيب الكود يكسر بعد كده بـ "Cannot read properties of undefined"
   // غامضة صعب تشخيصها.
   if (!sheets || Object.keys(sheets).length === 0) {
-    throw new Error("Both Worker and Apps Script getLastSync returned no sheets data (unexpected response shape — check that worker.js/Code.gs/app.js are all on the same deployed version).");
+    throw new Error("Apps Script getLastSync returned no sheets data (unexpected response shape — check that backend/Code.gs and js/app.js are on the same deployed version).");
   }
   return sheets;
 }
@@ -13988,11 +13976,8 @@ const LAST_SYNC_META_POLL_MS = 90 * 1000; // بيشيك كل دقيقة ونص (
 let lastSyncMetaBaseline = null;
 let lastSyncMetaCheckInFlight = false;
 
-// v1.1.44: بعد ما الـ 21 شيت اتقسّموا بين الـ Worker وApps Script (راجع
-// fetchOneLastSyncSource فوق)، بقى في مصدرين مستقلين ليهم getLastSyncMeta
-// خاص بكل واحد فيهم — بنسأل الاتنين مع بعض، ولو أي واحد فيهم عنده نسخة
-// أحدث بنعمل loadData(false) بصمت (مش شرط الاتنين يتغيروا مع بعض بالظبط،
-// كل مصدر بيحدّث في وقته).
+// v1.1.46: الـ 21 شيت بقوا كلهم من Apps Script بس (مش متقسمين مع الـ
+// Worker زي الأول) — فمصدر واحد بس هنا كمان.
 async function fetchOneLastSyncMeta(baseUrl) {
   if (!baseUrl) return null;
   try {
@@ -14005,12 +13990,7 @@ async function fetchOneLastSyncMeta(baseUrl) {
 }
 
 async function fetchLastSyncMeta() {
-  const [workerFetchedAt, appsScriptFetchedAt] = await Promise.all([
-    fetchOneLastSyncMeta(SYNC_CDN_URL),
-    fetchOneLastSyncMeta(DATA_API_URL),
-  ]);
-  if (!workerFetchedAt && !appsScriptFetchedAt) return null;
-  return workerFetchedAt + "|" + appsScriptFetchedAt; // combined baseline key
+  return fetchOneLastSyncMeta(DATA_API_URL);
 }
 
 // -------------------------------------------------------------------------

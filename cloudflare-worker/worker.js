@@ -36,7 +36,6 @@
       وارفع app.js المحدث على Vercel.
    ========================================================================== */
 
-const CACHE_KEY_META = "last_sync_meta_v1";
 // تاب "Confirmed by Day" (Weekly Inventory & Inbound) — بيتقرا هنا مباشرة
 // من Google Sheets (gviz) بدل ما يعدي على Apps Script خالص، عشان يبقى
 // مستقل تمامًا عن أي مشكلة Deploy في الباك اند (اللي واجهناها فعليًا).
@@ -87,56 +86,24 @@ const MANAGER_EMAIL = "youssef.hanafy@taager.com";
 const CACHE_KEY_MAIN_ERROR = "main_sheet_error_v1";
 const MAIN_GID = "2099497960";
 
-// v1.1.40: باقي الـ 22 شيت (Inventory وكل حاجة تانية غير Main/Confirmed by
-// Day/Incentive Merchants) بقوا بيتقروا هنا مباشرة من Google Sheets (gviz)
-// بالظبط زي التلاتة فوق — بدل ما الـ Worker يستنى Apps Script (action=
-// getLastSync) يعمل القراءة ويرجعها. نفس القايمة بالظبط اللي في
-// LAST_SYNC_GIDS جوه backend/Code.gs (لازم تفضل متطابقة لو ضفت شيت جديد
-// هناك). Apps Script نفسه فضل موجود ومطلوب بس للكتابة/تسجيل الدخول — القراءة
-// بقت مستقلة تمامًا عنه.
-// v1.1.44: بعد ما اتأكدنا (Cloudflare Observability: CPU Time 2010ms على
-// تشغيلة واحدة) إن قراءة كل الـ 21 شيت الباقيين مع Main/Confirmed/Incentive
-// في نفس التنفيذة كانت بتعدّي حد الـ CPU بتاع الـ Worker وبتخليه يتقفل، بدل
-// ما نخلي الـ Worker يدور عليهم بالتتابع (دورة طويلة، ~35 دقيقة)، قسّمناهم:
-// الـ 10 شيت الأخف (هنا) لسه بيتقروا من الـ Worker مباشرة، والـ 11 شيت
-// الأتقل (فيهم Beginning Inventory، أكبر شيت في القايمة) رجعوا يتقروا من
-// Apps Script (backend/Code.gs: LAST_SYNC_GIDS + runScheduledSync، بنفس
-// اسم الأكشن getLastSync/getLastSyncMeta بس على رابط الـ Web App مش رابط
-// الـ Worker). الفرونت اند (js/app.js) بيقرا من المصدرين بالتوازي ويدمجهم،
-// فالاتنين بيحدّثوا في نفس الوقت تقريبًا (كل 5 دقايق) بدل ما يستنوا بعض.
-// شلنا كمان 964398740 (Confirmed by Day) و1548963809 (Incentive Merchants)
-// من هنا زي v1.1.43 — ليهم كاش مستقل خاص بيهم فعلاً.
-const GENERAL_MIRROR_GIDS = [
-  "115442405",   // TARGETS_GID
-  "891214324",   // SEGMENTATION_GID
-  "2042936628",  // TARGETS_ACM_GID
-  "1780730573",  // INVENTORY_GID
-  "1779314157",  // PRODUCTS_GID
-  "1656655269",  // CAT_TARGETS_GID
-  "892918900",   // ACM_SALES_PLAN_GID
-  "1304674893",  // NEW_SEGMENTATION_GID
-  "565878313",   // INBOUND_GID
-  "531154071",   // PRODUCTS_INFO_GID
-];
-// v1.1.45: جربنا نعالج الـ 10 شيت كلهم في تشغيلة واحدة (batch = العدد كله)
-// بعد ما شلنا Beginning Inventory، بس Observability أثبتت إنها لسه بتطلع
-// CPU Time: 2010ms وبتكراش في كل scheduled() tick (نفس الرقم بالظبط اللي
-// كان قبل أي فيكس — يعني ده على الأغلب الحد الحقيقي لل CPU budget بتاع
-// الـ Worker مش مجرد رقم عشوائي). السبب: scheduled() بيشغل Main (34k صف)
-// + Confirmed by Day + Incentive Merchants + الـ 10 شيت دول كلهم مع بعض
-// في invocation واحد بنفس الـ CPU budget. فرجعنا للدوران على دفعات صغيرة
-// (batch=3) زي v1.1.43 عشان كل تشغيلة تاخد وقت أقل. لو حصل CPU error تاني
-// حتى بعد كده، قلّل الرقم ده أكتر (2 أو 1).
-const GENERAL_SYNC_BATCH_SIZE = 3;
-const CACHE_KEY_SHEET_PREFIX = "sheet_v1_";              // + gid — آخر نسخة "مستقرة" لكل شيت لوحده
-const CACHE_KEY_SHEET_CANDIDATE_PREFIX = "sheet_candidate_v1_"; // + gid — آخر قراءة خام (لمقارنة الدورة الجاية بيها)
-const CACHE_KEY_ALLSHEETS_ROTATION = "all_sheets_rotation_v1";  // {index} — مكان الدفعة الجاية في القايمة
-const CACHE_KEY_ALLSHEETS_UNSTABLE = "all_sheets_unstable_v1";  // array — أي GIDs لسه مش مستقرة/متأكدة
-const CACHE_KEY_ALLSHEETS_FPMAP = "all_sheets_fpmap_v1";        // {gid: fingerprint} لكل الشيتات المستقرة حاليًا (لاكتشاف تغيير حقيقي)
-// نفس فكرة CACHE_KEY_MAIN_ERROR — لو refreshCache (الـ mirror العام بتاع
-// getLastSyncMeta، اللي صف "General Sync" في المودال بيقراه) فشلت جوه
-// scheduled()، بتتسجل هنا عشان تظهر بدل ما تختفي في console.error بس.
-const CACHE_KEY_ALLSHEETS_ERROR = "all_sheets_error_v1";
+// v1.1.46: كل الـ 21 شيت الباقيين (Inventory وكل حاجة تانية غير Main/
+// Confirmed by Day/Incentive Merchants) بقوا بيتقروا من Apps Script بس
+// (backend/Code.gs: LAST_SYNC_GIDS + runScheduledSync)، مش من الـ Worker
+// خالص. السبب: Cloudflare Observability أثبتت إن الـ CPU budget الحقيقي
+// لخطة الـ Worker (Free) حوالي 10ms بس لكل تشغيلة — أي شغل حقيقي (fetch +
+// JSON.parse + fingerprint) لأي شيت كان بيعدّيه ويخلي scheduled() يفشل
+// (exceededCpu) في كل تشغيلة تقريبًا، حتى مع batch صغير (3 شيت بس). ده كان
+// السبب الحقيقي وراء إن "General Sync — Worker" كان دايمًا "عالق"/قديم في
+// مودال "Worker Sync Status".
+// Apps Script (Time-driven trigger، مش Cloudflare Worker) معندهوش نفس حد
+// الـ CPU-ms ده (بيتحدد بالوقت الكلي للتنفيذة، دقايق مش milliseconds)،
+// فبقى هو المصدر الوحيد لكل الـ 21 شيت — بيقراهم كلهم مع بعض في تنفيذة
+// واحدة كل 5 دقايق (fetchSheetsPayloadStable_)، يعني كل الشيتات دي بتتحدث
+// مع بعض فعلاً في نفس الوقت، مش متقسمة/متأخرة عن بعض زي لما كانت متقسمة
+// بين مصدرين. راجع تعليق LAST_SYNC_GIDS جوه backend/Code.gs.
+// الـ Worker فضل مسؤول بس عن Main (شيت واحد كبير، قراءة خفيفة نسبيًا لكل
+// طلب) وConfirmed by Day وIncentive Merchants — دول مش جزء من "General
+// Sync" ومعندهمش نفس المشكلة.
 
 // v1.1.40: نفس فكرة PRESENCE_ADMIN_EMAIL/heartbeat بتاعة js/auth.js وbackend/
 // Code.gs، بس اتنقلت هنا بالكامل — بيانات "مين أونلاين" مؤقتة بطبيعتها
@@ -159,143 +126,6 @@ function corsHeaders() {
 
 function jsonResponse(obj, status) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: corsHeaders() });
-}
-
-// v1.1.40 (إعادة كتابة كاملة): بدل ما نستنى Apps Script يقرا الـ 22 شيت
-// ويرجعهملنا مجمّعين (action=getLastSync)، بقينا نقراهم إحنا مباشرة من
-// Google (gviz) بالظبط زي Main/Confirmed by Day/Incentive Merchants —
-// Apps Script بقى مش جزء من مسار القراءة خالص. نفس فكرة الاستقرار
-// المستخدمة مع Main (مقارنة بصمة كل GID مع آخر تشغيلة، فاصل 5 دقايق حقيقي
-// بينهم) بس هنا لكل الـ 22 GID مع بعض: أي GID بصمته اتطابقت مع المرة اللي
-// فاتت بيتحدّث، وأي GID لسه بيتغيّر بنفضل خادمين آخر نسخة مستقرة معروفة
-// بتاعته لحد ما يستقر. الـ timestamp العام (fetchedAt) بيتحدث بس لو أي GID
-// فعليًا اتحدّث — نفس فكرة computeSyncContentHash_ بتاعة Code.gs (عشان
-// الفرونت اند miss يعملش رفرش كامل من غير داعي كل 5 دقايق).
-async function refreshCache(env) {
-  const sheetId = env.SHEET_ID;
-  if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
-  const nowIso = new Date().toISOString();
-  const n = GENERAL_MIRROR_GIDS.length;
-
-  // دفعة صغيرة بس من الدوران — راجع الكومنت فوق GENERAL_SYNC_BATCH_SIZE.
-  const rotationRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_ROTATION);
-  const rotationIndex = rotationRaw ? (JSON.parse(rotationRaw).index || 0) % n : 0;
-  const batchGids = [];
-  for (let i = 0; i < GENERAL_SYNC_BATCH_SIZE && i < n; i++) {
-    batchGids.push(GENERAL_MIRROR_GIDS[(rotationIndex + i) % n]);
-  }
-  await env.SYNC_CACHE.put(
-    CACHE_KEY_ALLSHEETS_ROTATION,
-    JSON.stringify({ index: (rotationIndex + GENERAL_SYNC_BATCH_SIZE) % n })
-  );
-
-  const results = await Promise.all(batchGids.map(async (gid) => {
-    try {
-      const raw = await fetchGvizSheet(sheetId, gid);
-      const inner = raw && raw.table ? raw.table : null;
-      const fp = sheetFingerprint(inner);
-      return { gid, raw, fp, ok: true };
-    } catch (err) {
-      return { gid, ok: false, error: (err && err.message) || String(err) };
-    }
-  }));
-
-  const [unstableRaw, fpMapRaw] = await Promise.all([
-    env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_UNSTABLE),
-    env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_FPMAP),
-  ]);
-  // أول مرة خالص (مفيش أي تشغيلة قبل كده) — كل الـ GIDs unstable لحد ما دورها
-  // يجي ويتأكد.
-  const unstableSet = new Set(unstableRaw ? JSON.parse(unstableRaw) : GENERAL_MIRROR_GIDS);
-  const fpMap = fpMapRaw ? JSON.parse(fpMapRaw) : {};
-  let anyChanged = false;
-
-  for (const r of results) {
-    const candRaw = await env.SYNC_CACHE.get(CACHE_KEY_SHEET_CANDIDATE_PREFIX + r.gid);
-    const cand = candRaw ? JSON.parse(candRaw) : null;
-    if (!r.ok) {
-      unstableSet.add(r.gid);
-      continue;
-    }
-    await env.SYNC_CACHE.put(CACHE_KEY_SHEET_CANDIDATE_PREFIX + r.gid, JSON.stringify({ fingerprint: r.fp, fetchedAt: nowIso }));
-    if (r.fp !== null && cand && cand.fingerprint === r.fp) {
-      // البصمة اتطابقت مع آخر مرة الشيت ده اتقرا فيها (دورة كاملة قبل
-      // كده) — مستقر، نخدّمه.
-      await env.SYNC_CACHE.put(CACHE_KEY_SHEET_PREFIX + r.gid, JSON.stringify(r.raw));
-      unstableSet.delete(r.gid);
-      if (fpMap[r.gid] !== r.fp) {
-        anyChanged = true;
-        fpMap[r.gid] = r.fp;
-      }
-    } else {
-      // لسه بيتغيّر (أو أول قراءة خالص لهذا الـ GID) — نفضل مستخدمين آخر
-      // نسخة مستقرة معروفة (لو موجودة أصلاً في CACHE_KEY_SHEET_PREFIX) لحد
-      // ما يستقر في دورة جاية.
-      unstableSet.add(r.gid);
-    }
-  }
-
-  await Promise.all([
-    env.SYNC_CACHE.put(CACHE_KEY_ALLSHEETS_UNSTABLE, JSON.stringify(Array.from(unstableSet))),
-    env.SYNC_CACHE.put(CACHE_KEY_ALLSHEETS_FPMAP, JSON.stringify(fpMap)),
-  ]);
-
-  // منحدّثش fetchedAt العام غير لو حصل تغيير حقيقي (شيت استقرّ على بصمة
-  // جديدة) — عشان lastSyncMetaPollTick بتاع الفرونت اند ميعملش رفرش كامل من
-  // غير داعي.
-  const prevMetaRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
-  const prevMeta = prevMetaRaw ? JSON.parse(prevMetaRaw) : null;
-  const effectiveFetchedAt = anyChanged || !prevMeta ? nowIso : prevMeta.fetchedAt;
-  const unstableGids = Array.from(unstableSet);
-  const metaJson = { success: true, fetchedAt: effectiveFetchedAt, unstableGids };
-  await env.SYNC_CACHE.put(CACHE_KEY_META, JSON.stringify(metaJson));
-  return metaJson;
-}
-
-// v1.1.43: كل شيت بقى متخزن لوحده (CACHE_KEY_SHEET_PREFIX+gid) بدل blob
-// واحد ضخم — فبنجمّعهم هنا وقت الطلب بس (لما يوزر فعلاً يفتح/يعمل رفرش
-// للداشبورد، مش كل 5 دقايق زي الكتابة). بنلزق كل قيمة KV (JSON صالح
-// أصلاً) جوه نص الرد يدويًا من غير JSON.parse/stringify للداتا الضخمة —
-// أرخص بكتير من تحليل عشرات الآلاف من الصفوف تاني وهي أصلاً متخزنة صح.
-async function handleGetLastSync(env) {
-  try {
-    const metaRaw = await env.SYNC_CACHE.get(CACHE_KEY_META);
-    if (!metaRaw) {
-      // لسه مفيش ولا دورة واحدة خلصت (أول تشغيلة خالص للـ Worker) — بنرجع
-      // رد فاضي بدل ما نحاول نسحب الـ 20 شيت مع بعض لايف (ده بالظبط اللي
-      // كان بيسبب "Failed to fetch"/CPU limit). الفرونت اند عنده fallback
-      // مباشر لـ gviz لأي GID مش موجود.
-      return jsonResponse({ success: true, fetchedAt: null, sheets: {}, unstableGids: GENERAL_MIRROR_GIDS });
-    }
-    const meta = JSON.parse(metaRaw);
-    const rawEntries = await Promise.all(GENERAL_MIRROR_GIDS.map(async (gid) => {
-      const raw = await env.SYNC_CACHE.get(CACHE_KEY_SHEET_PREFIX + gid);
-      return raw ? [gid, raw] : null;
-    }));
-    const sheetsJson = "{" + rawEntries.filter(Boolean).map(([gid, raw]) => JSON.stringify(gid) + ":" + raw).join(",") + "}";
-    const body = '{"success":true,"fetchedAt":' + JSON.stringify(meta.fetchedAt || null) +
-      ',"sheets":' + sheetsJson +
-      ',"unstableGids":' + JSON.stringify(meta.unstableGids || []) + "}";
-    return new Response(body, { headers: corsHeaders() });
-  } catch (err) {
-    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
-  }
-}
-
-async function handleGetLastSyncMeta(env) {
-  try {
-    let cached = await env.SYNC_CACHE.get(CACHE_KEY_META);
-    if (!cached) {
-      await refreshCache(env);
-      cached = await env.SYNC_CACHE.get(CACHE_KEY_META);
-    }
-    const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_ERROR);
-    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
-    const parsed = cached ? JSON.parse(cached) : { success: false, message: "No cache yet" };
-    return jsonResponse({ ...parsed, lastError });
-  } catch (err) {
-    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
-  }
 }
 
 // بيقرا شيت واحد مباشرة من Google Sheets (gviz) — نفس بالظبط الطريقة
@@ -474,21 +304,16 @@ async function handleGetMain(env) {
   }
 }
 
-// v1.1.42: كان بيستنى الأربع تحديثات مع بعض (Main + Confirmed by Day +
-// Incentive Merchants + الـ General Sync بتاع الـ 22 شيت) قبل ما يرد —
-// قراءة وتحليل 22 شيت (بعضهم عشرات الآلاف من الصفوف، زي Beginning Inventory)
-// فوق Main (34 ألف صف) في نفس الـ request كانت بتعدّي حدود تنفيذ الـ Worker
-// (CPU/duration)، فالتنفيذ كان بيتقفل فجأة من غير ما يرجع أي رد خالص — ده
-// اللي المتصفح بيشوفه كـ "Failed to fetch" (نفس بالظبط سبب مشكلة getMainMeta
-// القديمة، راجع تعليق refreshMainCache فوق). الحل: منستناش الـ General Sync
-// (الأتقل بكتير، 22 شيت) قبل ما نرد — بنبعته لـ ctx.waitUntil() يشتغل في
-// الخلفية بعد ما نرجع رد سريع، والتلاتة التانيين (كل واحد شيت واحد بس، أخف
-// بكتير) بيفضلوا متستناة عادي عشان يبانوا في الرد على طول.
+// v1.1.46: بعد ما شلنا الـ General Sync (21 شيت) من الـ Worker خالص (بقت
+// على Apps Script بس، راجع الكومنت فوق LAST_SYNC_GIDS/scheduled() تحت)،
+// forceRefresh بقى بيحدّث بس التلاتة اللي لسه على الـ Worker: Main +
+// Confirmed by Day + Incentive Merchants — التلاتة دول خفيفين بما يكفي إنهم
+// يتستنوا مع بعض في نفس الرد من غير أي مشكلة CPU.
 //
 // بوابة بسيطة بإيميل الـ Manager (نفس فكرة "Worker Sync Status" في الفرونت
 // اند). المهم: ده مش bypass لشرط الاستقرار — لسه بيمر بنفس منطق المقارنة
-// بين بصمتين متتاليتين جوه refreshMainCache/refreshCache بالظبط، بس بيخلي
-// "المتتاليتين" تحصل دلوقتي بدل ما تستنى 5 دقايق.
+// بين بصمتين متتاليتين جوه refreshMainCache بالظبط، بس بيخلي "المتتاليتين"
+// تحصل دلوقتي بدل ما تستنى 5 دقايق.
 async function handleForceRefresh(request, env, ctx) {
   const url = new URL(request.url);
   const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
@@ -502,37 +327,11 @@ async function handleForceRefresh(request, env, ctx) {
       refreshIncentiveMerchantsCache(env),
     ]);
 
-    // General Sync (22 شيت) بتشتغل في الخلفية بعد الرد — مش قبله. نسجّل
-    // نجاحها/فشلها في CACHE_KEY_ALLSHEETS_ERROR زي scheduled() بالظبط عشان
-    // تظهر في المودال حتى لو فشلت في الخلفية.
-    const generalSyncPromise = refreshCache(env).then(
-      () => env.SYNC_CACHE.delete(CACHE_KEY_ALLSHEETS_ERROR).catch(() => {}),
-      (err) => {
-        console.error("[forceRefresh general sync] failed:", err && err.message);
-        return env.SYNC_CACHE.put(
-          CACHE_KEY_ALLSHEETS_ERROR,
-          JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
-        ).catch(() => {});
-      }
-    );
-    if (ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(generalSyncPromise);
-    } else {
-      // fallback نادر (لو ctx مش متاح لأي سبب) — لسه أحسن من قفل الرد كله
-      generalSyncPromise.catch(() => {});
-    }
-
-    // منرجعش الجداول الكاملة هنا (ممكن تبقى عشرات الـ MB) — بس ملخص خفيف
-    // يورّي حصل إيه، الفرونت اند هيعمل getMainMeta/getConfirmedByDay/
-    // getIncentiveMerchants/getLastSyncMeta عادي بعد كده عشان يجيب التفاصيل
-    // الكاملة. الـ General Sync (lastSync) بيفضل شغال في الخلفية وقت ما
-    // بيوصل الرد ده — النتيجة بتظهر في المودال بعد كام ثانية، مش فورًا.
     return jsonResponse({
       success: true,
       main: { stable: !!main.stable, fetchedAt: main.fetchedAt || null, skippedReparse: !!main.skippedReparse },
       confirmedByDay: { fetchedAt: confirmedByDay.fetchedAt || null },
       incentiveMerchants: { fetchedAt: incentiveMerchants.fetchedAt || null },
-      lastSync: { started: true },
     });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
@@ -639,8 +438,6 @@ export default {
     const url = new URL(request.url);
     const action = url.searchParams.get("action");
 
-    if (action === "getLastSync") return handleGetLastSync(env);
-    if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
     if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
     if (action === "getMain") return handleGetMain(env);
@@ -653,29 +450,20 @@ export default {
       {
         success: false,
         message:
-          "Unknown action. This worker only serves getLastSync/getLastSyncMeta/getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta/forceRefresh/heartbeat/getOnlineUsers — every other action (login, backup, computed publish) still goes directly to Apps Script.",
+          "Unknown action. This worker only serves getConfirmedByDay/getIncentiveMerchants/getMain/getMainMeta/forceRefresh/heartbeat/getOnlineUsers — the general sheet sync (getLastSync/getLastSyncMeta) now goes directly to Apps Script, and every other action (login, backup, computed publish) still goes directly to Apps Script too.",
       },
       400
     );
   },
 
   // Cron Trigger (كل 5 دقايق — راجع wrangler.toml) — بيسحب نسخة جديدة من
-  // Apps Script ويخزّنها، من غير أي يوزر مستني الرد ده. لو فشلت المحاولة دي
-  // (Apps Script واقف وقتها)، آخر نسخة كانت متخزنة تفضل زي ما هي وتتخدم
-  // لليوزرز عادي لحد المحاولة الناجحة اللي بعدها.
+  // الشيتات اللي لسه على الـ Worker (Main/Confirmed by Day/Incentive
+  // Merchants بس، v1.1.46) ويخزّنها، من غير أي يوزر مستني الرد ده. لو فشلت
+  // المحاولة دي، آخر نسخة كانت متخزنة تفضل زي ما هي وتتخدم لليوزرز عادي لحد
+  // المحاولة الناجحة اللي بعدها.
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       Promise.all([
-        refreshCache(env).then(
-          () => env.SYNC_CACHE.delete(CACHE_KEY_ALLSHEETS_ERROR).catch(() => {}),
-          (err) => {
-            console.error("[scheduled refresh] failed (will retry next cron tick):", err && err.message);
-            return env.SYNC_CACHE.put(
-              CACHE_KEY_ALLSHEETS_ERROR,
-              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
-            ).catch(() => {});
-          }
-        ),
         refreshConfirmedByDayCache(env).then(
           () => env.SYNC_CACHE.delete(CACHE_KEY_CONFIRMED_BY_DAY_ERROR).catch(() => {}),
           (err) => {
