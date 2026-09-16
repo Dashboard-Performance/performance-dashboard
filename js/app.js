@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.38";
+const APP_VERSION = "1.1.39";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -716,6 +716,11 @@ const SYNC_STATUS_TARGETS = [
   { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true },
   { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay" },
   { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants" },
+  // v1.1.39: باقي الـ ~19 شيت (من ضمنهم Inventory) بتعتمد على المسار ده —
+  // مرآة الـ Worker لـ getLastSync بتاع Apps Script (مش بتتقرا من الـ Worker
+  // مباشرة زي التلاتة فوق). لو الصف ده مش بيتحرك، يبقى المشكلة في
+  // runScheduledSync بتاع الاب اسكربت نفسه أو في الـ mirror ده.
+  { key: "lastSync", label: "General Sync (Inventory + ~19 sheet تانيين)", action: "getLastSyncMeta", metaOnly: true },
 ];
 
 function syncStatusTimeAgo(iso) {
@@ -743,11 +748,14 @@ async function fetchOneSyncStatus(target) {
       clearTimeout(timer);
     }
     if (!json || !json.success) return { ...target, ok: false, error: (json && json.message) || "unknown error" };
-    // getMainMeta بيرجع rowCount جاهز مباشرة. أما الأكشنز التقيلة (getConfirmedByDay/
-    // getIncentiveMerchants) بترجع الشكل: { success, fetchedAt, stable, table: <gviz
-    // payload كامل> } وجوه الـ gviz payload نفسه فيه .table.rows/.table.cols (تعشيش
-    // مزدوج مقصود).
-    const rowCount = target.lightweight
+    // getMainMeta بيرجع rowCount جاهز مباشرة. getLastSyncMeta (metaOnly)
+    // مفهوش rowCount خالص (بيرجع unstableGids بس). أما الأكشنز التقيلة
+    // (getConfirmedByDay/getIncentiveMerchants) بترجع الشكل: { success,
+    // fetchedAt, stable, table: <gviz payload كامل> } وجوه الـ gviz payload
+    // نفسه فيه .table.rows/.table.cols (تعشيش مزدوج مقصود).
+    const rowCount = target.metaOnly
+      ? null
+      : target.lightweight
       ? (json.rowCount === undefined ? null : json.rowCount)
       : (json.table && json.table.table && Array.isArray(json.table.table.rows) ? json.table.table.rows.length : null);
     return {
@@ -758,6 +766,7 @@ async function fetchOneSyncStatus(target) {
       rowCount,
       lastError: json.lastError || null,
       lastAttempt: json.lastAttempt || null,
+      unstableGids: json.unstableGids || null,
     };
   } catch (err) {
     return { ...target, ok: false, error: (err && err.message) || String(err) };
@@ -789,7 +798,7 @@ function renderSyncStatusRow(r) {
     </div>
     <div style="display:flex;justify-content:space-between;color:#a1a1aa;font-size:11px;font-family:'JetBrains Mono',monospace;margin-top:4px;">
       <span>Last stable snapshot: ${escapeHtml(syncStatusTimeAgo(r.fetchedAt))}</span>
-      <span>Rows: ${r.rowCount === null ? "—" : fmtInt.format(r.rowCount)}</span>
+      <span>${r.metaOnly ? (r.unstableGids && r.unstableGids.length ? `Unstable GIDs: ${r.unstableGids.length}` : "All stable") : `Rows: ${r.rowCount === null ? "—" : fmtInt.format(r.rowCount)}`}</span>
     </div>
     ${r.lastAttempt ? `
     <div style="display:flex;justify-content:space-between;color:#71717a;font-size:10px;font-family:'JetBrains Mono',monospace;margin-top:2px;">

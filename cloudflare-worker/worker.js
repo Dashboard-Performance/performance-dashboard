@@ -327,19 +327,30 @@ async function handleForceRefresh(request, env) {
     return jsonResponse({ success: false, message: "Not authorized." }, 403);
   }
   try {
-    const [main, confirmedByDay, incentiveMerchants] = await Promise.all([
+    // v1.1.39: ضفنا refreshCache هنا كمان — ده الـ mirror العام بتاع getLastSync
+    // (الـ ~19 شيت الباقيين اللي بيتقروا من Apps Script مش من الـ Worker
+    // مباشرة، زي Inventory). قبل كده الزرار ده كان بيحدّث Main/Confirmed by
+    // Day/Incentive Merchants بس، فلو حد عمل ابديت/تشغيل يدوي لـ
+    // runScheduledSync في الاب اسكربت، كان لازم يستنى لحد 5 دقايق (الـ cron
+    // التلقائي بتاع الـ Worker) قبل ما يبان في الداشبورد حتى لو دوس Refresh
+    // يدوي — لأن الـ Refresh اليدوي بيقرا من كاش الـ Worker، مش من الاب
+    // اسكربت مباشرة.
+    const [main, confirmedByDay, incentiveMerchants, lastSync] = await Promise.all([
       refreshMainCache(env),
       refreshConfirmedByDayCache(env),
       refreshIncentiveMerchantsCache(env),
+      refreshCache(env).catch((err) => ({ success: false, message: (err && err.message) || String(err) })),
     ]);
     // منرجعش الجداول الكاملة هنا (ممكن تبقى عشرات الـ MB) — بس ملخص خفيف
     // يورّي حصل إيه، الفرونت اند هيعمل getMainMeta/getConfirmedByDay/
-    // getIncentiveMerchants عادي بعد كده عشان يجيب التفاصيل الكاملة.
+    // getIncentiveMerchants/getLastSyncMeta عادي بعد كده عشان يجيب التفاصيل
+    // الكاملة.
     return jsonResponse({
       success: true,
       main: { stable: !!main.stable, fetchedAt: main.fetchedAt || null, skippedReparse: !!main.skippedReparse },
       confirmedByDay: { fetchedAt: confirmedByDay.fetchedAt || null },
       incentiveMerchants: { fetchedAt: incentiveMerchants.fetchedAt || null },
+      lastSync: { success: !!lastSync.success, fetchedAt: lastSync.fetchedAt || null, message: lastSync.message || null },
     });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
