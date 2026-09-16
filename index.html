@@ -3144,10 +3144,10 @@
   <div id="syncStatusModal" class="modal hidden">
     <div class="modal-content" style="max-width:600px;">
       <h3>⚙️ Worker Sync Status</h3>
-      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">حالة قراءة الشيتات من Cloudflare Worker مباشرة (Main / Confirmed by Day / Incentive Merchants).</p>
+      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">Live sheet-read status straight from the Cloudflare Worker (Main / Confirmed by Day / Incentive Merchants / General Sync).</p>
       <div id="syncStatusBody" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;"></div>
       <div class="modal-actions">
-        <button id="syncStatusForceRefresh" class="btn btn-outline" title="بيسحب نسخة جديدة فورًا دلوقتي من الشيتات الثلاثة، بدل ما يستنى الـ cron التلقائي (كل 5 دقايق)">⚡ Force Refresh Now</button>
+        <button id="syncStatusForceRefresh" class="btn btn-outline" title="Pulls a fresh snapshot right now instead of waiting for the automatic cron (every 5 minutes)">⚡ Force Refresh Now</button>
         <button id="syncStatusRefresh" class="btn btn-outline">Refresh</button>
         <button id="syncStatusClose" class="btn btn-primary">Close</button>
       </div>

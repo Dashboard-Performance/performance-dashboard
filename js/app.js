@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.40";
+const APP_VERSION = "1.1.41";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -720,7 +720,7 @@ const SYNC_STATUS_TARGETS = [
   // مرآة الـ Worker لـ getLastSync بتاع Apps Script (مش بتتقرا من الـ Worker
   // مباشرة زي التلاتة فوق). لو الصف ده مش بيتحرك، يبقى المشكلة في
   // runScheduledSync بتاع الاب اسكربت نفسه أو في الـ mirror ده.
-  { key: "lastSync", label: "General Sync (Inventory + ~19 sheet تانيين)", action: "getLastSyncMeta", metaOnly: true },
+  { key: "lastSync", label: "General Sync (Inventory + ~19 other sheets)", action: "getLastSyncMeta", metaOnly: true },
 ];
 
 function syncStatusTimeAgo(iso) {

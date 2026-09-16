@@ -45,12 +45,19 @@ const CACHE_KEY_META = "last_sync_meta_v1";
 // يوزر بيتخدم من الـ KV Cache ده فورًا.
 const CACHE_KEY_CONFIRMED_BY_DAY = "confirmed_by_day_v1";
 const CONFIRMED_BY_DAY_GID = "964398740";
+// بطلب صريح ("ليه مش بيوريني إنه فشل؟"): زي CACHE_KEY_MAIN_ERROR تحت بالظبط —
+// لو الـ cron تاع الشيت ده فشل، كان بيتسجل بس في console.error (مش ظاهر في
+// "Worker Sync Status" خالص، فكان بيبان زي إن مفيش أي مشكلة، بس التوقيت
+// بيقدّم من غير سبب واضح). دلوقتي بيتسجل هنا وبيتبعت مع الرد عشان يظهر.
+const CACHE_KEY_CONFIRMED_BY_DAY_ERROR = "confirmed_by_day_error_v1";
 // تاب "Incentive Merchants" (Incentives Tracker) — نفس فكرة Confirmed by Day
 // فوق بالظبط: بيتقرا هنا مباشرة من Google Sheets (gviz)، مستقل تمامًا عن
 // Apps Script، عشان نتجنب نفس مشكلة الـ Deploy اللي واجهناها مع GID
 // 964398740 قبل كده.
 const CACHE_KEY_INCENTIVE_MERCHANTS = "incentive_merchants_v1";
 const INCENTIVE_MERCHANTS_GID = "1548963809";
+// نفس فكرة CACHE_KEY_CONFIRMED_BY_DAY_ERROR فوق.
+const CACHE_KEY_INCENTIVE_MERCHANTS_ERROR = "incentive_merchants_error_v1";
 // شيت الـ Main (المصدر الأساسي لكل الداشبورد تقريبًا) — بيتقرا هنا مباشرة
 // من Google Sheets (gviz) بدل ما يعتمد بس على نسخة Apps Script المجمّعة
 // (getLastSync). السبب (بطلب صريح): لو اليوزر بيعمل تعديل/لصق داتا في
@@ -114,6 +121,10 @@ const ALL_MIRROR_GIDS = [
   "1548963809",  // INCENTIVE_MERCHANTS_GID (نفس الملاحظة فوق)
 ];
 const CACHE_KEY_ALLSHEETS_CANDIDATE = "all_sheets_candidate_v1";
+// نفس فكرة CACHE_KEY_MAIN_ERROR — لو refreshCache (الـ mirror العام بتاع
+// getLastSyncMeta، اللي صف "General Sync" في المودال بيقراه) فشلت جوه
+// scheduled()، بتتسجل هنا عشان تظهر بدل ما تختفي في console.error بس.
+const CACHE_KEY_ALLSHEETS_ERROR = "all_sheets_error_v1";
 
 // v1.1.40: نفس فكرة PRESENCE_ADMIN_EMAIL/heartbeat بتاعة js/auth.js وbackend/
 // Code.gs، بس اتنقلت هنا بالكامل — بيانات "مين أونلاين" مؤقتة بطبيعتها
@@ -242,7 +253,10 @@ async function handleGetLastSyncMeta(env) {
       await refreshCache(env);
       cached = await env.SYNC_CACHE.get(CACHE_KEY_META);
     }
-    return new Response(cached || JSON.stringify({ success: false, message: "No cache yet" }), { headers: corsHeaders() });
+    const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_ALLSHEETS_ERROR);
+    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
+    const parsed = cached ? JSON.parse(cached) : { success: false, message: "No cache yet" };
+    return jsonResponse({ ...parsed, lastError });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
@@ -299,11 +313,15 @@ async function refreshConfirmedByDayCache(env) {
 async function handleGetConfirmedByDay(env) {
   try {
     let cached = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY);
+    let payload;
     if (!cached) {
-      const fresh = await refreshConfirmedByDayCache(env);
-      return jsonResponse(fresh);
+      payload = await refreshConfirmedByDayCache(env);
+    } else {
+      payload = JSON.parse(cached);
     }
-    return new Response(cached, { headers: corsHeaders() });
+    const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY_ERROR);
+    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
+    return jsonResponse({ ...payload, lastError });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
@@ -321,11 +339,15 @@ async function refreshIncentiveMerchantsCache(env) {
 async function handleGetIncentiveMerchants(env) {
   try {
     let cached = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS);
+    let payload;
     if (!cached) {
-      const fresh = await refreshIncentiveMerchantsCache(env);
-      return jsonResponse(fresh);
+      payload = await refreshIncentiveMerchantsCache(env);
+    } else {
+      payload = JSON.parse(cached);
     }
-    return new Response(cached, { headers: corsHeaders() });
+    const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS_ERROR);
+    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
+    return jsonResponse({ ...payload, lastError });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
@@ -587,15 +609,36 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       Promise.all([
-        refreshCache(env).catch((err) => {
-          console.error("[scheduled refresh] failed (will retry next cron tick):", err && err.message);
-        }),
-        refreshConfirmedByDayCache(env).catch((err) => {
-          console.error("[scheduled refresh confirmedByDay] failed (will retry next cron tick):", err && err.message);
-        }),
-        refreshIncentiveMerchantsCache(env).catch((err) => {
-          console.error("[scheduled refresh incentiveMerchants] failed (will retry next cron tick):", err && err.message);
-        }),
+        refreshCache(env).then(
+          () => env.SYNC_CACHE.delete(CACHE_KEY_ALLSHEETS_ERROR).catch(() => {}),
+          (err) => {
+            console.error("[scheduled refresh] failed (will retry next cron tick):", err && err.message);
+            return env.SYNC_CACHE.put(
+              CACHE_KEY_ALLSHEETS_ERROR,
+              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
+            ).catch(() => {});
+          }
+        ),
+        refreshConfirmedByDayCache(env).then(
+          () => env.SYNC_CACHE.delete(CACHE_KEY_CONFIRMED_BY_DAY_ERROR).catch(() => {}),
+          (err) => {
+            console.error("[scheduled refresh confirmedByDay] failed (will retry next cron tick):", err && err.message);
+            return env.SYNC_CACHE.put(
+              CACHE_KEY_CONFIRMED_BY_DAY_ERROR,
+              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
+            ).catch(() => {});
+          }
+        ),
+        refreshIncentiveMerchantsCache(env).then(
+          () => env.SYNC_CACHE.delete(CACHE_KEY_INCENTIVE_MERCHANTS_ERROR).catch(() => {}),
+          (err) => {
+            console.error("[scheduled refresh incentiveMerchants] failed (will retry next cron tick):", err && err.message);
+            return env.SYNC_CACHE.put(
+              CACHE_KEY_INCENTIVE_MERCHANTS_ERROR,
+              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
+            ).catch(() => {});
+          }
+        ),
         refreshMainCache(env).then(
           () => env.SYNC_CACHE.delete(CACHE_KEY_MAIN_ERROR).catch(() => {}),
           (err) => {
