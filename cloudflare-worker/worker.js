@@ -48,6 +48,9 @@ const CONFIRMED_BY_DAY_GID = "964398740";
 // "Worker Sync Status" خالص، فكان بيبان زي إن مفيش أي مشكلة، بس التوقيت
 // بيقدّم من غير سبب واضح). دلوقتي بيتسجل هنا وبيتبعت مع الرد عشان يظهر.
 const CACHE_KEY_CONFIRMED_BY_DAY_ERROR = "confirmed_by_day_error_v1";
+// v1.1.51: بصمة رخيصة لآخر نسخة اتكتبت فعليًا في CACHE_KEY_CONFIRMED_BY_DAY —
+// راجع الكومنت الكبير فوق refreshConfirmedByDayCache تحت لشرح ليه محتاجينها.
+const CACHE_KEY_CONFIRMED_BY_DAY_META = "confirmed_by_day_meta_v1";
 // تاب "Incentive Merchants" (Incentives Tracker) — نفس فكرة Confirmed by Day
 // فوق بالظبط: بيتقرا هنا مباشرة من Google Sheets (gviz)، مستقل تمامًا عن
 // Apps Script، عشان نتجنب نفس مشكلة الـ Deploy اللي واجهناها مع GID
@@ -56,6 +59,8 @@ const CACHE_KEY_INCENTIVE_MERCHANTS = "incentive_merchants_v1";
 const INCENTIVE_MERCHANTS_GID = "1548963809";
 // نفس فكرة CACHE_KEY_CONFIRMED_BY_DAY_ERROR فوق.
 const CACHE_KEY_INCENTIVE_MERCHANTS_ERROR = "incentive_merchants_error_v1";
+// نفس فكرة CACHE_KEY_CONFIRMED_BY_DAY_META فوق.
+const CACHE_KEY_INCENTIVE_MERCHANTS_META = "incentive_merchants_meta_v1";
 // شيت الـ Main (المصدر الأساسي لكل الداشبورد تقريبًا) — بيتقرا هنا مباشرة
 // من Google Sheets (gviz) بدل ما يعتمد بس على نسخة Apps Script المجمّعة
 // (getLastSync). السبب (بطلب صريح): لو اليوزر بيعمل تعديل/لصق داتا في
@@ -230,13 +235,44 @@ function rawTextFingerprint(text) {
   return out;
 }
 
-async function refreshConfirmedByDayCache(env) {
+// v1.1.51: مشكلة اتكشفت بعد ما رجّعنا الـ Cron لدقيقة واحدة (v1.1.47) +
+// حلينا الـ exceededCpu (v1.1.48): Cloudflare KV عندها حد 1,000 كتابة
+// (write) في اليوم بس على خطة Free. كل تشغيلة cron ناجحة كانت بتكتب في KV
+// حتى لو الداتا نفسها **متغيّرتش خالص** من آخر مرة — يعني شيت مستقر وهادي
+// كان لسه بيتكتب في KV كل دقيقة (1,440 كتابة/يوم بس من الشيت ده، والتلاتة
+// شيتات مع بعض كانوا بيعدوا الـ 1,000 بسرعة جدًا في نص اليوم). لما الـ
+// quota تخلص، أي كتابة تانية في KV (حتى heartbeat بتاع "مين أونلاين") كانت
+// بتفشل بـ exception (Error 1101) — ده سبب ظهور "Online: 0" رغم إن
+// اليوزرز فاتحين فعلاً. وكمان كل تحديث (حتى لو نفس الداتا بالظبط) كان بيغيّر
+// "fetchedAt"، فالفرونت اند (mainMetaPollTick) كان بيعتبرها "نسخة جديدة"
+// ويعمل تحميل كامل لجدول الـ Main (25+ ميجا بايت) وparsing كامل على الـ
+// main thread — وده السبب الحقيقي وراء "بيتجمد كل شوية": كان بيحصل كل
+// دقيقة أو اتنين تقريبًا حتى لو مفيش أي تغيير حقيقي في الداتا.
+//
+// الحل: بصمة "آخر نسخة اتكتبت فعليًا" (META) منفصلة عن أي حاجة بنقارن بيها
+// الاستقرار — لو الداتا الجديدة طابقت آخر نسخة مكتوبة بالفعل، منعملش أي
+// كتابة KV خالص (صفر) ونرجع نفس الـ fetchedAt القديم زي ما هو. الكتابة
+// بتحصل بس أول مرة أو لما الداتا فعلاً تتغيّر — يعني في يوم عادي (الداتا
+// بتتغيّر كذا مرة بس مش كل دقيقة) هتبقى كتابات KV قليلة جدًا، وfetchedAt
+// هيفضل ثابت (بمعنى صحيح: "آخر تحديث حقيقي") لحد ما حاجة تتغيّر فعلاً —
+// وده كمان بيوقف التحميل الكامل المتكرر بتاع الفرونت اند تلقائيًا.
+async function refreshConfirmedByDayCache(env, forceWrite) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
   const rawTable = await fetchGvizSheetRaw(sheetId, CONFIRMED_BY_DAY_GID);
+  const fp = rawTextFingerprint(rawTable);
   const nowIso = new Date().toISOString();
-  const payloadText = '{"success":true,"fetchedAt":"' + nowIso + '","table":' + rawTable + "}";
-  await env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY, payloadText);
+  const metaRaw = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY_META);
+  const meta = metaRaw ? JSON.parse(metaRaw) : null;
+  const payloadText = '{"success":true,"fetchedAt":"' + (meta && !forceWrite && meta.fingerprint === fp ? meta.fetchedAt || nowIso : nowIso) + '","table":' + rawTable + "}";
+  if (!forceWrite && meta && meta.fingerprint === fp) {
+    // نفس الداتا بالظبط زي آخر مرة اتكتبت — صفر كتابات KV (توفير الـ quota).
+    return { success: true, fetchedAt: meta.fetchedAt || nowIso, rawResponseText: payloadText, unchanged: true };
+  }
+  await Promise.all([
+    env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY, payloadText),
+    env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY_META, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso })),
+  ]);
   return { success: true, fetchedAt: nowIso, rawResponseText: payloadText };
 }
 
@@ -244,7 +280,7 @@ async function handleGetConfirmedByDay(env) {
   try {
     let cachedText = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY);
     if (!cachedText) {
-      const fresh = await refreshConfirmedByDayCache(env);
+      const fresh = await refreshConfirmedByDayCache(env, true);
       cachedText = fresh.rawResponseText;
     }
     const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY_ERROR);
@@ -259,27 +295,39 @@ async function handleGetConfirmedByDay(env) {
   }
 }
 
-async function refreshIncentiveMerchantsCache(env) {
+// نفس فكرة refreshConfirmedByDayCache فوق بالظبط (raw text + بصمة + دمج
+// كتابات KV) — قبل كده كان بيستخدم fetchGvizSheet (parsed) ويكتب في KV كل
+// تشغيلة cron من غير أي مقارنة، وده كان بيساهم في استهلاك الـ 1,000
+// كتابة/يوم برضو.
+async function refreshIncentiveMerchantsCache(env, forceWrite) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
-  const table = await fetchGvizSheet(sheetId, INCENTIVE_MERCHANTS_GID);
-  const payload = { success: true, fetchedAt: new Date().toISOString(), table };
-  await env.SYNC_CACHE.put(CACHE_KEY_INCENTIVE_MERCHANTS, JSON.stringify(payload));
-  return payload;
+  const rawTable = await fetchGvizSheetRaw(sheetId, INCENTIVE_MERCHANTS_GID);
+  const fp = rawTextFingerprint(rawTable);
+  const nowIso = new Date().toISOString();
+  const metaRaw = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS_META);
+  const meta = metaRaw ? JSON.parse(metaRaw) : null;
+  const payloadText = '{"success":true,"fetchedAt":"' + (meta && !forceWrite && meta.fingerprint === fp ? meta.fetchedAt || nowIso : nowIso) + '","table":' + rawTable + "}";
+  if (!forceWrite && meta && meta.fingerprint === fp) {
+    return { success: true, fetchedAt: meta.fetchedAt || nowIso, rawResponseText: payloadText, unchanged: true };
+  }
+  await Promise.all([
+    env.SYNC_CACHE.put(CACHE_KEY_INCENTIVE_MERCHANTS, payloadText),
+    env.SYNC_CACHE.put(CACHE_KEY_INCENTIVE_MERCHANTS_META, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso })),
+  ]);
+  return { success: true, fetchedAt: nowIso, rawResponseText: payloadText };
 }
 
 async function handleGetIncentiveMerchants(env) {
   try {
-    let cached = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS);
-    let payload;
-    if (!cached) {
-      payload = await refreshIncentiveMerchantsCache(env);
-    } else {
-      payload = JSON.parse(cached);
+    let cachedText = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS);
+    if (!cachedText) {
+      const fresh = await refreshIncentiveMerchantsCache(env, true);
+      cachedText = fresh.rawResponseText;
     }
     const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_INCENTIVE_MERCHANTS_ERROR);
-    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
-    return jsonResponse({ ...payload, lastError });
+    const finalText = appendJsonField(cachedText, "lastError", errorRaw || "null");
+    return new Response(finalText, { headers: corsHeaders() });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
@@ -305,7 +353,7 @@ async function gzipText(text) {
   return new Response(cs.readable).arrayBuffer();
 }
 
-async function refreshMainCache(env) {
+async function refreshMainCache(env, forceWrite) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
   // v1.1.48: بنقرا النص الخام بس (من غير JSON.parse) — ده كان السبب
@@ -320,27 +368,34 @@ async function refreshMainCache(env) {
   const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE);
   const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
 
-  // نسجّل القراءة الخام دي كـ "مرشح" للمرة الجاية، في كل الأحوال — عشان
-  // التشغيلة اللي بعدها تقارن نفسها بيها. الكائن المخزن هنا صغير جدًا
-  // (بصمة نصية + رقمين)، مش الجدول الضخم نفسه، فـ JSON.parse/stringify ليه
-  // رخيص جدًا.
-  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount }));
+  // v1.1.51: لو نفس البصمة دي اتكتبت فعلاً قبل كده في CACHE_KEY_MAIN (علامة
+  // written:true)، يبقى الداتا لسه زي ما هي من آخر تحديث حقيقي — صفر
+  // كتابات KV خالص (راجع الكومنت الكبير فوق refreshConfirmedByDayCache
+  // لشرح كامل ليه ده مهم جدًا لخطة Cloudflare Free).
+  if (!forceWrite && fp !== null && candidate && candidate.fingerprint === fp && candidate.written) {
+    return { success: true, fetchedAt: candidate.fetchedAt || nowIso, stable: true, unchanged: true };
+  }
 
   if (fp !== null && candidate && candidate.fingerprint === fp) {
-    // البصمة اتطابقت مع آخر تشغيلة — الشيت مستقر، مفيش تعديل شغال عليه
-    // دلوقتي. آمن نخدّمه لليوزرز. بنبني نص الرد بـ concatenation مباشرة —
-    // من غير JSON.stringify لأي object فيه الجدول الضخم.
+    // البصمة اتطابقت مع آخر تشغيلة (وده أول مرة تتطابق، لسه ماتكتبتش) —
+    // الشيت مستقر، مفيش تعديل شغال عليه دلوقتي. آمن نخدّمه لليوزرز. بنبني
+    // نص الرد بـ concatenation مباشرة — من غير JSON.stringify لأي object
+    // فيه الجدول الضخم.
     const payloadText = '{"success":true,"fetchedAt":"' + nowIso + '","stable":true,"table":' + rawTable + "}";
     const compressed = await gzipText(payloadText);
     await Promise.all([
       env.SYNC_CACHE.put(CACHE_KEY_MAIN, compressed),
       env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: true, fetchedAt: nowIso, rowCount })),
+      env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount, written: true })),
     ]);
     return { success: true, fetchedAt: nowIso, stable: true, rawResponseText: payloadText };
   }
 
-  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي، ومفيش أي
-  // إعادة تخزين لنسخة قديمة (ولا حتى قراءتها) — أرخص حالة ممكنة.
+  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — نسجّل القراءة الخام دي كـ "مرشح"
+  // للمرة الجاية بس (written:false)، عشان التشغيلة اللي بعدها تقارن نفسها
+  // بيه، من غير أي كتابة لـ CACHE_KEY_MAIN نفسه.
+  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount, written: false }));
+
   const hasExisting = await env.SYNC_CACHE.get(CACHE_KEY_MAIN).then((v) => !!v);
   if (hasExisting) return { success: true, stable: false, skippedReparse: true };
 
@@ -363,7 +418,7 @@ async function handleGetMain(env) {
     // gzip عشان يفك الضغط لوحده تلقائيًا (نفس آلية أي رد HTTP مضغوط عادي).
     let cachedBuf = await env.SYNC_CACHE.get(CACHE_KEY_MAIN, { type: "arrayBuffer" });
     if (!cachedBuf) {
-      const fresh = await refreshMainCache(env);
+      const fresh = await refreshMainCache(env, true);
       if (fresh && fresh.rawResponseText) {
         return new Response(fresh.rawResponseText, { headers: corsHeaders() });
       }
