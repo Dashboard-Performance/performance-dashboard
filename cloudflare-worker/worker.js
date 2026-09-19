@@ -371,7 +371,19 @@ async function handleGetMain(env) {
     }
     const headers = corsHeaders();
     headers["Content-Encoding"] = "gzip";
-    return new Response(cachedBuf, { headers });
+    // v1.1.49 (تصحيح): من غير encodeBody:"manual"، Cloudflare's edge بتحاول
+    // كمان تضغط الرد بتاعنا (لأنه Content-Type: application/json و
+    // Accept-Encoding: gzip من المتصفح)، فبيحصل ضغط مزدوج — bytes اتضغطت
+    // مرتين. المتصفح بيفك مرة واحدة بس (تلقائي حسب هيدر Content-Encoding)
+    // ويفضل معاه نص مضغوط لسه (طلعت شكلها بايتس عشوائية مش JSON). ده اللي
+    // كان بيحصل فعليًا وشفناه لما فتحنا الرابط مباشرة. الحل: encodeBody:
+    // "manual" بيقول لـ Cloudflare "الـ body ده متضغوط بالفعل زي ما الهيدر
+    // بيقول، متلمسوش" — پاس-ثرو خام من غير أي تعديل. وبرضو بنضيف
+    // "no-transform" لهيدر Cache-Control — من غيرها، بعض نقاط Cloudflare
+    // (edge POPs) بتتجاهل encodeBody:"manual" وتعيد ضغط الرد تاني برضو
+    // (مشكلة موثقة رسميًا من Cloudflare نفسها).
+    headers["Cache-Control"] = "no-store, no-transform";
+    return new Response(cachedBuf, { headers, encodeBody: "manual" });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
