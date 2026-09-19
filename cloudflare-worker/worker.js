@@ -167,27 +167,93 @@ async function fetchGvizSheet(sheetId, gid) {
   return parsed;
 }
 
+// v1.1.48: نسخة "خام" من fetchGvizSheet فوق — بترجع نص الـ JSON بعد فك
+// setResponse() وتصحيح Date(...) بس، من غير JSON.parse خالص. السبب: اكتشفنا
+// (Observability) إن الـ exceededCpu مكنش بس بسبب الـ 21 general-mirror
+// (اتحلت في v1.1.46) — كان لسه بيحصل لـ Main (35 ألف صف) وConfirmed by Day
+// (~640KB) لوحدهم، لأن JSON.parse لجدول بالحجم ده بياخد CPU حقيقي (بعكس
+// fetch() نفسه، اللي وقت الانتظار بتاعه مبيتحسبش على budget الـ Worker
+// خالص). فبدل ما نحوّل النص لـ object ضخم في الميموري بس عشان نخزّنه تاني
+// كـ نص (JSON.stringify)، بنفضل نص طول الوقت: تخزين، فحص خطأ، بصمة تغيّر،
+// وحتى تقدير عدد الصفوف — كل ده بعمليات نص رخيصة (indexOf/regex/slice) بدل
+// تحويل كامل للبيانات.
+async function fetchGvizSheetRaw(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&tqx=out:json`;
+  const res = await fetch(url, { cf: { cacheTtl: 0 } });
+  if (!res.ok) throw new Error(`gviz responded with status ${res.status}`);
+  const text = await res.text();
+  const match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if (!match) throw new Error("Unexpected gviz response shape (sheet/gid not public or wrong id?)");
+  const jsonSafeText = match[1].replace(/"v":Date\(([^)]*)\)/g, (m, inner) => '"v":"Date(' + inner + ')"');
+  // فحص خفيف للخطأ — "status":"error" بيظهر قريب من أول النص دايمًا في رد
+  // gviz، فبنفحص أول 300 حرف بس (indexOf رخيص) بدل JSON.parse كامل.
+  if (jsonSafeText.slice(0, 300).indexOf('"status":"error"') !== -1) {
+    throw new Error("gviz returned status=error for gid " + gid);
+  }
+  return jsonSafeText;
+}
+
+// بيدخل حقل جديد (key:valueJsonText) جوه نص JSON object موجود بالفعل — بإضافة
+// ",\"key\":value" قبل الـ "}" الأخيرة مباشرة. عملية نصية رخيصة جدًا (slice +
+// concat) بدل ما نعمل JSON.parse لكل النص (ممكن يبقى مئات الـ KB) بس عشان
+// نضيف حقل واحد صغير زي lastError.
+function appendJsonField(jsonText, key, valueJsonText) {
+  const trimmed = jsonText.replace(/\s+$/, "");
+  if (trimmed.charAt(trimmed.length - 1) !== "}") return jsonText;
+  return trimmed.slice(0, -1) + ',"' + key + '":' + valueJsonText + "}";
+}
+
+// تقدير رخيص لعدد الصفوف من النص الخام مباشرة (من غير parsing) — كل صف في
+// رد gviz شكله {"c":[...]}، وده مفتاح مش موجود في تعريفات الأعمدة (cols)،
+// فعدّ عدد مرات ظهور "c":[ بيديني عدد الصفوف الفعلي تقريبًا.
+function estimateRowCount(rawText) {
+  const m = rawText.match(/"c":\[/g);
+  return m ? m.length : null;
+}
+
+// بصمة رخيصة جدًا مبنية على النص الخام مباشرة (من غير أي parsing) — بتاخد
+// طول النص + عينات صغيرة (120 حرف) من 6 نقاط موزعة على طول النص. كافية
+// عمليًا لاكتشاف أي تعديل حقيقي في الشيت (أي تغيير في أي مكان هيغيّر الطول
+// أو يقع جوه واحدة من العينات على الأقل في أغلب الحالات)، بنفس فكرة
+// sheetFingerprint القديمة (المبنية على object متحلل) بس من غير تكلفة الـ
+// parsing خالص.
+function rawTextFingerprint(text) {
+  if (!text) return null;
+  const len = text.length;
+  const windowLen = 120;
+  const numSamples = 6;
+  let out = String(len);
+  for (let i = 0; i < numSamples; i++) {
+    const pos = Math.floor((len * i) / numSamples);
+    out += "|" + text.slice(pos, pos + windowLen);
+  }
+  return out;
+}
+
 async function refreshConfirmedByDayCache(env) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
-  const table = await fetchGvizSheet(sheetId, CONFIRMED_BY_DAY_GID);
-  const payload = { success: true, fetchedAt: new Date().toISOString(), table };
-  await env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY, JSON.stringify(payload));
-  return payload;
+  const rawTable = await fetchGvizSheetRaw(sheetId, CONFIRMED_BY_DAY_GID);
+  const nowIso = new Date().toISOString();
+  const payloadText = '{"success":true,"fetchedAt":"' + nowIso + '","table":' + rawTable + "}";
+  await env.SYNC_CACHE.put(CACHE_KEY_CONFIRMED_BY_DAY, payloadText);
+  return { success: true, fetchedAt: nowIso, rawResponseText: payloadText };
 }
 
 async function handleGetConfirmedByDay(env) {
   try {
-    let cached = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY);
-    let payload;
-    if (!cached) {
-      payload = await refreshConfirmedByDayCache(env);
-    } else {
-      payload = JSON.parse(cached);
+    let cachedText = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY);
+    if (!cachedText) {
+      const fresh = await refreshConfirmedByDayCache(env);
+      cachedText = fresh.rawResponseText;
     }
     const errorRaw = await env.SYNC_CACHE.get(CACHE_KEY_CONFIRMED_BY_DAY_ERROR);
-    const lastError = errorRaw ? JSON.parse(errorRaw) : null;
-    return jsonResponse({ ...payload, lastError });
+    // v1.1.48: بنضيف lastError كنص مباشرة جوه الرد الخام (appendJsonField)
+    // بدل JSON.parse(cached) + {...payload, lastError} + jsonResponse — ده
+    // كان بيحصل مع *كل طلب قراءة* من أي يوزر (مش بس كل 5 دقايق زي الـ cron)،
+    // يعني كان أغلى تكلفة CPU فعلية في الملف ده كله.
+    const finalText = appendJsonField(cachedText, "lastError", errorRaw || "null");
+    return new Response(finalText, { headers: corsHeaders() });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
@@ -219,76 +285,53 @@ async function handleGetIncentiveMerchants(env) {
   }
 }
 
-// نفس sheetFingerprint_ في backend/Code.gs بالظبط — بصمة رخيصة (عدد الصفوف
-// + أطوال أول/آخر صف + طول الأعمدة) بدل مقارنة كل خلية بخلية، كافية عمليًا
-// لاكتشاف أي تعديل حقيقي في الشيت من غير ما تبطّئ الـ Worker.
-function sheetFingerprint(table) {
-  if (!table || !table.rows) return null;
-  const rows = table.rows;
-  const n = rows.length;
-  const first = n ? JSON.stringify(rows[0]) : "";
-  const last = n ? JSON.stringify(rows[n - 1]) : "";
-  return n + "|" + first.length + "|" + last.length + "|" + JSON.stringify(table.cols || []).length;
-}
-
 async function refreshMainCache(env) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
-  const table = await fetchGvizSheet(sheetId, MAIN_GID);
-  // ⚠️ تصحيح مهم: fetchGvizSheet بيرجع الـ wrapper الخارجي كامل
-  // ({version,reqId,status,sig,table:{cols,rows}})، مش {cols,rows} مباشرة.
-  // sheetFingerprint (وحساب عدد الصفوف تحت) لازم يشتغلوا على table.table
-  // (المستوى الداخلي الفعلي) — كنا بنمرر الـ wrapper الخارجي غلط، فكانت
-  // sheetFingerprint بترجع null على طول (table.rows مكنش موجود خالص على
-  // الـ wrapper)، يعني الشرط "البصمتين متطابقتين" مستحيل يتحقق أبدًا —
-  // ده كان السبب الحقيقي وراء إنها "مش بتستقر" مهما استنينا أو عملنا
-  // Force Refresh.
-  const innerTable = table && table.table ? table.table : null;
-  const fp = sheetFingerprint(innerTable);
+  // v1.1.48: بنقرا النص الخام بس (من غير JSON.parse) — ده كان السبب
+  // الحقيقي المتبقي وراء exceededCpu بعد ما شلنا الـ 21 general-mirror في
+  // v1.1.46: JSON.parse لجدول Main (35 ألف صف) لوحده كان بياخد وقت CPU أكتر
+  // من الـ ~10ms budget بتاع خطة Cloudflare Free.
+  const rawTable = await fetchGvizSheetRaw(sheetId, MAIN_GID);
+  const fp = rawTextFingerprint(rawTable);
   const nowIso = new Date().toISOString();
+  const rowCount = estimateRowCount(rawTable);
 
   const candidateRaw = await env.SYNC_CACHE.get(CACHE_KEY_MAIN_CANDIDATE);
   const candidate = candidateRaw ? JSON.parse(candidateRaw) : null;
-  const attemptRowCount = innerTable && Array.isArray(innerTable.rows) ? innerTable.rows.length : null;
 
   // نسجّل القراءة الخام دي كـ "مرشح" للمرة الجاية، في كل الأحوال — عشان
-  // التشغيلة اللي بعدها (كل 5 دقايق) تقارن نفسها بيها. rowCount هنا بس
-  // عشان نوريه في getMainMeta كـ "آخر محاولة" حتى لو لسه ماتطابقتش —
-  // عشان توضح إن الـ Worker شغال وبيحاول فعلاً، مش واقف.
-  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount: attemptRowCount }));
+  // التشغيلة اللي بعدها تقارن نفسها بيها. الكائن المخزن هنا صغير جدًا
+  // (بصمة نصية + رقمين)، مش الجدول الضخم نفسه، فـ JSON.parse/stringify ليه
+  // رخيص جدًا.
+  await env.SYNC_CACHE.put(CACHE_KEY_MAIN_CANDIDATE, JSON.stringify({ fingerprint: fp, fetchedAt: nowIso, rowCount }));
 
   if (fp !== null && candidate && candidate.fingerprint === fp) {
-    // البصمة اتطابقت مع آخر تشغيلة (فاصل 5 دقايق حقيقي بينهم) — الشيت
-    // مستقر، مفيش تعديل شغال عليه دلوقتي. آمن نخدّمه لليوزرز.
-    const payload = { success: true, fetchedAt: nowIso, stable: true, table };
-    const rowCount = attemptRowCount;
+    // البصمة اتطابقت مع آخر تشغيلة — الشيت مستقر، مفيش تعديل شغال عليه
+    // دلوقتي. آمن نخدّمه لليوزرز. بنبني نص الرد بـ concatenation مباشرة —
+    // من غير JSON.stringify لأي object فيه الجدول الضخم.
+    const payloadText = '{"success":true,"fetchedAt":"' + nowIso + '","stable":true,"table":' + rawTable + "}";
     await Promise.all([
-      env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(payload)),
+      env.SYNC_CACHE.put(CACHE_KEY_MAIN, payloadText),
       env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: true, fetchedAt: nowIso, rowCount })),
     ]);
-    return payload;
+    return { success: true, fetchedAt: nowIso, stable: true, rawResponseText: payloadText };
   }
 
-  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي. بنفضل
-  // مستخدمين آخر نسخة "مستقرة" معروفة بدل ما ننشر لقطة نص-متغيرة — بس من
-  // غير ما نعمل JSON.parse للنسخة القديمة (اللي ممكن تبقى عشرات الـ MB)
-  // عشان بس نرجعها كـ return value محدش بيستخدمه أصلًا (الكولر الوحيد
-  // اللي بيوصل هنا فعليًا هو scheduled() تحت، وهو مش بيستخدم القيمة
-  // الراجعة خالص) — ده كان سبب حقيقي لتعدي الـ CPU limit وفشل الـ cron
-  // بصمت كل 5 دقايق.
+  // لسه بيتغيّر (أو دي أول تشغيلة خالص) — منستخدمش القراءة دي، ومفيش أي
+  // إعادة تخزين لنسخة قديمة (ولا حتى قراءتها) — أرخص حالة ممكنة.
   const hasExisting = await env.SYNC_CACHE.get(CACHE_KEY_MAIN).then((v) => !!v);
   if (hasExisting) return { success: true, stable: false, skippedReparse: true };
 
   // مفيش أي نسخة مستقرة اتسجلت قبل كده خالص (أول تشغيلة من عمر الـ Worker) —
   // مضطرين نستخدم القراءة دي زي ما هي عشان الداشبورد مايفضلش فاضي، بس
   // بعلامة stable:false توضح إنها لسه ماتأكدتش.
-  const bootstrapPayload = { success: true, fetchedAt: nowIso, stable: false, table };
-  const bootstrapRowCount = attemptRowCount;
+  const bootstrapText = '{"success":true,"fetchedAt":"' + nowIso + '","stable":false,"table":' + rawTable + "}";
   await Promise.all([
-    env.SYNC_CACHE.put(CACHE_KEY_MAIN, JSON.stringify(bootstrapPayload)),
-    env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: false, fetchedAt: nowIso, rowCount: bootstrapRowCount })),
+    env.SYNC_CACHE.put(CACHE_KEY_MAIN, bootstrapText),
+    env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: false, fetchedAt: nowIso, rowCount })),
   ]);
-  return bootstrapPayload;
+  return { success: true, fetchedAt: nowIso, stable: false, rawResponseText: bootstrapText };
 }
 
 async function handleGetMain(env) {
@@ -296,6 +339,9 @@ async function handleGetMain(env) {
     let cached = await env.SYNC_CACHE.get(CACHE_KEY_MAIN);
     if (!cached) {
       const fresh = await refreshMainCache(env);
+      if (fresh && fresh.rawResponseText) {
+        return new Response(fresh.rawResponseText, { headers: corsHeaders() });
+      }
       return jsonResponse(fresh);
     }
     return new Response(cached, { headers: corsHeaders() });
