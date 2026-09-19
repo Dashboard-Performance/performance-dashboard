@@ -285,6 +285,26 @@ async function handleGetIncentiveMerchants(env) {
   }
 }
 
+// v1.1.49: بعد إصلاح exceededCpu (v1.1.48)، ظهرت مشكلة تانية مختلفة تمامًا:
+// KV عنده حد أقصى لحجم القيمة الواحدة 25MB بالظبط (26,214,400 byte)، وجدول
+// Main بقى حجمه كـ نص JSON خام بيتخطى الحد ده (شفناها فعليًا: "KV PUT failed:
+// 413 Value length of 27093643 exceeds limit of 26214400"). الحل: نضغط
+// (gzip) النص قبل ما نخزنه في KV — Cloudflare Workers فيها CompressionStream
+// جاهزة (تنفيذ native سريع جدًا، مش JS عادي، فتكلفتها على CPU budget أقل
+// بكتير من فرق حجمها). وبما إن الـ gzip بتاعتنا بتحصل مرة واحدة بس لما
+// الشيت "يستقر" (نفس شرط الاستقرار القديم)، مش مع كل طلب قراءة، فالتكلفة
+// دي بتتحمل مرة كل تشغيلة ناجحة بس. وكمان بنخدّم النسخة المضغوطة لليوزر
+// مباشرة بهيدر Content-Encoding: gzip — المتصفح بيفك الضغط تلقائيًا فمفيش
+// أي تكلفة فك ضغط على الـ Worker خالص وقت القراءة.
+async function gzipText(text) {
+  const bytes = new TextEncoder().encode(text);
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  return new Response(cs.readable).arrayBuffer();
+}
+
 async function refreshMainCache(env) {
   const sheetId = env.SHEET_ID;
   if (!sheetId) throw new Error("SHEET_ID env var is not configured in wrangler.toml");
@@ -311,8 +331,9 @@ async function refreshMainCache(env) {
     // دلوقتي. آمن نخدّمه لليوزرز. بنبني نص الرد بـ concatenation مباشرة —
     // من غير JSON.stringify لأي object فيه الجدول الضخم.
     const payloadText = '{"success":true,"fetchedAt":"' + nowIso + '","stable":true,"table":' + rawTable + "}";
+    const compressed = await gzipText(payloadText);
     await Promise.all([
-      env.SYNC_CACHE.put(CACHE_KEY_MAIN, payloadText),
+      env.SYNC_CACHE.put(CACHE_KEY_MAIN, compressed),
       env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: true, fetchedAt: nowIso, rowCount })),
     ]);
     return { success: true, fetchedAt: nowIso, stable: true, rawResponseText: payloadText };
@@ -327,8 +348,9 @@ async function refreshMainCache(env) {
   // مضطرين نستخدم القراءة دي زي ما هي عشان الداشبورد مايفضلش فاضي، بس
   // بعلامة stable:false توضح إنها لسه ماتأكدتش.
   const bootstrapText = '{"success":true,"fetchedAt":"' + nowIso + '","stable":false,"table":' + rawTable + "}";
+  const compressedBootstrap = await gzipText(bootstrapText);
   await Promise.all([
-    env.SYNC_CACHE.put(CACHE_KEY_MAIN, bootstrapText),
+    env.SYNC_CACHE.put(CACHE_KEY_MAIN, compressedBootstrap),
     env.SYNC_CACHE.put(CACHE_KEY_MAIN_META, JSON.stringify({ stable: false, fetchedAt: nowIso, rowCount })),
   ]);
   return { success: true, fetchedAt: nowIso, stable: false, rawResponseText: bootstrapText };
@@ -336,15 +358,20 @@ async function refreshMainCache(env) {
 
 async function handleGetMain(env) {
   try {
-    let cached = await env.SYNC_CACHE.get(CACHE_KEY_MAIN);
-    if (!cached) {
+    // v1.1.49: الـ KV بقى مخزن فيه bytes مضغوطة (gzip)، مش نص — لازم نقراها
+    // كـ arrayBuffer، ونرجعها للمتصفح زي ما هي مع هيدر Content-Encoding:
+    // gzip عشان يفك الضغط لوحده تلقائيًا (نفس آلية أي رد HTTP مضغوط عادي).
+    let cachedBuf = await env.SYNC_CACHE.get(CACHE_KEY_MAIN, { type: "arrayBuffer" });
+    if (!cachedBuf) {
       const fresh = await refreshMainCache(env);
       if (fresh && fresh.rawResponseText) {
         return new Response(fresh.rawResponseText, { headers: corsHeaders() });
       }
       return jsonResponse(fresh);
     }
-    return new Response(cached, { headers: corsHeaders() });
+    const headers = corsHeaders();
+    headers["Content-Encoding"] = "gzip";
+    return new Response(cachedBuf, { headers });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
