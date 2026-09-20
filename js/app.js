@@ -1513,10 +1513,9 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   // Top 10 Merchants — نفس فرز/قص renderTop10Merchants() بالظبط (Top 10 بالـ
   // Delivered GMV)، بس من غير أي لمس للـ DOM.
   { section: "performanceMerchant", table: "top10", getRows: () => [...(state.merchantTableData || [])].sort((a, b) => b.deliveredGmv - a.deliveredGmv).slice(0, 10) },
-  // Recommended Tracker — prepareRecommendedTrackerData() بتتنادى أصلاً بس
-  // لو التاب مفتوح (updateDashboard)؛ بننادها هنا يدوي عشان state.recTrackerDataPrepared
-  // يتحسب لايف بغض النظر عن أي تاب مفتوح.
-  { section: "recommendedTracker", table: "main", getRows: () => { prepareRecommendedTrackerData({ sync: false }); return state.recTrackerDataPrepared || []; } },
+  // v1.1.51: Recommended Tracker اتشال من الموقع (التاب + الـ nav) بطلب
+  // صريح — شلنا كمان القراءة/الحساب التلقائي بتاعها هنا (كانت بتتحسب لايف
+  // كل ريفريش حتى لو محدش فاتح التاب، وده كان استهلاك شغل من غير داعي دلوقتي).
   // Performance ACM — prepareAcmTableData(rows) بتتنادى من غير أي شرط أصلاً
   // جوه updateDashboard، فـ state.acmTableData دايمًا محدثة.
   { section: "performanceAcm", table: "main", getRows: () => state.acmTableData || [] },

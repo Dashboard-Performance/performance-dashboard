@@ -19,7 +19,6 @@
       </div>
       <nav class="sidebar-nav">
         <a class="nav-item active" id="navOverview"><span class="nav-icon"></span>Over View</a>
-        <a class="nav-item" id="navRecommendedTracker"><span class="nav-icon"></span>Recommended Tracker</a>
         <div class="nav-dropdown-wrapper">
           <a class="nav-item" id="navAcmToggle">
             <span class="nav-icon"></span>Account Manager
@@ -208,114 +207,12 @@
             </div>
           </section>
         </div>
-        <!-- RECOMMENDED TRACKER (right under Over View) -->
-        <div id="viewRecommendedTracker" class="view-section hidden">
-          <section class="mb-4">
-            <div class="metrics-grid">
-              <div class="metric-card hover-glow">
-                <div class="metric-title">Matches Tracked <span class="icon-box"></span></div>
-                <div class="metric-value" id="rtTotalRows">0</div>
-                <div class="metric-sub text-dim">Product × Merchant</div>
-              </div>
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-blue">Distinct SKUs <span class="icon-box"></span></div>
-                <div class="metric-value text-blue" id="rtTotalSkus">0</div>
-                <div class="metric-sub text-dim">Count Products Tracker</div>
-              </div>
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-orange">Total Current Inventory <span class="icon-box"></span></div>
-                <div class="metric-value text-orange" id="rtTotalInventory">0</div>
-                <div class="metric-sub text-dim">Sum of Current Inventory (Debundle Map)</div>
-              </div>
-              <div class="metric-card hover-glow">
-                <div class="metric-title text-green">Avg Inventory DOH <span class="icon-box"></span></div>
-                <div class="metric-value text-green" id="rtAvgDoh">0</div>
-                <div class="metric-sub text-dim">Stock ÷ Avg Last 3 Days Confirmed (SKU level)</div>
-              </div>
-            </div>
-          </section>
-
-          <section class="table-section mt-4">
-            <div class="panel table-panel hover-glow">
-              <div class="panel-head-modern">
-                <div class="panel-title-wrapper border-purple">
-                  <h2>Recommended Tracker</h2>
-                  <p>Products &amp; Matches — live Starting vs Current</p>
-                </div>
-                <div class="table-controls">
-                  <div class="filter-group section-date-filter" data-section-date="recTracker" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
-                    <input id="startDate_recTracker" type="date" class="date-filter-input" aria-label="Start Date" />
-                    <span class="text-dim" style="padding:0 4px;">→</span>
-                    <input id="endDate_recTracker" type="date" class="date-filter-input" aria-label="End Date" />
-                    <button id="clearDate_recTracker" class="btn btn-outline small hidden" data-clear-date="recTracker">Clear</button>
-                  </div>
-                  <select id="rtAcmFilterSelect" class="filter-select">
-                    <option value="">All ACMs</option>
-                  </select>
-                  <select id="rtFeedbackDateSelect" class="filter-select" title="Pick a date to view that day's feedback, or 'All Feedback' to see every day's column">
-                    <option value="">Feedback: Today</option>
-                    <option value="__ALL__">All Feedback (all dates)</option>
-                  </select>
-                  <input id="searchRecommendedTrackerInput" type="search" placeholder="Search Product, Merchant, ACM or Action..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" style="margin-left:auto;" />
-                </div>
-              </div>
-              <div class="table-responsive">
-                <table class="data-table" id="recommendedTrackerTable">
-                  <thead>
-                    <tr id="rtTableHeaderRow">
-                      <th onclick="sortRecommendedTracker('type')" style="cursor:pointer;" title="Existing tracked match, or a newly detected locked match added automatically.">Type</th>
-                      <th onclick="sortRecommendedTracker('productId')" class="font-mono" style="cursor:pointer;" title="The product's unique ID.">PRODUCT_ID</th>
-                      <th onclick="sortRecommendedTracker('productName')" class="truncate-cell" style="cursor:pointer;" title="The product's name.">PRODUCT_NAME</th>
-                      <th onclick="sortRecommendedTracker('merchantId')" class="font-mono" style="cursor:pointer;" title="The merchant's unique ID.">Merchant ID</th>
-                      <th onclick="sortRecommendedTracker('merchant')" class="truncate-cell" style="cursor:pointer;" title="The merchant's name.">Merchant</th>
-                      <th onclick="sortRecommendedTracker('acm')" style="cursor:pointer;" title="Account manager assigned to this merchant.">ACM</th>
-                      <th onclick="sortRecommendedTracker('stock')" class="num" style="cursor:pointer;" title="Current stock for this SKU, read from the inventory data.">Stock</th>
-                      <th onclick="sortRecommendedTracker('action')" style="cursor:pointer;" title="Recommended action recorded for this match.">Action</th>
-                      <th onclick="sortRecommendedTracker('startingCogs')" class="num" style="cursor:pointer;" title="Cost of goods when this match was first tracked (fixed baseline, does not update).">Starting Cogs</th>
-                      <th onclick="sortRecommendedTracker('merchantStartingAvg')" class="num" style="cursor:pointer;" title="Merchant's average daily placed pieces for this SKU when tracking started (fixed baseline).">Merchant Starting AVG</th>
-                      <th onclick="sortRecommendedTracker('merchantCurrentAvg')" class="num" style="cursor:pointer;" title="Average daily pieces placed by this merchant for this SKU over the last 3 full days.">Merchant Current AVG</th>
-                      <th onclick="sortRecommendedTracker('skuStartingAvg')" class="num" style="cursor:pointer;" title="SKU's average daily placed pieces when tracking started (fixed baseline).">SKU Starting AVG</th>
-                      <th onclick="sortRecommendedTracker('skuCurrentAvg')" class="num" style="cursor:pointer;" title="SKU's average daily placed pieces across all merchants, over the last 3 full days.">SKU Current AVG</th>
-                      <th onclick="sortRecommendedTracker('skuPlacedToday')" class="num" style="cursor:pointer;" title="Pieces placed for this SKU today. No cutoff applied.">SKU Placed today</th>
-                      <th onclick="sortRecommendedTracker('skuPlacedYday')" class="num" style="cursor:pointer;" title="Pieces placed for this SKU yesterday. No cutoff applied.">SKU Placed Yesterday</th>
-                      <th onclick="sortRecommendedTracker('currentInventory')" class="num" style="cursor:pointer;" title="Latest stock figure for this product. No cutoff applied.">Current Inventory</th>
-                      <th onclick="sortRecommendedTracker('currentInventoryDoh')" class="num" style="cursor:pointer;" title="Days of stock on hand: current stock ÷ average daily demand (last 3 days, pooled across this SKU and any bundles containing it).">Current Inventory DOH</th>
-                      <th onclick="sortRecommendedTracker('avgSkuLast3d')" class="num" style="cursor:pointer;" title="Average daily demand over the last 3 days, used to compute DOH.">Avg SKU Last 3D</th>
-                      <th onclick="sortRecommendedTracker('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days so orders have time to finish confirming.">CR%</th>
-                      <th onclick="sortRecommendedTracker('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, excluding the most recent 5 days so orders have time to finish delivering.">DR%</th>
-                      <th onclick="sortRecommendedTracker('ndrPct')" class="num" style="cursor:pointer;" title="Net Delivery Rate = CR% × DR%, carrying both the 2-day and 5-day cutoffs above.">NDR%</th>
-                      <th onclick="sortRecommendedTracker('ppmPerPiece')" class="num" style="cursor:pointer;" title="Profit per piece delivered. Unlike CM3 below, this does not apply any cutoff.">PPM/Piece</th>
-                      <th onclick="sortRecommendedTracker('placedAsp')" class="num" style="cursor:pointer;" title="Average selling price from the last 3 days that had placed orders.">Placed ASP</th>
-                      <th onclick="sortRecommendedTracker('cm3PerMerchant')" class="num" style="cursor:pointer;" title="Contribution margin for this match, excluding the most recent 4 days.">CM3 Per Merchant</th>
-                      <th onclick="sortRecommendedTracker('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, using the same 4-day cutoff as CM3 Per Merchant.">CM3%</th>
-                      <th onclick="sortRecommendedTracker('skuPpm')" class="num" style="cursor:pointer;" title="Price minus cost minus profit for this SKU, read from product/cost data.">Priceing_PPM</th>
-                      <th onclick="sortRecommendedTracker('skuPpmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ the most recent single day's Placed ASP (not a 3-day average).">PPM%</th>
-                      <th onclick="sortRecommendedTracker('lockAllocatedQty')" class="num" style="cursor:pointer;" title="Pieces allocated to this merchant for this SKU under the active stock lock.">Allocated Qty (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('lockUsedQty')" class="num" style="cursor:pointer;" title="Pieces already used from this merchant's allocated lock.">Used Qty (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('lockRemainingPieces')" class="num" style="cursor:pointer;" title="Pieces still available from this merchant's lock allocation.">Remaining Pieces (Merchant)</th>
-                      <th onclick="sortRecommendedTracker('day0')" class="num" style="cursor:pointer;" title="Pieces placed today, from the merchant/SKU daily data.">DAY 0</th>
-                      <th onclick="sortRecommendedTracker('day1')" class="num" style="cursor:pointer;" title="Pieces placed yesterday.">DAY 1</th>
-                      <th onclick="sortRecommendedTracker('day2')" class="num" style="cursor:pointer;" title="Pieces placed 2 days ago.">DAY 2</th>
-                      <th onclick="sortRecommendedTracker('day3')" class="num" style="cursor:pointer;" title="Pieces placed 3 days ago.">DAY 3</th>
-                      <th onclick="sortRecommendedTracker('day4')" class="num" style="cursor:pointer;" title="Pieces placed 4 days ago.">DAY 4</th>
-                      <th onclick="sortRecommendedTracker('day5')" class="num" style="cursor:pointer;" title="Pieces placed 5 days ago.">DAY 5</th>
-                      <th id="rtFeedbackTh" style="min-width: 220px;" title="Account manager's written note for this match, editable for today's date.">Feedback</th>
-                    </tr>
-                  </thead>
-                  <tbody id="recommendedTrackerTableBody"></tbody>
-                </table>
-              </div>
-              <div class="table-footer">
-                <span id="rowCountRecommendedTracker">0 Rows</span>
-                <div class="pager">
-                  <button id="prevPageRecommendedTracker" class="btn btn-outline small">Prev</button>
-                  <span id="pageIndicatorRecommendedTracker">Page 1 of 1</span>
-                  <button id="nextPageRecommendedTracker" class="btn btn-outline small">Next</button>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <!-- RECOMMENDED TRACKER removed from the site (v1.1.51) — nav link and
+             this whole section's markup were deleted per request. The
+             underlying app.js data/render functions were intentionally left
+             in place (harmless dead code once nothing calls switchView on
+             it) since a couple of shared DOH-calculation comments elsewhere
+             reference the same math, to avoid risking unrelated sections. -->
         <!-- INVENTORY SECTION -->
         <div id="viewInventory" class="view-section hidden">
           <section class="table-section">
