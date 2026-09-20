@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.51";
+const APP_VERSION = "1.1.52";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10429,33 +10429,31 @@ function renderWeeklyInventoryTable() {
       const confirmedQty = wiSumConfirmedInRange(invRow.sku, effSaleStart, effSaleEnd);
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
-      // Confirmed From Purchase / Inbound vs Sold % — بقوا بيتحسبوا بنفس
-      // منطق الـ FIFO الحقيقي (wiComputePurchasesDepletion) بالظبط زي بادچ
-      // "Purchases Sold Out On" وPurchase Cohort Tracker، مش بس تقريب من
-      // "Remaining from Beginning" (ده اللي كان بيسبب اختلاف الرقم هنا عن
-      // رقم الـ Cohort Tracker لنفس الفلتر بالظبط).
-      const depletion = wiComputePurchasesDepletion(invRow.sku, effPurchaseStart, inb.qty, { batchEnd: effPurchaseEnd, cutoffTs: saleRange ? saleRange.endTs : undefined });
-      const confirmedFromPurchase = wiSoldFromPurchasesQty(depletion, inb.qty);
+      // v1.1.52: "Confirmed From Purchase" = "Remaining from Beginning" (أي
+      // كونفيرمد حصل بعد ما الـ Beginning Inventory خلص، أيًا كان توقيته
+      // الفعلي). ده بقى المنطق الـ"overall" الوحيد على الجدول ده بالكامل —
+      // اتشال استخدام wiComputePurchasesDepletion (الـ FIFO الحقيقي على
+      // الستوك اليومي) خالص من هنا، بما فيه عمود "Purchases Sold Out On"
+      // (اتحسب تحت من confirmedFromPurchase مباشرة، مش من depletion).
+      const confirmedFromPurchase = remainingFromBeginning;
       const inboundVsSold = inb.qty > 0 ? (confirmedFromPurchase / inb.qty) * 100 : null;
       const meta = (state.weeklyInvSkuMetaMap || new Map()).get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
       return {
         sku: invRow.sku, name: invRow.name || "Unknown",
         category: meta.category, availability: wiGetAvailability(invRow.sku), stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
         beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning,
-        confirmedFromPurchase, inboundVsSold, depletion,
+        confirmedFromPurchase, inboundVsSold,
         _purchaseStartTs: effPurchaseStart, _purchaseEndTs: effPurchaseEnd
       };
     }).filter(Boolean);
   } else {
     if (statusEl) statusEl.textContent = "";
-    // نفس التصحيح فوق، لكن للأسبوع الافتراضي (من غير فلتر): بنحسب الـ
-    // depletion الحقيقي بس للصفوف اللي فعلاً هتتعرض (عندها إنباوند)، مش لكل
-    // أسابيع السنة مقدمًا، عشان الأداء يفضل زي ما هو.
+    // v1.1.52: نفس المنطق فوق للأسبوع الافتراضي (من غير فلتر) — بدون أي
+    // استدعاء لـ wiComputePurchasesDepletion هنا خالص.
     rows = week.rows.filter(r => r.inboundQty > 0).map(r => {
-      const depletion = wiComputePurchasesDepletion(r.sku, week.weekStart, r.inboundQty);
-      const confirmedFromPurchase = wiSoldFromPurchasesQty(depletion, r.inboundQty);
+      const confirmedFromPurchase = r.remainingFromBeginning;
       const inboundVsSold = r.inboundQty > 0 ? (confirmedFromPurchase / r.inboundQty) * 100 : null;
-      return { ...r, availability: wiGetAvailability(r.sku), confirmedFromPurchase, inboundVsSold, depletion };
+      return { ...r, availability: wiGetAvailability(r.sku), confirmedFromPurchase, inboundVsSold };
     });
   }
 
@@ -10464,17 +10462,17 @@ function renderWeeklyInventoryTable() {
   rows = [...rows].sort((a, b) => b.inboundQty - a.inboundQty);
 
   tbody.innerHTML = rows.map(r => {
-    // "المشتريات (Total Purchases) بتاعت الأسبوع ده خلصت إمتى؟" — نفس الـ
-    // depletion المحسوب فوق بالظبط (مفيش إعادة حساب هنا)، عشان البادچ ده
-    // والنسبة/الكمية جنبه يفضلوا متطابقين مع بعض دايمًا.
-    const depletion = r.depletion;
+    // v1.1.52: "Purchases Sold Out On" بقى مبني على نفس المنطق الـ"overall"
+    // بتاع الجدول ده كله (confirmedFromPurchase vs inboundQty) — مش الـ FIFO
+    // الحقيقي على الستوك اليومي زي قبل كده. مفيش تاريخ حقيقي متتبع دلوقتي،
+    // فالبادچ بيوري "Sold out" لما كل الكمية المشتراة اتغطت، أو "Not yet
+    // (X left)" لو لسه فاضل منها.
+    const left = r.inboundQty - r.confirmedFromPurchase;
     let depletionHtml;
-    if (depletion.status === "depleted") {
-      depletionHtml = `<span class="badge-outline red" title="خلصت بعد ${fmtInt.format(depletion.daysTaken)} يوم من يوم الشراء">${escapeHtml(depletion.dateLabel)} <span class="text-dim" style="font-weight:400;">(${fmtInt.format(depletion.daysTaken)}d)</span></span>`;
-    } else if (depletion.status === "remaining") {
-      depletionHtml = `<span class="badge-outline orange" title="لسه فاضل ${fmtInt.format(Math.round(depletion.remaining))} قطعة لحد آخر يوم بيانات (${escapeHtml(depletion.asOf)})">Not yet (${fmtIntCell(Math.round(depletion.remaining))} left)</span>`;
+    if (r.inboundQty > 0 && left <= 0) {
+      depletionHtml = `<span class="badge-outline red" title="كل الـ ${fmtInt.format(r.inboundQty)} قطعة المشتراة اتغطت بكونفيرمد حصل بعد ما الـ Beginning Inventory خلص">Sold out</span>`;
     } else {
-      depletionHtml = `<span class="text-dim">-</span>`;
+      depletionHtml = `<span class="badge-outline orange" title="لسه فاضل ${fmtInt.format(Math.round(left))} قطعة من المشتريات دي">Not yet (${fmtIntCell(Math.round(left))} left)</span>`;
     }
     const isExpanded = !!(state.weeklyInvExpandedSkus && state.weeklyInvExpandedSkus.has(r.sku));
     return `
