@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.52";
+const APP_VERSION = "1.1.53";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10040,6 +10040,15 @@ function wiOverachievePct(n) {
   if (n === null || n === undefined || !Number.isFinite(n) || n <= 100) return `<span class="text-dim">-</span>`;
   return `<span class="text-purple font-bold">+${(n - 100).toFixed(1)}%</span>`;
 }
+// v1.1.53: بديل الـ Overachieve للجدول ده تحديدًا — بعد ما "Confirmed From
+// Purchase" بقت مكبوتة عند حد Inbound Qty، النسبة القديمة (inboundVsSold)
+// بقت متعديش الـ 100% أبدًا، فالعمود ده بقى بيوري "Over Confirmed" كنسبة
+// مئوية من Inbound Qty بدل ما يفضل ميت دايمًا.
+function wiOverConfirmedPct(overConfirmed, inboundQty) {
+  if (!overConfirmed || overConfirmed <= 0 || !inboundQty) return `<span class="text-dim">-</span>`;
+  const pct = (overConfirmed / inboundQty) * 100;
+  return `<span class="text-purple font-bold">+${pct.toFixed(1)}%</span>`;
+}
 
 // -------------------------------------------------------------------------
 // فلاتر الشهر/الأسبوع — شهر بيحدد مجموعة أسابيع، والأسبوع المختار (Sunday
@@ -10317,7 +10326,7 @@ function wiToggleSkuExpand(sku) {
 
 // عدد أعمدة #wiWeekTable الحقيقي (بعد إضافة Availability) — نفس الرقم
 // مستخدم في colspan لصف "مفيش داتا" وصف توسيع البندلات تحت.
-const WI_WEEK_TABLE_COLSPAN = 17;
+const WI_WEEK_TABLE_COLSPAN = 18;
 
 function wiRenderBundleExpandRowHtml(sku) {
   if (!state.weeklyInvExpandedSkus || !state.weeklyInvExpandedSkus.has(sku)) return "";
@@ -10429,31 +10438,31 @@ function renderWeeklyInventoryTable() {
       const confirmedQty = wiSumConfirmedInRange(invRow.sku, effSaleStart, effSaleEnd);
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
-      // v1.1.52: "Confirmed From Purchase" = "Remaining from Beginning" (أي
-      // كونفيرمد حصل بعد ما الـ Beginning Inventory خلص، أيًا كان توقيته
-      // الفعلي). ده بقى المنطق الـ"overall" الوحيد على الجدول ده بالكامل —
-      // اتشال استخدام wiComputePurchasesDepletion (الـ FIFO الحقيقي على
-      // الستوك اليومي) خالص من هنا، بما فيه عمود "Purchases Sold Out On"
-      // (اتحسب تحت من confirmedFromPurchase مباشرة، مش من depletion).
-      const confirmedFromPurchase = remainingFromBeginning;
+      // v1.1.53: "Confirmed From Purchase" مكبوتة عند حد "Inbound Qty (7d)"
+      // — مينفعش تبيع أكتر ممّا اشتريت. أي زيادة عن الحد ده بتتحط في
+      // "Over Confirmed" لوحدها. "Inbound vs Sold" بتتحسب على النسخة
+      // المكبوتة (confirmedFromPurchase) بس — نفس المنطق ده overall على
+      // الجدول كله (الفرعين: الأسبوع الافتراضي والفلتر الحر).
+      const confirmedFromPurchase = Math.min(remainingFromBeginning, inb.qty);
+      const overConfirmed = Math.max(0, remainingFromBeginning - inb.qty);
       const inboundVsSold = inb.qty > 0 ? (confirmedFromPurchase / inb.qty) * 100 : null;
       const meta = (state.weeklyInvSkuMetaMap || new Map()).get(invRow.sku) || { category: "Uncategorized", stock: 0, doh: 0, cogs: 0 };
       return {
         sku: invRow.sku, name: invRow.name || "Unknown",
         category: meta.category, availability: wiGetAvailability(invRow.sku), stock: meta.stock, doh: meta.doh, cogs: meta.cogs,
         beginInv, inboundQty: inb.qty, inboundDates: inb.dates, confirmedQty, beginningSales, remainingFromBeginning,
-        confirmedFromPurchase, inboundVsSold,
+        confirmedFromPurchase, overConfirmed, inboundVsSold,
         _purchaseStartTs: effPurchaseStart, _purchaseEndTs: effPurchaseEnd
       };
     }).filter(Boolean);
   } else {
     if (statusEl) statusEl.textContent = "";
-    // v1.1.52: نفس المنطق فوق للأسبوع الافتراضي (من غير فلتر) — بدون أي
-    // استدعاء لـ wiComputePurchasesDepletion هنا خالص.
+    // v1.1.53: نفس المنطق فوق للأسبوع الافتراضي (من غير فلتر).
     rows = week.rows.filter(r => r.inboundQty > 0).map(r => {
-      const confirmedFromPurchase = r.remainingFromBeginning;
+      const confirmedFromPurchase = Math.min(r.remainingFromBeginning, r.inboundQty);
+      const overConfirmed = Math.max(0, r.remainingFromBeginning - r.inboundQty);
       const inboundVsSold = r.inboundQty > 0 ? (confirmedFromPurchase / r.inboundQty) * 100 : null;
-      return { ...r, availability: wiGetAvailability(r.sku), confirmedFromPurchase, inboundVsSold };
+      return { ...r, availability: wiGetAvailability(r.sku), confirmedFromPurchase, overConfirmed, inboundVsSold };
     });
   }
 
@@ -10491,8 +10500,9 @@ function renderWeeklyInventoryTable() {
       <td class="num text-dim">${fmtIntCell(r.beginningSales)}</td>
       <td class="num text-orange font-bold">${fmtIntCell(r.remainingFromBeginning)}</td>
       <td class="num font-bold text-blue">${fmtIntCell(r.confirmedFromPurchase)}</td>
+      <td class="num font-bold text-purple">${r.overConfirmed > 0 ? fmtIntCell(r.overConfirmed) : `<span class="text-dim">-</span>`}</td>
       <td class="num font-bold">${wiCappedPct(r.inboundVsSold)}</td>
-      <td class="num">${wiOverachievePct(r.inboundVsSold)}</td>
+      <td class="num">${wiOverConfirmedPct(r.overConfirmed, r.inboundQty)}</td>
       <td class="center">${depletionHtml}</td>
     </tr>
     ${wiRenderBundleExpandRowHtml(r.sku)}
