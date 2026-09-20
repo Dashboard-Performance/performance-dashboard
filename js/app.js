@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.54";
+const APP_VERSION = "1.1.55";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11773,9 +11773,14 @@ function computeAllocationLocking() {
       // alcSingleSuggestedAllocationFor بعد كده (Phase 2b وحساب صفوف الـ Bundle).
       suggestedAllocationByPair.set(tagerId + "||" + singleId, math.suggestedAllocation);
 
-      // Final Action DOH — تغطية بالأيام لكمية Final Action بمعدل الكونفيرم
-      // بتاع آخر 3 أيام لنفس التاجر (merchantAvg3d).
-      const finalActionDoh = merchantAvg3d > 0 ? Math.round(math.finalActionQty / merchantAvg3d) : null;
+      // v1.1.55: Final Action DOH — بطلب صريح من المستخدم، بقت مضروبة في
+      // (CR% ÷ 100) عشان تلغي بالظبط نفس القسمة على CR% اللي حصلت جوه
+      // finalActionQty (alcComputeRowMath) — فترجع تقرا ~7 أيام تاني زي
+      // الأصل (مش الرقم المتضخم من غير تعديل)، بغض النظر عن قيمة CR%. لو
+      // crPct <= 0، finalActionQty أصلاً رجع للرقم الخام من غير قسمة (راجع
+      // alcComputeRowMath)، فمفيش عامل نضربه هنا (factor = 1) عشان النتيجة
+      // تفضل ~7 برضه بدل ما ترجع 0.
+      const finalActionDoh = merchantAvg3d > 0 ? Math.round((math.finalActionQty / merchantAvg3d) * (crPct > 0 ? (crPct / 100) : 1)) : null;
 
       pendingRows.push({
         // Allocated Qty / Remaining Pieces: Locked = خام 100% من صف القفل l
