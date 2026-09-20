@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.53";
+const APP_VERSION = "1.1.54";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11451,16 +11451,20 @@ function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty 
   const contrPct = overallAvg3d > 0 ? (merchantAvg3d / overallAvg3d) * 100 : 0;
   const suggestedAllocation = Math.round(stock * (contrPct / 100));
 
-  // Final Action (Qty to Lock) = round(merchantAvg3d × ALC_TARGET_DOH_DAYS).
-  // بطلب صريح من المستخدم: الكمية دي هدفها إنها تدي التاجر تغطية (Final
-  // Action DOH) = 7 أيام بالظبط بمعدل الكونفيرم بتاعه هو (آخر 3 أيام —
-  // الـ "run rate" بتاعه)، مش مشتقة من Suggested Allocation/CR%/Used Qty زي
-  // الأول (دول لسه بيتعرضوا في أعمدتهم لوحدهم للمعلومية، بس مبقوش داخلين في
-  // معادلة Final Action). لو مفيش run rate خالص (merchantAvg3d = 0) مفيش
-  // أساس نحسب عليه تغطية أيام، فالكمية بترجع 0. ملحوظة: الدالة دي
-  // (alcComputeRowMath) دلوقتي مستخدمة لصفوف الـ Single فقط — صفوف الـ Bundle
-  // بقى Final Action بتاعها = 0 ثابت دايمًا (راجع bundleRowKeys.forEach تحت).
-  const finalActionQty = merchantAvg3d > 0 ? Math.round(merchantAvg3d * ALC_TARGET_DOH_DAYS) : 0;
+  // Final Action (Qty to Lock) = round(merchantAvg3d × ALC_TARGET_DOH_DAYS
+  // ÷ (CR% ÷ 100)). بطلب صريح من المستخدم: الكمية دي هدفها إنها تدي التاجر
+  // تغطية (Final Action DOH) = 7 أيام بالظبط بمعدل الكونفيرم بتاعه هو (آخر
+  // 3 أيام — الـ "run rate" بتاعه)، لكن مقسومة على CR% بتاعه — عشان لو
+  // نصف الأوردرات بس بتتأكد (CR% = 50%)، لازم تقفل ضعف الكمية عشان الـ 7
+  // أيام تغطية دي تتحقق فعليًا بعد الكونفيرم، مش قبله. لو مفيش run rate
+  // خالص (merchantAvg3d = 0) مفيش أساس نحسب عليه تغطية أيام، فالكمية بترجع
+  // 0. لو فيه run rate بس مفيش CR% (crPct <= 0 — مفيش Placed كفاية في نفس
+  // الفترة)، بيترجع للرقم الخام من غير قسمة (مفيش نسبة نقسم عليها أصلاً).
+  // ملحوظة: الدالة دي (alcComputeRowMath) دلوقتي مستخدمة لصفوف الـ Single
+  // فقط — صفوف الـ Bundle بقى Final Action بتاعها = 0 ثابت دايمًا (راجع
+  // bundleRowKeys.forEach تحت).
+  const rawFinalActionQty = merchantAvg3d > 0 ? (merchantAvg3d * ALC_TARGET_DOH_DAYS) : 0;
+  const finalActionQty = rawFinalActionQty > 0 ? Math.round(crPct > 0 ? (rawFinalActionQty / (crPct / 100)) : rawFinalActionQty) : 0;
 
   return { contrPct, suggestedAllocation, finalActionQty };
 }
