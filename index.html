@@ -179,7 +179,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-green">
                   <h2>NDR Leaderboard</h2>
-                  <p>ACMs ranked by Net Delivery Rate (CR Cutoff D-2 &times; DR Cutoff D-5)</p>
+                  <p title="Ranked by a confidence-adjusted points score (Wilson lower bound on NDR% given order count), not raw NDR% — so an ACM with very few orders can't outrank real volume just off a lucky small sample. NDR% itself is still CR Cutoff D-2 × DR Cutoff D-5.">ACMs ranked by NDR Points (confidence-adjusted for order volume)</p>
                 </div>
               </div>
               <div style="max-height: 300px; overflow-y: auto; padding-right: 5px;">
@@ -3044,10 +3044,11 @@
   <div id="syncStatusModal" class="modal hidden">
     <div class="modal-content" style="max-width:600px;">
       <h3>⚙️ Worker Sync Status</h3>
-      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">Live sheet-read status straight from the Cloudflare Worker (Main / Confirmed by Day / Incentive Merchants / General Sync).</p>
+      <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">Live sheet-read status straight from the Cloudflare Worker (Main / Confirmed by Day / Incentive Merchants / General Sync), plus the "Analyst / Single" daily Google Sheet tab.</p>
       <div id="syncStatusBody" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;"></div>
       <div class="modal-actions">
         <button id="syncStatusForceRefresh" class="btn btn-outline" title="Pulls a fresh snapshot right now instead of waiting for the automatic cron (every 5 minutes)">⚡ Force Refresh Now</button>
+        <button id="syncStatusForceRefreshAnalystSingle" class="btn btn-outline" title="Recomputes and re-publishes the 'Analyst / Single' daily Google Sheet tab right now, instead of waiting for the next automatic sync">🔁 Force Refresh Analyst/Single Daily</button>
         <button id="syncStatusRefresh" class="btn btn-outline">Refresh</button>
         <button id="syncStatusClose" class="btn btn-primary">Close</button>
       </div>

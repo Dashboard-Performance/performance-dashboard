@@ -65,6 +65,20 @@ var BACKUP_FOLDER_NAME = "Performance Dashboard Backups";
 // grows without bound.
 var BACKUP_KEEP_LAST_N = 30;
 
+// ANALYST / SINGLE — DAILY. A real sheet tab (created automatically if
+// missing) inside the same spreadsheet, rewritten from scratch on every
+// publish with a rolling 30-day window of PPM Analyst / Single, but with
+// every day computed independently (no lag cutoffs across days — see the
+// big comment above buildPpmAnalystSingleDailyRows() in js/app.js for why).
+// The browser computes the rows (same reasoning as COMPUTED DATA API below
+// — reimplementing the debundle/PPM math here would mean two copies to keep
+// in sync) and POSTs them to handlePublishAnalystSingleDaily(), which just
+// writes them into this tab. Meta (last updated / row count) is kept in
+// Script Properties so the dashboard's "Worker Sync Status" modal can show
+// it and offer a manual "Force Refresh" without reading the whole sheet.
+var ANALYST_SINGLE_DAILY_SHEET_NAME = "Analyst / Single";
+var ANALYST_SINGLE_DAILY_PROP_KEY = "analystSingleDailyMeta";
+
 /**
  * ============================================================================
  *  COMPUTED DATA API — lets an outside consumer (a script, a BI tool, another
@@ -116,6 +130,7 @@ function doPost(e) {
   if (action === "save_match_feedback") return handleSaveMatchFeedback(payload);
   if (action === "add_new_locked_matches") return handleAddNewLockedMatches(payload);
   if (action === "publish_computed_batch") return handlePublishComputedBatch(payload);
+  if (action === "publish_analyst_single_daily") return handlePublishAnalystSingleDaily(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
@@ -169,6 +184,99 @@ function handlePublishComputedBatch(payload) {
       results.push({ section: section, table: table, ok: true });
     });
     return jsonResponse({ success: true, publishedAt: publishedAt, results: results });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+/**
+ * Called by js/app.js (publishAnalystSingleDaily) — either automatically as
+ * part of every publishComputedSnapshots() cycle, or manually via the
+ * "Force Refresh Analyst/Single Daily" button in the Worker Sync Status
+ * modal. payload.rows = the full rolling-30-day window (every day computed
+ * independently — see the comment above buildPpmAnalystSingleDailyRows() in
+ * js/app.js). Unlike handlePublishComputedBatch above, this writes straight
+ * into a real sheet tab (ANALYST_SINGLE_DAILY_SHEET_NAME) in the same
+ * spreadsheet, completely replacing its previous contents every time — it's
+ * a snapshot of "last 30 days as of now", not an append-only log.
+ *
+ * A short script lock IS used here (unlike handlePublishComputedBatch)
+ * because this writes to one shared sheet: if two people have the dashboard
+ * open and their publishes land within the same second, writing at the same
+ * time could interleave and corrupt the tab. If the lock can't be acquired
+ * quickly, we just skip this publish — another one will follow soon (every
+ * user's browser recomputes the same data from the same source), so losing
+ * one publish attempt is harmless.
+ */
+function handlePublishAnalystSingleDaily(payload) {
+  var rows = payload.rows;
+  if (!Array.isArray(rows)) return jsonResponse({ success: false, message: "rows must be an array." });
+  // Sanity cap — a 30-day window should never come close to this even with
+  // every SKU active every day; guards against a malformed/runaway payload.
+  if (rows.length > 200000) return jsonResponse({ success: false, message: "Too many rows (" + rows.length + ")." });
+
+  var lock = LockService.getScriptLock();
+  var gotLock = lock.tryLock(5000);
+  if (!gotLock) return jsonResponse({ success: false, message: "Busy — another publish is in progress, will retry on the next cycle." });
+
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(ANALYST_SINGLE_DAILY_SHEET_NAME);
+    if (!sheet) sheet = ss.insertSheet(ANALYST_SINGLE_DAILY_SHEET_NAME);
+
+    var headers = [
+      "Date", "SKU_ID", "SKU_NAME", "Category",
+      "Placed Pcs", "Confirmed Pcs", "Delivered Pcs", "Placed GMV", "Delivered GMV",
+      "CR%", "DR%", "NDR%", "Delivered ASP", "Priceing_PPM", "PPM%", "CM3", "CM3/Pcs", "CM3%"
+    ];
+    // Build the full values array first (no writes yet) so a bad row never
+    // leaves the sheet half-cleared/half-written — either the whole thing
+    // succeeds or the catch below leaves the previous good snapshot intact.
+    var values = [headers];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || {};
+      values.push([
+        r.date ? new Date(r.date + "T00:00:00") : "",
+        r.skuId || "", r.skuName || "", r.category || "",
+        r.placedPieces || 0, r.confirmedPieces || 0, r.deliveredPieces || 0,
+        r.placedGmv || 0, r.deliveredGmv || 0,
+        (r.crPct || 0) / 100, (r.drPct || 0) / 100, (r.ndrPct || 0) / 100,
+        r.deliveredAsp || 0, r.ppmSku || 0, (r.ppmPct || 0) / 100,
+        r.cm3 || 0, r.cm3PerPiece || 0, (r.cm3Pct || 0) / 100
+      ]);
+    }
+
+    sheet.clearContents();
+    sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+    if (values.length > 1) {
+      sheet.getRange(2, 1, values.length - 1, 1).setNumberFormat("yyyy-mm-dd");
+      [10, 11, 12, 15].forEach(function (col) {
+        sheet.getRange(2, col, values.length - 1, 1).setNumberFormat("0.0%");
+      });
+    }
+    sheet.setFrozenRows(1);
+
+    var meta = { updatedAt: new Date().toISOString(), rowCount: rows.length };
+    PropertiesService.getScriptProperties().setProperty(ANALYST_SINGLE_DAILY_PROP_KEY, JSON.stringify(meta));
+
+    return jsonResponse({ success: true, rowCount: rows.length, updatedAt: meta.updatedAt });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Lightweight status for the "Worker Sync Status" modal — last time the
+ * "Analyst / Single" tab was actually rewritten, and how many rows it has,
+ * without reading the sheet itself.
+ */
+function handleGetAnalystSingleDailyMeta(e) {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(ANALYST_SINGLE_DAILY_PROP_KEY);
+    var meta = raw ? JSON.parse(raw) : null;
+    return jsonResponse({ success: true, fetchedAt: meta ? meta.updatedAt : null, rowCount: meta ? meta.rowCount : null });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
@@ -585,6 +693,7 @@ function doGet(e) {
   if (action === "getLastSyncDebug") return handleGetLastSyncDebug(e);
   if (action === "getComputed") return handleGetComputed(e);
   if (action === "listComputed") return handleListComputed(e);
+  if (action === "getAnalystSingleDailyMeta") return handleGetAnalystSingleDailyMeta(e);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 

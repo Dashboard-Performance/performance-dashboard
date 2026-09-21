@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.55";
+const APP_VERSION = "1.1.57";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -725,6 +725,11 @@ const SYNC_STATUS_TARGETS = [
   // في المودال). Apps Script مش عليه نفس القيد، فبقى المصدر الوحيد — وده
   // كمان معناه إن الـ 21 شيت دول بيتحدثوا فعليًا مع بعض في نفس الوقت.
   { key: "generalAppsScript", label: "General Sync — Apps Script (21 sheets, incl. Beginning Inventory)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
+  // v1.1.57: تاب "Analyst / Single" (Google Sheet حقيقي) — بيتحدث تلقائي
+  // مع كل publishComputedSnapshots() (راجع تعليقها)، وليه زرار Force Refresh
+  // منفصل تحت (مش نفس زرار الـ Worker) لأن آلية تحديثه مختلفة تمامًا
+  // (POST من المتصفح لـ Apps Script، مش GET forceRefresh على الـ Worker).
+  { key: "analystSingleDaily", label: "Analyst / Single (Daily, Google Sheet tab)", action: "getAnalystSingleDailyMeta", lightweight: true, base: "appsScript" },
 ];
 
 function syncStatusTimeAgo(iso) {
@@ -862,6 +867,32 @@ if (syncStatusForceRefresh) {
     } finally {
       syncStatusForceRefresh.disabled = false;
       syncStatusForceRefresh.textContent = originalText;
+      loadAndRenderSyncStatus();
+    }
+  });
+}
+// v1.1.57: زرار Force Refresh مخصص لتاب "Analyst / Single" بس — بيحسب
+// buildPpmAnalystSingleDailyRows() لايف دلوقتي (من الداتا الموجودة أصلاً في
+// المتصفح) ويبعتها لـ Apps Script فورًا، من غير ما يستنى دورة الـ publish
+// التلقائية. الـ POST نفسه mode:"no-cors" (زي باقي الـ publish calls) فمفيش
+// طريقة نقرا نجح فعلاً ولا لأ من الـ response مباشرة — بنستنى شوية وبعدين
+// بنعيد تحميل حالة المودال (loadAndRenderSyncStatus) اللي بتقرا
+// getAnalystSingleDailyMeta الحقيقي من الشيت، وده التأكيد الفعلي.
+const syncStatusForceRefreshAnalystSingle = $("syncStatusForceRefreshAnalystSingle");
+if (syncStatusForceRefreshAnalystSingle) {
+  syncStatusForceRefreshAnalystSingle.addEventListener("click", async () => {
+    syncStatusForceRefreshAnalystSingle.disabled = true;
+    const originalText = syncStatusForceRefreshAnalystSingle.textContent;
+    syncStatusForceRefreshAnalystSingle.textContent = "Refreshing…";
+    try {
+      const result = await publishAnalystSingleDaily();
+      if (!result.ok) alert("Force refresh failed: " + (result.error || "unknown error"));
+      await new Promise(resolve => setTimeout(resolve, 2500)); // وقت لـ Apps Script يخلص الكتابة فعليًا
+    } catch (err) {
+      alert("Force refresh failed: " + ((err && err.message) || String(err)));
+    } finally {
+      syncStatusForceRefreshAnalystSingle.disabled = false;
+      syncStatusForceRefreshAnalystSingle.textContent = originalText;
       loadAndRenderSyncStatus();
     }
   });
@@ -1621,6 +1652,13 @@ async function publishComputedSnapshots() {
     }
   }
   console.log(`[Computed API publish] sent ${sentCount}/${sections.length} section(s)/table(s) request(s). (mode:"no-cors" means this confirms the requests went OUT, not that the server accepted every one — check Apps Script Executions or listComputed to verify.)`);
+
+  // v1.1.57: نفس دورة الـ publish العادية دي (بتحصل كل ما الداتا تتغير فعلاً
+  // — مش كل loadData) هي اللي بتحدّث تاب "Analyst / Single" (Google Sheet)
+  // تلقائيًا كل يوم، من غير أي كرون منفصل — طالما حد فاتح الداشبورد خلال
+  // اليوم (زي باقي أي حد فيه heartbeat) هيتبعت تحديث. try/catch لوحده عشان
+  // فشلها ما يأثرش على publish باقي السكشنز فوق.
+  try { await publishAnalystSingleDaily(); } catch (e) { console.warn("[Analyst / Single daily publish] skipped (non-fatal):", e && e.message); }
 }
 
 function setSyncStatus(text) {
@@ -3775,6 +3813,129 @@ if ($("prevPagePpmAnalystSingle")) $("prevPagePpmAnalystSingle").addEventListene
 if ($("nextPagePpmAnalystSingle")) $("nextPagePpmAnalystSingle").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystSingleState.filtered.length / PAGE_SIZE)); if (ppmAnalystSingleState.page < totalPages - 1) { ppmAnalystSingleState.page += 1; renderPaginatedPpmAnalystSingleTable(); } });
 
 // -------------------------------------------------------------------------
+// PPM ANALYST / SINGLE — DAILY (Google Sheet tab "Analyst / Single") — v1.1.57
+// بطلب صريح: مش سكشن ع الويب سايت خالص (عشان "متبوظش الدنيا") — بس بتبعت
+// صفوف لتاب حقيقي جوه نفس الجوجل شيت، عن طريق Apps Script (Code.gs:
+// handlePublishAnalystSingleDaily). نفس منطق الـ debundle mapping/weights
+// بتاع preparePpmAnalystSingleData فوق بالظبط، لكن الفرق الجوهري: كل يوم
+// (تاريخ) مستقل عن التاني تمامًا — كل الأرقام (CR%/DR%/NDR%/Delivered ASP/
+// PPM%/CM3...) بتتحسب من نفس اليوم ده بس (Placed/Confirmed/Delivered
+// المسجلين على التاريخ ده)، من غير أي lag cutoff عبر الأيام زي باقي
+// الداشبورد (مفيش "استنى يومين عشان تتأكد" هنا — دي "actual demand" خام
+// يوم بيوم زي ما اتطلب بالظبط). بتغطي آخر 30 يوم لحد إمبارح (شباك متحرك —
+// كل مرة بتتبعت فيها البيانات بتستبدل التاب بالكامل بآخر 30 يوم، مش بتضيف
+// فوق القديم، عشان الشيت يفضل حجمه ثابت ومحدث). النهاردة نفسه مستبعد لأن
+// يومه لسه ماخلصش. بطلب صريح كمان: الأعمدة اللي معناها مش يومي أصلاً
+// (Stock/DOH الحالي، Avg Last 3D/7D، Active Days، Last ASP Placed) اتشالت
+// من هنا بالكامل — كل عمود موجود هنا له معنى واضح لليوم ده بمفرده.
+// -------------------------------------------------------------------------
+const ANALYST_SINGLE_DAILY_WINDOW_DAYS = 30;
+
+function buildPpmAnalystSingleDailyRows() {
+  const mainRowsAll = state.allParsedRows || [];
+  if (!mainRowsAll.length) return [];
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const windowStartMs = todayMs - (ANALYST_SINGLE_DAILY_WINDOW_DAYS * 86400000);
+
+  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const mappingsFor = (sku) => {
+    const m = bundleProductMap.get(sku);
+    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
+  };
+
+  // Key = "<dateMs>||<singleId>" — نفس منطق الديبندلايز والـ weight بالظبط
+  // زي preparePpmAnalystSingleData، بس مجمّع لكل يوم لوحده مش الشهر كله.
+  const byDaySingle = new Map();
+  mainRowsAll.forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    const rTime = rDate.getTime();
+    if (rTime < windowStartMs || rTime >= todayMs) return; // برة نطاق الـ 30 يوم، أو النهاردة نفسه
+    mappingsFor(r.sku).forEach(mp => {
+      const key = rTime + "||" + mp.singleId;
+      let b = byDaySingle.get(key);
+      if (!b) {
+        b = { dateMs: rTime, singleId: mp.singleId, placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, placedGmv: 0, deliveredGmv: 0, ppm: 0, cm3: 0 };
+        byDaySingle.set(key, b);
+      }
+      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      const qty = mp.quantity || 1;
+      b.placedPieces += (r.placedPieces || 0) * qty;
+      b.confirmedPieces += (r.confirmedPieces || 0) * qty;
+      b.deliveredPieces += (r.deliveredPieces || 0) * qty;
+      b.placedGmv += (r.placedGmv || 0) * weight;
+      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
+      b.ppm += (r.ppm || 0) * weight;
+      b.cm3 += (r.cm3 || 0) * weight;
+    });
+  });
+
+  const fmtDateIso = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const rows = [];
+  byDaySingle.forEach(b => {
+    // يوم مفيهوش أي نشاط خالص (Placed/Confirmed/Delivered كلهم صفر) بيتشال
+    // — الهدف "actual demand" فعلي، مش مصفوفة صفوف فاضية لكل SKU × كل يوم.
+    if (!b.placedPieces && !b.confirmedPieces && !b.deliveredPieces) return;
+    const inv = state.inventoryMap[b.singleId] || {};
+    const prod = state.productsMap[b.singleId] || {};
+    const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(b.singleId) || 0) : 0;
+    const sellingPrice = prod.price || 0;
+    const profit = prod.profit || 0;
+    const ppmSku = sellingPrice - profit - cogs; // Priceing_PPM — نفس معادلة preparePpmAnalystSingleData
+    const crPct = b.placedPieces > 0 ? (b.confirmedPieces / b.placedPieces) * 100 : 0;
+    const drPct = b.confirmedPieces > 0 ? (b.deliveredPieces / b.confirmedPieces) * 100 : 0;
+    const ndrPct = (crPct * drPct) / 100;
+    // Delivered ASP — بطلب صريح، بتقرا Per Day: Delivered GMV ÷ Delivered
+    // Pieces بتوع نفس اليوم ده بس.
+    const deliveredAsp = b.deliveredPieces > 0 ? (b.deliveredGmv / b.deliveredPieces) : 0;
+    const ppmPct = deliveredAsp > 0 ? (ppmSku / deliveredAsp) * 100 : 0;
+    const cm3PerPiece = b.deliveredPieces > 0 ? (b.cm3 / b.deliveredPieces) : 0;
+    const cm3Pct = b.deliveredGmv > 0 ? (b.cm3 / b.deliveredGmv) * 100 : 0;
+    rows.push({
+      date: fmtDateIso(b.dateMs),
+      skuId: b.singleId, skuName: singlesList.get(b.singleId) || inv.skuName || prod.name || b.singleId,
+      category: inv.category || prod.category || "Uncategorized",
+      placedPieces: Math.round(b.placedPieces), confirmedPieces: Math.round(b.confirmedPieces), deliveredPieces: Math.round(b.deliveredPieces),
+      placedGmv: b.placedGmv, deliveredGmv: b.deliveredGmv,
+      crPct, drPct, ndrPct, deliveredAsp,
+      ppmSku, ppmPct, cm3: b.cm3, cm3PerPiece, cm3Pct
+    });
+  });
+
+  rows.sort((a, b) => a.date === b.date ? String(a.skuId).localeCompare(String(b.skuId)) : (a.date < b.date ? -1 : 1));
+  return rows;
+}
+
+// بتبعت الصفوف كاملة (مش مقسّمة زي COMPUTED_SNAPSHOT_REGISTRY) في POST واحد
+// لـ Apps Script (action مخصص، مش publish_computed_batch العادي) — عشان
+// Code.gs يقدر يكتبها في تاب حقيقي (SpreadsheetApp) مش يخزنها كـ JSON بس.
+// mode: "no-cors" زي باقي الـ publish calls (Apps Script مش بترجع CORS
+// headers)، فمفيش طريقة نقرا الـ response هنا مباشرة — التأكيد بيحصل بعد
+// كده بقراءة getAnalystSingleDailyMeta (راجع loadAndRenderSyncStatus).
+async function publishAnalystSingleDaily() {
+  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  const rows = buildPpmAnalystSingleDailyRows();
+  try {
+    await fetch(DATA_API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "publish_analyst_single_daily", rows })
+    });
+    return { ok: true, rowCount: rows.length };
+  } catch (e) {
+    console.warn("[Analyst / Single daily publish] failed (non-fatal):", e && e.message);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
+// -------------------------------------------------------------------------
 // PRODUCTS / ANALYST (منفصلة تمامًا، مش جوه PPM Analyst / Products — بس
 // متحطوطة تحتيها في القائمة الجانبية) — كل الـ Products اللي اتعملهم Inbound
 // (استلام) في أي شهر من السنة الحالية (نفس شيت الـ Inbound (GID 565878313)
@@ -4833,6 +4994,11 @@ async function updateDashboard(rows) {
     lbContainer.innerHTML = "";
     leaderboard.forEach((item, index) => {
       const li = document.createElement("li"); li.className = "leaderboard-item";
+      // v1.1.56: الترتيب بقى على item.points (Wilson lower bound) مش raw
+      // NDR% — بنعرض الـ NDR% الحقيقي زي الأول (مش نغير الرقم المعروض)،
+      // بس الـ title بيوضح رقم الـ Points اللي فعليًا حدد الترتيب، عشان لو
+      // ACM عنده NDR% أعلى من واحد فوقه في الليست يبان ليه (orders قليلة).
+      li.title = `Ranked by confidence-adjusted points: ${item.points.toFixed(1)} (raw NDR ${item.ndr.toFixed(1)}% on ${fmtInt.format(item.orders)} orders — low order counts get pulled down so a lucky small sample can't outrank real volume).`;
       li.innerHTML = `
         <div class="lb-rank ${index === 0 ? 'gold' : ''}">${index + 1}</div>
         <div class="lb-name">${item.name}</div>
@@ -4927,6 +5093,26 @@ function computeMetrics(rows) {
   };
 }
 
+// v1.1.56: Wilson score lower bound — بطلب صريح من المستخدم، عشان الـ
+// Leaderboard متبقاش بترتب بـ raw NDR% لوحده (اللي ممكن ACM عنده أوردرات
+// قليلة جدًا (زي 2 أو 3) ياخد NDR% عالي بالصدفة ويطلع أول واحد، رغم إن
+// حجم العينة صغير جدًا عشان نثق في الرقم ده). الصيغة دي بتحسب "حد أدنى
+// بثقة 95%" لنسبة الـ NDR بالنسبة لعدد الأوردرات (n) — كل ما n كبرت كل ما
+// الحد الأدنى ده يقرب من الـ NDR% الحقيقي، وكل ما n صغرت كل ما الصيغة
+// "تعاقب" الرقم وتسحبه لتحت (مش بثقة كافية). دي نفس الفكرة المستخدمة في
+// أي "Best" ranking معروف (زي تقييمات Reddit/Amazon) — مفيش رقم/حد أدنى
+// (زي "لازم 30 أوردر") متعمول يدوي هنا، الصيغة نفسها بتتصرف صح مع أي حجم
+// عينة من غير ما نحدد حد تعسفي.
+function wilsonLowerBound(p, n, z) {
+  if (!n || n <= 0) return 0;
+  z = z || 1.96; // 95% confidence
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const centre = p + z2 / (2 * n);
+  const margin = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+  return Math.max(0, (centre - margin) / denom);
+}
+
 function computeLeaderboard(rows) {
   // نفس منطق كروت CR/DR/NDR فوق في نفس الصفحة — عشان الـ Leaderboard يبقى
   // متسق معاهم: CR% (Confirmed/Placed) بكات أوف يومين (CR_LAG_DAYS) لوحده،
@@ -4945,8 +5131,12 @@ function computeLeaderboard(rows) {
   return Array.from(map.values()).filter(m => m.crPlaced > 0).map(m => {
     const cr = m.crPlaced ? (m.crConfirmed / m.crPlaced) : 0;
     const dr = m.drConfirmed ? (m.drDelivered / m.drConfirmed) : 0;
-    return { name: m.name, orders: m.crConfirmed, ndr: (dr * cr) * 100 };
-  }).sort((a, b) => b.ndr - a.ndr).slice(0, 6);
+    const ndr = (dr * cr) * 100;
+    // n = نفس عدد الأوردرات (Confirmed) المعروض جنب كل ACM في الليست —
+    // عشان الترتيب يتحسب على نفس الرقم اللي المستخدم شايفه قدامه بالظبط.
+    const points = wilsonLowerBound(ndr / 100, m.crConfirmed) * 100;
+    return { name: m.name, orders: m.crConfirmed, ndr, points };
+  }).sort((a, b) => b.points - a.points).slice(0, 6);
 }
 
 function getCrBadgeColor(pct) { return pct >= 60 ? "green" : (pct >= 50 ? "orange" : "red"); }
