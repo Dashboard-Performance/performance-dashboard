@@ -732,7 +732,13 @@ var LAST_SYNC_GIDS = [
   "892918900",   // ACM_SALES_PLAN_GID
   "1304674893",  // NEW_SEGMENTATION_GID
   "565878313",   // INBOUND_GID
-  "531154071"    // PRODUCTS_INFO_GID
+  "531154071",   // PRODUCTS_INFO_GID
+  // v1.1.58 — Sellthrough Rate Panel EGY/IRQ toggle (Products Info فوق بيتشارك
+  // مع IRQ، نفس الشيت بيتفلتر بعمود COUNTRY في app.js).
+  "997714491",   // IRQ_SELLTHROUGH_NEEDED_GID
+  "879952880",   // IRQ_INBOUND_GID
+  "827189174",   // IRQ_BEGIN_INV_GID
+  "775718300"    // IRQ_COGS_GID
 ];
 
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
@@ -918,7 +924,9 @@ var LAST_SYNC_GID_LABELS_ = {
   "2042936628": "Targets ACM", "1780730573": "Inventory",
   "1779314157": "Products", "1656655269": "Category Targets",
   "892918900": "ACM Sales Plan", "1304674893": "New Segmentation",
-  "565878313": "Inbound", "531154071": "Products Info"
+  "565878313": "Inbound", "531154071": "Products Info",
+  "997714491": "IRQ Sell-through Needed", "879952880": "IRQ Inbound",
+  "827189174": "IRQ Beginning Inventory", "775718300": "IRQ COGS"
 };
 
 function handleGetLastSyncDebug(e) {

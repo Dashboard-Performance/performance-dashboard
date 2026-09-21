@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.57";
+const APP_VERSION = "1.1.58";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -39,6 +39,13 @@ const INBOUND_GID = "565878313";
 const BEGIN_INV_GID = "22283311";        // شيت "EGY Beginning Inventory #4132"
 const PRODUCTS_INFO_GID = "531154071";   // شيت "Porducts_infor #4259"
 const SELLTHROUGH_NEEDED_GID = "548859670"; // شيت "EGY Sell-through rate needed data #2941"
+// IRQ (v1.1.58) — نفس Sellthrough Rate Panel بس بتوجل EGY/IRQ. الـ Products
+// Info (PRODUCTS_INFO_GID) نفسه بالظبط لكل الدولتين (بيتفلتر بعمود A
+// COUNTRY)، والباقي شيتات منفصلة تمامًا لأن أعمدتها مختلفة شكلاً.
+const IRQ_SELLTHROUGH_NEEDED_GID = "997714491"; // شيت "IRQ Sell-through rate needed data"
+const IRQ_INBOUND_GID = "879952880";            // شيت Inbound العراق (أعمدة مختلفة عن Inbound مصر)
+const IRQ_BEGIN_INV_GID = "827189174";          // شيت "IRQ Beginning Inventory"
+const IRQ_COGS_GID = "775718300";               // شيت الـ COGS الخاص بالعراق
 // شيت "Merchant Segmentation" الجديد (تحت Performance Merchant's / Merchant
 // Segmentation & Projections) — صف واحد لكل (Merchant × Month)، بالأعمدة
 // (0-based): 0 MONTH, 1 COUNTRY, 2 TAGER_ID, 3 TAGER_NAME, 4 ACC_MANAGER,
@@ -332,6 +339,15 @@ const state = {
   metabaseProductsInfo: [],
   metabaseBeginningInventory: [],
   metabaseSellthroughNeeded: [],
+  // IRQ (v1.1.58) — نفس الأربع مصادر فوق بس للعراق، مصادر شيتات مستقلة (غير
+  // Products Info اللي بيتفلتر بعمود COUNTRY من نفس الشيت). راجع toggle
+  // EGY/IRQ فوق جدول الـ Sellthrough Rate Panel.
+  inboundRowsIrq: [],
+  metabaseProductsInfoIrq: [],
+  metabaseBeginningInventoryIrq: [],
+  metabaseSellthroughNeededIrq: [],
+  cogsMapIrq: new Map(),
+  sellthroughCountry: "EGY", // "EGY" | "IRQ" — الافتراضي دايمًا EGY
   sellthroughDataPrepared: [],
   filteredSellthroughData: [],
   sellthroughSortKey: "stRate",
@@ -4696,6 +4712,61 @@ function parseInboundSheet(payload) {
 }
 
 // -------------------------------------------------------------------------
+// شيت "Inbound" العراق (IRQ_INBOUND_GID، gid=879952880) — v1.1.58.
+// أعمدة (0-based) زي ما بعتها اليوزر بالظبط: 0 SKU/PO | 1 Receiving Date |
+// 2 Status | 3 PO | 4 Country | 5 SKU ID | 6 SKU Name | 7 Sent Quantity |
+// 8 No. of Boxes | 9 QTY Per box | 10 Product Desc. | 11 Status | 12 Arrived Count.
+// شكل مختلف تمامًا عن Inbound مصر (مفيش Receiving Month / First buy month
+// جاهزين كأعمدة)، فبنحسبهم إحنا بعد القراءة (تحت، في fixIrqInboundFirstBuy):
+//   • RCV_QTY = Arrived Count (عمود M) — الكمية اللي فعلاً وصلت المخزن، مش
+//     Sent Quantity (اللي ممكن تختلف عن اللي وصل فعلاً). لو ده غلط حسب
+//     تعريفك للعمود، قولّي أظبطه على Sent Quantity بدالها.
+//   • Receiving Month = مشتقة من Receiving Date نفسه (بداية شهره).
+//   • First buy month = أقدم Receiving Month ظهر فيه الـ SKU ده — بيتحسب
+//     بعد قراءة كل الصفوف (تحت)، مش عمود جاهز زي مصر.
+// -------------------------------------------------------------------------
+function parseIrqInboundSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const sku = cellText(c[5]).trim();
+    if (!sku || sku.toUpperCase() === "SKU ID") continue; // تخطي صف العناوين لو موجود
+
+    const rcvDateText = cellText(c[1]);
+    const rcvDate = new Date(rcvDateText);
+    const rcvTs = isNaN(rcvDate.getTime()) ? 0 : rcvDate.getTime();
+
+    rows.push({
+      sku,
+      name: cellText(c[6]),
+      cat: "", // مفيش عمود كاتيجوري في شيت Inbound العراق
+      rcvDateText,
+      rcvTs,
+      rcvQty: cellNumber(c[12]), // Arrived Count
+      receivingMonthKey: rcvTs ? stMonthKeyFromValue(rcvDateText) : null,
+      firstBuyMonthKey: null // بيتحسب تحت في fixIrqInboundFirstBuy بعد قراءة كل الصفوف
+    });
+  }
+  return fixIrqInboundFirstBuy(rows);
+}
+
+// بيحسب "First buy month" لكل SKU (أقدم Receiving Month ظهر فيه) ويحطه في
+// كل صفوفه — نفس معنى عمود "First buy month" الجاهز في شيت Inbound مصر، بس
+// محسوب هنا مش مقروء لأنه مش موجود كعمود في شيت العراق.
+function fixIrqInboundFirstBuy(rows) {
+  const firstBySku = new Map();
+  rows.forEach(row => {
+    if (!row.sku || !row.receivingMonthKey) return;
+    const cur = firstBySku.get(row.sku);
+    if (!cur || new Date(row.receivingMonthKey) < new Date(cur)) firstBySku.set(row.sku, row.receivingMonthKey);
+  });
+  rows.forEach(row => { row.firstBuyMonthKey = firstBySku.get(row.sku) || null; });
+  return rows;
+}
+
+// -------------------------------------------------------------------------
 // شيت "Daily SKU Inventory" (WEEKLY_INVENTORY_GID). أعمدة: 0 SKU_ID |
 // 1 SKU_NAME | 2+ عمود لكل يوم (عنوان العمود نفسه هو تاريخ اليوم ده، زي
 // "23-August") — بيتضاف عمود جديد كل يوم تلقائيًا في الشيت. نفس باترن
@@ -4833,12 +4904,44 @@ function parseBeginningInventorySheet(payload) {
 }
 
 // -------------------------------------------------------------------------
+// شيت "IRQ Beginning Inventory" (IRQ_BEGIN_INV_GID، gid=827189174) — v1.1.58.
+// أعمدة بالترتيب زي ما بعتها اليوزر: Internal Reference | Quantity On Hand |
+// MONTH | Final_SKU. مفيش PRODUCT_NAME/CATEGORY_L1 جاهزين (زي مصر) — بيتجابوا
+// بعد كده من Products Info (IRQ) بمطابقة الـ SKU لو موجودين.
+// PRODUCT_ID = عمود A (Internal Reference) — نفس اسم عمود الـ ID المستخدم في
+// شيت الـ COGS بالظبط (Internal Reference)، فده الأرجح إنه هو المفتاح اللي
+// بيتلاقي بيه باقي شيتات العراق. لو ده مش صح وعايزها Final_SKU (عمود D)
+// بدالها، قولّي وأظبطها بسهولة.
+// -------------------------------------------------------------------------
+function parseIrqBeginningInventorySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const rows = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const productId = cellText(c[0]).trim();
+    if (!productId || productId.toUpperCase() === "INTERNAL REFERENCE") continue;
+    rows.push({
+      PRODUCT_ID: productId,
+      QTY: cellNumber(c[1]),
+      MONTH: cellText(c[2]),
+      PRODUCT_NAME: "",
+      CATEGORY_L1: "",
+      FINAL_SKU: cellText(c[3]).trim() // احتياطي، مش مستخدم حاليًا في الحسبة
+    });
+  }
+  return rows;
+}
+
+// -------------------------------------------------------------------------
 // شيت "Porducts_infor #4259" (PRODUCTS_INFO_GID)
 // أعمدة بالترتيب: COUNTRY | PRODUCT_ID | BUNDLE_NAME | CATEGORY_L1 | CATEGORY_L2 |
 //                 CATEGORY_L3 | PRICE | PROFIT | WAVG | PPM | IS_BUNDLE | QTY | IMAGE
-// بيتفلتر على COUNTRY = "EGY" بس (زي باقي البانل).
+// بيتفلتر على عمود COUNTRY — EGY افتراضيًا، أو IRQ لو مررت countryFilter
+// (v1.1.58: نفس الشيت بالظبط لكل الدولتين، بيتفلتر بعمود A بس).
 // -------------------------------------------------------------------------
-function parseProductsInfoSheet(payload) {
+function parseProductsInfoSheet(payload, countryFilter) {
+  const wantedCountry = (countryFilter || "EGY").trim().toUpperCase();
   const rawRows = payload?.table?.rows ?? [];
   const rows = [];
   for (const r of rawRows) {
@@ -4846,7 +4949,7 @@ function parseProductsInfoSheet(payload) {
     if (!c || c.length === 0) continue;
     const country = cellText(c[0]);
     if (!country || country === "COUNTRY") continue;
-    if (country.trim().toUpperCase() !== "EGY") continue;
+    if (country.trim().toUpperCase() !== wantedCountry) continue;
     const productId = cellText(c[1]);
     if (!productId) continue;
     rows.push({
@@ -8750,16 +8853,23 @@ function stMonthKeysBetween(startKey, endKey) {
 
 // تجميع كل الشهور الموجودة فعلياً في الداتا (من الثلاث مصادر) عشان نملي الفلاتر بيها.
 function computeSellthroughMonthOptions() {
+  // v1.1.58: نفس المصادر بالظبط بس حسب الدولة المختارة حاليًا (زي
+  // getSellthroughIndices/computeSellthroughSourceFingerprint فوق).
+  const isIrq = state.sellthroughCountry === "IRQ";
+  const need = isIrq ? state.metabaseSellthroughNeededIrq : state.metabaseSellthroughNeeded;
+  const begInv = isIrq ? state.metabaseBeginningInventoryIrq : state.metabaseBeginningInventory;
+  const inbound = isIrq ? state.inboundRowsIrq : state.inboundRows;
+
   const map = new Map(); // label -> Date (لغرض الترتيب)
-  (state.metabaseSellthroughNeeded || []).forEach(row => {
+  (need || []).forEach(row => {
     const key = stMonthKeyFromValue(row.MONTH);
     if (key) map.set(key, new Date(key));
   });
-  (state.metabaseBeginningInventory || []).forEach(row => {
+  (begInv || []).forEach(row => {
     const key = stMonthKeyFromValue(row.MONTH);
     if (key) map.set(key, new Date(key));
   });
-  (state.inboundRows || []).forEach(row => {
+  (inbound || []).forEach(row => {
     if (row.receivingMonthKey) map.set(row.receivingMonthKey, new Date(row.receivingMonthKey));
   });
   return Array.from(map.entries())
@@ -8808,8 +8918,23 @@ function populateSellthroughFilters() {
 // الفلاتر فوري وبيلغي الهنج اللي كان بيحصل قبل كده.
 let _stIndexCache = null;
 
+// IRQ (v1.1.58) — الكوجس المستخدم في computeSellthroughRowsForQuery/Bucket
+// بيتحدد حسب الدولة المختارة حاليًا (state.sellthroughCountry)، من غير ما
+// نلمس state.cogsMap الأصلي (ده مستخدم في أماكن تانية كتير في الداشبورد
+// لمنتجات مصر، لازم يفضل زي ما هو).
+function stCogsForSku(sku) {
+  const map = state.sellthroughCountry === "IRQ" ? state.cogsMapIrq : state.cogsMap;
+  return (map && map.get) ? (map.get(sku) || 0) : 0;
+}
+
 function getSellthroughIndices() {
-  const src = {
+  const isIrq = state.sellthroughCountry === "IRQ";
+  const src = isIrq ? {
+    inbound: state.inboundRowsIrq,
+    begInv: state.metabaseBeginningInventoryIrq,
+    need: state.metabaseSellthroughNeededIrq,
+    prodInfo: state.metabaseProductsInfoIrq
+  } : {
     inbound: state.inboundRows,
     begInv: state.metabaseBeginningInventory,
     need: state.metabaseSellthroughNeeded,
@@ -9079,7 +9204,7 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     // Selling Price - Profit - Cogs.
     const sellingPrice = prodInfo.price || 0;
     const profit = prodInfo.profit || 0;
-    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    const cogsCost = stCogsForSku(sku);
     const ppmSku = sellingPrice - profit - cogsCost;
 
     rows.push({
@@ -9178,7 +9303,7 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
     const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
     const sellingPrice = prodInfo.price || 0;
     const profit = prodInfo.profit || 0;
-    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    const cogsCost = stCogsForSku(sku);
     const ppmSku = sellingPrice - profit - cogsCost;
 
     rows.push({
@@ -10795,6 +10920,23 @@ document.addEventListener("DOMContentLoaded", () => {
       recomputeSellthroughRows();
     });
   }
+
+  // Toggle EGY/IRQ (v1.1.58) — فوق فلاتر الـ Sellthrough Rate Panel مباشرة.
+  // بيبدل مصادر الداتا الأربعة (Sellthrough Needed/Beginning Inventory/
+  // Inbound/Products Info) + الكوجس لنفس الدولة المختارة، وبيصفّر الفلاتر
+  // القديمة (شهور مصر ممكن متبقاش موجودة في شهور العراق) قبل ما يعيد بناء
+  // الجدول من الأول.
+  document.querySelectorAll("#stCountryToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const country = btn.dataset.country === "IRQ" ? "IRQ" : "EGY";
+      if (state.sellthroughCountry === country) return;
+      state.sellthroughCountry = country;
+      document.querySelectorAll("#stCountryToggle .segmented-btn").forEach(b => b.classList.toggle("active", b === btn));
+      state.stFilters = { begInv: null, startSale: null, endSale: null, lastInboundStatus: "" };
+      if ($("stLastInboundStatusSelect")) $("stLastInboundStatusSelect").value = "";
+      prepareSellthroughData();
+    });
+  });
 
   if($("prevPageSellthrough")) $("prevPageSellthrough").addEventListener("click", () => {
     if (state.sellthroughPage > 0) { state.sellthroughPage -= 1; renderPaginatedSellthroughTable(); }
@@ -13174,7 +13316,8 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID
+  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID,
+  IRQ_SELLTHROUGH_NEEDED_GID, IRQ_INBOUND_GID, IRQ_BEGIN_INV_GID, IRQ_COGS_GID
 ].filter(Boolean);
 
 // آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
@@ -13352,7 +13495,11 @@ const GID_LABELS = {
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
-  [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)"
+  [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)",
+  [IRQ_SELLTHROUGH_NEEDED_GID]: "IRQ Sell-through Needed",
+  [IRQ_INBOUND_GID]: "IRQ Inbound",
+  [IRQ_BEGIN_INV_GID]: "IRQ Beginning Inventory",
+  [IRQ_COGS_GID]: "IRQ COGS"
 };
 
 // بيجيب تاب "Confirmed by Day" مباشرة من الـ Cloudflare Worker
@@ -13565,6 +13712,12 @@ async function fetchAllSheetsSnapshot() {
   const prodInfoPayload = sheets[PRODUCTS_INFO_GID];
   const begInvPayload = sheets[BEGIN_INV_GID];
   const sellthroughNeededPayload = sheets[SELLTHROUGH_NEEDED_GID];
+  // IRQ (v1.1.58) — Products Info بيستخدم نفس prodInfoPayload فوق (نفس الشيت)
+  // بس بفلتر COUNTRY مختلف، تحت.
+  const irqInboundPayload = sheets[IRQ_INBOUND_GID];
+  const irqBegInvPayload = sheets[IRQ_BEGIN_INV_GID];
+  const irqSellthroughNeededPayload = sheets[IRQ_SELLTHROUGH_NEEDED_GID];
+  const irqCogsPayload = sheets[IRQ_COGS_GID];
   const debundleMapPayload = sheets[PRODUCTS_DEBUNDLE_MAP_GID];
   const singleSkuTargetsPayload = sheets[SINGLE_SKU_TARGETS_GID];
   const cogsPayload = sheets[COGS_GID];
@@ -13601,6 +13754,12 @@ async function fetchAllSheetsSnapshot() {
     metabaseProductsInfo: prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload) : state.metabaseProductsInfo,
     metabaseBeginningInventory: begInvPayload ? parseBeginningInventorySheet(begInvPayload) : state.metabaseBeginningInventory,
     metabaseSellthroughNeeded: sellthroughNeededPayload ? parseSellthroughNeededSheet(sellthroughNeededPayload) : state.metabaseSellthroughNeeded,
+    // IRQ (v1.1.58) — نفس منطق الأربع سطور اللي فوق، بس لمصادر العراق.
+    inboundRowsIrq: irqInboundPayload ? parseIrqInboundSheet(irqInboundPayload) : state.inboundRowsIrq,
+    metabaseProductsInfoIrq: prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload, "IRQ") : state.metabaseProductsInfoIrq,
+    metabaseBeginningInventoryIrq: irqBegInvPayload ? parseIrqBeginningInventorySheet(irqBegInvPayload) : state.metabaseBeginningInventoryIrq,
+    metabaseSellthroughNeededIrq: irqSellthroughNeededPayload ? parseSellthroughNeededSheet(irqSellthroughNeededPayload) : state.metabaseSellthroughNeededIrq,
+    cogsMapIrq: irqCogsPayload ? parseCogsSheet(irqCogsPayload) : state.cogsMapIrq,
     debundleMap: debundleMapPayload ? parseDebundleMapSheet(debundleMapPayload) : state.debundleMap, // <-- Commercial Debundlized
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
     cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
@@ -13629,10 +13788,14 @@ async function fetchAllSheetsSnapshot() {
 // حقيقي وصل من الشيت.
 // -------------------------------------------------------------------------
 function computeSellthroughSourceFingerprint() {
-  const inbound = state.inboundRows || [];
-  const begInv = state.metabaseBeginningInventory || [];
-  const need = state.metabaseSellthroughNeeded || [];
-  const prodInfo = state.metabaseProductsInfo || [];
+  // v1.1.58: بصمة مختلفة لكل دولة (العلم نفسه مضاف في الأول) — عشان تبديل
+  // EGY/IRQ يبطل الكاش القديم فورًا ويعيد بناء الفهارس من مصادر الدولة الجديدة.
+  const isIrq = state.sellthroughCountry === "IRQ";
+  const countryTag = isIrq ? "IRQ" : "EGY";
+  const inbound = (isIrq ? state.inboundRowsIrq : state.inboundRows) || [];
+  const begInv = (isIrq ? state.metabaseBeginningInventoryIrq : state.metabaseBeginningInventory) || [];
+  const need = (isIrq ? state.metabaseSellthroughNeededIrq : state.metabaseSellthroughNeeded) || [];
+  const prodInfo = (isIrq ? state.metabaseProductsInfoIrq : state.metabaseProductsInfo) || [];
   const debundle = state.debundleMap || [];
   const mainRows = state.allParsedRows || [];
 
@@ -13653,6 +13816,7 @@ function computeSellthroughSourceFingerprint() {
   mainRows.forEach(r => { if (r.timestamp > maxMainTs) maxMainTs = r.timestamp; });
 
   return [
+    countryTag,
     inbound.length, Math.round(sumRcvQty), maxRcvTs,
     begInv.length, Math.round(sumBegQty),
     need.length, Math.round(sumCnf), Math.round(sumDlv), Math.round(sumRto),
@@ -13679,6 +13843,12 @@ function applySnapshotToState(snapshot) {
   state.metabaseProductsInfo = snapshot.metabaseProductsInfo || [];
   state.metabaseBeginningInventory = snapshot.metabaseBeginningInventory || [];
   state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
+  // IRQ (v1.1.58)
+  state.inboundRowsIrq = snapshot.inboundRowsIrq || [];
+  state.metabaseProductsInfoIrq = snapshot.metabaseProductsInfoIrq || [];
+  state.metabaseBeginningInventoryIrq = snapshot.metabaseBeginningInventoryIrq || [];
+  state.metabaseSellthroughNeededIrq = snapshot.metabaseSellthroughNeededIrq || [];
+  state.cogsMapIrq = snapshot.cogsMapIrq || state.cogsMapIrq || new Map();
   state.debundleMap = snapshot.debundleMap || [];
   state.singleSkuTargets = snapshot.singleSkuTargets || {};
   state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
