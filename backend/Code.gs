@@ -738,7 +738,8 @@ var LAST_SYNC_GIDS = [
   "997714491",   // IRQ_SELLTHROUGH_NEEDED_GID
   "879952880",   // IRQ_INBOUND_GID
   "827189174",   // IRQ_BEGIN_INV_GID
-  "775718300"    // IRQ_COGS_GID
+  "775718300",   // IRQ_COGS_GID
+  "133618857"    // IRQ_INVENTORY_GID — شيت "inv-IRQ" (v1.1.60)
 ];
 
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
@@ -926,7 +927,8 @@ var LAST_SYNC_GID_LABELS_ = {
   "892918900": "ACM Sales Plan", "1304674893": "New Segmentation",
   "565878313": "Inbound", "531154071": "Products Info",
   "997714491": "IRQ Sell-through Needed", "879952880": "IRQ Inbound",
-  "827189174": "IRQ Beginning Inventory", "775718300": "IRQ COGS"
+  "827189174": "IRQ Beginning Inventory", "775718300": "IRQ COGS",
+  "133618857": "IRQ Inventory (inv-IRQ)"
 };
 
 function handleGetLastSyncDebug(e) {

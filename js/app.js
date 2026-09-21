@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.58";
+const APP_VERSION = "1.1.60";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -46,6 +46,11 @@ const IRQ_SELLTHROUGH_NEEDED_GID = "997714491"; // شيت "IRQ Sell-through rate
 const IRQ_INBOUND_GID = "879952880";            // شيت Inbound العراق (أعمدة مختلفة عن Inbound مصر)
 const IRQ_BEGIN_INV_GID = "827189174";          // شيت "IRQ Beginning Inventory"
 const IRQ_COGS_GID = "775718300";               // شيت الـ COGS الخاص بالعراق
+// v1.1.60 — شيت "inv-IRQ": Stock/DOH/CAT/Availability/Is Locked/Is Expired/
+// CR%/DR%/NDR%/Selling Price/Profit/AVG3D("1st 3D Avg")/AVG15D("15D Avg")
+// جاهزين لكل SKU عراقي — بيسد الفجوة اللي كانت موجودة (الحقول دي كانت بتطلع
+// صفر/"-" في وضع IRQ لأنها كانت بتتقرا من MAIN_GID/PRODUCTS_GID المصريين).
+const IRQ_INVENTORY_GID = "133618857";
 // شيت "Merchant Segmentation" الجديد (تحت Performance Merchant's / Merchant
 // Segmentation & Projections) — صف واحد لكل (Merchant × Month)، بالأعمدة
 // (0-based): 0 MONTH, 1 COUNTRY, 2 TAGER_ID, 3 TAGER_NAME, 4 ACC_MANAGER,
@@ -347,6 +352,7 @@ const state = {
   metabaseBeginningInventoryIrq: [],
   metabaseSellthroughNeededIrq: [],
   cogsMapIrq: new Map(),
+  irqInventoryMap: new Map(), // شيت inv-IRQ (IRQ_INVENTORY_GID) — Stock/DOH/AVG3D/AVG15D/... لسكيو العراق
   sellthroughCountry: "EGY", // "EGY" | "IRQ" — الافتراضي دايمًا EGY
   sellthroughDataPrepared: [],
   filteredSellthroughData: [],
@@ -4998,6 +5004,46 @@ function parseSellthroughNeededSheet(payload) {
   return rows;
 }
 
+// -------------------------------------------------------------------------
+// شيت "inv-IRQ" (IRQ_INVENTORY_GID، gid=133618857) — v1.1.60. مصدر
+// Stock/DOH/Availability/Is Locked/Is Expired/Selling Price/Profit/AVG3D/AVG15D
+// الجاهزين لسكيو العراق. أعمدة بالترتيب زي ما بعتها اليوزر بالظبط:
+// SKU_ID | SKU_NAME | Stock | DOH | CAT | Availability | Is Locked |
+// Is Expired | CR% | DR% | NDR% | Selling Price | Profit | Placed Today |
+// Placed yesterday | 22-Sep | 21-Sep | 20-Sep | 19-Sep | 18-Sep | 17-Sep |
+// 16-Sep | 1st 3D Avg | 2nd 3D Avg | 15D Avg.
+// AVG 3D بتاع الـ Sellthrough Panel (IRQ) بيتقرا من "1st 3D Avg" (عمود W،
+// index 22)، و AVG 15D من "15D Avg" (عمود Y، index 24) — بالظبط زي ما طلب
+// اليوزر. "2nd 3D Avg" مش مستخدم حاليًا في أي حسبة.
+// -------------------------------------------------------------------------
+function parseIrqInventorySheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const map = new Map();
+  for (const r of rawRows) {
+    const c = r.c || [];
+    if (!c || c.length === 0) continue;
+    const sku = cellText(c[0]).trim();
+    if (!sku || sku.toUpperCase() === "SKU_ID") continue;
+    map.set(sku, {
+      skuName: cellText(c[1]),
+      stock: cellNumber(c[2]),
+      doh: cellNumber(c[3]),
+      cat: cellText(c[4]),
+      availability: cellText(c[5]),
+      isLocked: cellText(c[6]),
+      isExpired: cellText(c[7]),
+      crPct: cellNumber(c[8]),
+      drPct: cellNumber(c[9]),
+      ndrPct: cellNumber(c[10]),
+      sellingPrice: cellNumber(c[11]),
+      profit: cellNumber(c[12]),
+      avg3d: cellNumber(c[22]),  // "1st 3D Avg"
+      avg15d: cellNumber(c[24]) // "15D Avg"
+    });
+  }
+  return map;
+}
+
 function getSegmentLogic(orders) {
   if (orders === 0) return "In active";
   if (orders < 5) return "Low Value";
@@ -8927,6 +8973,56 @@ function stCogsForSku(sku) {
   return (map && map.get) ? (map.get(sku) || 0) : 0;
 }
 
+// -------------------------------------------------------------------------
+// Stock/DOH/AVG3D/AVG15D/Selling Price/Profit/Availability/Is Locked لكل SKU
+// في computeSellthroughRowsForQuery/Bucket — v1.1.60. لحد ما شيت "inv-IRQ"
+// اتضاف، الحقول دي كانت دايمًا بتتقرا من مصادر مصر بس (MAIN_GID/PRODUCTS_GID)
+// حتى في وضع IRQ (فكانت بتطلع صفر/"-" لسكيوهات العراق، زي ما اتقال للمستخدم
+// قبل كده). دلوقتي في وضع IRQ بتتقرا مباشرة من idx.irqInventoryMap
+// (IRQ_INVENTORY_GID، gid=133618857) اللي فيه القيم جاهزة لكل سكيو عراقي —
+// AVG3D = عمود "1st 3D Avg"، AVG15D = عمود "15D Avg" (بالظبط زي ما طلب
+// اليوزر). في وضع EGY السلوك زي ما هو بالظبط من غير أي تغيير.
+// -------------------------------------------------------------------------
+function stResolveInventoryExtras(sku, idx) {
+  const { stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku } = idx;
+
+  if (state.sellthroughCountry === "IRQ") {
+    const inv = (idx.irqInventoryMap && idx.irqInventoryMap.get) ? idx.irqInventoryMap.get(sku) : null;
+    const stock = inv ? (inv.stock || 0) : 0;
+    const avg3dConfirmed = inv ? (inv.avg3d || 0) : 0;
+    const avg15dConfirmed = inv ? (inv.avg15d || 0) : 0;
+    // DOH: لو الشيت نفسه معطيه جاهز (عمود DOH) بناخده زي ما هو، وإلا بنحسبه
+    // من Stock/AVG3D بنفس معادلة مصر (احتياطي لو الخانة فاضية).
+    const doh = (inv && inv.doh != null && inv.doh !== 0) ? inv.doh : (avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0));
+    const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
+    return {
+      stock, avg3dConfirmed, avg15dConfirmed, doh, doh15d,
+      sellingPrice: inv ? (inv.sellingPrice || 0) : 0,
+      profit: inv ? (inv.profit || 0) : 0,
+      websiteStatus: inv && inv.availability ? inv.availability : "-",
+      isLocked: inv && inv.isLocked ? inv.isLocked : "-",
+      irqName: inv ? inv.skuName : null,
+      irqCat: inv ? inv.cat : null
+    };
+  }
+
+  // --- EGY (زي ما كانت بالظبط) ---
+  const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
+  const avg3dConfirmed = singleOverallStats(sku).avg;
+  const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
+  const avg15dConfirmed = singleOverallStats15d(sku).avg;
+  const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
+  const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
+  return {
+    stock, avg3dConfirmed, avg15dConfirmed, doh, doh15d,
+    sellingPrice: prodInfo.price || 0,
+    profit: prodInfo.profit || 0,
+    websiteStatus: prodInfo.websiteStatus || "-",
+    isLocked: prodInfo.isLocked || "-",
+    irqName: null, irqCat: null
+  };
+}
+
 function getSellthroughIndices() {
   const isIrq = state.sellthroughCountry === "IRQ";
   const src = isIrq ? {
@@ -9066,7 +9162,8 @@ function getSellthroughIndices() {
     productInfo, inboundBySkuMonth, inboundFirstBuyMonth, inboundLastRec, inboundNameCat,
     beginInvBySkuMonth, beginInvNameCat, needBySkuMonth, needNameCat,
     skuByMonthInbound, skuByMonthBegInv, skuByMonthNeed,
-    stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku
+    stockByProductId, singleOverallStats, singleOverallStats15d, productsBySkuNormalized, stNormalizeSku,
+    irqInventoryMap: state.irqInventoryMap // v1.1.60 — شيت inv-IRQ (Stock/DOH/AVG3D/AVG15D/... لسكيو العراق)
   };
   return _stIndexCache;
 }
@@ -9181,36 +9278,22 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
 
-    // Stock/DOH: نفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) — STOCK
-    // بيتقرا من عمود A (PRODUCT_ID) في شيت الديبندلايز (عمود H)، والـ DOH
-    // بيتحسب من ديماند الـ SKU ده Overall: هو لوحده + كل البندلز اللي هو
-    // مكوّن جواها (كل بندل × الكمية بتاعته فيه) — نفس getSellthroughIndices فوق.
-    const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
-    const avg3dConfirmed = singleOverallStats(sku).avg;
-    const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
-    // AVG 15D / DOH_15D: نفس منطق AVG 3D/DOH فوق بالظبط (Overall Debundled
-    // demand)، بس على شباك آخر 15 يوم بدل آخر 3 أيام.
-    const avg15dConfirmed = singleOverallStats15d(sku).avg;
-    const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
+    // Stock/DOH/AVG3D/AVG15D/Selling Price/Profit/Availability/Is Locked —
+    // v1.1.60: راجع stResolveInventoryExtras فوق (EGY زي ما كانت بالظبط،
+    // IRQ بقت بتتقرا من شيت inv-IRQ الجاهز بدل ما تطلع صفر).
+    const extras = stResolveInventoryExtras(sku, idx);
+    const { stock, avg3dConfirmed, avg15dConfirmed, doh, doh15d, sellingPrice, profit, websiteStatus, isLocked } = extras;
 
-    // Availability / Is_Locked: من شيت Products (PRODUCTS_GID) عن طريق SKU —
-    // مطابقة مباشرة الأول، وبعدين مطابقة بعد توحيد الشكل (trim + كابيتال)
-    // لو الـ SKU في شيت الـ Metabase مكتوب بشكل مختلف شوية عن SKU_ID.
-    const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
-
-    // Selling Price / Profit: من نفس شيت الـ Products (PRODUCTS_GID) بتاع
-    // الـ SKU ده. Cogs: من شيت الـ COGS (COGS_GID) بمطابقة الـ SKU. Priceing_PPM:
-    // نفس معادلة "Priceing_PPM" المستخدمة في Recommended Tracker بالظبط —
-    // Selling Price - Profit - Cogs.
-    const sellingPrice = prodInfo.price || 0;
-    const profit = prodInfo.profit || 0;
+    // Cogs: من شيت الـ COGS (COGS_GID لمصر، أو IRQ_COGS_GID للعراق) بمطابقة
+    // الـ SKU. Priceing_PPM: نفس معادلة "Priceing_PPM" المستخدمة في
+    // Recommended Tracker بالظبط — Selling Price - Profit - Cogs.
     const cogsCost = stCogsForSku(sku);
     const ppmSku = sellingPrice - profit - cogsCost;
 
     rows.push({
       sku,
-      name: info.name || "Unknown",
-      cat: info.cat || "Uncategorized",
+      name: info.name || extras.irqName || "Unknown",
+      cat: info.cat || extras.irqCat || "Uncategorized",
       lastRecDate: lastRec ? lastRec.text : "-",
       lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
@@ -9221,7 +9304,7 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
       sellingPrice, profit, cogs: cogsCost, ppmSku,
-      websiteStatus: prodInfo.websiteStatus || "-", isLocked: prodInfo.isLocked || "-"
+      websiteStatus, isLocked
     });
   });
 
@@ -9294,20 +9377,14 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
 
-    const stock = stockByProductId.has(sku) ? stockByProductId.get(sku) : (state.inventoryMap[sku] ? state.inventoryMap[sku].stock : 0);
-    const avg3dConfirmed = singleOverallStats(sku).avg;
-    const doh = avg3dConfirmed > 0 ? Math.round(stock / avg3dConfirmed) : Math.round(stock || 0);
-    const avg15dConfirmed = singleOverallStats15d(sku).avg;
-    const doh15d = avg15dConfirmed > 0 ? Math.round(stock / avg15dConfirmed) : Math.round(stock || 0);
-
-    const prodInfo = state.productsMap[sku] || productsBySkuNormalized.get(stNormalizeSku(sku)) || {};
-    const sellingPrice = prodInfo.price || 0;
-    const profit = prodInfo.profit || 0;
+    // v1.1.60: راجع stResolveInventoryExtras فوق computeSellthroughRowsForQuery.
+    const extras = stResolveInventoryExtras(sku, idx);
+    const { stock, avg3dConfirmed, avg15dConfirmed, doh, doh15d, sellingPrice, profit, websiteStatus, isLocked } = extras;
     const cogsCost = stCogsForSku(sku);
     const ppmSku = sellingPrice - profit - cogsCost;
 
     rows.push({
-      sku, name: info.name || "Unknown", cat: info.cat || "Uncategorized",
+      sku, name: info.name || extras.irqName || "Unknown", cat: info.cat || extras.irqCat || "Uncategorized",
       lastRecDate: lastRec ? lastRec.text : "-", lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
@@ -9317,7 +9394,7 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
       stock: Math.round(stock || 0), doh,
       avg3d: avg3dConfirmed, avg15d: avg15dConfirmed, doh15d,
       sellingPrice, profit, cogs: cogsCost, ppmSku,
-      websiteStatus: prodInfo.websiteStatus || "-", isLocked: prodInfo.isLocked || "-"
+      websiteStatus, isLocked
     });
   });
 
@@ -9531,24 +9608,22 @@ function renderSellthroughSummaries(rows) {
   renderSellthroughSummaryTable("stDeliveredSummaryBody", computeSellthroughSummary(rows, "delivered"));
 }
 
-function simulateSellthroughProgress() {
+// v1.1.59 — نفس تدريج شريط التحميل اللي كان جوه simulateSellthroughProgress
+// بالظبط (0% -> 55% -> الشغل الحقيقي جوه setTimeout -> 100%)، اتقلع لدالة
+// لوحدها قابلة لإعادة الاستخدام. السبب: toggle EGY/IRQ (تحت) كان بينادي
+// prepareSellthroughData() مباشرة synchronous جوه الـ click handler من غير
+// أي مؤشر تحميل — الحسبة التقيلة (buildDebundledStockDohIndex على allParsedRows
+// اللي ممكن يكون فيها مية ألف صف) كانت بتجمد المتصفح كامل لثواني (المتصفح
+// مش عارف يرسم أي حاجة لحد ما الشغل الـ synchronous يخلص)، فكان حاسس إنه
+// "علقان جامد" — مش خطأ في الداتا، مجرد إن الشغل كان بيتنفذ من غير ما يدي
+// المتصفح فرصة يرسم حالة التحميل الأول. دلوقتي أي حاجة تقيلة (فتح البانل،
+// أو toggle الدولة) بتمر من هنا فتاخد نفس اللودينج بار السلس.
+function stRunHeavyWorkWithProgress(workFn) {
   const overlay = $("stProgressOverlay");
   const bar = $("stProgressBar");
   const text = $("stProgressText");
 
-  // ✅ الداتا اتجهزت قبل كده في نفس الجلسة، والمصدر الخام مش اتغيّر (مفيش
-  // ريفريش جديد) — يبقى مفيش داعي نعمل لودينج ولا نعيد الحساب تاني.
-  // البانل هيفضل زي ما هو (الجدول والملخصات لسه في الـ DOM من المرة اللي فاتت).
-  if (state.sellthroughPrepared) {
-    if (overlay) overlay.classList.add("hidden");
-    return;
-  }
-
-  if (!overlay || !bar || !text) {
-    prepareSellthroughData();
-    state.sellthroughPrepared = true;
-    return;
-  }
+  if (!overlay || !bar || !text) { workFn(); return; }
 
   // 1. إظهار الشريط وتصفيره فوراً بدون أنيميشن عشان يبدأ من الصفر بجد
   overlay.classList.remove("hidden");
@@ -9568,8 +9643,7 @@ function simulateSellthroughProgress() {
       // وهمي منفصل عن الشغل زي قبل كده.
       requestAnimationFrame(() => {
         setTimeout(() => {
-          prepareSellthroughData();      // <-- الشغل الحقيقي بيحصل هنا بالظبط
-          state.sellthroughPrepared = true;
+          workFn();      // <-- الشغل الحقيقي بيحصل هنا بالظبط
 
           bar.style.transition = "width 0.15s ease-out";
           bar.style.width = "100%";
@@ -9581,6 +9655,20 @@ function simulateSellthroughProgress() {
         }, 20);
       });
     });
+  });
+}
+
+// أول ما البانل يتفتح: لو الداتا محضّرة بالفعل من المرة اللي فاتت (ومفيش
+// ريفريش جديد وصل)، مفيش داعي لودينج ولا إعادة حساب — البانل بيفضل زي ما هو.
+function simulateSellthroughProgress() {
+  if (state.sellthroughPrepared) {
+    const overlay = $("stProgressOverlay");
+    if (overlay) overlay.classList.add("hidden");
+    return;
+  }
+  stRunHeavyWorkWithProgress(() => {
+    prepareSellthroughData();
+    state.sellthroughPrepared = true;
   });
 }
 
@@ -10926,15 +11014,37 @@ document.addEventListener("DOMContentLoaded", () => {
   // Inbound/Products Info) + الكوجس لنفس الدولة المختارة، وبيصفّر الفلاتر
   // القديمة (شهور مصر ممكن متبقاش موجودة في شهور العراق) قبل ما يعيد بناء
   // الجدول من الأول.
+  // v1.1.59: بيمر دلوقتي من stRunHeavyWorkWithProgress (نفس لودينج بار فتح
+  // البانل الأول) بدل ما ينادي prepareSellthroughData() مباشرة synchronous —
+  // ده اللي كان بيخلي التبديل بين EGY/IRQ حاسس إنه "علقان جامد" (المتصفح
+  // بيجمد فعليًا لحد ما الحسبة التقيلة تخلص من غير أي مؤشر تحميل). كمان
+  // قافل الزرارين وقت الشغل عشان لمسة تانية سريعة (EGY->IRQ->EGY) ماتعملش
+  // أكتر من حسبة تقيلة فوق بعض في نفس اللحظة.
+  let stCountryToggleBusy = false;
   document.querySelectorAll("#stCountryToggle .segmented-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const country = btn.dataset.country === "IRQ" ? "IRQ" : "EGY";
-      if (state.sellthroughCountry === country) return;
+      if (stCountryToggleBusy || state.sellthroughCountry === country) return;
+      stCountryToggleBusy = true;
+
+      const toggleBtns = document.querySelectorAll("#stCountryToggle .segmented-btn");
+      toggleBtns.forEach(b => { b.disabled = true; b.classList.toggle("active", b === btn); });
+
       state.sellthroughCountry = country;
-      document.querySelectorAll("#stCountryToggle .segmented-btn").forEach(b => b.classList.toggle("active", b === btn));
       state.stFilters = { begInv: null, startSale: null, endSale: null, lastInboundStatus: "" };
       if ($("stLastInboundStatusSelect")) $("stLastInboundStatusSelect").value = "";
-      prepareSellthroughData();
+
+      stRunHeavyWorkWithProgress(() => {
+        prepareSellthroughData();
+      });
+
+      // نفس مدة أنيميشن الـ progress bar فوق (55% -> setTimeout 20ms -> 100%)
+      // + هامش أمان بسيط قبل ما نفك القفل، عشان اليوزر مايقدرش يضغط تاني وهي
+      // لسه بتحسب.
+      setTimeout(() => {
+        toggleBtns.forEach(b => { b.disabled = false; });
+        stCountryToggleBusy = false;
+      }, 350);
     });
   });
 
@@ -13317,7 +13427,7 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
   WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID,
-  IRQ_SELLTHROUGH_NEEDED_GID, IRQ_INBOUND_GID, IRQ_BEGIN_INV_GID, IRQ_COGS_GID
+  IRQ_SELLTHROUGH_NEEDED_GID, IRQ_INBOUND_GID, IRQ_BEGIN_INV_GID, IRQ_COGS_GID, IRQ_INVENTORY_GID
 ].filter(Boolean);
 
 // آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
@@ -13499,7 +13609,8 @@ const GID_LABELS = {
   [IRQ_SELLTHROUGH_NEEDED_GID]: "IRQ Sell-through Needed",
   [IRQ_INBOUND_GID]: "IRQ Inbound",
   [IRQ_BEGIN_INV_GID]: "IRQ Beginning Inventory",
-  [IRQ_COGS_GID]: "IRQ COGS"
+  [IRQ_COGS_GID]: "IRQ COGS",
+  [IRQ_INVENTORY_GID]: "IRQ Inventory (inv-IRQ)"
 };
 
 // بيجيب تاب "Confirmed by Day" مباشرة من الـ Cloudflare Worker
@@ -13718,6 +13829,7 @@ async function fetchAllSheetsSnapshot() {
   const irqBegInvPayload = sheets[IRQ_BEGIN_INV_GID];
   const irqSellthroughNeededPayload = sheets[IRQ_SELLTHROUGH_NEEDED_GID];
   const irqCogsPayload = sheets[IRQ_COGS_GID];
+  const irqInventoryPayload = sheets[IRQ_INVENTORY_GID];
   const debundleMapPayload = sheets[PRODUCTS_DEBUNDLE_MAP_GID];
   const singleSkuTargetsPayload = sheets[SINGLE_SKU_TARGETS_GID];
   const cogsPayload = sheets[COGS_GID];
@@ -13760,6 +13872,7 @@ async function fetchAllSheetsSnapshot() {
     metabaseBeginningInventoryIrq: irqBegInvPayload ? parseIrqBeginningInventorySheet(irqBegInvPayload) : state.metabaseBeginningInventoryIrq,
     metabaseSellthroughNeededIrq: irqSellthroughNeededPayload ? parseSellthroughNeededSheet(irqSellthroughNeededPayload) : state.metabaseSellthroughNeededIrq,
     cogsMapIrq: irqCogsPayload ? parseCogsSheet(irqCogsPayload) : state.cogsMapIrq,
+    irqInventoryMap: irqInventoryPayload ? parseIrqInventorySheet(irqInventoryPayload) : state.irqInventoryMap,
     debundleMap: debundleMapPayload ? parseDebundleMapSheet(debundleMapPayload) : state.debundleMap, // <-- Commercial Debundlized
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
     cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
@@ -13815,6 +13928,14 @@ function computeSellthroughSourceFingerprint() {
   debundle.forEach(r => { sumStock += r.stock || 0; });
   mainRows.forEach(r => { if (r.timestamp > maxMainTs) maxMainTs = r.timestamp; });
 
+  // v1.1.60 — شيت inv-IRQ (Stock/DOH/AVG3D/AVG15D/... لسكيو العراق): بس
+  // مؤثر في وضع IRQ، لازم يبطل الكاش لو اتحدث (ريفريش جديد وصل قيم جديدة).
+  const irqInv = state.irqInventoryMap;
+  let irqInvCount = 0, sumIrqStock = 0;
+  if (isIrq && irqInv && irqInv.forEach) {
+    irqInv.forEach(v => { irqInvCount++; sumIrqStock += v.stock || 0; });
+  }
+
   return [
     countryTag,
     inbound.length, Math.round(sumRcvQty), maxRcvTs,
@@ -13822,7 +13943,8 @@ function computeSellthroughSourceFingerprint() {
     need.length, Math.round(sumCnf), Math.round(sumDlv), Math.round(sumRto),
     prodInfo.length,
     debundle.length, Math.round(sumStock),
-    mainRows.length, maxMainTs
+    mainRows.length, maxMainTs,
+    irqInvCount, Math.round(sumIrqStock)
   ].join("|");
 }
 
@@ -13849,6 +13971,7 @@ function applySnapshotToState(snapshot) {
   state.metabaseBeginningInventoryIrq = snapshot.metabaseBeginningInventoryIrq || [];
   state.metabaseSellthroughNeededIrq = snapshot.metabaseSellthroughNeededIrq || [];
   state.cogsMapIrq = snapshot.cogsMapIrq || state.cogsMapIrq || new Map();
+  state.irqInventoryMap = snapshot.irqInventoryMap || state.irqInventoryMap || new Map();
   state.debundleMap = snapshot.debundleMap || [];
   state.singleSkuTargets = snapshot.singleSkuTargets || {};
   state.cogsMap = snapshot.cogsMap || state.cogsMap || new Map();
