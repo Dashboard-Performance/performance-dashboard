@@ -372,3 +372,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 
 /* Search box duplicated inside Pipeline & Insights / Products Breakdown panel heads */
 .cm3ap-search-slot { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Forecast Model (Admin Panel) */
+#viewForecastModel { position: relative; }
+.fc-data-status { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 12px; }
+.fc-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-top: 16px; }
+.fc-trend-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: center; margin-top: 12px; }
+@media (max-width: 1100px) { .fc-trend-grid { grid-template-columns: 1fr; } }
+.fc-method summary { cursor: pointer; font-size: 13px; color: var(--text); list-style: none; }
+.fc-method summary::-webkit-details-marker { display: none; }
+.fc-method summary::before { content: "▸ "; color: var(--text-dim); }
+.fc-method[open] summary::before { content: "▾ "; }
+.fc-method-body { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fc-method-body p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-dim); }
+.fc-method-body strong { color: var(--text); }

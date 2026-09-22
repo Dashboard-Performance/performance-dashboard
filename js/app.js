@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.64";
+const APP_VERSION = "1.1.73";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -51,6 +51,9 @@ const IRQ_COGS_GID = "775718300";               // شيت الـ COGS الخاص
 // جاهزين لكل SKU عراقي — بيسد الفجوة اللي كانت موجودة (الحقول دي كانت بتطلع
 // صفر/"-" في وضع IRQ لأنها كانت بتتقرا من MAIN_GID/PRODUCTS_GID المصريين).
 const IRQ_INVENTORY_GID = "133618857";
+// Forecast Model — daily demand history (April–July). Read lazily, only when
+// the Forecast Model tab is opened (never part of the startup snapshot).
+const FORECAST_HISTORY_GID = "1338407774";
 // شيت "Merchant Segmentation" الجديد (تحت Performance Merchant's / Merchant
 // Segmentation & Projections) — صف واحد لكل (Merchant × Month)، بالأعمدة
 // (0-based): 0 MONTH, 1 COUNTRY, 2 TAGER_ID, 3 TAGER_NAME, 4 ACC_MANAGER,
@@ -669,6 +672,7 @@ const navAdminCaret = $("navAdminCaret");
 const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
+const navForecastModel = $("navForecastModel");
 const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
 const navIncentivesCaret = $("navIncentivesCaret");
@@ -951,6 +955,7 @@ function switchView(viewName) {
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
+  if(navForecastModel) navForecastModel.classList.remove("active");
   if(navIncMerchants) navIncMerchants.classList.remove("active");
 
   let activeSection = null;
@@ -989,6 +994,11 @@ function switchView(viewName) {
       if(navWeeklyInventory) navWeeklyInventory.classList.add("active");
       renderWeeklyInventoryPanel();
   }
+  else if (viewName === "forecastModel") {
+      activeSection = $("viewForecastModel");
+      if(navForecastModel) navForecastModel.classList.add("active");
+      prepareForecastModelView(false);
+  }
   else if (viewName === "incentiveMerchants") {
       activeSection = $("viewIncMerchants");
       if(navIncMerchants) navIncMerchants.classList.add("active");
@@ -1026,6 +1036,7 @@ if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
+if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
 // -------------------------------------------------------------------------
@@ -8532,6 +8543,11 @@ function prepareMpMatchesData() {
   const mainRows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "mpMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(mainRows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع CM3_LAG_DAYS أيام
+  // Cutoff للـ CR و DR — بنفس منطق Products Matches / Analyst بالظبط:
+  //  • CR% ياخد كات أوف قصير (CR_LAG_DAYS = يومين) — الـ Confirm بيحصل بسرعة.
+  //  • DR% ياخد نفس كات أوف الـ CM3 (CM3_LAG_DAYS) — التسليم بياخد وقت أطول.
+  // كده الـ CR/DR مبيبقوش متأثرين بآخر كام يوم لسه الأوردرات فيهم متعلقة.
+  const crCutoff = getLagCutoffTimestamp(mainRows, CR_LAG_DAYS);
 
   // Stock/DOH — بطلب صريح: نفس المنطق بالظبط المستخدم في PPM Analyst /
   // Products (buildDebundledStockDohIndex → getStockDoh) — يعني الديماند
@@ -8566,8 +8582,14 @@ function prepareMpMatchesData() {
     const e = map.get(key);
     e.totalPlaced += r.placedPieces; e.totalConfirmed += r.confirmedPieces; e.totalDelivered += r.deliveredPieces;
     e.placedGmv += r.placedGmv; e.deliveredGmv += r.deliveredGmv;
-    e.crConfirmed += r.confirmedPieces; e.crPlaced += r.placedPieces;
-    e.drDelivered += r.deliveredPieces; e.drConfirmed += r.confirmedPieces;
+    // CR% (Confirmed ÷ Placed): بس الصفوف اللي عدّى عليها كات أوف الـ CR (يومين).
+    if (isRowEligibleForLag(r, crCutoff, "mpMatches")) {
+      e.crConfirmed += r.confirmedPieces; e.crPlaced += r.placedPieces;
+    }
+    // DR% (Delivered ÷ Confirmed): بس الصفوف اللي عدّى عليها كات أوف الـ CM3.
+    if (isCm3RowEligible(r, cm3Cutoff, "mpMatches")) {
+      e.drDelivered += r.deliveredPieces; e.drConfirmed += r.confirmedPieces;
+    }
     totalPlacedPcs += r.placedPieces;
 
     // GMV in-plan/out-plan: بدون كات أوف (زي كارت Total Delivered GMV بالظبط
@@ -9889,6 +9911,1591 @@ function renderSellthroughByCategoryMonthTable() {
     }).join("");
     return `<tr${cat === "Grand Total" ? ' class="st-grand-total"' : ""}><td>${cat}</td>${stCells}${invCells}</tr>`;
   }).join("");
+}
+
+// ===== FC_ENGINE_START =====
+// =========================================================================
+// FORECAST MODEL (v1.1.69) — SKU-level monthly demand forecast, built on the
+// "Forecast Model - Aug'25" method:
+//   1. Daily demand per Single SKU (Confirmed pieces, debundled — same basis
+//      as DOH / Sellthrough), from the history tab (FORECAST_HISTORY_GID,
+//      April–July) + the Main tab (previous + current month).
+//   2. Each source window = the last 30 days of a month. Features: windows
+//      (last 3/7/10/14/15/20/30, first 7), max day / max week, StdDev / CV,
+//      linear-fit slope + R², momentum, zero-day share.
+//   3. Behavior category per SKU (Shifting Up / Shifting Down / Steady /
+//      Non-Linear / Volatile / Spiky) — trained and predicted per category.
+//   4. ML = ridge regression on log1p(next-month demand) per category (with
+//      a pooled fallback). Non-Linear / Volatile uses a hurdle model:
+//      p(non-zero month) (logistic) × amount|non-zero (ridge).
+//   5. Final = w × ML + (1 − w) × Baseline, then category guardrails.
+//   6. V2: SKUs that missed badly last month (or are sparse + jumpy) get
+//      their deviation from baseline halved.
+// Everything below this line is DOM-free (pure functions) on purpose.
+// =========================================================================
+const FC_WINDOW_DAYS = 30;
+const FC_CATEGORIES = ["Shifting Up", "Shifting Down", "Steady", "Non-Linear / Volatile", "Spiky"];
+const FC_RULES = {
+  largeChangePcs: 10,       // |last7 − first7| in pieces to count as a "large change"
+  largeChangeRatio: 1.3,    // …and at least this relative move (last7 / first7)
+  linearR2: 0.2,            // R² at/above this = "some linearity"
+  steadyCv: 1.0,            // CV at/below this (with linearity) = Steady
+  flatCv: 0.6,              // CV at/below this (no linearity) = flat level = Steady
+  slopeUp: 1, slopeDown: -1, downRatio: 0.5,
+  spikyDayShare: 0.5,       // one day ≥ 50% of the window = Spiky
+  spikyMinTotal: 5,
+  ridgeLambda: 5,
+  minCategorySamples: 40
+};
+
+function fcPad2(n) { return n < 10 ? "0" + n : "" + n; }
+function fcDayKey(d) { return `${d.getFullYear()}-${fcPad2(d.getMonth() + 1)}-${fcPad2(d.getDate())}`; }
+function fcMonthLabel(y, m) { return new Date(y, m, 1).toLocaleString("en-US", { month: "long", year: "numeric" }); }
+function fcShortDate(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+
+// gviz date cells come either as a formatted string (cell.f) or as
+// "Date(2026,3,1)" in cell.v — handle both.
+function fcParseDateCell(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === "string") {
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)/);
+    if (m) return new Date(+m[1], +m[2], +m[3]);
+  }
+  const text = (cell.f ?? v ?? "").toString().trim();
+  if (!text) return null;
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+  const d = new Date(text);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+// Decide which columns of the history tab hold Date / Merchant / SKU /
+// Confirmed pieces, from the header labels. Falls back to the Main tab layout
+// (A = Date, B = Merchant ID, D = SKU, Q = Confirmed Pieces) when the labels
+// don't say otherwise.
+function fcDetectHistoryColumns(table) {
+  const cols = (table && table.cols) || [];
+  const rows = (table && table.rows) || [];
+  let labels = cols.map(c => (c && c.label) ? String(c.label) : "");
+  let headerInFirstRow = false;
+  if (!labels.some(l => l.trim()) && rows.length) {
+    labels = ((rows[0] && rows[0].c) || []).map(c => c ? String(c.f ?? c.v ?? "") : "");
+    headerInFirstRow = true;
+  }
+  const norm = labels.map(l => l.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
+  const find = (tests) => {
+    for (const t of tests) { const i = norm.findIndex(n => n && t.test(n)); if (i >= 0) return i; }
+    return -1;
+  };
+  let date = find([/^date$/, /^(order|created)_?date$/, /^day$/, /^(period|month)(_filter|_start|_key)?$/, /period/, /date/, /month/]);
+  let sku = find([/^(product_id|sku|sku_id|productid|single_id|product_sku)$/, /product_id/, /sku/]);
+  let merchant = find([/^(tager_id|merchant_id|tagerid|merchantid)$/, /(tager|merchant).*id/]);
+  let qty = find([/^confirmed_(pcs|pieces|qty|quantity|units)$/, /confirmed.*(pcs|piece|qty|quantity|unit)/, /^confirmed$/]);
+  let source = "header";
+  const mainLayoutOk = cols.length >= 17 && !/gmv|order/.test(norm[16] || "");
+  if ((date < 0 || sku < 0 || qty < 0) && mainLayoutOk) {
+    date = 0; merchant = 1; sku = 3; qty = 16; source = "main-layout";
+  }
+  if (date < 0 || sku < 0 || qty < 0) {
+    return { ok: false, labels, reason: "Could not find Date / SKU / Confirmed pieces columns." };
+  }
+  const letter = (i) => (cols[i] && cols[i].id) ? cols[i].id : fcColLetter(i);
+  return {
+    ok: true, source, headerInFirstRow, labels,
+    idx: { date, merchant, sku, qty },
+    letters: { date: letter(date), merchant: merchant >= 0 ? letter(merchant) : null, sku: letter(sku), qty: letter(qty) },
+    names: { date: labels[date] || letter(date), merchant: merchant >= 0 ? (labels[merchant] || letter(merchant)) : "—", sku: labels[sku] || letter(sku), qty: labels[qty] || letter(qty) }
+  };
+}
+function fcColLetter(i) {
+  let s = ""; i = i + 1;
+  while (i > 0) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); }
+  return s;
+}
+
+// Rows from a "select date, merchant, sku, qty" (or aggregated
+// "select date, sku, sum(qty)") query → [{day: Date, merchantId, sku, qty}].
+function fcParseHistoryRows(table, hasMerchant) {
+  const out = [];
+  const rows = (table && table.rows) || [];
+  for (const r of rows) {
+    const c = r.c || [];
+    const day = fcParseDateCell(c[0]);
+    if (!day) continue; // header row / blank
+    const merchantId = hasMerchant ? (c[1] ? String(c[1].f ?? c[1].v ?? "") : "") : "";
+    const skuCell = hasMerchant ? c[2] : c[1];
+    const qtyCell = hasMerchant ? c[3] : c[2];
+    const sku = skuCell ? String(skuCell.f ?? skuCell.v ?? "").trim() : "";
+    if (!sku) continue;
+    let qty = 0;
+    if (qtyCell) {
+      if (typeof qtyCell.v === "number") qty = qtyCell.v;
+      else { const n = parseFloat(String(qtyCell.f ?? qtyCell.v ?? "0").replace(/[%,]/g, "")); qty = Number.isFinite(n) ? n : 0; }
+    }
+    out.push({ day, merchantId, sku, qty });
+  }
+  return out;
+}
+
+// Daily demand series per Single SKU. History rows are skipped for any day
+// the Main tab already covers (Main wins on overlap). Duplicate
+// (day, merchant, sku) rows in the history tab are counted once — same
+// de-dup rule as parseMainSheet.
+function fcBuildSeries(histRows, mainRows, mappingsFor, today) {
+  const mainDays = new Set();
+  let minTs = Infinity, maxTs = -Infinity;
+  let mainMin = Infinity, mainMax = -Infinity, histMin = Infinity, histMax = -Infinity;
+  const mainClean = [];
+  for (const r of (mainRows || [])) {
+    if (!r || !r.sku || !r.timestamp) continue;
+    const d = new Date(r.timestamp); const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const t = day.getTime();
+    mainDays.add(fcDayKey(day));
+    mainClean.push({ day, sku: r.sku, qty: r.confirmedPieces || 0 });
+    if (t < mainMin) mainMin = t; if (t > mainMax) mainMax = t;
+  }
+  // Quantities Main already has for the same days, so we can compare the two
+  // sources like-for-like (same days, same SKUs) instead of guessing whether
+  // they count the same thing.
+  const mainDayQty = new Map();
+  for (const r of mainClean) { const k = fcDayKey(r.day); mainDayQty.set(k, (mainDayQty.get(k) || 0) + r.qty); }
+  const overlapDays = new Set();
+  let overlapHistQty = 0;
+  const histClean = [];
+  const seen = new Set();
+  let histDupes = 0, histOverlapSkipped = 0;
+  for (const r of (histRows || [])) {
+    const k = fcDayKey(r.day);
+    if (mainDays.has(k)) { histOverlapSkipped++; overlapDays.add(k); overlapHistQty += r.qty || 0; continue; }
+    if (r.merchantId) {
+      const dk = k + "|" + r.merchantId + "|" + r.sku;
+      if (seen.has(dk)) { histDupes++; continue; }
+      seen.add(dk);
+    }
+    histClean.push(r);
+    const t = r.day.getTime();
+    if (t < histMin) histMin = t; if (t > histMax) histMax = t;
+  }
+  minTs = Math.min(mainMin, histMin); maxTs = Math.max(mainMax, histMax);
+  if (!Number.isFinite(minTs) || !Number.isFinite(maxTs)) {
+    return { days: [], series: new Map(), lastFullIdx: -1, coverage: { histRows: 0, mainRows: 0 } };
+  }
+  const days = [];
+  const idxOf = new Map();
+  const start = new Date(minTs);
+  for (let i = 0; ; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    if (d.getTime() > maxTs) break;
+    idxOf.set(fcDayKey(d), i); days.push(d);
+  }
+  const series = new Map();
+  const add = (sku, dayIdx, qty) => {
+    if (!qty) return;
+    for (const mp of mappingsFor(sku)) {
+      let arr = series.get(mp.singleId);
+      if (!arr) { arr = new Float64Array(days.length); series.set(mp.singleId, arr); }
+      arr[dayIdx] += qty * (mp.quantity || 1);
+    }
+  };
+  for (const r of histClean) { const i = idxOf.get(fcDayKey(r.day)); if (i !== undefined) add(r.sku, i, r.qty); }
+  for (const r of mainClean) { const i = idxOf.get(fcDayKey(r.day)); if (i !== undefined) add(r.sku, i, r.qty); }
+
+  // A day still being filled (today) is not a full day.
+  let lastFullIdx = days.length - 1;
+  const todayKey = today ? fcDayKey(today) : "";
+  if (lastFullIdx >= 0 && fcDayKey(days[lastFullIdx]) === todayKey) lastFullIdx--;
+  return {
+    days, idxOf, series, lastFullIdx,
+    coverage: {
+      histRows: histClean.length, histDupes, histOverlapSkipped,
+      histFrom: Number.isFinite(histMin) ? new Date(histMin) : null, histTo: Number.isFinite(histMax) ? new Date(histMax) : null,
+      mainRows: mainClean.length,
+      mainFrom: Number.isFinite(mainMin) ? new Date(mainMin) : null, mainTo: Number.isFinite(mainMax) ? new Date(mainMax) : null,
+      overlapDays: overlapDays.size, overlapHistQty,
+      overlapMainQty: Array.from(overlapDays).reduce((sum, k) => sum + (mainDayQty.get(k) || 0), 0)
+    }
+  };
+}
+
+// Calendar months overlapping the series, with their index range and
+// whether they're fully covered by full days.
+function fcMonths(sd) {
+  const out = [];
+  if (!sd.days.length) return out;
+  const first = sd.days[0], last = sd.days[sd.days.length - 1];
+  let y = first.getFullYear(), m = first.getMonth();
+  while (y < last.getFullYear() || (y === last.getFullYear() && m <= last.getMonth())) {
+    const dim = new Date(y, m + 1, 0).getDate();
+    const startIdx = sd.idxOf.get(fcDayKey(new Date(y, m, 1)));
+    const endIdx = sd.idxOf.get(fcDayKey(new Date(y, m, dim)));
+    const complete = startIdx !== undefined && endIdx !== undefined && endIdx <= sd.lastFullIdx;
+    out.push({ key: fcMonthLabel(y, m), y, m, dim, startIdx, endIdx, complete });
+    m++; if (m > 11) { m = 0; y++; }
+  }
+  return out;
+}
+
+function fcSum(x, a, b) { let s = 0; for (let i = a; i <= b; i++) s += x[i]; return s; }
+function fcStd(x, a, b) {
+  const n = b - a + 1; if (n <= 1) return 0;
+  let s = 0; for (let i = a; i <= b; i++) s += x[i];
+  const mu = s / n; let v = 0; for (let i = a; i <= b; i++) v += (x[i] - mu) * (x[i] - mu);
+  return Math.sqrt(v / n);
+}
+function fcLinFit(x, a, b) {
+  const n = b - a + 1; let st = 0, sy = 0, stt = 0, sty = 0;
+  for (let i = a; i <= b; i++) { const t = i - a; st += t; sy += x[i]; stt += t * t; sty += t * x[i]; }
+  const den = n * stt - st * st;
+  const slope = den ? (n * sty - st * sy) / den : 0;
+  const icpt = (sy - slope * st) / n;
+  const mu = sy / n; let ssTot = 0, ssRes = 0;
+  for (let i = a; i <= b; i++) { const t = i - a; const f = icpt + slope * t; ssRes += (x[i] - f) * (x[i] - f); ssTot += (x[i] - mu) * (x[i] - mu); }
+  return { slope, r2: ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0 };
+}
+
+// Features of a 30-day window x[end-29 .. end].
+function fcFeatures(arr, endIdx) {
+  const a = endIdx - FC_WINDOW_DAYS + 1, b = endIdx;
+  const W = FC_WINDOW_DAYS;
+  const total = fcSum(arr, a, b);
+  const mean = total / W;
+  let maxDay = 0, zeros = 0;
+  for (let i = a; i <= b; i++) { if (arr[i] > maxDay) maxDay = arr[i]; if (arr[i] === 0) zeros++; }
+  let maxWeek = 0;
+  for (let i = a; i + 6 <= b; i++) { const s = fcSum(arr, i, i + 6); if (s > maxWeek) maxWeek = s; }
+  const std30 = fcStd(arr, a, b);
+  const fit = fcLinFit(arr, a, b);
+  const fit14 = fcLinFit(arr, b - 13, b);
+  return {
+    total, mean, maxDay, maxWeek, zeroFrac: zeros / W, daysSold: W - zeros,
+    first7: fcSum(arr, a, a + 6), last3: fcSum(arr, b - 2, b), last7: fcSum(arr, b - 6, b), prev7: fcSum(arr, b - 13, b - 7),
+    last10: fcSum(arr, b - 9, b), last14: fcSum(arr, b - 13, b), last15: fcSum(arr, b - 14, b), last20: fcSum(arr, b - 19, b),
+    std10: fcStd(arr, b - 9, b), std20: fcStd(arr, b - 19, b), std30,
+    cv: mean > 0 ? std30 / mean : 0,
+    slope: fit.slope, r2: fit.r2, slope14: fit14.slope
+  };
+}
+function fcFeatureVector(f) {
+  const l = Math.log1p;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const lvl = f.mean * FC_WINDOW_DAYS + 1;
+  return [
+    l(f.total), l(f.last3 * 10), l(f.last7 * 30 / 7), l(f.last10 * 3), l(f.last14 * 30 / 14),
+    l(f.first7 * 30 / 7), l(f.maxWeek * 30 / 7), l(f.maxDay),
+    Math.min(f.cv, 5), f.r2,
+    clamp(f.slope * FC_WINDOW_DAYS / lvl, -3, 3), clamp(f.slope14 * FC_WINDOW_DAYS / lvl, -3, 3),
+    Math.log((f.last7 + 1) / (f.first7 + 1)), Math.log((f.last7 + 1) / (f.prev7 + 1)),
+    f.zeroFrac, Math.min(f.std10 / (f.mean + 1), 5)
+  ];
+}
+
+function fcCategorize(f) {
+  const R = FC_RULES;
+  const avgFirst7 = f.first7 / 7, avgLast7 = f.last7 / 7;
+  if (avgFirst7 === 0 && avgLast7 > 0) return "Shifting Up";
+  const change = f.last7 - f.first7;
+  const ratio = (f.last7 + 1) / (f.first7 + 1);
+  if (change >= R.largeChangePcs && ratio >= R.largeChangeRatio) return "Shifting Up";
+  if (change <= -R.largeChangePcs && ratio <= 1 / R.largeChangeRatio) return "Shifting Down";
+  if (f.total >= R.spikyMinTotal && f.maxDay >= R.spikyDayShare * f.total) return "Spiky";
+  if (f.r2 >= R.linearR2) {
+    if (f.cv <= R.steadyCv) return "Steady";
+    if (f.slope >= R.slopeUp) return "Shifting Up";
+    if (f.slope <= R.slopeDown || (f.first7 > 0 && f.last7 / f.first7 <= R.downRatio)) return "Shifting Down";
+    return "Spiky";
+  }
+  if (f.cv <= R.flatCv) return "Steady";
+  return "Non-Linear / Volatile";
+}
+
+// Baselines (30-day units) — exactly the per-category baselines from the deck.
+function fcBaseline(f, cat) {
+  switch (cat) {
+    case "Shifting Up": return Math.max(f.total, f.last10 * 3, f.last7 * 4);
+    case "Shifting Down": return 0.6 * (f.first7 * 4) + 0.4 * (f.last14 * 30 / 14);
+    case "Steady": return f.mean * FC_WINDOW_DAYS;
+    case "Non-Linear / Volatile": return Math.max(f.maxWeek, f.maxDay * 7, f.total, f.mean * FC_WINDOW_DAYS);
+    default: return f.total; // Spiky
+  }
+}
+// Guardrails (after blending) — from the deck; Spiky gets a conservative cap.
+function fcGuardrail(v, f, cat, baseline) {
+  let out = v;
+  if (cat === "Shifting Up") out = Math.max(out, 0.85 * (f.last7 * 4));
+  else if (cat === "Shifting Down") out = Math.min(out, 1.10 * baseline);
+  else if (cat === "Steady") { const avg = f.mean * FC_WINDOW_DAYS; out = Math.min(Math.max(out, 0.85 * avg), 1.15 * avg); }
+  else if (cat === "Non-Linear / Volatile") out = Math.min(out, 2.75 * f.total);
+  else out = Math.min(out, 1.5 * f.total);
+  return Math.max(0, out);
+}
+// w = how much we trust ML vs baseline.
+function fcWeight(ml, f, cat) {
+  const t = f.total;
+  let agree;
+  if (cat === "Shifting Up") agree = ml >= 0.95 * t;
+  else if (cat === "Shifting Down") agree = ml <= 1.05 * t;
+  else if (cat === "Steady") agree = Math.abs(ml - t) <= 0.25 * Math.max(t, 1);
+  else agree = ml <= 1.2 * Math.max(t, 1);
+  const moderate = f.cv <= 1;
+  if (agree && moderate) return 0.8 + 0.15 * Math.max(0, Math.min(1, 1 - f.cv));
+  if (agree) return 0.75;
+  if (moderate) return 0.7;
+  return 0.6;
+}
+// Expected range around the forecast, by category / volatility.
+function fcBandPct(cat, f) {
+  if (cat === "Steady") return 0.15;
+  if (cat === "Non-Linear / Volatile") return 0.6;
+  if (cat === "Spiky") return 0.5;
+  return Math.max(0.2, Math.min(0.5, 0.2 + 0.2 * f.cv));
+}
+
+// ---- tiny ML toolkit: ridge regression + logistic regression ----
+function fcStandardizer(X) {
+  const p = X[0].length, n = X.length;
+  const mu = new Array(p).fill(0), sd = new Array(p).fill(0);
+  for (const r of X) for (let j = 0; j < p; j++) mu[j] += r[j];
+  for (let j = 0; j < p; j++) mu[j] /= n;
+  for (const r of X) for (let j = 0; j < p; j++) sd[j] += (r[j] - mu[j]) * (r[j] - mu[j]);
+  for (let j = 0; j < p; j++) { sd[j] = Math.sqrt(sd[j] / n); if (!(sd[j] > 1e-9)) sd[j] = 1; }
+  return { mu, sd, apply: (r) => r.map((v, j) => (v - mu[j]) / sd[j]) };
+}
+function fcSolve(A, b) {
+  const n = b.length; const M = A.map((row, i) => row.concat([b[i]]));
+  for (let c = 0; c < n; c++) {
+    let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-12) continue;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue; const k = M[r][c] / M[c][c]; if (!k) continue;
+      for (let j = c; j <= n; j++) M[r][j] -= k * M[c][j];
+    }
+  }
+  return M.map((row, i) => Math.abs(row[i]) < 1e-12 ? 0 : row[n] / row[i]);
+}
+function fcRidgeFit(X, y, lambda) {
+  if (!X.length) return null;
+  const st = fcStandardizer(X);
+  const Z = X.map(st.apply);
+  const p = Z[0].length + 1;
+  const A = Array.from({ length: p }, () => new Array(p).fill(0));
+  const b = new Array(p).fill(0);
+  for (let i = 0; i < Z.length; i++) {
+    const z = [1].concat(Z[i]);
+    for (let r = 0; r < p; r++) { b[r] += z[r] * y[i]; for (let c = 0; c < p; c++) A[r][c] += z[r] * z[c]; }
+  }
+  for (let j = 1; j < p; j++) A[j][j] += lambda; // intercept not penalised
+  return { st, beta: fcSolve(A, b), n: X.length };
+}
+function fcRidgePredict(model, x) {
+  const z = [1].concat(model.st.apply(x));
+  let s = 0; for (let j = 0; j < z.length; j++) s += z[j] * model.beta[j];
+  return s;
+}
+function fcLogisticFit(X, y) {
+  if (!X.length) return null;
+  const pos = y.reduce((s, v) => s + v, 0);
+  if (pos === 0 || pos === y.length) return { constant: pos === 0 ? 0 : 1, n: X.length };
+  const st = fcStandardizer(X);
+  const Z = X.map(r => [1].concat(st.apply(r)));
+  const p = Z[0].length; const w = new Array(p).fill(0);
+  const lr = 0.3, l2 = 0.01, n = Z.length;
+  for (let it = 0; it < 300; it++) {
+    const g = new Array(p).fill(0);
+    for (let i = 0; i < n; i++) {
+      let s = 0; for (let j = 0; j < p; j++) s += Z[i][j] * w[j];
+      const pr = 1 / (1 + Math.exp(-s)); const e = pr - y[i];
+      for (let j = 0; j < p; j++) g[j] += e * Z[i][j];
+    }
+    for (let j = 0; j < p; j++) w[j] -= lr * (g[j] / n + (j ? l2 * w[j] : 0));
+  }
+  return { st, w, n };
+}
+function fcLogisticPredict(model, x) {
+  if (!model) return 1;
+  if (model.constant !== undefined) return model.constant;
+  const z = [1].concat(model.st.apply(x));
+  let s = 0; for (let j = 0; j < z.length; j++) s += z[j] * model.w[j];
+  return 1 / (1 + Math.exp(-s));
+}
+
+// Training set for a list of (source month, target month) pairs.
+function fcTrainingSamples(sd, pairs) {
+  const samples = [];
+  for (const pr of pairs) {
+    const tgtScale = FC_WINDOW_DAYS / pr.target.dim;
+    sd.series.forEach((arr) => {
+      const f = fcFeatures(arr, pr.source.endIdx);
+      if (f.total <= 0) return;
+      const nextTotal = fcSum(arr, pr.target.startIdx, pr.target.endIdx);
+      samples.push({ cat: fcCategorize(f), x: fcFeatureVector(f), y: Math.log((nextTotal * tgtScale + 1) / (f.total + 1)), nonzero: nextTotal > 0 ? 1 : 0 });
+    });
+  }
+  return samples;
+}
+function fcTrainModels(samples) {
+  if (!samples.length) return null;
+  const lam = FC_RULES.ridgeLambda, minN = FC_RULES.minCategorySamples;
+  const global = fcRidgeFit(samples.map(s => s.x), samples.map(s => s.y), lam);
+  const perCat = {};
+  for (const cat of FC_CATEGORIES) {
+    const sub = samples.filter(s => s.cat === cat);
+    if (sub.length >= minN) perCat[cat] = fcRidgeFit(sub.map(s => s.x), sub.map(s => s.y), lam);
+  }
+  const nl = samples.filter(s => s.cat === "Non-Linear / Volatile");
+  const hurdleBase = nl.length >= minN ? nl : samples;
+  const hurdleClf = fcLogisticFit(hurdleBase.map(s => s.x), hurdleBase.map(s => s.nonzero));
+  const nzBase = hurdleBase.filter(s => s.nonzero);
+  const nzAll = samples.filter(s => s.nonzero);
+  const hurdleAmt = fcRidgeFit((nzBase.length >= minN ? nzBase : nzAll).map(s => s.x), (nzBase.length >= minN ? nzBase : nzAll).map(s => s.y), lam);
+  return { global, perCat, hurdleClf, hurdleAmt, n: samples.length };
+}
+
+// One SKU's forecast in 30-day units.
+function fcPredictOne(models, f, conf) {
+  const cat = fcCategorize(f);
+  const x = fcFeatureVector(f);
+  const baseline = fcBaseline(f, cat);
+  // Predict the change vs the source window, so an uninformative model lands
+  // on "same as last 30 days" instead of drifting toward the global average.
+  const fromRatio = (pred) => Math.max(0, Math.min((f.total + 1) * Math.exp(pred) - 1, 10 * Math.max(f.total, 1)));
+  if (!models) {
+    return { cat, baseline, ml: null, w: 0, pNonzero: null, raw: fcGuardrail(baseline, f, cat, baseline) };
+  }
+  if (cat === "Non-Linear / Volatile") {
+    const p = fcLogisticPredict(models.hurdleClf, x);
+    const amt = models.hurdleAmt ? fromRatio(fcRidgePredict(models.hurdleAmt, x)) : baseline;
+    const hurdle = p * amt;
+    const wh = 0.7 * (conf === undefined ? 1 : conf);
+    return { cat, baseline, ml: hurdle, w: wh, pNonzero: p, raw: fcGuardrail(wh * hurdle + (1 - wh) * baseline, f, cat, baseline) };
+  }
+  const model = models.perCat[cat] || models.global;
+  const ml = fromRatio(fcRidgePredict(model, x));
+  const w = fcWeight(ml, f, cat) * (conf === undefined ? 1 : conf);
+  return { cat, baseline, ml, w, pNonzero: null, raw: fcGuardrail(w * ml + (1 - w) * baseline, f, cat, baseline) };
+}
+
+// Hit = within ±band% of actual (or within 2 pieces for tiny SKUs).
+function fcIsHit(F, A, bandPct) { const d = Math.abs(F - A); return d <= Math.max(2, (bandPct / 100) * A); }
+function fcAccuracy(rows, bandPct) {
+  let n = 0, hits = 0, sF = 0, sA = 0, sAbs = 0;
+  for (const r of rows) {
+    if (r.actual === null || r.actual === undefined) continue;
+    n++; if (fcIsHit(r.forecast, r.actual, bandPct)) hits++;
+    sF += r.forecast; sA += r.actual; sAbs += Math.abs(r.forecast - r.actual);
+  }
+  return {
+    n, hits, hitRate: n ? hits / n * 100 : null,
+    wapeAcc: sA > 0 ? Math.max(0, (1 - sAbs / sA) * 100) : null,
+    bias: sA > 0 ? (sF - sA) / sA * 100 : null, sumF: sF, sumA: sA
+  };
+}
+
+// Runs every target month the data allows:
+//   • backtest  — past complete month (forecast from the month before it,
+//                 trained only on pairs that ended before it: no leakage)
+//   • current   — this month (from last month), compared to month-to-date
+//   • next      — next month, from the last 30 full days
+function fcRunEngine(sd, today, opts) {
+  const o = Object.assign({ v2: true }, opts || {});
+  const months = fcMonths(sd);
+  const results = [];
+  if (!months.length) return { months, results };
+  const complete = months.filter(m => m.complete);
+  const pairsBefore = (limitIdx) => {
+    const pairs = [];
+    for (let i = 0; i + 1 < months.length; i++) {
+      const s = months[i], t = months[i + 1];
+      if (!s.complete || !t.complete) continue;
+      if (s.endIdx - FC_WINDOW_DAYS + 1 < 0) continue;
+      if (t.endIdx > limitIdx) continue;
+      pairs.push({ source: s, target: t });
+    }
+    return pairs;
+  };
+  const modelCache = new Map();
+  const modelsFor = (limitIdx) => {
+    const pairs = pairsBefore(limitIdx);
+    const key = pairs.map(p => p.target.key).join("|");
+    if (!modelCache.has(key)) modelCache.set(key, { pairs, models: pairs.length ? fcTrainModels(fcTrainingSamples(sd, pairs)) : null });
+    return modelCache.get(key);
+  };
+
+  // Score every candidate blend (model / baseline / "same as last 30 days" /
+  // mixes) on earlier months, per behavior, and keep what actually won — the
+  // same self-checking rule used in monthly mode. No leakage: the target month
+  // is never part of the scoring.
+  const blendCache = new Map();
+  const pickBlends = (limitStartIdx) => {
+    if (blendCache.has(limitStartIdx)) return blendCache.get(limitStartIdx);
+    const acc = new Map();
+    for (let v = 1; v < months.length; v++) {
+      const sM = months[v - 1], tM = months[v];
+      if (!sM.complete || !tM.complete) continue;
+      if (sM.endIdx - FC_WINDOW_DAYS + 1 < 0) continue;
+      if (tM.endIdx >= limitStartIdx) continue; // only months that ended before the target
+      const { pairs: vp, models: vm } = modelsFor(tM.startIdx - 1);
+      const vConf = Math.min(1, vp.length / 3);
+      const aScale = FC_WINDOW_DAYS / tM.dim;
+      sd.series.forEach((arr) => {
+        const f = fcFeatures(arr, sM.endIdx);
+        if (f.total <= 0) return;
+        const p = fcPredictOne(vm, f, vConf);
+        const c = { f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total };
+        const actual = fcSum(arr, tM.startIdx, tM.endIdx) * aScale;
+        let byCat = acc.get(p.cat);
+        if (!byCat) { byCat = new Map(); acc.set(p.cat, byCat); }
+        FC_BLENDS.forEach(b => {
+          if (b.w[0] > 0 && c.ml === null) return;
+          let e = byCat.get(b.key);
+          if (!e) { e = { absErr: 0, sumA: 0, n: 0 }; byCat.set(b.key, e); }
+          const ml = c.ml === null ? c.naive : c.ml;
+          const raw = b.w[0] * ml + b.w[1] * c.baseline + b.w[2] * c.naive;
+          const val = b.key === "naive" ? c.naive : fcGuardrail(raw, c.f, c.cat, c.baseline);
+          e.absErr += Math.abs(val - actual);
+          e.sumA += actual; e.n++;
+        });
+      });
+    }
+    const chosen = {};
+    acc.forEach((byCat, cat) => {
+      let best = null, naiveWape = null;
+      byCat.forEach((e, key) => {
+        if (e.n < 25 || e.sumA <= 0) return;
+        const wape = e.absErr / e.sumA;
+        if (key === "naive") naiveWape = wape;
+        if (!best || wape < best.wape) best = { key, wape, n: e.n };
+      });
+      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) best = { key: "naive", wape: naiveWape, n: best.n };
+      if (best) {
+        const naiveEntry = byCat.get("naive");
+        chosen[cat] = {
+          blend: FC_BLENDS.find(b => b.key === best.key), accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
+          naiveAccuracy: naiveEntry && naiveEntry.sumA > 0 ? Math.max(0, (1 - naiveEntry.absErr / naiveEntry.sumA) * 100) : null
+        };
+      }
+    });
+    blendCache.set(limitStartIdx, chosen);
+    return chosen;
+  };
+
+  let prevErrors = null; // sku -> {forecast, actual} from the previous backtest
+  const build = (mode, target, srcEnd, srcLabel, limitIdx, blendLimitIdx) => {
+    const { pairs, models } = modelsFor(limitIdx);
+    const conf = Math.min(1, pairs.length / 3);
+    const blends = pickBlends(blendLimitIdx === undefined ? sd.days.length : blendLimitIdx);
+    const scale = target.dim / FC_WINDOW_DAYS;
+    const rows = [];
+    const flaggedPrev = new Set();
+    if (prevErrors) prevErrors.forEach((e, sku) => {
+      const big = Math.max(e.forecast, e.actual) >= 20;
+      if (big && Math.abs(e.forecast - e.actual) > Math.max(e.actual, 1)) flaggedPrev.add(sku);
+    });
+    let newSkuCount = 0, newSkuPcs = 0;
+    sd.series.forEach((arr, sku) => {
+      const f = fcFeatures(arr, srcEnd);
+      let actual = null, mtd = null, elapsed = 0;
+      if (mode === "backtest") actual = fcSum(arr, target.startIdx, target.endIdx);
+      if (mode === "current" && target.startIdx !== undefined) {
+        const end = Math.min(sd.lastFullIdx, target.endIdx !== undefined ? target.endIdx : sd.lastFullIdx);
+        elapsed = end >= target.startIdx ? end - target.startIdx + 1 : 0;
+        mtd = elapsed > 0 ? fcSum(arr, target.startIdx, end) : 0;
+      }
+      if (f.total <= 0) {
+        if (mode === "backtest" && actual > 0) { newSkuCount++; newSkuPcs += actual; }
+        return;
+      }
+      const p = fcPredictOne(models, f, conf);
+      const pick = blends[p.cat];
+      // Nothing to learn from yet (first month): lean half on last month
+      // rather than trusting the rule-based baseline alone.
+      const blend = pick ? pick.blend : (models ? null : FC_DEFAULT_BLEND);
+      let raw = p.raw;
+      if (blend) {
+        if (blend.key === "naive") raw = f.total;
+        else {
+          const ml = p.ml === null ? f.total : p.ml;
+          raw = fcGuardrail(blend.w[0] * ml + blend.w[1] * p.baseline + blend.w[2] * f.total, f, p.cat, p.baseline);
+        }
+      }
+      const sparseJumpy = f.daysSold <= 5 && f.cv > 2;
+      const flagged = flaggedPrev.has(sku) || sparseJumpy;
+      const flagReason = flaggedPrev.has(sku) ? "Missed >100% last month" : (sparseJumpy ? "Sparse & volatile" : "");
+      if (o.v2 && flagged && models && !(blend && blend.key === "naive")) {
+        raw = fcGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
+      }
+      const forecast = raw * scale;
+      const band = fcBandPct(p.cat, f);
+      rows.push({
+        sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv, blend: blend ? blend.label : null,
+        baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
+        forecast, fMin: forecast * (1 - band), fMax: forecast * (1 + band),
+        actual, mtd, elapsed, flagged, flagReason
+      });
+    });
+    const result = {
+      mode, key: target.key, label: target.key, dim: target.dim,
+      sourceLabel: srcLabel, pairs: pairs.map(p => `${p.source.key.split(" ")[0].slice(0, 3)} → ${p.target.key.split(" ")[0].slice(0, 3)}`),
+      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, blends
+    };
+    if (mode === "backtest") {
+      prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
+    }
+    return result;
+  };
+  const windowLabel = (endIdx) => `${fcShortDate(sd.days[endIdx - FC_WINDOW_DAYS + 1])} – ${fcShortDate(sd.days[endIdx])}`;
+
+  // backtests
+  for (let i = 1; i < months.length; i++) {
+    const s = months[i - 1], t = months[i];
+    if (!s.complete || !t.complete) continue;
+    if (s.endIdx - FC_WINDOW_DAYS + 1 < 0) continue;
+    results.push(build("backtest", t, s.endIdx, windowLabel(s.endIdx), t.startIdx - 1, t.startIdx));
+  }
+  // current month = the month of the last full data day, if it's still open
+  const lastFullDay = sd.lastFullIdx >= 0 ? sd.days[sd.lastFullIdx] : (today || new Date());
+  const curKey = fcMonthLabel(lastFullDay.getFullYear(), lastFullDay.getMonth());
+  const curIdx = months.findIndex(m => m.key === curKey);
+  const lastComplete = complete.length ? complete[complete.length - 1] : null;
+  if (curIdx > 0 && !months[curIdx].complete && months[curIdx - 1].complete) {
+    const s = months[curIdx - 1];
+    if (s.endIdx - FC_WINDOW_DAYS + 1 >= 0) results.push(build("current", months[curIdx], s.endIdx, windowLabel(s.endIdx), s.endIdx));
+  }
+  // next month — from the last 30 full days
+  if (sd.lastFullIdx - FC_WINDOW_DAYS + 1 >= 0) {
+    const ny = lastFullDay.getMonth() === 11 ? lastFullDay.getFullYear() + 1 : lastFullDay.getFullYear();
+    const nm = (lastFullDay.getMonth() + 1) % 12;
+    const nextT = { key: fcMonthLabel(ny, nm), dim: new Date(ny, nm + 1, 0).getDate() };
+    results.push(build("next", nextT, sd.lastFullIdx, windowLabel(sd.lastFullIdx), lastComplete ? lastComplete.endIdx : -1));
+  }
+  return { months, results };
+}
+// ===== FC_ENGINE_END =====
+
+
+// ---- Monthly history support -------------------------------------------
+// The history tab can be either daily (one row per day) or monthly (one row
+// per SKU per month, dated on the 1st — e.g. a PERIOD_FILTER column). We
+// detect which, and run the matching engine: daily windows when we have real
+// daily signals, month-over-month features when we only have monthly totals.
+function fcHistoryGranularity(histRows) {
+  const byMonth = new Map();
+  for (const r of (histRows || [])) {
+    const mk = `${r.day.getFullYear()}-${r.day.getMonth()}`;
+    let s = byMonth.get(mk); if (!s) { s = new Set(); byMonth.set(mk, s); }
+    s.add(r.day.getDate());
+  }
+  if (!byMonth.size) return { monthly: false, months: 0, medianDays: 0 };
+  const counts = Array.from(byMonth.values()).map(s => s.size).sort((a, b) => a - b);
+  const med = counts[Math.floor(counts.length / 2)];
+  return { monthly: med <= 3, months: byMonth.size, medianDays: med, maxDays: counts[counts.length - 1] };
+}
+
+// Monthly totals per SKU. History months are complete by definition (the tab
+// carries the whole month on one row); Main months are complete once every
+// one of their days is a full day.
+function fcMonthlySeries(sd, histMonthKeys) {
+  const months = fcMonths(sd).map(m => {
+    const fromHist = histMonthKeys.has(m.key);
+    const end = (m.endIdx === undefined) ? sd.lastFullIdx : Math.min(m.endIdx, sd.lastFullIdx);
+    const elapsed = (m.startIdx === undefined || end < m.startIdx) ? 0 : (end - m.startIdx + 1);
+    return Object.assign({}, m, { fromHist, complete: fromHist || (m.endIdx !== undefined && m.endIdx <= sd.lastFullIdx), end, elapsed });
+  });
+  const totals = new Map();
+  sd.series.forEach((arr, sku) => {
+    const v = new Float64Array(months.length);
+    months.forEach((m, i) => { v[i] = (m.startIdx === undefined || m.end < m.startIdx) ? 0 : fcSum(arr, m.startIdx, m.end); });
+    totals.set(sku, v);
+  });
+  return { months, totals };
+}
+
+// Month-over-month features (all normalised to a 30-day month so months of
+// different lengths are comparable).
+function fcMonthlyFeatures(v, i, months) {
+  const norm = (k) => k >= 0 ? v[k] * 30 / months[k].dim : null;
+  const m0 = norm(i) || 0;
+  const m1 = norm(i - 1), m2 = norm(i - 2), m3 = norm(i - 3);
+  const hist = [m3, m2, m1, m0].filter(x => x !== null);
+  const n = hist.length;
+  const mean = hist.reduce((s, x) => s + x, 0) / n;
+  let varr = 0; hist.forEach(x => { varr += (x - mean) * (x - mean); });
+  const std = Math.sqrt(varr / n);
+  const sorted = hist.slice().sort((a, b) => a - b);
+  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  const last3 = [m2, m1, m0].filter(x => x !== null);
+  const avg3 = last3.reduce((s, x) => s + x, 0) / last3.length;
+  const fit = fcLinFit(hist, 0, n - 1);
+  return {
+    total: m0, m1: m1 === null ? m0 : m1, m2: m2 === null ? (m1 === null ? m0 : m1) : m2,
+    avail: n, mean, std, median, avg3, wAvg: (m1 === null ? m0 : (m2 === null ? 0.8 * m0 + 0.2 * m1 : 0.7 * m0 + 0.2 * m1 + 0.1 * m2)), maxA: Math.max.apply(null, hist), zeroMonths: hist.filter(x => x === 0).length,
+    cv: mean > 0 ? std / mean : 0,
+    growth1: (m0 + 1) / ((m1 === null ? m0 : m1) + 1),
+    growth2: m1 === null ? 1 : (m1 + 1) / ((m2 === null ? m1 : m2) + 1),
+    slope: fit.slope, r2: fit.r2
+  };
+}
+function fcMonthlyVector(f) {
+  const l = Math.log1p;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  return [
+    l(f.total), l(f.m1), l(f.m2), l(f.avg3), l(f.maxA), l(f.median),
+    Math.log(f.growth1), Math.log(f.growth2),
+    Math.min(f.cv, 5), f.r2, clamp(f.slope / (f.mean + 1), -3, 3),
+    f.zeroMonths / f.avail, f.avail
+  ];
+}
+function fcMonthlyCategorize(f) {
+  const R = FC_RULES;
+  if (f.m1 === 0 && f.total > 0) return "Shifting Up";
+  const chg = f.total - f.m1;
+  if (f.zeroMonths >= 1 && f.avail >= 3) return "Non-Linear / Volatile";
+  if (f.avail >= 3 && f.maxA >= 2.5 * Math.max(f.median, 1) && f.cv > 0.6) return "Spiky";
+  if (chg >= R.largeChangePcs && f.growth1 >= R.largeChangeRatio) return "Shifting Up";
+  if (chg <= -R.largeChangePcs && f.growth1 <= 1 / R.largeChangeRatio) return "Shifting Down";
+  if (f.cv <= 0.25) return "Steady";
+  if (f.cv <= 0.6) return "Steady";
+  return "Non-Linear / Volatile";
+}
+function fcMonthlyBaseline(f, cat) {
+  switch (cat) {
+    case "Shifting Up": return Math.max(f.total, f.total * Math.min(f.growth1, 1.5));
+    case "Shifting Down": return 0.6 * f.total + 0.4 * (f.total * Math.max(f.growth1, 0.5));
+    case "Steady": return f.wAvg;
+    case "Non-Linear / Volatile": return Math.max(f.avg3, f.total);
+    default: return f.median;
+  }
+}
+function fcMonthlyGuardrail(v, f, cat, baseline) {
+  let out = v;
+  if (cat === "Shifting Up") out = Math.max(out, 0.85 * f.total);
+  else if (cat === "Shifting Down") out = Math.min(out, 1.10 * baseline);
+  else if (cat === "Steady") out = Math.min(Math.max(out, 0.85 * f.total), 1.15 * f.total);
+  else if (cat === "Non-Linear / Volatile") out = Math.min(out, 2.75 * Math.max(f.total, f.avg3));
+  else out = Math.min(out, 1.5 * Math.max(f.total, f.median));
+  return Math.max(0, out);
+}
+function fcMonthlyPredictOne(models, f, conf) {
+  const cat = fcMonthlyCategorize(f);
+  const x = fcMonthlyVector(f);
+  const baseline = fcMonthlyBaseline(f, cat);
+  // The model predicts the CHANGE vs last month (log ratio), so when it has
+  // nothing to go on it falls back to "same as last month" instead of drifting
+  // toward the overall average — the safe default with few training months.
+  const fromRatio = (pred) => Math.max(0, Math.min((f.total + 1) * Math.exp(pred) - 1, 10 * Math.max(f.total, f.avg3, 1)));
+  if (!models) return { cat, baseline, ml: null, w: 0, pNonzero: null, raw: fcMonthlyGuardrail(baseline, f, cat, baseline) };
+  if (cat === "Non-Linear / Volatile") {
+    const p = fcLogisticPredict(models.hurdleClf, x);
+    const amt = models.hurdleAmt ? fromRatio(fcRidgePredict(models.hurdleAmt, x)) : baseline;
+    const hurdle = p * amt;
+    const wh = 0.7 * (conf === undefined ? 1 : conf);
+    return { cat, baseline, ml: hurdle, w: wh, pNonzero: p, raw: fcMonthlyGuardrail(wh * hurdle + (1 - wh) * baseline, f, cat, baseline) };
+  }
+  const model = models.perCat[cat] || models.global;
+  const ml = fromRatio(fcRidgePredict(model, x));
+  // Trust the model only as far as the training history supports it: with a
+  // single month pair its "direction" is mostly that one month's noise.
+  const w = fcWeight(ml, f, cat) * (conf === undefined ? 1 : conf);
+  return { cat, baseline, ml, w, pNonzero: null, raw: fcMonthlyGuardrail(w * ml + (1 - w) * baseline, f, cat, baseline) };
+}
+
+// The three things we can predict next month with, per SKU (30-day units):
+//   naive    = same as last month
+//   baseline = the category's rule-based number
+//   ml       = the trained model
+// Which mix actually wins is measured on past months, per behavior, instead
+// of being hard-coded — see fcPickBlends below.
+const FC_BLENDS = [
+  { key: "ml", w: [1, 0, 0], label: "ML" },
+  { key: "base", w: [0, 1, 0], label: "Baseline" },
+  { key: "naive", w: [0, 0, 1], label: "Last month" },
+  { key: "ml_base", w: [0.5, 0.5, 0], label: "50 ML / 50 Base" },
+  { key: "ml_naive", w: [0.5, 0, 0.5], label: "50 ML / 50 Last" },
+  { key: "base_naive", w: [0, 0.5, 0.5], label: "50 Base / 50 Last" },
+  { key: "even", w: [1 / 3, 1 / 3, 1 / 3], label: "Even mix" },
+  { key: "naive_heavy", w: [0.25, 0.25, 0.5], label: "25 ML / 25 Base / 50 Last" }
+];
+const FC_DEFAULT_BLEND = FC_BLENDS.find(b => b.key === "base_naive");
+
+function fcMonthlyCandidates(v, i, months, models, conf) {
+  const f = fcMonthlyFeatures(v, i, months);
+  if (f.total <= 0) return null;
+  const p = fcMonthlyPredictOne(models, f, conf);
+  return { f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total, pNonzero: p.pNonzero, w: p.w };
+}
+function fcBlendValue(c, blend) {
+  if (blend.key === "naive") return c.naive; // plain "same as last month", untouched
+  const ml = c.ml === null ? c.naive : c.ml; // no model yet -> fall back to last month
+  const raw = blend.w[0] * ml + blend.w[1] * c.baseline + blend.w[2] * c.naive;
+  return fcMonthlyGuardrail(raw, c.f, c.cat, c.baseline);
+}
+
+function fcRunEngineMonthly(sd, ms, opts) {
+  const o = Object.assign({ v2: true }, opts || {});
+  const months = ms.months;
+  const results = [];
+  const trainSamples = (limit) => {
+    const pairs = [], samples = [];
+    for (let i = 0; i + 1 < months.length; i++) {
+      if (!months[i].complete || !months[i + 1].complete) continue;
+      if (i + 1 > limit) continue;
+      pairs.push({ source: months[i], target: months[i + 1] });
+      ms.totals.forEach((v) => {
+        const f = fcMonthlyFeatures(v, i, months);
+        if (f.total <= 0) return;
+        const y = Math.log((v[i + 1] * 30 / months[i + 1].dim + 1) / (f.total + 1));
+        samples.push({ cat: fcMonthlyCategorize(f), x: fcMonthlyVector(f), y, nonzero: v[i + 1] > 0 ? 1 : 0 });
+      });
+    }
+    return { pairs, samples };
+  };
+  const cache = new Map();
+  const modelsFor = (limit) => {
+    if (!cache.has(limit)) {
+      const { pairs, samples } = trainSamples(limit);
+      cache.set(limit, { pairs, models: samples.length ? fcTrainModels(samples) : null });
+    }
+    return cache.get(limit);
+  };
+  let prevErrors = null;
+  const short = (k) => k.split(" ")[0].slice(0, 3);
+
+  // For target index t: replay every earlier month pair with models that only
+  // saw data before that month, score each candidate blend per behavior, and
+  // keep the one with the lowest error. No leakage: month t is never scored.
+  const blendCache = new Map();
+  const pickBlends = (t) => {
+    if (blendCache.has(t)) return blendCache.get(t);
+    const acc = new Map(); // cat -> { blendKey -> {absErr, sumA, n} }
+    for (let vIdx = 1; vIdx < t; vIdx++) {
+      if (!months[vIdx].complete || !months[vIdx - 1].complete) continue;
+      const { pairs, models } = modelsFor(vIdx - 1);
+      const vConf = Math.min(1, pairs.length / 3);
+      const scale = 30 / months[vIdx].dim;
+      ms.totals.forEach((v) => {
+        const c = fcMonthlyCandidates(v, vIdx - 1, months, models, vConf);
+        if (!c) return;
+        const actual = v[vIdx] * scale; // normalised to 30 days like the candidates
+        let byCat = acc.get(c.cat);
+        if (!byCat) { byCat = new Map(); acc.set(c.cat, byCat); }
+        FC_BLENDS.forEach(b => {
+          if (b.w[0] > 0 && c.ml === null) return; // ML wasn't available that month — don't credit it
+          let e = byCat.get(b.key);
+          if (!e) { e = { absErr: 0, sumA: 0, n: 0 }; byCat.set(b.key, e); }
+          e.absErr += Math.abs(fcBlendValue(c, b) - actual);
+          e.sumA += actual; e.n++;
+        });
+      });
+    }
+    const chosen = {};
+    acc.forEach((byCat, cat) => {
+      let best = null, naiveWape = null;
+      byCat.forEach((e, key) => {
+        if (e.n < 25 || e.sumA <= 0) return;
+        const wape = e.absErr / e.sumA;
+        if (key === "naive") naiveWape = wape;
+        if (!best || wape < best.wape) best = { key, wape, n: e.n };
+      });
+      // Stay on "last month" unless another blend beats it by a real margin —
+      // a tiny edge on a couple of months is noise, not skill.
+      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) {
+        best = { key: "naive", wape: naiveWape, n: best.n };
+      }
+      if (best) {
+        const blend = FC_BLENDS.find(b => b.key === best.key);
+        const naiveEntry = byCat.get("naive");
+        chosen[cat] = {
+          blend, accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
+          naiveAccuracy: naiveEntry && naiveEntry.sumA > 0 ? Math.max(0, (1 - naiveEntry.absErr / naiveEntry.sumA) * 100) : null
+        };
+      }
+    });
+    blendCache.set(t, chosen);
+    return chosen;
+  };
+
+  const build = (mode, target, srcIdx, srcLabel, limit, projectedSource) => {
+    const { pairs, models } = modelsFor(limit);
+    const conf = Math.min(1, pairs.length / 3);
+    const blends = pickBlends(target.index >= 0 ? target.index : months.length);
+    const scale = target.dim / 30;
+    const rows = [];
+    const flaggedPrev = new Set();
+    if (prevErrors) prevErrors.forEach((e, sku) => {
+      if (Math.max(e.forecast, e.actual) >= 20 && Math.abs(e.forecast - e.actual) > Math.max(e.actual, 1)) flaggedPrev.add(sku);
+    });
+    let newSkuCount = 0, newSkuPcs = 0;
+    const tIdx = target.index;
+    ms.totals.forEach((v, sku) => {
+      const f = projectedSource ? projectedSource(v) : fcMonthlyFeatures(v, srcIdx, months);
+      let actual = null, mtd = null, elapsed = 0;
+      if (mode === "backtest") actual = v[tIdx];
+      if (mode === "current") { mtd = v[tIdx]; elapsed = target.elapsed; }
+      if (f.total <= 0) { if (mode === "backtest" && actual > 0) { newSkuCount++; newSkuPcs += actual; } return; }
+      const p = fcMonthlyPredictOne(models, f, conf);
+      const pick = blends[p.cat];
+      const blend = pick ? pick.blend : (models ? null : FC_DEFAULT_BLEND);
+      let raw = blend
+        ? fcBlendValue({ f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total }, blend)
+        : p.raw;
+      const sparseJumpy = f.zeroMonths >= 1 && f.cv > 1;
+      const flagged = flaggedPrev.has(sku) || sparseJumpy;
+      const flagReason = flaggedPrev.has(sku) ? "Missed >100% last month" : (sparseJumpy ? "Zero month + volatile" : "");
+      if (o.v2 && flagged && models && !(blend && blend.key === "naive")) raw = fcMonthlyGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
+      const forecast = raw * scale;
+      const band = fcBandPct(p.cat, f);
+      rows.push({
+        sku, cat: p.cat, srcTotal: f.total * scale, daysSold: null, cv: f.cv,
+        blend: blend ? blend.label : null,
+        baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
+        forecast, fMin: forecast * (1 - band), fMax: forecast * (1 + band),
+        actual, mtd, elapsed, flagged, flagReason
+      });
+    });
+    const res = {
+      mode, key: target.key, label: target.key, dim: target.dim, granularity: "monthly",
+      srcColLabel: "Last Month", sourceLabel: srcLabel,
+      pairs: pairs.map(p => `${short(p.source.key)} → ${short(p.target.key)}`),
+      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, blends
+    };
+    if (mode === "backtest") prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
+    return res;
+  };
+
+  months.forEach((m, i) => { m.index = i; });
+  for (let i = 1; i < months.length; i++) {
+    if (!months[i].complete || !months[i - 1].complete) continue;
+    results.push(build("backtest", months[i], i - 1, months[i - 1].key, i - 1));
+  }
+  const lastCompleteIdx = months.reduce((acc, m, i) => m.complete ? i : acc, -1);
+  const curIdx = months.length - 1;
+  const cur = months[curIdx];
+  if (cur && !cur.complete && lastCompleteIdx === curIdx - 1 && cur.elapsed > 0) {
+    results.push(build("current", cur, curIdx - 1, months[curIdx - 1].key, curIdx - 1));
+  }
+  // Next month — source = the current partial month projected to a full month,
+  // or the last complete month when there is no open month yet.
+  if (lastCompleteIdx >= 0) {
+    const openPartial = cur && !cur.complete && cur.elapsed > 0;
+    const baseM = openPartial ? cur : months[lastCompleteIdx];
+    const ny = baseM.m === 11 ? baseM.y + 1 : baseM.y;
+    const nm = (baseM.m + 1) % 12;
+    const target = { key: fcMonthLabel(ny, nm), dim: new Date(ny, nm + 1, 0).getDate(), index: -1 };
+    const srcLabel = openPartial ? `${baseM.key} (projected from ${baseM.elapsed} of ${baseM.dim} days)` : baseM.key;
+    const projected = openPartial ? (v) => {
+      const scaled = new Float64Array(v.length);
+      for (let k = 0; k < v.length; k++) scaled[k] = v[k];
+      scaled[curIdx] = cur.elapsed > 0 ? v[curIdx] * cur.dim / cur.elapsed : 0;
+      return fcMonthlyFeatures(scaled, curIdx, months);
+    } : null;
+    results.push(build("next", target, openPartial ? curIdx : lastCompleteIdx, srcLabel, lastCompleteIdx, projected));
+  }
+  return { months, results };
+}
+
+// ---- Forecast Model: loading (lazy — only when the tab is opened) ----
+// The history tab is read straight from Google Sheets (gviz JSONP), with a
+// server-side column selection so we only download Date / Merchant / SKU /
+// Confirmed pieces instead of every column.
+function fcLoadGvizQuery(gid, tq, timeoutMs) {
+  return limitSheetLoad(() => new Promise((resolve, reject) => {
+    const cb = `__fcCb${Date.now()}_${jsonpCounter++}`;
+    const script = document.createElement("script");
+    let settled = false;
+    const finish = () => { window[cb] = function () {}; if (script.parentNode) script.remove(); clearTimeout(timer); };
+    const timer = setTimeout(() => { if (settled) return; settled = true; finish(); reject(new Error("Timed out")); }, timeoutMs);
+    window[cb] = (payload) => {
+      if (settled) return; settled = true; finish();
+      if (payload && payload.status === "error") {
+        const e0 = (payload.errors && payload.errors[0]) || {};
+        reject(new Error(e0.detailed_message || e0.message || "Google Sheets query error"));
+        return;
+      }
+      resolve(payload);
+    };
+    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${gid}&tq=${encodeURIComponent(tq)}&tqx=out:json;responseHandler:${cb}`;
+    script.onerror = () => { if (settled) return; settled = true; finish(); reject(new Error("Connection failed")); };
+    document.head.appendChild(script);
+  }));
+}
+
+async function fcLoadHistory(onStage) {
+  onStage("Reading the history tab header…", 8);
+  const head = await fcLoadGvizQuery(FORECAST_HISTORY_GID, "select * limit 3", 60000);
+  const det = fcDetectHistoryColumns(head && head.table);
+  if (!det.ok) { const err = new Error(det.reason); err.labels = det.labels; throw err; }
+  const L = det.letters;
+  const hasMerchant = !!L.merchant;
+  const cols = hasMerchant ? [L.date, L.merchant, L.sku, L.qty] : [L.date, L.sku, L.qty];
+  // How big is this tab? A daily tab is far bigger than a monthly one, and
+  // pulling every merchant-level row can be tens of MB. Ask for the row count
+  // first (one tiny query) and aggregate on Google's side when it's large —
+  // we sum per SKU per day anyway, so nothing we use is lost.
+  let rowCount = null;
+  try {
+    const cnt = await fcLoadGvizQuery(FORECAST_HISTORY_GID, `select count(${L.sku})`, 60000);
+    const cRow = cnt && cnt.table && cnt.table.rows && cnt.table.rows[0];
+    if (cRow && cRow.c && cRow.c[0]) rowCount = Number(cRow.c[0].v) || null;
+  } catch (e) { rowCount = null; }
+  const aggQuery = `select ${L.date}, ${L.sku}, sum(${L.qty}) where ${L.sku} is not null group by ${L.date}, ${L.sku}`;
+  const detailQuery = `select ${cols.join(", ")} where ${L.sku} is not null`;
+  const goCompact = rowCount !== null && rowCount > 150000;
+  onStage(`Downloading daily demand${rowCount ? ` (${fmtInt.format(rowCount)} rows)` : ""}…`, 22);
+  let table, aggregated = false;
+  try {
+    table = (await fcLoadGvizQuery(FORECAST_HISTORY_GID, goCompact ? aggQuery : detailQuery, 240000)).table;
+    aggregated = goCompact;
+  } catch (e) {
+    if (goCompact) throw e;
+    onStage("Large tab — retrying with a compact (aggregated) query…", 32);
+    table = (await fcLoadGvizQuery(FORECAST_HISTORY_GID, aggQuery, 240000)).table;
+    aggregated = true;
+  }
+  const rows = fcParseHistoryRows(table, hasMerchant && !aggregated);
+  return { rows, meta: { detection: det, aggregated, rawRows: ((table && table.rows) || []).length } };
+}
+
+// ---- Forecast Model: state + orchestration ----
+const fcState = {
+  hist: null, histMeta: null, histError: null, loading: false,
+  engine: null, engineSig: "", byKey: new Map(),
+  target: "", catFilter: "", behaviorFilter: "", search: "", band: 25, v2: true,
+  sortKey: "forecast", sortDir: "desc", page: 0, filtered: [],
+  chart: null, wired: false, series: null
+};
+
+function fcNextFrame() { return new Promise(r => requestAnimationFrame(() => setTimeout(r, 16))); }
+function fcSetProgress(stage, pct) {
+  const ov = $("fcProgressOverlay"), bar = $("fcProgressBar"), txt = $("fcProgressText"), st = $("fcProgressStage");
+  if (!ov) return;
+  if (stage === null) { ov.classList.add("hidden"); return; }
+  ov.classList.remove("hidden");
+  if (st) st.textContent = stage;
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  if (txt) txt.textContent = `${Math.round(pct)}%`;
+}
+function fcMainSignature() {
+  const rows = state.allParsedRows || [];
+  let maxTs = 0, sum = 0;
+  for (const r of rows) { if (r.timestamp > maxTs) maxTs = r.timestamp; sum += r.confirmedPieces || 0; }
+  return `${rows.length}|${maxTs}|${Math.round(sum)}`;
+}
+
+async function prepareForecastModelView(forceReload) {
+  fcWireControlsOnce();
+  if (fcState.loading) return;
+  const needHist = forceReload || (!fcState.hist && !fcState.histError);
+  const sig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
+  if (!needHist && fcState.engine && fcState.engineSig === sig) { fcRenderAll(); return; }
+  fcState.loading = true;
+  try {
+    if (needHist) {
+      fcState.histError = null;
+      fcSetProgress("Connecting to the history tab…", 3); await fcNextFrame();
+      try {
+        const res = await fcLoadHistory((s, p) => fcSetProgress(s, p));
+        fcState.hist = res.rows; fcState.histMeta = res.meta;
+      } catch (e) {
+        fcState.hist = null; fcState.histMeta = null;
+        fcState.histError = { message: e.message || String(e), labels: e.labels || null };
+      }
+    }
+    fcSetProgress("Building daily demand per SKU (debundled)…", 45); await fcNextFrame();
+    const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+    const mappingsFor = (sku) => { const m = bundleProductMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
+    const sd = fcBuildSeries(fcState.hist || [], state.allParsedRows || [], mappingsFor, new Date());
+    fcState.series = sd;
+    // The history tab can be daily or monthly (one row per SKU per month) —
+    // detect it and run the matching engine.
+    const gran = fcHistoryGranularity(fcState.hist || []);
+    fcState.granularity = gran;
+    fcSetProgress("Categorizing SKUs and training models…", 65); await fcNextFrame();
+    let engine;
+    if (gran.monthly) {
+      const histMonthKeys = new Set((fcState.hist || []).map(r => fcMonthLabel(r.day.getFullYear(), r.day.getMonth())));
+      const ms = fcMonthlySeries(sd, histMonthKeys);
+      fcState.monthly = ms;
+      engine = fcRunEngineMonthly(sd, ms, { v2: fcState.v2 });
+    } else {
+      fcState.monthly = null;
+      engine = fcRunEngine(sd, new Date(), { v2: fcState.v2 });
+    }
+    fcSetProgress("Scoring and ranking…", 88); await fcNextFrame();
+    fcEnrichResults(engine);
+    fcState.engine = engine;
+    fcState.byKey = new Map(engine.results.map(r => [r.key, r]));
+    fcState.engineSig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
+    if (!fcState.byKey.has(fcState.target)) {
+      const pick = engine.results.find(r => r.mode === "next") || engine.results.find(r => r.mode === "current") || engine.results[engine.results.length - 1];
+      fcState.target = pick ? pick.key : "";
+    }
+    fcSetProgress("Done", 100); await fcNextFrame();
+  } finally {
+    fcState.loading = false;
+    fcSetProgress(null);
+  }
+  fcRenderAll();
+}
+
+function fcEnrichResults(engine) {
+  const { singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  let stockMap = null;
+  try { stockMap = buildDebundledStockDohIndex(state.allParsedRows || []).stockByProductId; } catch (e) { stockMap = null; }
+  for (const res of engine.results) {
+    for (const r of res.rows) {
+      const inv = (state.inventoryMap && state.inventoryMap[r.sku]) || {};
+      const prod = (state.productsMap && state.productsMap[r.sku]) || {};
+      r.name = (singlesList && singlesList.get(r.sku)) || inv.skuName || prod.name || r.sku;
+      r.prodCat = inv.category || prod.category || "Uncategorized";
+      r.stock = (stockMap && stockMap.has && stockMap.has(r.sku)) ? (stockMap.get(r.sku) || 0) : (inv.stock || 0);
+      const perDay = r.forecast / res.dim;
+      r.cover = perDay > 0 ? r.stock / perDay : null;
+      if (res.mode === "backtest") {
+        r.errPct = r.actual > 0 ? (r.forecast - r.actual) / r.actual * 100 : (r.forecast > 0 ? null : 0);
+      }
+      if (res.mode === "current") {
+        const expected = r.elapsed > 0 ? r.forecast * r.elapsed / res.dim : 0;
+        r.pace = expected > 0 ? r.mtd / expected * 100 : null;
+        r.projected = r.elapsed > 0 ? r.mtd * res.dim / r.elapsed : 0;
+      }
+    }
+  }
+}
+
+// ---- Forecast Model: rendering ----
+const fcPcs = (n) => (n === null || n === undefined || !Number.isFinite(n)) ? "—" : fmtInt.format(Math.round(n));
+const fcPct = (n, digits) => (n === null || n === undefined || !Number.isFinite(n)) ? "—" : `${n.toFixed(digits === undefined ? 1 : digits)}%`;
+const fcCompact = (n) => {
+  const a = Math.abs(n);
+  if (a >= 1000000) return (n / 1000000).toFixed(a >= 10000000 ? 0 : 1) + "M";
+  if (a >= 1000) return Math.round(n / 1000) + "K";
+  return String(Math.round(n));
+};
+const FC_CAT_BADGE = { "Shifting Up": "green", "Shifting Down": "red", "Steady": "blue", "Non-Linear / Volatile": "orange", "Spiky": "purple" };
+const FC_MODE_LABEL = { backtest: "Backtest", current: "This month · live pace", next: "Next month forecast" };
+
+function fcCurrent() { return fcState.byKey.get(fcState.target) || null; }
+function fcLatestBacktest() {
+  const bts = (fcState.engine ? fcState.engine.results : []).filter(r => r.mode === "backtest" && r.trainN > 0);
+  return bts.length ? bts[bts.length - 1] : null;
+}
+
+function fcRenderAll() {
+  fcRenderStatus();
+  fcRenderMethod();
+  fcRenderTargetOptions();
+  fcRenderBehaviorOptions();
+  fcRenderProductCategoryOptions();
+  fcRenderKpis();
+  fcRenderCategoryTable();
+  fcRenderAccuracyTrend();
+  fcApplyFilters();
+}
+
+function fcRenderMethod() {
+  const el = $("fcMethodBody");
+  if (!el) return;
+  const monthly = !!(fcState.granularity && fcState.granularity.monthly);
+  const common = [
+    ["Demand", "Confirmed pieces per Single SKU (bundles debundled × quantity) — the same basis as DOH and Sellthrough. Where the history tab and Main cover the same day, Main wins; duplicate rows are counted once."],
+    ["Behavior", "Every SKU is classified so incompatible patterns are never mixed: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky. Training and prediction happen per behavior."],
+    ["Blending", "Final = w × ML + (1 − w) × Baseline, then category guardrails. w is higher when the model agrees with the behavior and volatility is moderate, lower when they conflict."],
+    ["V2 outliers", "SKUs that missed by more than 100% last month, or that are sparse and volatile, are flagged and their deviation from baseline is halved (toggle with V2 On/Off)."],
+    ["No leakage", "A backtest for any month is trained only on month pairs that ended before it, then compared to that month's actual. The Naive column shows what simply repeating last month would have scored, so you can see what the model adds."]
+  ];
+  const specific = monthly
+    ? [
+      ["Source (monthly tab)", "The history tab carries one row per SKU per month (a period column dated on the 1st), so the model runs month-over-month. Features: last month, the two months before it, a recency-weighted average, the max and median month, month-over-month growth, trend slope and R², volatility across months, and how many months were zero. Every month is normalised to 30 days so different month lengths are comparable."],
+      ["Method picking", "For each behavior, every candidate — the model, the baseline, plain 'same as last month', and 50/50 mixes of them — is scored on earlier months (always with models that only saw data before those months). The one with the lowest error wins, and it only moves off 'same as last month' when the gain is real, so the forecast can't quietly end up worse than doing nothing. The winner per behavior is shown in the By Behavior table."],
+      ["Model", "Ridge regression per behavior on the change vs last month, so when the model has nothing to go on it falls back to 'same as last month' instead of drifting toward the average. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount. The weight on ML is scaled down when there are few training month pairs."],
+      ["Baselines", "Up: last month continued at its growth rate (capped at 1.5×). Down: a decayed last month. Steady: recency-weighted average of the last 3 months. Non-Linear / Volatile: max(3-month average, last month). Spiky: median month."],
+      ["Guardrails", "Up: floor ≥ 0.85 × last month. Down: ceiling ≤ 1.10 × baseline. Steady: within ±15% of last month. Non-Linear / Volatile: cap ≤ 2.75 × last month. Spiky: cap ≤ 1.5 × last month."],
+      ["Next month", "Forecast from the open month projected to a full month (month-to-date scaled by the days elapsed), so the newest signal is used."]
+    ]
+    : [
+      ["Source (daily tab)", "The source window is the last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope and R², momentum, and share of zero days."],
+      ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
+      ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
+      ["Guardrails", "Up: floor ≥ 0.85 × (last 7 × 4). Down: ceiling ≤ 1.10 × baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75 × 30-day total. Spiky: cap ≤ 1.5 × 30-day total."],
+      ["Next month", "Forecast from the last 30 full days of data."]
+    ];
+  el.innerHTML = common.slice(0, 2).concat(specific).concat(common.slice(2)).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
+}
+
+function fcRenderStatus() {
+  const el = $("fcDataStatus");
+  if (!el) return;
+  const sd = fcState.series;
+  const parts = [];
+  if (fcState.histError) {
+    const labels = fcState.histError.labels ? ` Columns found: ${fcState.histError.labels.filter(Boolean).slice(0, 20).join(", ")}.` : "";
+    parts.push(`<span class="badge-outline red">History tab not loaded</span> <span class="text-dim">${fcState.histError.message}${labels} Make sure the tab (gid ${FORECAST_HISTORY_GID}) is in the same spreadsheet and shared as "Anyone with the link – Viewer". Forecasts below use the Main tab only.</span>`);
+  } else if (fcState.histMeta && sd) {
+    const c = sd.coverage; const d = fcState.histMeta.detection;
+    const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
+    const g = fcState.granularity || {};
+    const monthsCovered = (fcState.monthly && fcState.monthly.months || []).filter(m => m.fromHist);
+    const covered = monthsCovered.length
+      ? `${monthsCovered[0].key.split(" ")[0].slice(0, 3)} – ${monthsCovered[monthsCovered.length - 1].key.split(" ")[0].slice(0, 3)} ${monthsCovered[monthsCovered.length - 1].y} · ${monthsCovered.length} months`
+      : range(c.histFrom, c.histTo);
+    const grainBadge = g.monthly
+      ? `<span class="badge-outline blue" title="One row per SKU per month — the model runs month-over-month instead of on daily signals.">monthly totals</span>`
+      : `<span class="badge-outline blue">daily</span>`;
+    parts.push(`<span class="badge-outline green">History tab</span> ${grainBadge} <span class="text-dim" title="Raw dates in the tab: ${range(c.histFrom, c.histTo)}">${fcPcs(fcState.histMeta.rawRows)} rows · ${covered} · columns: ${d.names.date} / ${d.names.sku} / ${d.names.qty}${fcState.histMeta.aggregated ? " (aggregated)" : ""}${c.histDupes ? ` · ${fcPcs(c.histDupes)} duplicate rows ignored` : ""}</span>`);
+  }
+  if (sd && sd.coverage) {
+    const c = sd.coverage;
+    const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
+    parts.push(`<span class="badge-outline blue">Main tab</span> <span class="text-dim">${range(c.mainFrom, c.mainTo)}</span>`);
+    parts.push(`<span class="badge-outline gray">${fcPcs(sd.series.size)} Single SKUs with demand</span>`);
+  }
+  // Same-day comparison of the two sources: the strongest signal that they
+  // do (or don't) count the same thing.
+  if (sd && sd.coverage && sd.coverage.overlapDays > 0) {
+    const c2 = sd.coverage;
+    const ratio = c2.overlapMainQty > 0 ? c2.overlapHistQty / c2.overlapMainQty : null;
+    const pct = ratio === null ? null : ratio * 100;
+    const ok = pct !== null && Math.abs(pct - 100) <= 5;
+    parts.push(`<span class="badge-outline ${ok ? "green" : "orange"}" title="On the ${c2.overlapDays} days both sources cover, the history tab totals ${fcPcs(c2.overlapHistQty)} confirmed pieces and Main totals ${fcPcs(c2.overlapMainQty)}. They should match. If they don't, the two tabs are not counting the same thing (country filter, debundling, confirmed vs delivered) — fix that before trusting any accuracy number.">Source match ${pct === null ? "—" : pct.toFixed(0) + "%"}</span> <span class="text-dim">history vs Main on ${fcPcs(c2.overlapDays)} shared days (${fcPcs(c2.overlapHistQty)} vs ${fcPcs(c2.overlapMainQty)} pcs)</span>`);
+  }
+  // Monthly totals across both sources. A big step exactly where the history
+  // tab hands over to Main usually means the two aren't counting the same
+  // thing (country filter, debundling, confirmed vs delivered) — which would
+  // quietly wreck every forecast that crosses the seam.
+  const msx = fcState.monthly;
+  if (msx && msx.months.length) {
+    const tot = new Array(msx.months.length).fill(0);
+    msx.totals.forEach(v => { for (let i = 0; i < v.length; i++) tot[i] += v[i]; });
+    const txt = msx.months.map((m, i) => `${m.key.split(" ")[0].slice(0, 3)} ${fcCompact(tot[i])}${m.complete ? "" : " (MTD)"}`).join(" · ");
+    let warn = "";
+    let lastH = -1;
+    msx.months.forEach((m, i) => { if (m.fromHist) lastH = i; });
+    if (lastH >= 0 && lastH + 1 < msx.months.length && msx.months[lastH + 1].complete && tot[lastH] > 0) {
+      const step = tot[lastH + 1] / tot[lastH] - 1;
+      const steps = [];
+      for (let i = 1; i <= lastH; i++) if (tot[i - 1] > 0) steps.push(Math.abs(tot[i] / tot[i - 1] - 1));
+      const typical = steps.length ? steps.reduce((x, y) => x + y, 0) / steps.length : 0;
+      if (Math.abs(step) > 0.3 && Math.abs(step) > 2 * typical) {
+        warn = ` <span class="badge-outline orange" title="Within the history tab the month-to-month change averages ${(typical * 100).toFixed(0)}%, but the step from ${msx.months[lastH].key} (history tab) to ${msx.months[lastH + 1].key} (Main) is ${(step * 100).toFixed(0)}%. Check that both sources count the same thing: same country, same debundling, confirmed pieces.">level shift ${step > 0 ? "+" : ""}${(step * 100).toFixed(0)}% at the handover</span>`;
+      }
+    }
+    parts.push(`<span class="badge-outline purple">Monthly totals</span> <span class="text-dim">${txt}</span>${warn}`);
+  }
+  el.innerHTML = parts.map(p => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${p}</div>`).join("");
+}
+
+function fcRenderTargetOptions() {
+  const sel = $("fcTargetSelect");
+  if (!sel || !fcState.engine) return;
+  const opts = fcState.engine.results.slice().reverse().map(r => {
+    const tag = r.mode === "backtest" ? (r.trainN > 0 ? "Backtest" : "Backtest · baseline only") : FC_MODE_LABEL[r.mode];
+    return `<option value="${r.key}" ${r.key === fcState.target ? "selected" : ""}>${r.key} — ${tag}</option>`;
+  });
+  sel.innerHTML = opts.join("");
+}
+function fcRenderBehaviorOptions() {
+  const sel = $("fcBehaviorSelect"); if (!sel) return;
+  sel.innerHTML = `<option value="">All Behaviors</option>` + FC_CATEGORIES.map(c => `<option value="${c}" ${fcState.behaviorFilter === c ? "selected" : ""}>${c}</option>`).join("");
+}
+function fcRenderProductCategoryOptions() {
+  const sel = $("fcCategorySelect"); const res = fcCurrent(); if (!sel || !res) return;
+  const cats = Array.from(new Set(res.rows.map(r => r.prodCat))).sort();
+  sel.innerHTML = `<option value="">All Categories</option>` + cats.map(c => `<option value="${c}" ${fcState.catFilter === c ? "selected" : ""}>${c}</option>`).join("");
+}
+
+function fcKpi(title, value, sub, color) {
+  return `<div class="metric-card hover-glow"><div class="metric-title">${title}</div><div class="metric-value ${color || ""}">${value}</div>${sub ? `<div class="metric-sub text-dim">${sub}</div>` : ""}</div>`;
+}
+function fcRenderKpis() {
+  const grid = $("fcKpiGrid"); const res = fcCurrent();
+  const sub = $("fcTargetSubtitle");
+  if (!grid) return;
+  if (!res) { grid.innerHTML = fcKpi("Forecast", "—", "Not enough data yet (needs at least 30 full days)."); if (sub) sub.textContent = ""; return; }
+  const rows = res.rows;
+  const total = rows.reduce((s, r) => s + r.forecast, 0);
+  const flagged = rows.filter(r => r.flagged).length;
+  const trained = res.trainN > 0 ? `Trained on ${res.pairs.join(", ")} (${fcPcs(res.trainN)} samples)` : "No training history before this month — baseline + guardrails only";
+  if (sub) sub.textContent = `${FC_MODE_LABEL[res.mode] || res.mode} · source window ${res.sourceLabel} · ${trained}`;
+  const cards = [];
+  cards.push(fcKpi("Total Forecast", fcPcs(total), `${fcPcs(rows.length)} SKUs · ${fcPcs(flagged)} flagged by V2 · ${res.dim} days`, "text-blue"));
+  if (res.mode === "backtest") {
+    const acc = fcAccuracy(rows, fcState.band);
+    const accEx = fcAccuracy(rows.filter(r => !r.flagged), fcState.band);
+    cards.push(fcKpi("Total Actual", fcPcs(acc.sumA), `${res.newSkuCount ? `+${fcPcs(res.newSkuPcs)} pcs from ${fcPcs(res.newSkuCount)} new SKUs (not forecastable)` : "Confirmed pieces, debundled"}`, "text-green"));
+    cards.push(fcKpi(`Hit Rate (±${fcState.band}%)`, fcPct(acc.hitRate), `Excl. flagged: ${fcPct(accEx.hitRate)}`, "text-purple"));
+    cards.push(fcKpi("Accuracy (1 − WAPE)", fcPct(acc.wapeAcc), `Excl. flagged: ${fcPct(accEx.wapeAcc)}`));
+    cards.push(fcKpi("Bias", fcPct(acc.bias), acc.bias > 0 ? "Over-forecast" : "Under-forecast", Math.abs(acc.bias || 0) <= 10 ? "text-green" : "text-orange"));
+  } else if (res.mode === "current") {
+    const mtd = rows.reduce((s, r) => s + (r.mtd || 0), 0);
+    const elapsed = rows.length ? rows[0].elapsed : 0;
+    const expected = elapsed > 0 ? total * elapsed / res.dim : 0;
+    const pace = expected > 0 ? mtd / expected * 100 : null;
+    const behind = rows.filter(r => r.pace !== null && r.pace < 85).length;
+    const ahead = rows.filter(r => r.pace !== null && r.pace > 115).length;
+    cards.push(fcKpi("Month-to-Date Actual", fcPcs(mtd), `${elapsed} of ${res.dim} days`, "text-green"));
+    cards.push(fcKpi("Pace vs Forecast", fcPct(pace), `Projected month-end: ${fcPcs(elapsed > 0 ? mtd * res.dim / elapsed : 0)}`, pace !== null && pace >= 95 ? "text-green" : "text-orange"));
+    cards.push(fcKpi("Behind / Ahead", `${fcPcs(behind)} / ${fcPcs(ahead)}`, "SKUs below 85% / above 115% of pace"));
+    const bt = fcLatestBacktest();
+    if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
+  } else {
+    const lowCover = rows.filter(r => r.cover !== null && r.cover < res.dim).length;
+    const stock = rows.reduce((s, r) => s + (r.stock || 0), 0);
+    cards.push(fcKpi("Current Stock (these SKUs)", fcPcs(stock), `${fcPct(total > 0 ? stock / total * 100 : null, 0)} of forecast`));
+    cards.push(fcKpi("SKUs Under 1 Month Cover", fcPcs(lowCover), "Stock ÷ forecast daily rate < days in month", lowCover ? "text-orange" : "text-green"));
+    const bt = fcLatestBacktest();
+    if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
+  }
+  grid.innerHTML = cards.join("");
+}
+
+function fcRenderCategoryTable() {
+  const head = $("fcCatHeaderRow"), body = $("fcCatTableBody"); const res = fcCurrent();
+  if (!head || !body) return;
+  if (!res) { head.innerHTML = ""; body.innerHTML = ""; return; }
+  const bt = res.mode === "backtest", cur = res.mode === "current";
+  const blends = res.blends || null;
+  head.innerHTML = `<th>Behavior</th>${blends ? `<th title="The mix that scored best on earlier months for this behavior — chosen from the data, not hard-coded.">Method</th>` : ""}<th class="num">SKUs</th><th class="num text-blue">Forecast</th><th class="num">Share</th>` +
+    (bt ? `<th class="num text-green">Actual</th><th class="num text-purple">Hit Rate</th><th class="num">Accuracy</th><th class="num">Bias</th>` : "") +
+    (cur ? `<th class="num text-green">MTD</th><th class="num">Pace</th>` : "");
+  const total = res.rows.reduce((s, r) => s + r.forecast, 0);
+  const line = (label, rows, cls) => {
+    const f = rows.reduce((s, r) => s + r.forecast, 0);
+    let extra = "";
+    if (bt) { const a = fcAccuracy(rows, fcState.band); extra = `<td class="num">${fcPcs(a.sumA)}</td><td class="num text-purple font-bold">${fcPct(a.hitRate)}</td><td class="num">${fcPct(a.wapeAcc)}</td><td class="num">${fcPct(a.bias)}</td>`; }
+    if (cur) {
+      const mtd = rows.reduce((s, r) => s + (r.mtd || 0), 0); const el = rows.length ? rows[0].elapsed : 0;
+      const exp = el > 0 ? f * el / res.dim : 0;
+      extra = `<td class="num">${fcPcs(mtd)}</td><td class="num">${fcPct(exp > 0 ? mtd / exp * 100 : null)}</td>`;
+    }
+    const badge = FC_CAT_BADGE[label] ? `<span class="badge-outline ${FC_CAT_BADGE[label]}">${label}</span>` : label;
+    let method = "";
+    if (blends) {
+      const pick = blends[label];
+      method = `<td class="text-dim" style="font-size:11.5px;">${pick ? `${pick.blend.label}${pick.naiveAccuracy !== null && pick.accuracy !== null ? ` <span class="${pick.accuracy >= pick.naiveAccuracy ? "text-green" : "text-orange"}">(${pick.accuracy >= pick.naiveAccuracy ? "+" : ""}${(pick.accuracy - pick.naiveAccuracy).toFixed(1)} vs last month)</span>` : ""}` : (label === "Grand Total" ? "" : "—")}</td>`;
+    }
+    return `<tr${cls ? ` class="${cls}"` : ""}><td>${badge}</td>${method}<td class="num">${fcPcs(rows.length)}</td><td class="num text-blue font-bold">${fcPcs(f)}</td><td class="num">${fcPct(total > 0 ? f / total * 100 : null)}</td>${extra}</tr>`;
+  };
+  body.innerHTML = FC_CATEGORIES.map(c => line(c, res.rows.filter(r => r.cat === c))).join("") + line("Grand Total", res.rows, "st-grand-total");
+}
+
+function fcRenderAccuracyTrend() {
+  const canvas = $("fcAccuracyChart"), body = $("fcTrendTableBody");
+  const bts = (fcState.engine ? fcState.engine.results : []).filter(r => r.mode === "backtest");
+  const data = bts.map(r => ({
+    key: r.key, trained: r.trainN > 0,
+    acc: fcAccuracy(r.rows, fcState.band),
+    accEx: fcAccuracy(r.rows.filter(x => !x.flagged), fcState.band),
+    naive: fcAccuracy(r.rows.map(x => ({ forecast: x.srcTotal * (r.dim / (r.granularity === "monthly" ? r.dim : 30)), actual: x.actual })), fcState.band)
+  }));
+  if (body) {
+    body.innerHTML = data.length ? data.map(d => {
+      const lift = (d.acc.wapeAcc !== null && d.naive.wapeAcc !== null) ? d.acc.wapeAcc - d.naive.wapeAcc : null;
+      const liftCls = lift === null ? "" : (lift >= 0 ? "text-green" : "text-red");
+      return `<tr><td>${d.key}${d.trained ? "" : ' <span class="badge-outline gray">baseline only</span>'}</td><td class="num text-purple font-bold">${fcPct(d.acc.hitRate)}</td><td class="num">${fcPct(d.acc.wapeAcc)}</td><td class="num text-dim">${fcPct(d.naive.wapeAcc)}</td><td class="num ${liftCls}">${lift === null ? "—" : (lift > 0 ? "+" : "") + lift.toFixed(1)}</td><td class="num">${fcPct(d.acc.bias)}</td></tr>`;
+    }).join("")
+      : `<tr><td colspan="6" class="text-dim">Backtests need two consecutive full months of data.</td></tr>`;
+  }
+  if (!canvas || typeof Chart === "undefined") return;
+  if (fcState.chart) { fcState.chart.destroy(); fcState.chart = null; }
+  if (!data.length) return;
+  const labels = data.map(d => { const dt = new Date(d.key); return isNaN(dt.getTime()) ? d.key : dt.toLocaleDateString("en-US", { month: "short", year: "2-digit" }); });
+  fcState.chart = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: `Hit Rate (±${fcState.band}%)`, data: data.map(d => d.acc.hitRate), borderColor: "#a78bfa", backgroundColor: "rgba(167,139,250,0.08)", tension: 0.35, pointRadius: 4, pointBackgroundColor: "#a78bfa" },
+        { label: "Accuracy (1 − WAPE)", data: data.map(d => d.acc.wapeAcc), borderColor: "#10b981", backgroundColor: "rgba(16,185,129,0.08)", tension: 0.35, pointRadius: 4, pointBackgroundColor: "#10b981" },
+        { label: "Accuracy excl. flagged", data: data.map(d => d.accEx.wapeAcc), borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.08)", tension: 0.35, pointRadius: 3, pointBackgroundColor: "#3b82f6", borderDash: [4, 3] },
+        { label: "Naive (same as last month)", data: data.map(d => d.naive.wapeAcc), borderColor: "#64748b", backgroundColor: "rgba(100,116,139,0.08)", tension: 0.35, pointRadius: 3, pointBackgroundColor: "#64748b", borderDash: [2, 3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: { backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#cbd5e1", borderColor: "#334155", borderWidth: 1, padding: 10, callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y === null ? "—" : ctx.parsed.y.toFixed(1) + "%"}` } }
+      },
+      scales: {
+        x: { grid: { display: false, drawBorder: false } },
+        y: { min: 0, max: 100, grid: { color: "#1e293b", borderDash: [4, 4], drawBorder: false }, ticks: { callback: v => v + "%" } }
+      }
+    }
+  });
+}
+
+// SKU table — columns depend on the target's mode.
+function fcColumns(res) {
+  const base = [
+    { key: "sku", label: "SKU", cls: "font-mono", title: "Single SKU (bundles are debundled into their Singles)." },
+    { key: "name", label: "Name", cls: "truncate-cell", title: "Product name." },
+    { key: "prodCat", label: "Category", cls: "truncate-cell", title: "Product category." },
+    { key: "cat", label: "Behavior", title: "Demand behavior in the source window: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky." },
+    { key: "srcTotal", label: res.srcColLabel || "Last 30d", num: true, title: res.srcColLabel ? "Confirmed pieces in the source month." : "Confirmed pieces in the 30-day source window." },
+    { key: "baseline", label: "Baseline", num: true, title: "Category baseline (see How it works)." },
+    { key: "ml", label: "ML", num: true, title: "Model output before blending (hurdle p × amount for Non-Linear / Volatile)." },
+    { key: "w", label: "w", num: true, title: "Weight on ML: Final = w × ML + (1 − w) × Baseline." },
+    { key: "forecast", label: "Forecast", num: true, cls: "text-blue font-bold", title: "Final forecast for the target month, after guardrails (and V2 when flagged)." },
+    { key: "fMin", label: "Range", num: true, title: "Expected range around the forecast, based on behavior and volatility." }
+  ];
+  if (res.mode === "backtest") return base.concat([
+    { key: "actual", label: "Actual", num: true, cls: "text-green", title: "Actual confirmed pieces (debundled) in the target month." },
+    { key: "errPct", label: "Error", num: true, title: "(Forecast − Actual) ÷ Actual." },
+    { key: "hit", label: "Hit", title: `Within ±${fcState.band}% of actual (or ±2 pieces).` }
+  ]);
+  if (res.mode === "current") return base.concat([
+    { key: "mtd", label: "MTD", num: true, cls: "text-green", title: "Actual confirmed pieces so far this month." },
+    { key: "pace", label: "Pace", num: true, title: "MTD ÷ (Forecast × elapsed days ÷ days in month)." },
+    { key: "projected", label: "Projected", num: true, title: "MTD extrapolated to month-end." },
+    { key: "stock", label: "Stock", num: true, title: "Current stock (Overall Debundled)." },
+    { key: "cover", label: "Days Cover", num: true, title: "Stock ÷ forecast daily rate." }
+  ]);
+  return base.concat([
+    { key: "stock", label: "Stock", num: true, title: "Current stock (Overall Debundled)." },
+    { key: "cover", label: "Days Cover", num: true, title: "Stock ÷ forecast daily rate." }
+  ]);
+}
+
+function fcApplyFilters() {
+  const res = fcCurrent();
+  if (!res) { fcState.filtered = []; fcRenderSkuTable(); return; }
+  const q = (fcState.search || "").trim().toLowerCase();
+  fcState.filtered = res.rows.filter(r =>
+    (!fcState.catFilter || r.prodCat === fcState.catFilter) &&
+    (!fcState.behaviorFilter || r.cat === fcState.behaviorFilter) &&
+    (!q || `${r.sku} ${r.name}`.toLowerCase().includes(q))
+  );
+  const k = fcState.sortKey, dir = fcState.sortDir === "asc" ? 1 : -1;
+  const val = (r) => k === "hit" ? (r.actual === null ? -1 : (fcIsHit(r.forecast, r.actual, fcState.band) ? 1 : 0)) : r[k];
+  fcState.filtered.sort((a, b) => {
+    const av = val(a), bv = val(b);
+    if (typeof av === "string" || typeof bv === "string") return String(av || "").localeCompare(String(bv || "")) * dir;
+    const an = (av === null || av === undefined || !Number.isFinite(av)) ? -Infinity : av;
+    const bn = (bv === null || bv === undefined || !Number.isFinite(bv)) ? -Infinity : bv;
+    return (an - bn) * dir;
+  });
+  fcState.page = 0;
+  fcRenderSkuTable();
+}
+
+function fcCell(col, r, res) {
+  switch (col.key) {
+    case "cat": {
+      const b = `<span class="badge-outline ${FC_CAT_BADGE[r.cat] || "gray"}">${r.cat}</span>`;
+      return r.flagged ? `${b} <span class="badge-outline yellow" title="${r.flagReason}${fcState.v2 ? " — deviation from baseline halved (V2)" : ""}">V2</span>` : b;
+    }
+    case "ml": return r.ml === null ? "—" : fcPcs(r.ml);
+    case "w": return r.ml === null ? "—" : r.w.toFixed(2);
+    case "fMin": return `${fcPcs(r.fMin)} – ${fcPcs(r.fMax)}`;
+    case "errPct": {
+      if (r.errPct === null || r.errPct === undefined) return "—";
+      const cls = Math.abs(r.errPct) <= fcState.band ? "text-green" : (Math.abs(r.errPct) <= 2 * fcState.band ? "text-orange" : "text-red");
+      return `<span class="${cls}">${r.errPct > 0 ? "+" : ""}${r.errPct.toFixed(0)}%</span>`;
+    }
+    case "hit": return r.actual === null ? "—" : (fcIsHit(r.forecast, r.actual, fcState.band) ? `<span class="badge-outline green">Hit</span>` : `<span class="badge-outline red">Miss</span>`);
+    case "pace": {
+      if (r.pace === null || r.pace === undefined) return "—";
+      const cls = r.pace >= 95 ? "text-green" : (r.pace >= 85 ? "text-orange" : "text-red");
+      return `<span class="${cls}">${r.pace.toFixed(0)}%</span>`;
+    }
+    case "cover": {
+      if (r.cover === null || r.cover === undefined) return "—";
+      const cls = r.cover < 15 ? "text-red" : (r.cover < res.dim ? "text-orange" : "text-green");
+      return `<span class="${cls}">${r.cover > 999 ? "999+" : r.cover.toFixed(0)}</span>`;
+    }
+    default: {
+      const v = r[col.key];
+      if (col.num) return fcPcs(v);
+      return v === null || v === undefined ? "—" : String(v);
+    }
+  }
+}
+
+function fcRenderSkuTable() {
+  const head = $("fcSkuHeaderRow"), body = $("fcSkuTableBody"); const res = fcCurrent();
+  if (!head || !body) return;
+  if (!res) { head.innerHTML = ""; body.innerHTML = ""; return; }
+  const cols = fcColumns(res);
+  head.innerHTML = cols.map(c => {
+    const arrow = fcState.sortKey === c.key ? (fcState.sortDir === "asc" ? " ▲" : " ▼") : "";
+    return `<th data-fc-sort="${c.key}" class="${c.num ? "num " : ""}${c.cls && !c.num ? c.cls : ""}" style="cursor:pointer;user-select:none;" title="${c.title || ""}">${c.label}${arrow}</th>`;
+  }).join("");
+  const start = fcState.page * PAGE_SIZE;
+  const pageRows = fcState.filtered.slice(start, start + PAGE_SIZE);
+  body.innerHTML = pageRows.length
+    ? pageRows.map(r => `<tr>${cols.map(c => `<td class="${c.num ? "num " : ""}${c.cls || ""}"${c.key === "name" ? ` title="${String(r.name).replace(/"/g, "&quot;")}"` : ""}>${fcCell(c, r, res)}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${cols.length}" class="text-dim" style="text-align:center;padding:20px;">No SKUs match the current filters.</td></tr>`;
+  const totalPages = Math.max(1, Math.ceil(fcState.filtered.length / PAGE_SIZE));
+  if ($("fcRowCount")) $("fcRowCount").textContent = `${fmtInt.format(fcState.filtered.length)} SKUs`;
+  if ($("fcPageIndicator")) $("fcPageIndicator").textContent = `Page ${fcState.page + 1} of ${totalPages}`;
+  if ($("fcPrevPage")) $("fcPrevPage").disabled = fcState.page === 0;
+  if ($("fcNextPage")) $("fcNextPage").disabled = fcState.page >= totalPages - 1;
+}
+
+function fcDownloadCsv() {
+  const res = fcCurrent(); if (!res) return;
+  const cols = fcColumns(res);
+  const header = ["Target Month", "Mode"].concat(cols.map(c => c.key === "fMin" ? "Range Min,Range Max" : c.label)).concat(["V2 Flag"]);
+  const esc = (v) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const num = (v, d) => (v === null || v === undefined || !Number.isFinite(v)) ? "" : (d ? v.toFixed(d) : Math.round(v));
+  const lines = [header.join(",")];
+  fcState.filtered.forEach(r => {
+    const cells = [esc(res.key), esc(FC_MODE_LABEL[res.mode] || res.mode)];
+    cols.forEach(c => {
+      if (c.key === "fMin") cells.push(num(r.fMin), num(r.fMax));
+      else if (c.key === "w") cells.push(r.ml === null ? "" : r.w.toFixed(2));
+      else if (c.key === "errPct" || c.key === "pace") cells.push(num(r[c.key], 1));
+      else if (c.key === "cover") cells.push(num(r.cover, 0));
+      else if (c.key === "hit") cells.push(r.actual === null ? "" : (fcIsHit(r.forecast, r.actual, fcState.band) ? "Hit" : "Miss"));
+      else if (c.num) cells.push(num(r[c.key]));
+      else cells.push(esc(r[c.key]));
+    });
+    cells.push(esc(r.flagged ? r.flagReason : ""));
+    lines.push(cells.join(","));
+  });
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `forecast-${res.key.replace(/\s+/g, "-").toLowerCase()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function fcWireControlsOnce() {
+  if (fcState.wired) return;
+  fcState.wired = true;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on("fcTargetSelect", "change", (e) => { fcState.target = e.target.value; fcState.catFilter = ""; fcRenderAll(); });
+  on("fcCategorySelect", "change", (e) => { fcState.catFilter = e.target.value; fcApplyFilters(); });
+  on("fcBehaviorSelect", "change", (e) => { fcState.behaviorFilter = e.target.value; fcApplyFilters(); });
+  let t = null;
+  on("fcSearchInput", "input", (e) => { clearTimeout(t); const v = e.target.value; t = setTimeout(() => { fcState.search = v; fcApplyFilters(); }, 250); });
+  on("fcDownloadBtn", "click", fcDownloadCsv);
+  on("fcReloadBtn", "click", () => prepareForecastModelView(true));
+  on("fcPrevPage", "click", () => { if (fcState.page > 0) { fcState.page--; fcRenderSkuTable(); } });
+  on("fcNextPage", "click", () => { const tp = Math.max(1, Math.ceil(fcState.filtered.length / PAGE_SIZE)); if (fcState.page < tp - 1) { fcState.page++; fcRenderSkuTable(); } });
+  on("fcSkuHeaderRow", "click", (e) => {
+    const th = e.target.closest("[data-fc-sort]"); if (!th) return;
+    const k = th.getAttribute("data-fc-sort");
+    if (fcState.sortKey === k) fcState.sortDir = fcState.sortDir === "asc" ? "desc" : "asc"; else { fcState.sortKey = k; fcState.sortDir = "desc"; }
+    fcApplyFilters();
+  });
+  document.querySelectorAll("#fcBandToggle .segmented-btn").forEach(btn => btn.addEventListener("click", () => {
+    document.querySelectorAll("#fcBandToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fcState.band = Number(btn.getAttribute("data-band")) || 25;
+    fcRenderKpis(); fcRenderCategoryTable(); fcRenderAccuracyTrend(); fcRenderSkuTable();
+  }));
+  document.querySelectorAll("#fcV2Toggle .segmented-btn").forEach(btn => btn.addEventListener("click", () => {
+    const want = btn.getAttribute("data-v2") === "on";
+    if (want === fcState.v2) return;
+    document.querySelectorAll("#fcV2Toggle .segmented-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fcState.v2 = want;
+    prepareForecastModelView(false);
+  }));
 }
 
 function prepareSellthroughData() {

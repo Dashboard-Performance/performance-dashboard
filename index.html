@@ -82,6 +82,7 @@
             <a class="nav-item-sub" id="navSegmentationPanel">Segmentation Panel</a>
             <a class="nav-item-sub" id="navSellthroughPanel">Sellthrough Rate Panel</a>
             <a class="nav-item-sub" id="navWeeklyInventory">Weekly Inventory &amp; Inbound</a>
+            <a class="nav-item-sub" id="navForecastModel">Forecast Model</a>
           </div>
         </div>
         <!-- ظاهر بس للـ Manager (نفس الإيميل المحدد في PRESENCE_ADMIN_EMAIL
@@ -1788,9 +1789,9 @@
                       <th onclick="sortMpMatches('totalPlaced')" class="num" style="cursor:pointer;" title="Total placed pieces for this merchant × product. No cutoff applied.">Total Placed</th>
                       <th onclick="sortMpMatches('totalConfirmed')" class="num text-blue" style="cursor:pointer;" title="Total confirmed pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Confirmed</th>
                       <th onclick="sortMpMatches('totalDelivered')" class="num text-green" style="cursor:pointer;" title="Total delivered pieces. No cutoff applied — unlike the KPI card above, this row-level column does not apply a cutoff.">Total Delivered</th>
-                      <th onclick="sortMpMatches('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces. No cutoff applied.">CR%</th>
-                      <th onclick="sortMpMatches('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces. No cutoff applied.">DR%</th>
-                      <th onclick="sortMpMatches('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th onclick="sortMpMatches('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed pieces, excluding the most recent 2 days (CR cutoff) so orders still pending confirmation don't drag the rate down.">CR%</th>
+                      <th onclick="sortMpMatches('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed pieces, excluding the most recent 5 days (same cutoff as CM3) so orders still in transit don't drag the rate down.">DR%</th>
+                      <th onclick="sortMpMatches('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR% — each computed with its own cutoff (CR = last 2 days excluded, DR = last 5 days excluded).">NDR%</th>
                       <th onclick="sortMpMatches('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value. No cutoff applied.">Delivered GMV</th>
                       <th onclick="sortMpMatches('contrPct')" class="num" style="cursor:pointer;" title="This merchant's share of the SKU's total confirmed pieces across all merchants.">CONTR%</th>
                       <th onclick="sortMpMatches('placedAsp')" class="num text-dim" style="cursor:pointer;" title="Average selling price on placed orders (Placed GMV ÷ Placed Pieces). No cutoff applied.">Placed ASP</th>
@@ -3048,6 +3049,137 @@
                 <span id="wiRowCount">0 Rows</span>
               </div>
             </div>
+          </section>
+        </div>
+
+        <!-- FORECAST MODEL (Admin Panel) — SKU-level monthly demand forecast:
+             behavior categories + ML/baseline blending + guardrails, with
+             backtested accuracy, live pace for this month, and next month. -->
+        <div id="viewForecastModel" class="view-section hidden">
+          <div id="fcProgressOverlay" class="st-progress-overlay hidden">
+            <div class="st-progress-box">
+              <h3>Building Forecast…</h3>
+              <div class="progress-bar lg">
+                <div id="fcProgressBar" class="progress-fill blue" style="width: 0%"></div>
+              </div>
+              <div id="fcProgressText" class="st-progress-text">0%</div>
+              <div id="fcProgressStage" class="text-dim" style="margin-top:8px;font-size:12px;"></div>
+            </div>
+          </div>
+
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Forecast Model</h2>
+                  <p id="fcTargetSubtitle">SKU-level monthly demand forecast — Confirmed pieces, debundled to Single SKUs.</p>
+                </div>
+                <div class="table-controls">
+                  <button id="fcReloadBtn" class="btn btn-outline small" type="button" title="Re-read the history tab and rebuild every forecast.">Reload Data</button>
+                  <button id="fcDownloadBtn" class="btn btn-outline small" type="button" title="Download the SKU table below (current filters) as CSV.">Download CSV</button>
+                </div>
+              </div>
+              <div class="table-controls" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:15px;margin-left:0;justify-content:flex-start;width:100%;align-items:center;">
+                <select id="fcTargetSelect" class="st-filter-select" title="Target month. Backtest = a past month forecast only from data before it, compared to what actually happened."></select>
+                <select id="fcBehaviorSelect" class="st-filter-select"><option value="">All Behaviors</option></select>
+                <select id="fcCategorySelect" class="st-filter-select"><option value="">All Categories</option></select>
+                <input id="fcSearchInput" type="search" placeholder="Search SKU or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                <div class="segmented" id="fcBandToggle" title="Hit = forecast within this band of actual (or within 2 pieces).">
+                  <button type="button" class="segmented-btn" data-band="15">±15%</button>
+                  <button type="button" class="segmented-btn active" data-band="25">±25%</button>
+                  <button type="button" class="segmented-btn" data-band="35">±35%</button>
+                </div>
+                <div class="segmented" id="fcV2Toggle" title="V2 outlier correction: SKUs that missed by more than 100% last month, or are sparse and volatile, get their deviation from baseline halved.">
+                  <button type="button" class="segmented-btn active" data-v2="on">V2 On</button>
+                  <button type="button" class="segmented-btn" data-v2="off">V2 Off</button>
+                </div>
+              </div>
+              <div id="fcDataStatus" class="fc-data-status"></div>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <div class="metrics-grid fc-kpi-grid" id="fcKpiGrid"></div>
+          </section>
+
+          <section class="mb-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>By Behavior</h2>
+                  <p>Forecast split by demand behavior for the selected month.</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="fcCatTable">
+                  <thead><tr id="fcCatHeaderRow"></tr></thead>
+                  <tbody id="fcCatTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>Accuracy Trend</h2>
+                  <p>Every past month, forecast only from the data before it, then compared to what actually happened.</p>
+                </div>
+              </div>
+              <div class="fc-trend-grid">
+                <div class="chart-container" style="height:240px;">
+                  <canvas id="fcAccuracyChart"></canvas>
+                </div>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Month</th>
+                        <th class="num text-purple" title="Share of SKUs forecast within the selected band.">Hit Rate</th>
+                        <th class="num" title="1 − Σ|Forecast − Actual| ÷ ΣActual.">Accuracy</th>
+                        <th class="num text-dim" title="What simply repeating last month would have scored.">Naive</th>
+                        <th class="num" title="Model accuracy minus naive accuracy — what the model actually adds.">Lift</th>
+                        <th class="num" title="(ΣForecast − ΣActual) ÷ ΣActual.">Bias</th>
+                      </tr>
+                    </thead>
+                    <tbody id="fcTrendTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>SKU Forecast</h2>
+                  <p>Click any column header to sort.</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="fcSkuTable">
+                  <thead><tr id="fcSkuHeaderRow"></tr></thead>
+                  <tbody id="fcSkuTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="fcRowCount">0 SKUs</span>
+                <div class="pager">
+                  <button id="fcPrevPage" class="btn btn-outline small">Prev</button>
+                  <span id="fcPageIndicator">Page 1 of 1</span>
+                  <button id="fcNextPage" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mb-4 mt-4">
+            <details class="panel fc-method">
+              <summary><strong>How this forecast works</strong></summary>
+              <div class="fc-method-body" id="fcMethodBody"></div>
+            </details>
           </section>
         </div>
       </main>
