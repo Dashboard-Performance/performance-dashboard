@@ -1,0 +1,669 @@
+/* ==========================================================================
+   Performance Dashboard — Login / Sign Up Gate
+   --------------------------------------------------------------------------
+   This file is fully self-contained: it injects its own CSS and its own
+   HTML overlay at runtime, so nothing in index.html / style.css / app.js
+   had to be touched except ONE line (the <script src="js/auth.js"> tag).
+
+   HOW IT WORKS
+   1) The moment this script runs (it is the first thing in <body>), it
+      injects a CSS rule that hides every other element in <body> and shows
+      only the auth overlay — so the dashboard never "flashes" before login.
+   2) If a valid session is already saved in localStorage, the gate is
+      skipped instantly and the dashboard is shown as normal.
+   3) Sign up only accepts emails ending with "@taager.com".
+   4) Login / Sign up both talk to a Google Apps Script Web App that reads
+      and writes the "Users" sheet (see CONFIG.API_URL below + backend/Code.gs).
+   5) On successful login/signup, the session (name, email, role) is saved
+      to localStorage so the user is NOT asked to log in again on this
+      device/browser until they press "Logout".
+   ========================================================================== */
+
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------ *
+   *  CONFIG — edit these two values only
+   * ------------------------------------------------------------------ */
+  const CONFIG = {
+    // Paste the "Web app URL" you get after deploying backend/Code.gs
+    // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone)
+    API_URL: "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec",
+
+    // Only emails ending with this domain are allowed to sign up
+    ALLOWED_DOMAIN: "taager.com",
+
+    // Roles offered in the Sign Up form — edit freely
+    ROLES: ["Admin", "Account Manager", "Commercial", "Marketplace", "Viewer"],
+
+    // localStorage key used to keep the user logged in
+    STORAGE_KEY: "taagerDashboardSession",
+
+    // Only this account ever sees the "who's online" widget. Everyone else's
+    // client still sends heartbeats (so the count stays accurate), but the
+    // panel itself is never built for them, and the backend refuses to hand
+    // the list back to any other email regardless.
+    PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
+    // v1.1.40: heartbeat/getOnlineUsers نقلوا بالكامل للـ Cloudflare Worker
+    // (مش Apps Script) — بيانات "مين أونلاين" مؤقتة بطبيعتها ومحتاجاش تتخزن
+    // في شيت جوجل، فده أخف على السيرفرين. نفس رابط SYNC_CDN_URL في js/app.js
+    // بالظبط (الملف ده مستقل عن app.js فمكرّرينه هنا).
+    WORKER_URL: "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev",
+    // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
+    // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
+    // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
+    // v1.1.32: من 20 ثانية لـ 30 — بيقلل عدد الطلبات المتزامنة على نفس
+    // الـ deployment أكتر (راجع startPresence/buildPresenceWidget تحت كمان
+    // — دلوقتي مفصولين عن بعض بفاصل زمني عشان ميضربوش الباك اند في نفس
+    // اللحظة بالظبط).
+    // v1.1.51: من 30 ثانية لـ 60 — كل heartbeat بيكتب على Cloudflare Workers
+    // KV، واللي مسموح بيه على الخطة المجانية 1000 كتابة/يوم بس لكل الحسابات
+    // مجتمعة. بـ 30 ثانية، شخص واحد فاتح الموقع لساعتين كان لوحده بياخد
+    // ~240 كتابة. تقليل الفاصل لـ 60 ثانية بيوفر نص الاستهلاك من غير ما يأثر
+    // فعليًا على دقة "مين أونلاين" — لسه أصغر بكتير من نافذة اعتبار المستخدم
+    // "أونلاين" في الباك اند (PRESENCE_ONLINE_WINDOW_MS = 90 ثانية في
+    // cloudflare-worker/worker.js)، فمفيش خطر إن حد يظهر "أوفلاين" غلط بين
+    // نبضتين.
+    HEARTBEAT_INTERVAL_MS: 60000,
+  };
+
+  /* ------------------------------------------------------------------ *
+   *  0) Immediately hide the dashboard until we know the auth state
+   * ------------------------------------------------------------------ */
+  const existingSession = readSession();
+
+  const gateStyle = document.createElement("style");
+  gateStyle.id = "authGateStyle";
+  if (!existingSession) {
+    gateStyle.textContent = `body > *:not(#authOverlay){display:none !important;}`;
+  }
+  document.head.appendChild(gateStyle);
+
+  injectAuthStyles();
+
+  if (!existingSession) {
+    buildOverlay();
+  } else {
+    // Already logged in on this device — just wire up the logout control
+    // once the rest of the dashboard has loaded.
+    onDomReady(() => {
+      injectUserBadge(existingSession);
+      startPresence(existingSession);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Helpers
+   * ------------------------------------------------------------------ */
+  function onDomReady(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      fn();
+    }
+  }
+
+  function readSession() {
+    try {
+      const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.email && parsed.name) return parsed;
+      return null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function saveSession(user) {
+    localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(user));
+  }
+
+  function clearSession() {
+    localStorage.removeItem(CONFIG.STORAGE_KEY);
+  }
+
+  function isTaagerEmail(email) {
+    const re = new RegExp("^[^\\s@]+@" + CONFIG.ALLOWED_DOMAIN.replace(".", "\\.") + "$", "i");
+    return re.test(String(email || "").trim());
+  }
+
+  // بطلب صريح: مفيش أي timeout هنا زمان — لو نفس الـ Apps Script deployment
+  // (اللي بيستقبل كمان المزامنة المركزية/الـ backup/نشر الـ Computed API/
+  // heartbeats) كان مزنوق ومتأخر في الرد، طلب اللوجن كان بيفضل معلق "للأبد"
+  // من غير أي رسالة خطأ — وبما إن الصفحة كلها مخفية لحد ما اللوجن ينجح، ده
+  // كان بيبان زي إن الشاشة كلها "اتجمدت". الـ 25 ثانية دي كافية جدًا لطلب
+  // لوجن عادي (حتى لو السيرفر مزحوم شوية)، وبترجع رسالة واضحة بدل ما تفضل
+  // مستنية من غير نهاية.
+  const AUTH_API_TIMEOUT_MS = 25000;
+
+  // v1.1.1: ⚠️ ردود أي Apps Script Web App (كبيرة أو صغيرة — حتى heartbeat
+  // الصغيرة دي) بتتوصّل فعليًا عن طريق تحويل داخلي لمسار
+  // script.googleusercontent.com/macros/echo. لو التنفيذ ورا الرابط ده اتأخر
+  // بسبب زحمة تنفيذات متزامنة على نفس الـ deployment (heartbeat + presence +
+  // sync + backup + login كلهم بيشاركوا نفس الرابط)، بيرجع 404 (صفحة HTML)
+  // بدل الرد الحقيقي، فـ res.json() بيرمي SyntaxError. ده فشل عابر بحت من
+  // عند جوجل، مش خطأ في بياناتنا — بنتعامل معاه بمحاولة تانية سريعة (retry)
+  // تلقائية في callApi() تحت، بدل ما نسيب heartbeat/presence "يفوتوا" بلاش.
+  function callApiOnce(payload) {
+    if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
+      return Promise.reject(
+        new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
+      );
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AUTH_API_TIMEOUT_MS);
+    return fetch(CONFIG.API_URL, {
+      method: "POST",
+      // text/plain avoids a CORS pre-flight request against Apps Script
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+      .then(
+        (res) => res.json().catch((parseErr) => {
+          throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
+        }),
+        (fetchErr) => {
+          if (fetchErr && fetchErr.name === "AbortError") {
+            throw new Error("Server is busy right now — please try again in a moment.");
+          }
+          throw new Error("Could not reach the server. Please check your connection.");
+        }
+      )
+      .finally(() => clearTimeout(timer));
+  }
+
+  function callApi(payload, attempt) {
+    attempt = attempt || 1;
+    return callApiOnce(payload).catch((err) => {
+      const msg = (err && err.message) || "";
+      const isTransient = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0;
+      if (isTransient && attempt < 3) {
+        // محاولتين إضافيتين (بدل واحدة) بفاصل بسيط — بما إن الـ Cloudflare
+        // Worker بقى بياخد طلبات القراءة الكبيرة عن Apps Script، فمفيش خوف
+        // من إن المحاولة الإضافية دي تزود الزحمة، وبتقلل احتمال ظهور فشل
+        // ظاهر لليوزر أكتر.
+        return new Promise((resolve) => setTimeout(resolve, 800 * attempt)).then(() => callApi(payload, attempt + 1));
+      }
+      if (isTransient) {
+        throw new Error("Server is busy right now — please try again in a moment.");
+      }
+      throw err;
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  1) Styles for the overlay (scoped under #authOverlay)
+   * ------------------------------------------------------------------ */
+  function injectAuthStyles() {
+    const css = `
+    #authOverlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
+      background:radial-gradient(circle at 30% 20%,rgba(59,130,246,0.12),transparent 45%),
+                 radial-gradient(circle at 80% 80%,rgba(139,92,246,0.12),transparent 45%),#09090b;
+      font-family:"Inter",-apple-system,sans-serif;padding:20px;}
+    #authOverlay *{box-sizing:border-box;}
+    .auth-card{width:100%;max-width:380px;background:#18181b;border:1px solid #27272a;border-radius:14px;
+      padding:32px 28px;box-shadow:0 20px 60px rgba(0,0,0,0.45);}
+    .auth-brand{text-align:center;font-size:13px;font-weight:700;color:#fff;letter-spacing:0.5px;
+      background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:9px 14px;border-radius:8px;margin:0 auto 22px auto;
+      display:block;width:fit-content;text-shadow:0 1px 2px rgba(0,0,0,0.3);}
+    .auth-tabs{display:flex;background:#09090b;border:1px solid #27272a;border-radius:8px;padding:4px;margin-bottom:22px;}
+    .auth-tab{flex:1;background:transparent;border:none;padding:9px 0;font-size:12px;font-weight:600;color:#a1a1aa;
+      border-radius:6px;cursor:pointer;letter-spacing:0.3px;transition:all .2s;font-family:inherit;}
+    .auth-tab.active{background:#3b82f6;color:#fff;box-shadow:0 0 12px rgba(59,130,246,0.35);}
+    .auth-form{display:none;flex-direction:column;gap:6px;}
+    .auth-form.active{display:flex;}
+    .auth-form label{font-size:11px;font-weight:600;color:#a1a1aa;text-transform:uppercase;letter-spacing:0.5px;
+      margin-top:10px;}
+    .auth-form input,.auth-form select{width:100%;padding:10px 12px;background:#09090b;border:1px solid #27272a;
+      border-radius:7px;color:#fafafa;font-size:13px;font-family:inherit;outline:none;transition:border-color .2s;}
+    .auth-form input:focus,.auth-form select:focus{border-color:#3b82f6;}
+    .auth-form select{cursor:pointer;}
+    .auth-password-wrap{position:relative;display:flex;align-items:center;}
+    .auth-password-wrap input{padding-right:56px;}
+    .auth-toggle-pass{position:absolute;right:10px;font-size:11px;color:#3b82f6;cursor:pointer;font-weight:600;
+      user-select:none;}
+    .auth-error{min-height:16px;color:#ef4444;font-size:12px;margin-top:10px;line-height:1.4;}
+    .auth-submit{margin-top:14px;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:11px 0;
+      font-size:13px;font-weight:700;letter-spacing:0.3px;cursor:pointer;transition:all .2s;
+      box-shadow:0 0 12px rgba(59,130,246,0.3);font-family:inherit;}
+    .auth-submit:hover{box-shadow:0 0 18px rgba(59,130,246,0.5);transform:translateY(-1px);}
+    .auth-submit:disabled{opacity:0.6;cursor:not-allowed;transform:none;}
+    .auth-footnote{text-align:center;margin-top:20px;font-size:11px;color:#52525b;letter-spacing:0.2px;}
+    .auth-profile{display:flex;align-items:center;gap:10px;padding-bottom:14px;margin-bottom:14px;
+      border-bottom:1px solid #27272a;}
+    .auth-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;
+      font-family:"Inter",sans-serif;flex-shrink:0;letter-spacing:0;text-transform:uppercase;}
+    .auth-profile-info{flex:1;min-width:0;}
+    .auth-profile-name{font-size:12px;font-weight:700;color:#fff;font-family:"Inter",sans-serif;
+      text-transform:none;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .auth-profile-role{font-size:10px;color:#a1a1aa;font-family:'JetBrains Mono',monospace;
+      text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;}
+    .auth-logout-icon{background:transparent;border:1px solid #3f3f46;color:#a1a1aa;border-radius:6px;
+      width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+      flex-shrink:0;transition:all .2s;font-size:13px;line-height:1;}
+    .auth-logout-icon:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,0.08);}
+    `;
+    const styleEl = document.createElement("style");
+    styleEl.id = "authOverlayStyles";
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  2) Build overlay markup + wire events
+   * ------------------------------------------------------------------ */
+  function buildOverlay() {
+    const roleOptions = CONFIG.ROLES.map((r) => `<option value="${r}">${r}</option>`).join("");
+
+    const overlay = document.createElement("div");
+    overlay.id = "authOverlay";
+    overlay.innerHTML = `
+      <div class="auth-card">
+        <span class="auth-brand">Performance Analytics</span>
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" data-tab="login">Login</button>
+          <button type="button" class="auth-tab" data-tab="signup">Sign Up</button>
+        </div>
+
+        <form id="authLoginForm" class="auth-form active" autocomplete="on">
+          <label>Email</label>
+          <input type="email" id="authLoginEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+          <label>Password</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authLoginPassword" placeholder="••••••••" autocomplete="current-password" required />
+            <span class="auth-toggle-pass" data-target="authLoginPassword">Show</span>
+          </div>
+          <div class="auth-error" id="authLoginError"></div>
+          <button type="submit" class="auth-submit" id="authLoginSubmit">Login</button>
+        </form>
+
+        <form id="authSignupForm" class="auth-form" autocomplete="off">
+          <label>Full Name</label>
+          <input type="text" id="authSignupName" placeholder="e.g. Name" required />
+          <label>Email</label>
+          <input type="email" id="authSignupEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" required />
+          <label>Role</label>
+          <select id="authSignupRole" required>${roleOptions}</select>
+          <label>Password</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authSignupPassword" placeholder="At least 6 characters" required />
+            <span class="auth-toggle-pass" data-target="authSignupPassword">Show</span>
+          </div>
+          <label>Confirm Password</label>
+          <input type="password" id="authSignupPasswordConfirm" placeholder="••••••••" required />
+          <div class="auth-error" id="authSignupError"></div>
+          <button type="submit" class="auth-submit" id="authSignupSubmit">Create Account</button>
+        </form>
+
+        <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} accounts</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Tabs
+    overlay.querySelectorAll(".auth-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        overlay.querySelectorAll(".auth-tab").forEach((t) => t.classList.remove("active"));
+        overlay.querySelectorAll(".auth-form").forEach((f) => f.classList.remove("active"));
+        tab.classList.add("active");
+        overlay.querySelector(`#auth${cap(tab.dataset.tab)}Form`).classList.add("active");
+      });
+    });
+
+    // Show/hide password
+    overlay.querySelectorAll(".auth-toggle-pass").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.target);
+        const isPass = input.type === "password";
+        input.type = isPass ? "text" : "password";
+        btn.textContent = isPass ? "Hide" : "Show";
+      });
+    });
+
+    // Prefill remembered email if present (edge case: cleared session but kept email)
+    const rememberedEmail = localStorage.getItem("taagerDashboardLastEmail");
+    if (rememberedEmail) {
+      document.getElementById("authLoginEmail").value = rememberedEmail;
+    }
+
+    wireLoginForm(overlay);
+    wireSignupForm(overlay);
+
+    function cap(s) {
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+  }
+
+  function wireLoginForm(overlay) {
+    const form = overlay.querySelector("#authLoginForm");
+    const errorEl = overlay.querySelector("#authLoginError");
+    const submitBtn = overlay.querySelector("#authLoginSubmit");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+
+      const email = overlay.querySelector("#authLoginEmail").value.trim();
+      const password = overlay.querySelector("#authLoginPassword").value;
+
+      if (!isTaagerEmail(email)) {
+        errorEl.textContent = `Please use your @${CONFIG.ALLOWED_DOMAIN} email.`;
+        return;
+      }
+      if (!password) {
+        errorEl.textContent = "Please enter your password.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Signing in...";
+
+      callApi({ action: "login", email: email, password: password })
+        .then((res) => {
+          if (!res || !res.success) {
+            errorEl.textContent = (res && res.message) || "Invalid email or password.";
+            return;
+          }
+          const user = { name: res.name, email: res.email, role: res.role };
+          saveSession(user);
+          localStorage.setItem("taagerDashboardLastEmail", user.email);
+          unlockDashboard(user);
+        })
+        .catch((err) => {
+          errorEl.textContent = err.message || "Something went wrong. Please try again.";
+        })
+        .finally(() => {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Login";
+        });
+    });
+  }
+
+  function wireSignupForm(overlay) {
+    const form = overlay.querySelector("#authSignupForm");
+    const errorEl = overlay.querySelector("#authSignupError");
+    const submitBtn = overlay.querySelector("#authSignupSubmit");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+
+      const name = overlay.querySelector("#authSignupName").value.trim();
+      const email = overlay.querySelector("#authSignupEmail").value.trim();
+      const role = overlay.querySelector("#authSignupRole").value;
+      const password = overlay.querySelector("#authSignupPassword").value;
+      const confirm = overlay.querySelector("#authSignupPasswordConfirm").value;
+
+      if (!name) {
+        errorEl.textContent = "Please enter your full name.";
+        return;
+      }
+      if (!isTaagerEmail(email)) {
+        errorEl.textContent = `Sign up is only allowed with an @${CONFIG.ALLOWED_DOMAIN} email.`;
+        return;
+      }
+      if (password.length < 6) {
+        errorEl.textContent = "Password must be at least 6 characters.";
+        return;
+      }
+      if (password !== confirm) {
+        errorEl.textContent = "Passwords do not match.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Creating account...";
+
+      callApi({ action: "signup", name: name, email: email, password: password, role: role })
+        .then((res) => {
+          if (!res || !res.success) {
+            errorEl.textContent = (res && res.message) || "Could not create the account.";
+            return;
+          }
+          const user = { name: res.name, email: res.email, role: res.role };
+          saveSession(user);
+          localStorage.setItem("taagerDashboardLastEmail", user.email);
+          unlockDashboard(user);
+        })
+        .catch((err) => {
+          errorEl.textContent = err.message || "Something went wrong. Please try again.";
+        })
+        .finally(() => {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create Account";
+        });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  3) Unlock dashboard after successful auth
+   * ------------------------------------------------------------------ */
+  function unlockDashboard(user) {
+    const gate = document.getElementById("authGateStyle");
+    if (gate) gate.textContent = "";
+    const overlay = document.getElementById("authOverlay");
+    if (overlay) overlay.remove();
+    onDomReady(() => {
+      injectUserBadge(user);
+      startPresence(user);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  4) Profile card + Logout, injected at the top of the sidebar
+   *     footer (right above "Live System Sync")
+   * ------------------------------------------------------------------ */
+  function injectUserBadge(user) {
+    if (document.getElementById("authUserBadge")) return; // already injected
+    const footer = document.querySelector(".sidebar-footer");
+    if (!footer) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "authUserBadge";
+    wrap.className = "auth-profile";
+    wrap.innerHTML = `
+      <div class="auth-avatar">${escapeHtml(getInitials(user.name))}</div>
+      <div class="auth-profile-info">
+        <div class="auth-profile-name">${escapeHtml(user.name)}</div>
+        <div class="auth-profile-role">${escapeHtml(user.role)}</div>
+      </div>
+      <button type="button" class="auth-logout-icon" title="Logout">⏻</button>
+    `;
+
+    wrap.querySelector(".auth-logout-icon").addEventListener("click", () => {
+      clearSession();
+      window.location.reload();
+    });
+
+    footer.prepend(wrap);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  5) Presence — heartbeat for everyone, "who's online" widget for
+   *     PRESENCE_ADMIN_EMAIL only
+   * ------------------------------------------------------------------ */
+  // v1.1.3: التاب لما يبقى مخفي (تاب تاني مفتوح، أو التاب ده في الخلفية)،
+  // المتصفح بيعلّق الشبكة عليه (ERR_NETWORK_IO_SUSPENDED) — مفيش داعي نحاول
+  // نبعت heartbeat/presence أصلاً وقتها، بنسيبهم يستأنفوا أول ما التاب يرجع مرئي.
+  function isTabVisible() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  }
+
+  // v1.1.32: فاصل بسيط (4 ثواني) قبل أول heartbeat — عشان ميضربش نفس
+  // اللحظة بالظبط اللي فيها loadData الأساسية بتضرب الباك اند وقت تحميل
+  // الصفحة (كانت الاتنين بيحصلوا سوا عند t=0، ده كان بيزود احتمال الـ 404
+  // العابر). الـ setInterval بعد كده بيفضل شغال بنفس الفاصل الزمني عادي.
+  function startPresence(user) {
+    setTimeout(() => sendHeartbeat(user), 4000);
+    setInterval(() => { if (isTabVisible()) sendHeartbeat(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
+
+    if (String(user.email || "").trim().toLowerCase() === CONFIG.PRESENCE_ADMIN_EMAIL.toLowerCase()) {
+      injectPresenceStyles();
+      buildPresenceWidget(user);
+    }
+  }
+
+  function sendHeartbeat(user) {
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=heartbeat&email=${encodeURIComponent(user.email)}&name=${encodeURIComponent(user.name || "")}`;
+    fetch(url, { method: "GET", cache: "no-store" }).catch(() => {
+      /* silent — a missed heartbeat just means one skipped "online" tick */
+    });
+  }
+
+  function injectPresenceStyles() {
+    const css = `
+    .presence-widget{position:relative;display:inline-flex;z-index:9500;font-family:"Inter",-apple-system,sans-serif;}
+    .presence-pill{display:flex;align-items:center;gap:7px;background:#18181b;border:1px solid #27272a;
+      border-radius:20px;padding:7px 14px 7px 10px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35);
+      transition:border-color .2s;font-family:inherit;}
+    .presence-pill:hover{border-color:#3f3f46;}
+    .presence-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;
+      box-shadow:0 0 0 0 rgba(34,197,94,0.55);animation:presencePulse 2s infinite;}
+    @keyframes presencePulse{
+      0%{box-shadow:0 0 0 0 rgba(34,197,94,0.55);}
+      70%{box-shadow:0 0 0 6px rgba(34,197,94,0);}
+      100%{box-shadow:0 0 0 0 rgba(34,197,94,0);}
+    }
+    .presence-count{font-size:12px;font-weight:700;color:#fafafa;}
+    .presence-label{font-size:11px;font-weight:600;color:#a1a1aa;letter-spacing:0.3px;}
+    .presence-panel{position:absolute;top:calc(100% + 8px);right:0;width:280px;max-height:340px;overflow-y:auto;
+      background:#18181b;border:1px solid #27272a;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      padding:8px;}
+    .presence-panel.hidden{display:none;}
+    .presence-panel-header{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 10px 8px;
+      border-bottom:1px solid #27272a;margin-bottom:6px;}
+    .presence-panel-title{font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.5px;}
+    .presence-panel-sub{font-size:10px;color:#52525b;font-family:'JetBrains Mono',monospace;}
+    .presence-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;}
+    .presence-row:hover{background:#09090b;}
+    .presence-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;
+      flex-shrink:0;text-transform:uppercase;}
+    .presence-row-info{flex:1;min-width:0;}
+    .presence-row-name{font-size:12px;font-weight:600;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-email{font-size:10px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-time{font-size:10px;color:#22c55e;font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+    .presence-empty{padding:16px 8px;text-align:center;font-size:11px;color:#52525b;}
+    `;
+    const styleEl = document.createElement("style");
+    styleEl.id = "presenceStyles";
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  function buildPresenceWidget(user) {
+    if (document.getElementById("presenceWidget")) return;
+
+    const widget = document.createElement("div");
+    widget.id = "presenceWidget";
+    widget.className = "presence-widget";
+    widget.innerHTML = `
+      <button type="button" class="presence-pill" id="presencePillBtn" title="Who's online">
+        <span class="presence-dot"></span>
+        <span class="presence-count" id="presenceCount">—</span>
+        <span class="presence-label">Online</span>
+      </button>
+      <div class="presence-panel hidden" id="presencePanel">
+        <div class="presence-panel-header">
+          <span class="presence-panel-title">Active Now</span>
+          <span class="presence-panel-sub" id="presenceUpdatedAt"></span>
+        </div>
+        <div class="presence-list" id="presenceList"></div>
+      </div>
+    `;
+    const actionsRow = document.querySelector(".topbar-actions");
+    if (actionsRow) {
+      actionsRow.prepend(widget);
+    } else {
+      document.body.appendChild(widget);
+    }
+
+    const pillBtn = widget.querySelector("#presencePillBtn");
+    const panel = widget.querySelector("#presencePanel");
+
+    pillBtn.addEventListener("click", () => {
+      const willOpen = panel.classList.contains("hidden");
+      panel.classList.toggle("hidden");
+      if (willOpen) refreshPresence(user);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!widget.contains(e.target)) panel.classList.add("hidden");
+    });
+
+    // v1.1.32: فاصل تاني (14 ثانية) — بعيد عن أول heartbeat (4 ثواني) وعن
+    // نص الدورة (15 ثانية) عشان الـ presence refresh والـ heartbeat يفضلوا
+    // بعيدين عن بعض على مدار الوقت، مش بس أول مرة (الاتنين بيشتغلوا بنفس
+    // الفاصل الزمني الكامل HEARTBEAT_INTERVAL_MS، فالفرق الأولي ده بيفضل
+    // ثابت طول عمر الصفحة).
+    setTimeout(() => refreshPresence(user), 14000);
+    setInterval(() => { if (isTabVisible()) refreshPresence(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
+  }
+
+  function refreshPresence(user) {
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=getOnlineUsers&requesterEmail=${encodeURIComponent(user.email)}`;
+    fetch(url, { method: "GET", cache: "no-store" })
+      .then((res) => res.json())
+      .then((res) => {
+        if (!res || !res.success) return;
+        renderPresence(res.users || [], res.now || Date.now());
+      })
+      .catch(() => {
+        /* silent — widget just keeps showing the last known state */
+      });
+  }
+
+  function renderPresence(users, now) {
+    const countEl = document.getElementById("presenceCount");
+    const listEl = document.getElementById("presenceList");
+    const updatedEl = document.getElementById("presenceUpdatedAt");
+    if (!countEl || !listEl) return;
+
+    countEl.textContent = String(users.length);
+    updatedEl.textContent = "now";
+
+    if (!users.length) {
+      listEl.innerHTML = `<div class="presence-empty">No one else is online right now.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = users
+      .map((u) => {
+        const secondsAgo = Math.max(0, Math.round((now - u.lastSeen) / 1000));
+        return `
+        <div class="presence-row">
+          <div class="presence-avatar">${escapeHtml(getInitials(u.name))}</div>
+          <div class="presence-row-info">
+            <div class="presence-row-name">${escapeHtml(u.name)}</div>
+            <div class="presence-row-email">${escapeHtml(u.email)}</div>
+          </div>
+          <div class="presence-row-time">${formatSecondsAgo(secondsAgo)}</div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function formatSecondsAgo(seconds) {
+    if (seconds < 10) return "now";
+    if (seconds < 60) return seconds + "s";
+    return Math.round(seconds / 60) + "m";
+  }
+
+  function getInitials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    if (parts.length === 1) return parts[0].slice(0, 2);
+    return parts[0].charAt(0) + parts[parts.length - 1].charAt(0);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+})();

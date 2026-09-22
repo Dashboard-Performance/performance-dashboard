@@ -1,0 +1,33 @@
+name = "performance-dashboard-sync-cache"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# v1.1.47: بعد ما شلنا الـ General Sync (21 شيت) من الـ Worker خالص، بقى
+# شغل الـ scheduled() handler خفيف جدًا (Main + Confirmed by Day + Incentive
+# Merchants بس، مفيش CPU error خالص عليهم) — فقدرنا نقلل الفاصل من 5 دقايق
+# لدقيقة واحدة من غير أي خطورة (الـ Worker مالوش سقف تنفيذات يومي زي Apps
+# Script، وعدد الطلبات ده لسه بعيد جدًا عن أي حد مجاني عند Cloudflare).
+# ⚠️ لو انت بتنشر بلصق الكود يدوي من Dashboard (مش wrangler deploy)، السطر
+# ده هنا مجرد مرجع — لازم كمان تعدّل الـ Cron Trigger من نفس صفحة الـ Worker
+# على Cloudflare: Triggers tab → Cron Triggers → عدّل من */5 * * * * لـ
+# * * * * *.
+[triggers]
+crons = ["* * * * *"]
+
+# ⚠️ لازم تستبدل الـ id ده بالـ id الحقيقي اللي هتاخده من أمر:
+#   wrangler kv namespace create "SYNC_CACHE"
+# (راجع الشرح فوق worker.js لخطوات كاملة)
+[[kv_namespaces]]
+binding = "SYNC_CACHE"
+id = "0352049f347a42f1823b5dd1425bd413"
+
+[vars]
+# رابط الـ Apps Script Web App بتاعك — نفسه المستخدم في js/app.js (DATA_API_URL)
+# وjs/auth.js (CONFIG.API_URL). لو غيرت الـ deployment بتاع الباك اند يوم من
+# الأيام، لازم تحدّث القيمة هنا كمان.
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec"
+
+# آي دي الشيت نفسه (نفس القيمة اللي في js/app.js — SHEET_ID) — الـ Worker
+# بيستخدمه عشان يقرا تاب "Confirmed by Day" (action=getConfirmedByDay)
+# مباشرة من Google Sheets (gviz)، من غير ما يعدي على Apps Script خالص.
+SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA"
