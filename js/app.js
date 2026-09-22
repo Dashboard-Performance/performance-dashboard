@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.78";
+const APP_VERSION = "1.1.79";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10584,7 +10584,7 @@ function fcRunEngine(sd, today, opts) {
 // machinery as the monthly engine (segment picker, calibration, bands), but
 // the target is "the next H days" instead of a calendar month, which also
 // gives far more test windows to validate on.
-const FC_HORIZONS = [7, 14, 30];
+const FC_HORIZONS = [14, 7];
 function fcHorizonLabel(H) { return H === 7 ? "Next 7 days" : (H === 14 ? "Next 14 days" : "Next " + H + " days"); }
 
 function fcRunHorizonEngine(sd, H, opts) {
@@ -11194,10 +11194,8 @@ async function prepareForecastModelView(forceReload) {
     fcState.engine = engine;
     fcState.byKey = new Map(engine.results.map(r => [r.key, r]));
     fcState.engineSig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
-    if (!fcState.byKey.has(fcState.target)) {
-      const pick = engine.results.find(r => r.mode === "next") || engine.results.find(r => r.mode === "current") || engine.results[engine.results.length - 1];
-      fcState.target = pick ? pick.key : "";
-    }
+    if (!fcState.engines[fcState.family]) fcState.family = "month";
+    fcState.target = fcNextKeyOf(fcState.family);
     fcSetProgress("Done", 100); await fcNextFrame();
   } finally {
     fcState.loading = false;
@@ -11363,28 +11361,23 @@ function fcRenderStatus() {
   el.innerHTML = parts.map(p => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${p}</div>`).join("");
 }
 
+// One simple choice: Month, 14 Day or 7 Day. Picking one jumps straight to
+// that horizon's upcoming forecast — everything else on the page follows it.
+function fcFamilies() {
+  const list = [{ key: "month", label: "Month" }];
+  FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => { if (fcState.engines["H" + H]) list.push({ key: "H" + H, label: H + " Day" }); });
+  return list;
+}
+function fcNextKeyOf(familyKey) {
+  const eng = fcState.engines[familyKey];
+  if (!eng) return "";
+  const nx = eng.results.find(r => r.mode === "next") || eng.results[eng.results.length - 1];
+  return nx ? nx.key : "";
+}
 function fcRenderTargetOptions() {
   const sel = $("fcTargetSelect");
   if (!sel || !fcState.engine) return;
-  const monthOpts = fcState.engine.results.slice().reverse().map(r => {
-    const tag = r.mode === "backtest" ? (r.trainN > 0 ? "Backtest" : "Backtest · baseline only") : FC_MODE_LABEL[r.mode];
-    const sel2 = (fcState.family === "month" && r.key === fcState.target) ? "selected" : "";
-    return `<option value="month::${r.key}" ${sel2}>${r.key} — ${tag}</option>`;
-  }).join("");
-  let horizonOpts = "";
-  FC_HORIZONS.forEach(H => {
-    const eng = fcState.engines["H" + H];
-    if (!eng) return;
-    const nx = eng.results.find(r => r.mode === "next");
-    if (!nx) return;
-    const sel2 = fcState.family === ("H" + H) ? "selected" : "";
-    horizonOpts += `<option value="H${H}::${nx.key}" ${sel2}>${nx.key}</option>`;
-    eng.results.filter(r => r.mode === "backtest").slice().reverse().forEach(r => {
-      const s3 = (fcState.family === ("H" + H) && r.key === fcState.target) ? "selected" : "";
-      horizonOpts += `<option value="H${H}::${r.key}" ${s3}>&nbsp;&nbsp;${H}d backtest · ${r.key}</option>`;
-    });
-  });
-  sel.innerHTML = `<optgroup label="Calendar months">${monthOpts}</optgroup>` + (horizonOpts ? `<optgroup label="Rolling horizon (more accurate)">${horizonOpts}</optgroup>` : "");
+  sel.innerHTML = fcFamilies().map(f => `<option value="${f.key}" ${fcState.family === f.key ? "selected" : ""}>${f.label}</option>`).join("");
 }
 function fcRenderBehaviorOptions() {
   const sel = $("fcBehaviorSelect"); if (!sel) return;
@@ -11731,8 +11724,8 @@ function fcWireControlsOnce() {
   fcState.wired = true;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on("fcTargetSelect", "change", (e) => {
-    const v = String(e.target.value), i = v.indexOf("::");
-    if (i > 0) { fcState.family = v.slice(0, i); fcState.target = v.slice(i + 2); } else { fcState.family = "month"; fcState.target = v; }
+    fcState.family = String(e.target.value);
+    fcState.target = fcNextKeyOf(fcState.family);
     fcState.catFilter = ""; fcRenderAll();
   });
   on("fcCategorySelect", "change", (e) => { fcState.catFilter = e.target.value; fcApplyFilters(); });
