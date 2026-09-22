@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.74";
+const APP_VERSION = "1.1.75";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10465,10 +10465,9 @@ function fcRunEngine(sd, today, opts) {
         if (c.key === "naive") naiveWape = wape;
         if (!best || wape < best.wape) best = { key: c.key, wape, n: e.n, calib: e.sf > 0 ? e.sa / e.sf : 1 };
       });
-      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) {
-        const e = bag.naive;
-        best = { key: "naive", wape: naiveWape, n: e.n, calib: e.sf > 0 ? e.sa / e.sf : 1 };
-      }
+      // No "prefer naive on ties" rule here on purpose: a segment is scored on
+      // hundreds of SKU-months, so small WAPE gaps are real signal, not noise.
+      // (Measured: forcing ties to naive cost ~7 accuracy points in July.)
       if (best) picks[sg.key] = {
         cand: FC_CAND_BY_KEY[best.key], calib: Math.max(FC_CALIB_MIN, Math.min(FC_CALIB_MAX, best.calib)),
         accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
