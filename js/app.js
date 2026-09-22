@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.75";
+const APP_VERSION = "1.1.76";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10478,6 +10478,13 @@ function fcRunEngine(sd, today, opts) {
     return picks;
   };
 
+  // Spread of actual vs forecast from months already replayed, per segment —
+  // a real 80% range instead of a guessed one, and its coverage gets measured
+  // on the following month so the claim can be checked.
+  const ratioBySeg = { A: [], B: [], C: [] };
+  const quantile = (arr, p) => { if (arr.length < 40) return null; const a = arr.slice().sort((x, y) => x - y); const i = Math.min(a.length - 1, Math.max(0, Math.round(p * (a.length - 1)))); return a[i]; };
+  const bandFor = (seg) => { const lo = quantile(ratioBySeg[seg], 0.10), hi = quantile(ratioBySeg[seg], 0.90); return (lo === null || hi === null) ? null : { lo, hi }; };
+
   let prevErrors = null; // sku -> {forecast, actual} from the previous backtest
   const build = (mode, target, srcEnd, srcLabel, limitIdx, blendLimitIdx) => {
     const { pairs, models } = modelsFor(limitIdx);
@@ -10520,12 +10527,13 @@ function fcRunEngine(sd, today, opts) {
         raw = fcGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
       }
       const forecast = raw * scale;
+      const cal = bandFor(seg);
       const band = fcBandPct(p.cat, f);
       rows.push({
         sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv,
-        seg, method: cand.label, calib,
+        seg, method: cand.label, calib, bandCalibrated: !!cal,
         baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
-        forecast, fMin: forecast * (1 - band), fMax: forecast * (1 + band),
+        forecast, fMin: cal ? forecast * cal.lo : forecast * (1 - band), fMax: cal ? forecast * cal.hi : forecast * (1 + band),
         actual, mtd, elapsed, flagged, flagReason
       });
     });
@@ -10536,6 +10544,7 @@ function fcRunEngine(sd, today, opts) {
     };
     if (mode === "backtest") {
       prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
+      rows.forEach(r => { if (r.forecast > 0 && ratioBySeg[r.seg]) ratioBySeg[r.seg].push(r.actual / r.forecast); });
     }
     return result;
   };
@@ -11106,6 +11115,7 @@ function fcRenderAll() {
   fcRenderBehaviorOptions();
   fcRenderProductCategoryOptions();
   fcRenderKpis();
+  fcRenderTrustTable();
   fcRenderSegmentTable();
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
@@ -11269,6 +11279,44 @@ function fcRenderKpis() {
   grid.innerHTML = cards.join("");
 }
 
+// "How much can I trust this number?" — answered with measured results, at
+// every level the number gets used at, not with a claim.
+function fcTrustRow(rows) {
+  const skuAe = rows.reduce((s2, r) => s2 + Math.abs(r.forecast - r.actual), 0);
+  const sumA = rows.reduce((s2, r) => s2 + r.actual, 0);
+  const sumF = rows.reduce((s2, r) => s2 + r.forecast, 0);
+  const byCat = {};
+  rows.forEach(r => { const c = r.prodCat || "Uncategorized"; (byCat[c] = byCat[c] || { f: 0, a: 0 }); byCat[c].f += r.forecast; byCat[c].a += r.actual; });
+  let catAe = 0; Object.values(byCat).forEach(v => { catAe += Math.abs(v.f - v.a); });
+  const banded = rows.filter(r => r.bandCalibrated && r.forecast > 0);
+  const inside = banded.filter(r => r.actual >= r.fMin && r.actual <= r.fMax).length;
+  return {
+    sku: sumA > 0 ? 100 * (1 - skuAe / sumA) : null,
+    cat: sumA > 0 ? 100 * (1 - catAe / sumA) : null,
+    total: sumA > 0 ? 100 * (1 - Math.abs(sumF - sumA) / sumA) : null,
+    band: banded.length ? 100 * inside / banded.length : null,
+    bandN: banded.length
+  };
+}
+function fcRenderTrustTable() {
+  const head = $("fcTrustHeaderRow"), body = $("fcTrustTableBody"), wrap = $("fcTrustPanel");
+  if (!head || !body || !wrap) return;
+  const bts = (fcState.engine ? fcState.engine.results : []).filter(r => r.mode === "backtest" && r.trainN > 0);
+  if (!bts.length) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  const cols = bts.map(r => r.key.split(" ")[0].slice(0, 3));
+  const data = bts.map(r => fcTrustRow(r.rows));
+  head.innerHTML = `<th>Level the number is used at</th>${cols.map(c => `<th class="num">${c}</th>`).join("")}<th class="num">Average</th><th>Verdict</th>`;
+  const avg = (key) => { const v = data.map(d => d[key]).filter(x => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const verdict = (v, good, ok) => v === null ? "—" : (v >= good ? `<span class="badge-outline green">Trust it</span>` : (v >= ok ? `<span class="badge-outline orange">Directional</span>` : `<span class="badge-outline red">Don't decide on it</span>`));
+  const line = (label, key, good, ok, title) => `<tr><td title="${title}">${label}</td>${data.map(d => `<td class="num">${fcPct(d[key])}</td>`).join("")}<td class="num font-bold">${fcPct(avg(key))}</td><td>${verdict(avg(key), good, ok)}</td></tr>`;
+  body.innerHTML =
+    line("Whole portfolio total", "total", 88, 80, "How close the sum of every forecast was to the sum of every actual.") +
+    line("Per product category", "cat", 85, 75, "Forecasts summed per category, compared to that category's actual.") +
+    line("Per single SKU", "sku", 85, 70, "Each SKU's own forecast against its own actual — the hardest level.") +
+    line(`80% range covers the actual`, "band", 78, 70, "The range shown next to each forecast is built from how far past forecasts actually missed. This is the share of SKUs whose real sales landed inside it — it should sit near 80%.");
+}
+
 function fcRenderSegmentTable() {
   const body = $("fcSegTableBody"), wrap = $("fcSegPanel");
   const res = fcCurrent();
@@ -11385,7 +11433,7 @@ function fcColumns(res) {
     { key: "ml", label: "ML", num: true, title: "Model output before blending (hurdle p × amount for Non-Linear / Volatile)." },
     { key: "w", label: "w", num: true, title: "Weight on ML: Final = w × ML + (1 − w) × Baseline." },
     { key: "forecast", label: "Forecast", num: true, cls: "text-blue font-bold", title: "Final forecast for the target month, after guardrails (and V2 when flagged)." },
-    { key: "fMin", label: "Range", num: true, title: "Expected range around the forecast, based on behavior and volatility." }
+    { key: "fMin", label: "80% Range", num: true, title: "Where the real number lands 8 times out of 10, measured from how far past forecasts actually missed for this size segment." }
   ];
   if (res.mode === "backtest") return base.concat([
     { key: "actual", label: "Actual", num: true, cls: "text-green", title: "Actual confirmed pieces (debundled) in the target month." },
