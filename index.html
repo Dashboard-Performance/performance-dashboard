@@ -2853,7 +2853,8 @@
                       <th data-stkey="purSales" class="num text-green" title="Delivered pieces sourced from new purchases.">PURCHASES_SALES</th>
                       <th data-stkey="stRate" class="num text-purple font-bold" title="Delivered pieces ÷ (beginning inventory + purchases + returns).">SELLTHROUGH_RATE</th>
                       <th data-stkey="cStRate" class="num text-blue font-bold" title="Confirmed pieces ÷ (beginning inventory + purchases + returns) — same formula as SELLTHROUGH_RATE but based on Confirmed instead of Delivered.">SELLTHROUGH_RATE (Confirmed)</th>
-                      <th data-stkey="soldInb" class="num font-bold" title="Share of this month's purchases that have already sold through.">SOLD_FROM_INBOUND</th>
+                      <th data-stkey="soldInb" class="num font-bold" title="Share of this month's purchases that have already sold through, based on Delivered pieces.">SOLD_FROM_INBOUND</th>
+                      <th data-stkey="cSoldInb" class="num text-blue font-bold" title="Same as SOLD_FROM_INBOUND but based on Confirmed pieces instead of Delivered — Confirmed pieces sourced from new purchases ÷ TOTAL_PURCHASES.">SOLD_FROM_INBOUND (Confirmed)</th>
                       <th data-stkey="firstBuy" class="center" title="Whether this is the SKU's first purchase month on record.">First buy?</th>
                       <th data-stkey="stock" class="num text-dim font-bold" title="Current stock, looked up directly by product ID.">STOCK</th>
                       <th data-stkey="doh" class="num text-dim font-bold" title="Stock ÷ average daily confirmed pieces (last 3 days), demand pooled across this SKU standalone and every bundle it's part of.">DOH</th>

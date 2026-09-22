@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.60";
+const APP_VERSION = "1.1.62";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -9136,12 +9136,30 @@ function getSellthroughIndices() {
   //     جواها (كل بندل بيتضرب في PRODUCT_QUANTITY بتاعه فيه)، مش بس
   //     الديماند اللي طالع على نفس الـ SKU ده لوحده كسطر في MAIN_GID.
   // ---------------------------------------------------------------------
+  // v1.1.61 — أهم سبب حقيقي في "التعليق" وقت التبديل لـ IRQ: الحسبة دي بتلف
+  // على allParsedRows (كل تاريخ شيت الـ Main، ممكن يبقى مية ألف صف فأكتر)
+  // مرتين (3 أيام + 15 يوم) في كل مرة الكاش يتبطل — وده كان بيحصل حتى في وضع
+  // IRQ رغم إنها أصلاً مش مستخدمة خالص في وضع IRQ (stResolveInventoryExtras
+  // بيقرا AVG3D/AVG15D/Stock من شيت inv-IRQ مباشرة بدل ما يحتاجها). يعني
+  // كانت شغل تقيل بيتعمل بالمجان في كل toggle للعراق. دلوقتي بتتحسب بس في
+  // وضع EGY (اللي فعلًا محتاجها)، وفي وضع IRQ بيرجع Map فاضي/دالة صفرية
+  // خفيفة جدًا — التبديل لـ IRQ بقى شبه فوري تقريبًا.
   const mainRows = state.allParsedRows || [];
-  const { stockByProductId, singleOverallStats } = buildDebundledStockDohIndex(mainRows);
-  // AVG 15D / DOH_15D — نفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) فوق،
-  // بس على شباك 15 يوم بدل 3 أيام (buildDebundledStockDohIndex بقت بتاخد
-  // windowDays كباراميتر تاني اختياري).
-  const { singleOverallStats: singleOverallStats15d } = buildDebundledStockDohIndex(mainRows, 15);
+  const isIrqMode = state.sellthroughCountry === "IRQ";
+  let stockByProductId, singleOverallStats, singleOverallStats15d;
+  if (isIrqMode) {
+    stockByProductId = new Map();
+    singleOverallStats = () => ({ avg: 0, doh: 0 });
+    singleOverallStats15d = () => ({ avg: 0, doh: 0 });
+  } else {
+    const built = buildDebundledStockDohIndex(mainRows);
+    stockByProductId = built.stockByProductId;
+    singleOverallStats = built.singleOverallStats;
+    // AVG 15D / DOH_15D — نفس منطق "SKU TOTAL DEMAND OVERALL" (Debundled) فوق،
+    // بس على شباك 15 يوم بدل 3 أيام (buildDebundledStockDohIndex بقت بتاخد
+    // windowDays كباراميتر تاني اختياري).
+    singleOverallStats15d = buildDebundledStockDohIndex(mainRows, 15).singleOverallStats;
+  }
 
   // ---------------------------------------------------------------------
   // Availability (WEBSITE_STATUS) / Is_Locked (IS_LOCKED) — من شيت Products
@@ -9152,10 +9170,12 @@ function getSellthroughIndices() {
   // متفضلش راجعة "-" لمجرد اختلاف شكلي بسيط في نص الـ SKU.
   const stNormalizeSku = (v) => (v || "").toString().trim().toUpperCase();
   const productsBySkuNormalized = new Map();
-  Object.keys(state.productsMap || {}).forEach(sku => {
-    const norm = stNormalizeSku(sku);
-    if (norm && !productsBySkuNormalized.has(norm)) productsBySkuNormalized.set(norm, state.productsMap[sku]);
-  });
+  if (!isIrqMode) {
+    Object.keys(state.productsMap || {}).forEach(sku => {
+      const norm = stNormalizeSku(sku);
+      if (norm && !productsBySkuNormalized.has(norm)) productsBySkuNormalized.set(norm, state.productsMap[sku]);
+    });
+  }
 
   _stIndexCache = {
     _fp: fp,
@@ -9274,6 +9294,10 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     // بس بـ CNF_QTY بدل DLV_QTY في البسط — نفس المقام (Beginning Inventory +
     // Total Purchases + RTOS).
     const cStRate = denom > 0 ? (cnfQty / denom) * 100 : 0;
+    // SOLD_FROM_INBOUND (Confirmed) — v1.1.62: نفس معادلة SOLD_FROM_INBOUND
+    // (P) بالظبط بس بـ CPurSales (مبني على الكونفيرمد) بدل PURCHASES_SALES
+    // (المبني على الدليفرد)، نفس المقام TOTAL_PURCHASES.
+    const cSoldInb = totPur > 0 ? (cPurSales / totPur) * 100 : 0;
 
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
@@ -9298,7 +9322,7 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
       lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
-      stRate, cStRate, soldInb, firstBuy,
+      stRate, cStRate, soldInb, cSoldInb, firstBuy,
       crPct, drPct, ndrPct,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
@@ -9373,6 +9397,8 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
     const cRemPurSales = cnfQty - (cBegSales + cRetSales);
     const cPurSales = Math.min(cRemPurSales, totPur);
     const cStRate = denom > 0 ? (cnfQty / denom) * 100 : 0;
+    // SOLD_FROM_INBOUND (Confirmed) — راجع تعليق computeSellthroughRowsForQuery.
+    const cSoldInb = totPur > 0 ? (cPurSales / totPur) * 100 : 0;
 
     const lastRec = inboundLastRec.get(sku);
     const info = productInfo.get(sku) || needNameCat.get(sku) || beginInvNameCat.get(sku) || inboundNameCat.get(sku) || {};
@@ -9388,7 +9414,7 @@ function computeSellthroughRowsForBucket(bucketMonthKeys, idx) {
       lastRecDate: lastRec ? lastRec.text : "-", lastRecTs: lastRec ? lastRec.ts : null,
       cnfQty, dlvQty, plcQty, begInv, begSales, remBeg,
       rtos, retSales, remPurSales, totPur, purSales,
-      stRate, cStRate, soldInb, firstBuy,
+      stRate, cStRate, soldInb, cSoldInb, firstBuy,
       crPct, drPct, ndrPct,
       cBegSales, cRemBeg, cRetSales, cRemPurSales, cPurSales,
       stock: Math.round(stock || 0), doh,
@@ -9440,6 +9466,7 @@ function mergeSellthroughRowsAcrossMonths(rowsByMonth) {
     m.stRate = denom > 0 ? (m.dlvQty / denom) * 100 : 0;
     m.cStRate = denom > 0 ? (m.cnfQty / denom) * 100 : 0;
     m.soldInb = m.totPur > 0 ? (m.purSales / m.totPur) * 100 : 0;
+    m.cSoldInb = m.totPur > 0 ? (m.cPurSales / m.totPur) * 100 : 0;
     // CR%/DR%/NDR% بعد الدمج: من إجمالي الشهور المجموعة (مش متوسط النسب) —
     // نفس مبدأ SELLTHROUGH_RATE/SOLD_FROM_INBOUND فوق بالظبط.
     m.crPct = m.plcQty > 0 ? (m.cnfQty / m.plcQty) * 100 : 0;
@@ -9861,6 +9888,7 @@ function renderPaginatedSellthroughTable() {
       <td class="num text-purple font-bold">${m.stRate.toFixed(1)}%</td>
       <td class="num text-blue font-bold">${m.cStRate.toFixed(1)}%</td>
       <td class="num font-bold">${m.soldInb.toFixed(1)}%</td>
+      <td class="num text-blue font-bold">${(m.cSoldInb || 0).toFixed(1)}%</td>
       <td class="center"><span class="badge-outline ${m.firstBuy === 'Yes' ? 'green' : 'dim'}">${m.firstBuy}</span></td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.stock))}</td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
