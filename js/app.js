@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.62";
+const APP_VERSION = "1.1.63";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -9810,10 +9810,92 @@ function renderSellthroughTrendChart() {
   });
 }
 
+// =====================================================================
+// SELLTHROUGH % & INBOUND VS SOLD — BY CATEGORY (v1.1.63) — جدول تحت شارت
+// Sellthrough Trend مباشرة، نفس فكرة تاب "Copy of New sellthrough &
+// Inbound" (الخمس كاتيجوريز الثابتة + Grand Total) بس مبسوطة أفقيًا: عمودين
+// لكل شهر من آخر 4 شهور (SELLTHROUGH % و Inbound Vs Sold)، Delivered
+// افتراضيًا مع توجل لـ Confirmed. مستقلة تمامًا عن فلاتر اللوحة فوق (زي شارت
+// الترند بالظبط) — كل شهر بيتحسب لوحده (Beginning=Start=End=نفس الشهر، زي
+// "Quick Month Select") وبعدين computeSellthroughSummary بيجمعه على مستوى
+// الكاتيجوري، بنفس الـ mode المختار.
+// =====================================================================
+const ST_BY_CAT_MONTHS_COUNT = 4;
+let stByCatMetric = "delivered"; // "delivered" | "confirmed"
+
+// آخر N شهر شمسي (ميلادي) انتهاءً بالشهر الحالي — دايمًا نفس الـ 4 شهور
+// اللي المستخدم شايفها فعليًا النهاردة، بغض النظر عن وجود داتا فيهم من عدمه
+// (لو مفيش داتا في شهر معين، خانته هتطلع 0.0% بدل ما تختفي أو تتبدل بشهر
+// تاني قديم — عشان اللوجيك يفضل "مفهوم" ومتوقع زي ما اليوزر طلب بالظبط).
+function stLastNMonthKeys(n) {
+  const now = new Date();
+  const keys = [];
+  for (let i = n - 1; i >= 0; i--) {
+    keys.push(stMonthLabel(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+  }
+  return keys;
+}
+function stShortMonthLabel(mk) {
+  const d = new Date(mk);
+  return isNaN(d.getTime()) ? mk : d.toLocaleDateString("en-US", { month: "short" });
+}
+
+function stByCatWireControlsOnce() {
+  if (stByCatWireControlsOnce._wired) return; stByCatWireControlsOnce._wired = true;
+  document.querySelectorAll("#stByCatMetricToggle .segmented-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.classList.contains("active")) return;
+      document.querySelectorAll("#stByCatMetricToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      stByCatMetric = btn.dataset.metric;
+      renderSellthroughByCategoryMonthTable();
+    });
+  });
+}
+
+function renderSellthroughByCategoryMonthTable() {
+  stByCatWireControlsOnce();
+  const headerRow = $("stByCatHeaderRow");
+  const tbody = $("stByCatTableBody");
+  if (!headerRow || !tbody) return;
+
+  const isConfirmed = stByCatMetric === "confirmed";
+  const basisLabel = isConfirmed ? "Confirmed" : "Delivered";
+  if ($("stByCatSubtitle")) $("stByCatSubtitle").textContent = `Last ${ST_BY_CAT_MONTHS_COUNT} months, ending this month — ${basisLabel} basis`;
+
+  const idx = getSellthroughIndices();
+  const monthKeys = stLastNMonthKeys(ST_BY_CAT_MONTHS_COUNT);
+  const perMonthByCat = monthKeys.map(mk => {
+    const rows = computeSellthroughRowsForQuery(mk, mk, mk, idx);
+    const summary = computeSellthroughSummary(rows, stByCatMetric);
+    return new Map(summary.map(s => [s.cat, s]));
+  });
+
+  headerRow.innerHTML = `
+    <th>CAT</th>
+    ${monthKeys.map(mk => `<th class="num text-purple font-bold" title="SELLTHROUGH_RATE for ${mk}, ${basisLabel} basis — same formula as the SELLTHROUGH_RATE column above.">SELLTHROUGH % (${stShortMonthLabel(mk)})</th>`).join("")}
+    ${monthKeys.map(mk => `<th class="num" title="Inbound Vs Sold for ${mk}, ${basisLabel} basis — same formula as the summary tables above.">Inbound Vs Sold (${stShortMonthLabel(mk)})</th>`).join("")}
+  `;
+
+  const catRows = ST_SUMMARY_CATS.concat(["Grand Total"]);
+  tbody.innerHTML = catRows.map(cat => {
+    const stCells = perMonthByCat.map(byCat => {
+      const s = byCat.get(cat);
+      return `<td class="num text-purple font-bold">${(s ? s.stRate : 0).toFixed(1)}%</td>`;
+    }).join("");
+    const invCells = perMonthByCat.map(byCat => {
+      const s = byCat.get(cat);
+      return `<td class="num">${(s ? s.inboundVsSold : 0).toFixed(1)}%</td>`;
+    }).join("");
+    return `<tr${cat === "Grand Total" ? ' class="st-grand-total"' : ""}><td>${cat}</td>${stCells}${invCells}</tr>`;
+  }).join("");
+}
+
 function prepareSellthroughData() {
   populateSellthroughFilters();
   recomputeSellthroughRows();
   renderSellthroughTrendChart();
+  renderSellthroughByCategoryMonthTable();
 }
 
 function sortSellthrough(key) {

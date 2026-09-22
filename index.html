@@ -2820,6 +2820,37 @@
             </div>
           </section>
 
+          <!-- SELLTHROUGH % & INBOUND VS SOLD — BY CATEGORY (v1.1.63) — نفس تاب
+               "Copy of New sellthrough & Inbound" (الخمس كاتيجوريز + Grand Total)
+               بس مبسوطة أفقيًا لآخر 4 شهور (دايمًا آخر 4 شهور شمسي انتهاءً بالشهر
+               الحالي، مش أول 4 شهور فيهم داتا) — عمودين لكل شهر (SELLTHROUGH % و
+               Inbound Vs Sold)، بتوجل Confirmed/Delivered بيبدل الأساس اللي كل
+               الجدول بيتحسب عليه. مستقلة عن فلاتر اللوحة فوق زي شارت الترند. -->
+          <section class="mb-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Sellthrough % &amp; Inbound vs Sold — by Category</h2>
+                  <p id="stByCatSubtitle">Last 4 months, ending this month — Delivered basis</p>
+                </div>
+                <div class="table-controls">
+                  <div class="segmented" id="stByCatMetricToggle">
+                    <button type="button" class="segmented-btn active" data-metric="delivered">Delivered</button>
+                    <button type="button" class="segmented-btn" data-metric="confirmed">Confirmed</button>
+                  </div>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="stByCatTable">
+                  <thead>
+                    <tr id="stByCatHeaderRow"></tr>
+                  </thead>
+                  <tbody id="stByCatTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <!-- Data Table Section -->
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
