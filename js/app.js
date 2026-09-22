@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.63";
+const APP_VERSION = "1.1.64";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -9820,7 +9820,7 @@ function renderSellthroughTrendChart() {
 // "Quick Month Select") وبعدين computeSellthroughSummary بيجمعه على مستوى
 // الكاتيجوري، بنفس الـ mode المختار.
 // =====================================================================
-const ST_BY_CAT_MONTHS_COUNT = 4;
+const ST_BY_CAT_MONTHS_COUNT = 6;
 let stByCatMetric = "delivered"; // "delivered" | "confirmed"
 
 // آخر N شهر شمسي (ميلادي) انتهاءً بالشهر الحالي — دايمًا نفس الـ 4 شهور
