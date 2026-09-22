@@ -3102,6 +3102,33 @@
             <div class="metrics-grid fc-kpi-grid" id="fcKpiGrid"></div>
           </section>
 
+          <section class="mb-4 hidden" id="fcSegPanel">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Method by SKU Size</h2>
+                  <p>The method is not fixed — for each size segment the dashboard uses whatever actually won on earlier months, plus a calibration for that segment's systematic bias.</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Segment</th>
+                      <th class="num">SKUs</th>
+                      <th class="num text-blue">Forecast</th>
+                      <th>Method Chosen</th>
+                      <th class="num" title="Corrects the segment's systematic over/under-forecast, clamped to ±25%.">Calibration</th>
+                      <th class="num" title="Accuracy this method scored on the earlier months it was chosen from.">Accuracy Then</th>
+                      <th class="num" title="How much it beat plain 'last 30 days' by, on those months.">vs Last 30d</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fcSegTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <section class="mb-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">

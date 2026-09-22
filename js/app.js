@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.73";
+const APP_VERSION = "1.1.74";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10423,69 +10423,67 @@ function fcRunEngine(sd, today, opts) {
     return modelCache.get(key);
   };
 
-  // Score every candidate blend (model / baseline / "same as last 30 days" /
-  // mixes) on earlier months, per behavior, and keep what actually won — the
-  // same self-checking rule used in monthly mode. No leakage: the target month
-  // is never part of the scoring.
-  const blendCache = new Map();
-  const pickBlends = (limitStartIdx) => {
-    if (blendCache.has(limitStartIdx)) return blendCache.get(limitStartIdx);
-    const acc = new Map();
+  // Replay every earlier month with models that only saw data before it, score
+  // each candidate per size segment, and keep what actually won — plus a
+  // calibration factor for that segment's systematic over/under-forecast.
+  // Nothing from the target month is used, so this stays a fair test.
+  const segCache = new Map();
+  const pickSegments = (stopIdx) => {
+    if (segCache.has(stopIdx)) return segCache.get(stopIdx);
+    const acc = {};
+    FC_SEGMENTS.forEach(sg => { acc[sg.key] = {}; FC_CANDIDATES.forEach(c => acc[sg.key][c.key] = { ae: 0, sa: 0, sf: 0, n: 0 }); });
     for (let v = 1; v < months.length; v++) {
       const sM = months[v - 1], tM = months[v];
       if (!sM.complete || !tM.complete) continue;
       if (sM.endIdx - FC_WINDOW_DAYS + 1 < 0) continue;
-      if (tM.endIdx >= limitStartIdx) continue; // only months that ended before the target
+      if (tM.endIdx >= stopIdx) continue;
       const { pairs: vp, models: vm } = modelsFor(tM.startIdx - 1);
       const vConf = Math.min(1, vp.length / 3);
-      const aScale = FC_WINDOW_DAYS / tM.dim;
+      const vScale = tM.dim / FC_WINDOW_DAYS;
       sd.series.forEach((arr) => {
         const f = fcFeatures(arr, sM.endIdx);
         if (f.total <= 0) return;
         const p = fcPredictOne(vm, f, vConf);
-        const c = { f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total };
-        const actual = fcSum(arr, tM.startIdx, tM.endIdx) * aScale;
-        let byCat = acc.get(p.cat);
-        if (!byCat) { byCat = new Map(); acc.set(p.cat, byCat); }
-        FC_BLENDS.forEach(b => {
-          if (b.w[0] > 0 && c.ml === null) return;
-          let e = byCat.get(b.key);
-          if (!e) { e = { absErr: 0, sumA: 0, n: 0 }; byCat.set(b.key, e); }
-          const ml = c.ml === null ? c.naive : c.ml;
-          const raw = b.w[0] * ml + b.w[1] * c.baseline + b.w[2] * c.naive;
-          const val = b.key === "naive" ? c.naive : fcGuardrail(raw, c.f, c.cat, c.baseline);
-          e.absErr += Math.abs(val - actual);
-          e.sumA += actual; e.n++;
+        const actual = fcSum(arr, tM.startIdx, tM.endIdx);
+        const bag = acc[fcSegmentOf(f.total)];
+        FC_CANDIDATES.forEach(c => {
+          if (c.key.indexOf("model") === 0 && !vm) return; // no model back then — don't credit it
+          const val = c.fn(f, arr, sM.endIdx, p) * vScale;
+          const e = bag[c.key];
+          e.ae += Math.abs(val - actual); e.sa += actual; e.sf += val; e.n++;
         });
       });
     }
-    const chosen = {};
-    acc.forEach((byCat, cat) => {
+    const picks = {};
+    FC_SEGMENTS.forEach(sg => {
+      const bag = acc[sg.key];
       let best = null, naiveWape = null;
-      byCat.forEach((e, key) => {
-        if (e.n < 25 || e.sumA <= 0) return;
-        const wape = e.absErr / e.sumA;
-        if (key === "naive") naiveWape = wape;
-        if (!best || wape < best.wape) best = { key, wape, n: e.n };
+      FC_CANDIDATES.forEach(c => {
+        const e = bag[c.key];
+        if (e.n < 25 || e.sa <= 0) return;
+        const wape = e.ae / e.sa;
+        if (c.key === "naive") naiveWape = wape;
+        if (!best || wape < best.wape) best = { key: c.key, wape, n: e.n, calib: e.sf > 0 ? e.sa / e.sf : 1 };
       });
-      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) best = { key: "naive", wape: naiveWape, n: best.n };
-      if (best) {
-        const naiveEntry = byCat.get("naive");
-        chosen[cat] = {
-          blend: FC_BLENDS.find(b => b.key === best.key), accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
-          naiveAccuracy: naiveEntry && naiveEntry.sumA > 0 ? Math.max(0, (1 - naiveEntry.absErr / naiveEntry.sumA) * 100) : null
-        };
+      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) {
+        const e = bag.naive;
+        best = { key: "naive", wape: naiveWape, n: e.n, calib: e.sf > 0 ? e.sa / e.sf : 1 };
       }
+      if (best) picks[sg.key] = {
+        cand: FC_CAND_BY_KEY[best.key], calib: Math.max(FC_CALIB_MIN, Math.min(FC_CALIB_MAX, best.calib)),
+        accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
+        naiveAccuracy: naiveWape === null ? null : Math.max(0, (1 - naiveWape) * 100)
+      };
     });
-    blendCache.set(limitStartIdx, chosen);
-    return chosen;
+    segCache.set(stopIdx, picks);
+    return picks;
   };
 
   let prevErrors = null; // sku -> {forecast, actual} from the previous backtest
   const build = (mode, target, srcEnd, srcLabel, limitIdx, blendLimitIdx) => {
     const { pairs, models } = modelsFor(limitIdx);
     const conf = Math.min(1, pairs.length / 3);
-    const blends = pickBlends(blendLimitIdx === undefined ? sd.days.length : blendLimitIdx);
+    const segPicks = pickSegments(blendLimitIdx === undefined ? sd.days.length : blendLimitIdx);
     const scale = target.dim / FC_WINDOW_DAYS;
     const rows = [];
     const flaggedPrev = new Set();
@@ -10508,28 +10506,25 @@ function fcRunEngine(sd, today, opts) {
         return;
       }
       const p = fcPredictOne(models, f, conf);
-      const pick = blends[p.cat];
-      // Nothing to learn from yet (first month): lean half on last month
-      // rather than trusting the rule-based baseline alone.
-      const blend = pick ? pick.blend : (models ? null : FC_DEFAULT_BLEND);
-      let raw = p.raw;
-      if (blend) {
-        if (blend.key === "naive") raw = f.total;
-        else {
-          const ml = p.ml === null ? f.total : p.ml;
-          raw = fcGuardrail(blend.w[0] * ml + blend.w[1] * p.baseline + blend.w[2] * f.total, f, p.cat, p.baseline);
-        }
-      }
+      const seg = fcSegmentOf(f.total);
+      const pick = segPicks[seg];
+      // Nothing to learn from yet (first month): a plain recent-rate rule beats
+      // both the raw model and last-30-days on this data.
+      const cand = pick ? pick.cand : FC_CAND_BY_KEY[FC_COLD_START_CAND];
+      const calib = pick ? pick.calib : 1;
+      let raw = cand.fn(f, arr, srcEnd, p) * calib;
       const sparseJumpy = f.daysSold <= 5 && f.cv > 2;
       const flagged = flaggedPrev.has(sku) || sparseJumpy;
       const flagReason = flaggedPrev.has(sku) ? "Missed >100% last month" : (sparseJumpy ? "Sparse & volatile" : "");
-      if (o.v2 && flagged && models && !(blend && blend.key === "naive")) {
+      // V2 only tames the model — the recent-rate rules are conservative already.
+      if (o.v2 && flagged && models && cand.key.indexOf("model") === 0) {
         raw = fcGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
       }
       const forecast = raw * scale;
       const band = fcBandPct(p.cat, f);
       rows.push({
-        sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv, blend: blend ? blend.label : null,
+        sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv,
+        seg, method: cand.label, calib,
         baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
         forecast, fMin: forecast * (1 - band), fMax: forecast * (1 + band),
         actual, mtd, elapsed, flagged, flagReason
@@ -10538,7 +10533,7 @@ function fcRunEngine(sd, today, opts) {
     const result = {
       mode, key: target.key, label: target.key, dim: target.dim,
       sourceLabel: srcLabel, pairs: pairs.map(p => `${p.source.key.split(" ")[0].slice(0, 3)} → ${p.target.key.split(" ")[0].slice(0, 3)}`),
-      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, blends
+      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, segPicks
     };
     if (mode === "backtest") {
       prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
@@ -10707,6 +10702,29 @@ function fcMonthlyPredictOne(models, f, conf) {
 //   ml       = the trained model
 // Which mix actually wins is measured on past months, per behavior, instead
 // of being hard-coded — see fcPickBlends below.
+// SKU size segments. Measured on the real data: the model earns its keep on
+// high-volume SKUs and actively hurts on low-volume ones, where a plain
+// recent-rate rule wins — so the method is chosen per segment, not globally.
+const FC_SEGMENTS = [
+  { key: "A", label: "A — 100+ pcs / month", min: 100 },
+  { key: "B", label: "B — 30 to 99", min: 30 },
+  { key: "C", label: "C — under 30", min: 0 }
+];
+function fcSegmentOf(total) { return total >= 100 ? "A" : (total >= 30 ? "B" : "C"); }
+const FC_CANDIDATES = [
+  { key: "naive", label: "Last 30 days", fn: (f) => f.total },
+  { key: "last10x", label: "Last 10 days × 3", fn: (f) => f.last10 * 3 },
+  { key: "last14x", label: "Last 14 days × 30/14", fn: (f) => f.last14 * 30 / 14 },
+  { key: "last21x", label: "Last 21 days × 30/21", fn: (f, a, E) => fcSum(a, Math.max(0, E - 20), E) * 30 / 21 },
+  { key: "mix14_30", label: "Half last 14 days, half last 30", fn: (f) => 0.5 * (f.last14 * 30 / 14) + 0.5 * f.total },
+  { key: "model", label: "Model (behavior + guardrails)", fn: (f, a, E, p) => p.raw },
+  { key: "model_14", label: "Half model, half last 14 days", fn: (f, a, E, p) => 0.5 * p.raw + 0.5 * (f.last14 * 30 / 14) }
+];
+const FC_CAND_BY_KEY = {};
+FC_CANDIDATES.forEach(c => { FC_CAND_BY_KEY[c.key] = c; });
+const FC_COLD_START_CAND = "mix14_30"; // nothing to learn from yet
+const FC_CALIB_MIN = 0.85, FC_CALIB_MAX = 1.25;
+
 const FC_BLENDS = [
   { key: "ml", w: [1, 0, 0], label: "ML" },
   { key: "base", w: [0, 1, 0], label: "Baseline" },
@@ -11089,6 +11107,7 @@ function fcRenderAll() {
   fcRenderBehaviorOptions();
   fcRenderProductCategoryOptions();
   fcRenderKpis();
+  fcRenderSegmentTable();
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
   fcApplyFilters();
@@ -11108,7 +11127,8 @@ function fcRenderMethod() {
   const specific = monthly
     ? [
       ["Source (monthly tab)", "The history tab carries one row per SKU per month (a period column dated on the 1st), so the model runs month-over-month. Features: last month, the two months before it, a recency-weighted average, the max and median month, month-over-month growth, trend slope and R², volatility across months, and how many months were zero. Every month is normalised to 30 days so different month lengths are comparable."],
-      ["Method picking", "For each behavior, every candidate — the model, the baseline, plain 'same as last month', and 50/50 mixes of them — is scored on earlier months (always with models that only saw data before those months). The one with the lowest error wins, and it only moves off 'same as last month' when the gain is real, so the forecast can't quietly end up worse than doing nothing. The winner per behavior is shown in the By Behavior table."],
+      ["Size segments", "SKUs are split by recent volume: A (100+ pieces a month), B (30–99), C (under 30). Measured on this data, the model earns its keep on A and loses to a plain recent-rate rule on C — which is most of the catalogue — so the method is chosen per segment instead of one rule for everything. Each segment also gets a calibration factor (clamped to ±25%) that removes its systematic over/under-forecast."],
+      ["Method picking", "For each segment, every candidate — the model, last 10 / 14 / 21 / 30 days, and mixes of them — is scored on earlier months (always with models that only saw data before those months). The one with the lowest error wins, and it only moves off 'last 30 days' when the gain is real, so the forecast can't quietly end up worse than doing nothing. The winner per segment is shown in the Method by SKU Size panel."],
       ["Model", "Ridge regression per behavior on the change vs last month, so when the model has nothing to go on it falls back to 'same as last month' instead of drifting toward the average. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount. The weight on ML is scaled down when there are few training month pairs."],
       ["Baselines", "Up: last month continued at its growth rate (capped at 1.5×). Down: a decayed last month. Steady: recency-weighted average of the last 3 months. Non-Linear / Volatile: max(3-month average, last month). Spiky: median month."],
       ["Guardrails", "Up: floor ≥ 0.85 × last month. Down: ceiling ≤ 1.10 × baseline. Steady: within ±15% of last month. Non-Linear / Volatile: cap ≤ 2.75 × last month. Spiky: cap ≤ 1.5 × last month."],
@@ -11250,6 +11270,32 @@ function fcRenderKpis() {
   grid.innerHTML = cards.join("");
 }
 
+function fcRenderSegmentTable() {
+  const body = $("fcSegTableBody"), wrap = $("fcSegPanel");
+  const res = fcCurrent();
+  if (!body || !wrap) return;
+  const picks = res && res.segPicks;
+  if (!picks || !Object.keys(picks).length) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  body.innerHTML = FC_SEGMENTS.map(sg => {
+    const p = picks[sg.key];
+    const rows = res.rows.filter(r => r.seg === sg.key);
+    const fc = rows.reduce((s2, r) => s2 + r.forecast, 0);
+    if (!p) return `<tr><td>${sg.label}</td><td class="num">${fcPcs(rows.length)}</td><td class="num text-blue">${fcPcs(fc)}</td><td class="text-dim">Not enough history yet — using ${FC_CAND_BY_KEY[FC_COLD_START_CAND].label}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`;
+    const lift = (p.naiveAccuracy === null) ? null : p.accuracy - p.naiveAccuracy;
+    const cls = lift === null ? "" : (lift >= 0 ? "text-green" : "text-red");
+    return `<tr>
+      <td>${sg.label}</td>
+      <td class="num">${fcPcs(rows.length)}</td>
+      <td class="num text-blue font-bold">${fcPcs(fc)}</td>
+      <td>${p.cand.label}</td>
+      <td class="num">×${p.calib.toFixed(2)}</td>
+      <td class="num">${fcPct(p.accuracy)}</td>
+      <td class="num ${cls}">${lift === null ? "—" : (lift > 0 ? "+" : "") + lift.toFixed(1)}</td>
+    </tr>`;
+  }).join("");
+}
+
 function fcRenderCategoryTable() {
   const head = $("fcCatHeaderRow"), body = $("fcCatTableBody"); const res = fcCurrent();
   if (!head || !body) return;
@@ -11333,6 +11379,8 @@ function fcColumns(res) {
     { key: "name", label: "Name", cls: "truncate-cell", title: "Product name." },
     { key: "prodCat", label: "Category", cls: "truncate-cell", title: "Product category." },
     { key: "cat", label: "Behavior", title: "Demand behavior in the source window: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky." },
+    { key: "seg", label: "Size", title: "Volume segment from the source window: A = 100+ pieces a month, B = 30 to 99, C = under 30. The forecasting method is chosen per segment." },
+    { key: "method", label: "Method", cls: "truncate-cell", title: "The method that won for this SKU's size segment on earlier months." },
     { key: "srcTotal", label: res.srcColLabel || "Last 30d", num: true, title: res.srcColLabel ? "Confirmed pieces in the source month." : "Confirmed pieces in the 30-day source window." },
     { key: "baseline", label: "Baseline", num: true, title: "Category baseline (see How it works)." },
     { key: "ml", label: "ML", num: true, title: "Model output before blending (hurdle p × amount for Non-Linear / Volatile)." },
@@ -11386,6 +11434,7 @@ function fcCell(col, r, res) {
       const b = `<span class="badge-outline ${FC_CAT_BADGE[r.cat] || "gray"}">${r.cat}</span>`;
       return r.flagged ? `${b} <span class="badge-outline yellow" title="${r.flagReason}${fcState.v2 ? " — deviation from baseline halved (V2)" : ""}">V2</span>` : b;
     }
+    case "seg": return `<span class="badge-outline ${r.seg === "A" ? "green" : (r.seg === "B" ? "blue" : "gray")}">${r.seg}</span>`;
     case "ml": return r.ml === null ? "—" : fcPcs(r.ml);
     case "w": return r.ml === null ? "—" : r.w.toFixed(2);
     case "fMin": return `${fcPcs(r.fMin)} – ${fcPcs(r.fMax)}`;
