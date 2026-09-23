@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.87";
+const APP_VERSION = "1.1.88";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10412,16 +10412,13 @@ function fcBuildAvailIndex() {
     const ib = (typeof state !== "undefined" && state.inboundRows) || [];
     if (!bi.length) return null;
     const beginBy = new Map();   // sku -> { "April 2026": qty }
-    const beginTs = new Map();   // sku -> [{ts, key}] to find the latest known
     bi.forEach(r => {
       const d = new Date(r.MONTH); if (isNaN(d.getTime())) return;
       const key = MN[d.getUTCMonth()] + " " + d.getUTCFullYear();
       const sku = r.PRODUCT_ID; const q = +r.QTY || 0;
-      if (!beginBy.has(sku)) { beginBy.set(sku, {}); beginTs.set(sku, []); }
+      if (!beginBy.has(sku)) beginBy.set(sku, {});
       beginBy.get(sku)[key] = (beginBy.get(sku)[key] || 0) + q;
-      beginTs.get(sku).push({ ts: d.getTime(), key });
     });
-    beginTs.forEach(arr => arr.sort((a, b) => a.ts - b.ts));
     const inboundBy = new Map(); // sku -> { "April 2026": qty }
     ib.forEach(r => {
       const sku = r.sku, key = r.receivingMonthKey; if (!sku || !key) return;
@@ -10429,17 +10426,19 @@ function fcBuildAvailIndex() {
       inboundBy.get(sku)[key] = (inboundBy.get(sku)[key] || 0) + (+r.rcvQty || 0);
     });
     return {
+      // Only returns a number when THIS month has its own real beginning-
+      // inventory row (backtests, and the current in-progress month). For a
+      // future month with no row yet — the "next month" forecast — it returns
+      // null so the cap does NOT fire: the last known month's opening stock is
+      // a stale proxy that ignores everything received since (a SKU that
+      // opened September at 864 but took in ~7,900 of inbound and still holds
+      // 2,720 today would be wrongly throttled to 864×2.5). Better an honest
+      // uncapped forecast than a wrong ceiling built on stale stock.
       get(sku, monthKey) {
         const b = beginBy.get(sku);
-        if (!b) return null;
-        let begin = b[monthKey];
-        if (begin === undefined) {
-          const arr = beginTs.get(sku);
-          begin = arr && arr.length ? b[arr[arr.length - 1].key] : undefined;
-        }
-        if (begin === undefined) return null;
+        if (!b || b[monthKey] === undefined) return null;
         const inb = (inboundBy.get(sku) || {})[monthKey] || 0;
-        return begin + inb;
+        return b[monthKey] + inb;
       }
     };
   } catch (e) { return null; }
@@ -11440,11 +11439,11 @@ function fcRenderMethod() {
       ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
       ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
-      ["Stock ceiling (segment A)", "A segment-A forecast is capped at 2.5× the pieces that could actually be supplied that month = beginning inventory + inbound (known at the month's start, so no leakage). Removes wild over-forecasts on SKUs that never had the stock to sell that much. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, with bias staying near zero. B/C are left uncapped — it lifts their accuracy metric too but deepens an already-negative bias."],
+      ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
       ["Guardrails", "Up: floor ≥ 0.85× (last 7 × 4). Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75× 30-day total. Spiky: cap ≤ 1.5× 30-day total."],
-      ["Next month", "Forecast from the last 30 full days of data. The stock ceiling uses the latest known beginning inventory + scheduled inbound as the best available estimate."]
+      ["Next month", "Forecast from the last 30 full days of data — and deliberately NOT capped by the stock ceiling. This is the number you buy on: a purchase plan needs true demand, not demand throttled to the stock you happen to hold now (capping it there would make you under-buy). The stock ceiling only ever applies to months whose real opening stock is known, which the future month isn't."]
     ];
   el.innerHTML = common.concat(specific).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
 }

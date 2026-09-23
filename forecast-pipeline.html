@@ -296,16 +296,16 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
     <div class="stage">
       <div class="stage-num">11</div>
       <div class="stage-card">
-        <h3>Stock ceiling — segment A only</h3>
-        <p class="desc">A segment-A forecast is capped at <strong>2.5 × the pieces that could actually be supplied</strong> that month = beginning inventory + inbound (both known at the month's start, so no leakage). The model's worst misses are wild over-forecasts on SKUs that never had the stock to sell that much — this removes them.</p>
+        <h3>Stock ceiling — segment A, known-stock months only</h3>
+        <p class="desc">For a month whose real opening stock is known (every backtest, plus the current month), a segment-A forecast is capped at <strong>2.5 × what could actually be supplied</strong> = beginning inventory + inbound. It's an accuracy correction — you can't confirm more than you can supply — that removes wild over-forecasts on SKUs that never had the stock.</p>
         <div class="outcome" style="margin-top:12px;">
           <div class="box">
             <div class="k">Segment A accuracy</div>
             <div class="v">44.9% → 54.2% <span style="color:var(--accent-ink);">(measured, 7 real months)</span></div>
           </div>
           <div class="box">
-            <div class="k">Why not B / C</div>
-            <div class="v">the cap lifts their metric too, but deepens an already-negative bias → left uncapped</div>
+            <div class="k">Next month is NOT capped</div>
+            <div class="v">the purchase-plan number needs true demand — capping it to current stock would make you under-buy</div>
           </div>
         </div>
       </div>
@@ -336,7 +336,7 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
   </div>
 
   <footer>
-    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.87) — every formula and cap above is copied from the running code, not summarized from memory.
+    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.88) — every formula and cap above is copied from the running code, not summarized from memory.
   </footer>
 
 </div>
