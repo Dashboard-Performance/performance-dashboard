@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.85";
+const APP_VERSION = "1.1.86";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10879,16 +10879,22 @@ const FC_SEGMENTS = [
 function fcSegmentOf(total) { return total >= 100 ? "A" : (total >= 30 ? "B" : "C"); }
 const FC_CANDIDATES = [
   { key: "naive", label: "Last 30 days", fn: (f) => f.total },
-  // Capped ±40% of the 30-day naive: measured (7 real backtest months) that
-  // the raw ×3 extrapolation occasionally way overreacts to a short-term
-  // blip — e.g. April 2026 segment A: raw last10x scored 21.9% vs naive's
-  // 42.6% that one month, because a handful of SKUs had an unusually strong
-  // first third of the source window that didn't repeat. The cap trades a
-  // little of last10x's average edge (it still wins most months) for taking
-  // the catastrophic-miss risk off the table — capped version averaged 47.2%
-  // across the 7 months vs raw last10x's 45.1% and naive's 45.8%.
+  // Every short-window candidate below is capped ±40% of the 30-day naive:
+  // measured (7 real backtest months) that a raw extrapolation occasionally
+  // way overreacts to a short-term blip — e.g. April 2026 segment A: raw
+  // last10x scored 21.9% vs naive's 42.6% that one month, because a handful
+  // of SKUs had an unusually strong first third of the source window that
+  // didn't repeat. The cap trades a little of the candidate's average edge
+  // for taking the catastrophic-miss risk off the table — capped last10x
+  // averaged 47.2% across the 7 months vs raw last10x's 45.1% and naive's 45.8%.
+  { key: "last7x", label: "Last 7 days × 30/7 (capped ±40% of naive)", fn: (f) => Math.max(f.total * 0.6, Math.min(f.total * 1.4, f.last7 * 30 / 7)) },
   { key: "last10x", label: "Last 10 days × 3 (capped ±40% of naive)", fn: (f) => Math.max(f.total * 0.6, Math.min(f.total * 1.4, f.last10 * 3)) },
   { key: "last14x", label: "Last 14 days × 30/14", fn: (f) => f.last14 * 30 / 14 },
+  // Added alongside last7x — a 15-day window was the one gap between last14x
+  // and the 30-day naive. Both new candidates only ever get used if a real,
+  // leakage-free backtest on the live data shows they beat what's already
+  // here (see "Method picking" — nothing is picked just because it exists).
+  { key: "last15x", label: "Last 15 days × 30/15 (capped ±40% of naive)", fn: (f) => Math.max(f.total * 0.6, Math.min(f.total * 1.4, f.last15 * 30 / 15)) },
   { key: "last21x", label: "Last 21 days × 30/21", fn: (f, a, E) => fcSum(a, Math.max(0, E - 20), E) * 30 / 21 },
   { key: "mix14_30", label: "Half last 14 days, half last 30", fn: (f) => 0.5 * (f.last14 * 30 / 14) + 0.5 * f.total },
   { key: "model", label: "Model (behavior + guardrails)", fn: (f, a, E, p) => p.raw },
@@ -11363,7 +11369,7 @@ function fcRenderMethod() {
     : [
       ["Source (daily tab)", "The last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope, momentum, and share of zero days."],
       ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
-      ["Method picking", "For segment A, every candidate (last 10/14/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
+      ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],

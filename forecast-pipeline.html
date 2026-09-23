@@ -225,8 +225,10 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
         <h3>Method picking — tested on the past, not assumed</h3>
         <p class="desc">For Segment A, every candidate method below is scored against real past months, using models that never saw those months. Lowest real error wins — the forecast can't quietly end up worse than doing nothing.</p>
         <div class="tag-row">
+          <span class="tag">last 7d × 30/7 (capped ±40% of naive)</span>
           <span class="tag">last 10d × 3 (capped ±40% of naive)</span>
           <span class="tag">last 14d × 30/14</span>
+          <span class="tag">last 15d × 30/15 (capped ±40% of naive)</span>
           <span class="tag">last 21d × 30/21</span>
           <span class="tag">half last-14 + half last-30</span>
           <span class="tag">the ML model</span>
