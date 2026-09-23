@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.88";
+const APP_VERSION = "1.1.89";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11454,8 +11454,7 @@ function fcRenderStatus() {
   const sd = fcState.series;
   const parts = [];
   if (fcState.histError) {
-    const labels = fcState.histError.labels ? ` Columns found: ${fcState.histError.labels.filter(Boolean).slice(0, 20).join(", ")}.` : "";
-    parts.push(`<span class="badge-outline red">History tab not loaded</span> <span class="text-dim">${fcState.histError.message}${labels} Make sure the tab (gid ${FORECAST_HISTORY_GID}) is in the same spreadsheet and shared as "Anyone with the link – Viewer". Forecasts below use the Main tab only.</span>`);
+    parts.push(`<span class="badge-outline red">Full history didn't load</span> <span class="text-dim">Couldn't load the full sales history right now, so the forecast below is built from the recent two months only. Press Reload to try again.</span>`);
   } else if (fcState.histMeta && sd) {
     const c = sd.coverage; const d = fcState.histMeta.detection;
     const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
@@ -11467,13 +11466,13 @@ function fcRenderStatus() {
     const grainBadge = g.monthly
       ? `<span class="badge-outline blue" title="One row per SKU per month — the model runs month-over-month instead of on daily signals.">monthly totals</span>`
       : `<span class="badge-outline blue">daily</span>`;
-    parts.push(`<span class="badge-outline green">History tab</span> ${grainBadge} <span class="text-dim" title="Raw dates in the tab: ${range(c.histFrom, c.histTo)}">${fcPcs(fcState.histMeta.rawRows)} rows · ${covered} · columns: ${d.names.date} / ${d.names.sku} / ${d.names.qty}${fcState.histMeta.aggregated ? " (aggregated)" : ""}${c.histDupes ? ` · ${fcPcs(c.histDupes)} duplicate rows ignored` : ""}</span>`);
+    parts.push(`<span class="badge-outline green">Sales history loaded</span> <span class="text-dim" title="Raw dates in the history: ${range(c.histFrom, c.histTo)}">${fcPcs(fcState.histMeta.rawRows)} rows · ${covered}${c.histDupes ? ` · ${fcPcs(c.histDupes)} duplicate rows removed` : ""}</span>`);
   }
   if (sd && sd.coverage) {
     const c = sd.coverage;
     const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
-    parts.push(`<span class="badge-outline blue">Main tab</span> <span class="text-dim">${range(c.mainFrom, c.mainTo)}</span>`);
-    parts.push(`<span class="badge-outline gray">${fcPcs(sd.series.size)} Single SKUs with demand</span>`);
+    parts.push(`<span class="badge-outline blue">Recent data</span> <span class="text-dim">${range(c.mainFrom, c.mainTo)}</span>`);
+    parts.push(`<span class="badge-outline gray">${fcPcs(sd.series.size)} SKUs with demand</span>`);
   }
   // Same-day comparison of the two sources: the strongest signal that they
   // do (or don't) count the same thing.
@@ -11482,7 +11481,7 @@ function fcRenderStatus() {
     const ratio = c2.overlapMainQty > 0 ? c2.overlapHistQty / c2.overlapMainQty : null;
     const pct = ratio === null ? null : ratio * 100;
     const ok = pct !== null && Math.abs(pct - 100) <= 5;
-    parts.push(`<span class="badge-outline ${ok ? "green" : "orange"}" title="On the ${c2.overlapDays} days both sources cover, the history tab totals ${fcPcs(c2.overlapHistQty)} confirmed pieces and Main totals ${fcPcs(c2.overlapMainQty)}. They should match. If they don't, the two tabs are not counting the same thing (country filter, debundling, confirmed vs delivered) — fix that before trusting any accuracy number.">Source match ${pct === null ? "—" : pct.toFixed(0) + "%"}</span> <span class="text-dim">history vs Main on ${fcPcs(c2.overlapDays)} shared days (${fcPcs(c2.overlapHistQty)} vs ${fcPcs(c2.overlapMainQty)} pcs)</span>`);
+    parts.push(`<span class="badge-outline ${ok ? "green" : "orange"}" title="On the ${c2.overlapDays} days both data sources overlap, they should report the same confirmed pieces. If they don't, they aren't counting the same thing — worth checking before trusting the accuracy numbers.">Data match ${pct === null ? "—" : pct.toFixed(0) + "%"}</span> <span class="text-dim">on ${fcPcs(c2.overlapDays)} overlapping days</span>`);
   }
   // Monthly totals across both sources. A big step exactly where the history
   // tab hands over to Main usually means the two aren't counting the same
