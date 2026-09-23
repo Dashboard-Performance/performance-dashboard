@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.78";
+const APP_VERSION = "1.1.81";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10468,11 +10468,28 @@ function fcRunEngine(sd, today, opts) {
       // No "prefer naive on ties" rule here on purpose: a segment is scored on
       // hundreds of SKU-months, so small WAPE gaps are real signal, not noise.
       // (Measured: forcing ties to naive cost ~7 accuracy points in July.)
-      if (best) picks[sg.key] = {
-        cand: FC_CAND_BY_KEY[best.key], calib: Math.max(FC_CALIB_MIN, Math.min(FC_CALIB_MAX, best.calib)),
-        accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
-        naiveAccuracy: naiveWape === null ? null : Math.max(0, (1 - naiveWape) * 100)
-      };
+      // B/C exception: picking a per-month "winner" from noisy replay scores
+      // doesn't generalize as well on these segments as just using a fixed
+      // short lookback (measured on 7 real backtest months, leave-one-out:
+      // B fixed-14d 12.2% vs dynamic-pick 9.3%; C fixed-21d 5.4% vs 4.8%).
+      // Segment A's dynamic pick stays — it's the one place picking + the
+      // calibration below actually helps.
+      const fixedKey = FC_FIXED_WINDOW_SEG[sg.key];
+      const fixedBag = fixedKey ? bag[fixedKey] : null;
+      if (fixedBag && fixedBag.n >= 25 && fixedBag.sa > 0) {
+        const wape = fixedBag.ae / fixedBag.sa;
+        picks[sg.key] = {
+          cand: FC_CAND_BY_KEY[fixedKey], calib: 1,
+          accuracy: Math.max(0, (1 - wape) * 100), n: fixedBag.n,
+          naiveAccuracy: naiveWape === null ? null : Math.max(0, (1 - naiveWape) * 100)
+        };
+      } else if (best) {
+        picks[sg.key] = {
+          cand: FC_CAND_BY_KEY[best.key], calib: Math.max(FC_CALIB_MIN, Math.min(FC_CALIB_MAX, best.calib)),
+          accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
+          naiveAccuracy: naiveWape === null ? null : Math.max(0, (1 - naiveWape) * 100)
+        };
+      }
     });
     segCache.set(stopIdx, picks);
     return picks;
@@ -10517,7 +10534,12 @@ function fcRunEngine(sd, today, opts) {
       // Nothing to learn from yet (first month): a plain recent-rate rule beats
       // both the raw model and last-30-days on this data.
       const cand = pick ? pick.cand : FC_CAND_BY_KEY[FC_COLD_START_CAND];
-      const calib = pick ? pick.calib : 1;
+      // Calibration is a per-segment average bias correction — reliable on
+      // segment A (hundreds of SKU-months, stable averages), but on B/C it's
+      // dominated by a handful of high-volume outlier months and actively
+      // hurts out-of-sample. Measured on real backtests: applying it to B/C
+      // cost accuracy (B 12.2%→6.6%, C 5.4%→0.7%), so it's segment A only.
+      const calib = (pick && seg === "A") ? pick.calib : 1;
       let raw = cand.fn(f, arr, srcEnd, p) * calib;
       const sparseJumpy = f.daysSold <= 5 && f.cv > 2;
       const flagged = flaggedPrev.has(sku) || sparseJumpy;
@@ -10540,7 +10562,8 @@ function fcRunEngine(sd, today, opts) {
     const result = {
       mode, key: target.key, label: target.key, dim: target.dim,
       sourceLabel: srcLabel, pairs: pairs.map(p => `${p.source.key.split(" ")[0].slice(0, 3)} → ${p.target.key.split(" ")[0].slice(0, 3)}`),
-      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, segPicks
+      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, segPicks,
+      bands: fcBandsAtLevels(ratioBySeg)
     };
     if (mode === "backtest") {
       prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
@@ -10584,7 +10607,7 @@ function fcRunEngine(sd, today, opts) {
 // machinery as the monthly engine (segment picker, calibration, bands), but
 // the target is "the next H days" instead of a calendar month, which also
 // gives far more test windows to validate on.
-const FC_HORIZONS = [7, 14, 30];
+const FC_HORIZONS = [14, 7];
 function fcHorizonLabel(H) { return H === 7 ? "Next 7 days" : (H === 14 ? "Next 14 days" : "Next " + H + " days"); }
 
 function fcRunHorizonEngine(sd, H, opts) {
@@ -10684,7 +10707,9 @@ function fcRunHorizonEngine(sd, H, opts) {
       const seg = fcSegmentOf(f.total);
       const pick = picks[seg];
       const cand = pick ? pick.cand : candByKey.naiveH;
-      const calib = pick ? pick.calib : 1;
+      // Same segment-A-only calibration rule as the monthly engine — measured
+      // to hurt B/C out-of-sample (see fcRunEngine's build() for the numbers).
+      const calib = (pick && seg === "A") ? pick.calib : 1;
       const forecast = Math.max(0, cand.fn(f, arr, E, p) * calib);
       const cal = bandFor(seg);
       const band = fcBandPct(p.cat, f);
@@ -10701,7 +10726,8 @@ function fcRunHorizonEngine(sd, H, opts) {
       mode, key: keyLabel, label: keyLabel, dim: H, granularity: "horizon", horizon: H,
       srcColLabel: "Last 30d", sourceLabel: dayLabel(E - FC_WINDOW_DAYS + 1) + " – " + dayLabel(E),
       pairs: pairs.map(pr => pr.source.key.split(" ")[0].slice(0, 3) + " → " + pr.target.key.split(" ")[0].slice(0, 3)),
-      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, segPicks: picks
+      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, segPicks: picks,
+      bands: fcBandsAtLevels(ratioBySeg)
     };
   };
 
@@ -10863,6 +10889,33 @@ const FC_CANDIDATES = [
 const FC_CAND_BY_KEY = {};
 FC_CANDIDATES.forEach(c => { FC_CAND_BY_KEY[c.key] = c; });
 const FC_COLD_START_CAND = "mix14_30"; // nothing to learn from yet
+// Segments B and C: measured (7 real backtest months, leave-one-out) that a
+// fixed short lookback beats picking a winner per month from noisy replay
+// scores — see the comment where this is used, in the monthly engine's
+// pickSegments(). Segment A isn't listed here: its dynamic pick + calibration
+// keeps winning, so it's left alone.
+const FC_FIXED_WINDOW_SEG = { B: "last14x", C: "last21x" };
+// Confidence levels offered for the range. Narrower = tighter range that holds
+// less often; each level's real coverage is measured and shown, so the trade
+// stays visible instead of hidden.
+const FC_CONF_LEVELS = [50, 80, 90];
+function fcQuantileOf(arr, q) {
+  if (!arr || arr.length < 40) return null;
+  const a = arr.slice().sort((x, y) => x - y);
+  return a[Math.min(a.length - 1, Math.max(0, Math.round(q * (a.length - 1))))];
+}
+function fcBandsAtLevels(ratiosBySeg) {
+  const out = {};
+  FC_CONF_LEVELS.forEach(L => {
+    const tail = (100 - L) / 200; // 80% -> 0.10 in each tail
+    out[L] = {};
+    Object.keys(ratiosBySeg).forEach(seg => {
+      const lo = fcQuantileOf(ratiosBySeg[seg], tail), hi = fcQuantileOf(ratiosBySeg[seg], 1 - tail);
+      if (lo !== null && hi !== null) out[L][seg] = { lo, hi };
+    });
+  });
+  return out;
+}
 const FC_CALIB_MIN = 0.85, FC_CALIB_MAX = 1.25;
 
 const FC_BLENDS = [
@@ -11119,7 +11172,7 @@ async function fcLoadHistory(onStage) {
 const fcState = {
   hist: null, histMeta: null, histError: null, loading: false,
   engine: null, engineSig: "", byKey: new Map(),
-  engines: {}, family: "month",
+  engines: {}, family: "month", conf: 80,
   target: "", catFilter: "", behaviorFilter: "", search: "", band: 25, v2: true,
   sortKey: "forecast", sortDir: "desc", page: 0, filtered: [],
   chart: null, wired: false, series: null
@@ -11194,10 +11247,8 @@ async function prepareForecastModelView(forceReload) {
     fcState.engine = engine;
     fcState.byKey = new Map(engine.results.map(r => [r.key, r]));
     fcState.engineSig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
-    if (!fcState.byKey.has(fcState.target)) {
-      const pick = engine.results.find(r => r.mode === "next") || engine.results.find(r => r.mode === "current") || engine.results[engine.results.length - 1];
-      fcState.target = pick ? pick.key : "";
-    }
+    if (!fcState.engines[fcState.family]) fcState.family = "month";
+    fcState.target = fcNextKeyOf(fcState.family);
     fcSetProgress("Done", 100); await fcNextFrame();
   } finally {
     fcState.loading = false;
@@ -11243,6 +11294,13 @@ const fcCompact = (n) => {
 const FC_CAT_BADGE = { "Shifting Up": "green", "Shifting Down": "red", "Steady": "blue", "Non-Linear / Volatile": "orange", "Spiky": "purple" };
 const FC_MODE_LABEL = { backtest: "Backtest", current: "This month · live pace", next: "Next month forecast" };
 
+// The range shown for a row, at whatever confidence level is selected. Falls
+// back to the row's stored range when there isn't enough history to measure one.
+function fcRowRange(r, res) {
+  const b = res && res.bands && res.bands[fcState.conf] && res.bands[fcState.conf][r.seg];
+  if (!b) return { lo: r.fMin, hi: r.fMax, measured: !!r.bandCalibrated };
+  return { lo: r.forecast * b.lo, hi: r.forecast * b.hi, measured: true };
+}
 function fcActiveEngine() { return fcState.engines[fcState.family] || fcState.engine; }
 function fcCurrent() {
   const eng = fcActiveEngine();
@@ -11258,6 +11316,7 @@ function fcLatestBacktest() {
 function fcRenderAll() {
   fcRenderStatus();
   fcRenderMethod();
+  fcRenderHorizonOptions();
   fcRenderTargetOptions();
   fcRenderBehaviorOptions();
   fcRenderProductCategoryOptions();
@@ -11363,28 +11422,35 @@ function fcRenderStatus() {
   el.innerHTML = parts.map(p => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${p}</div>`).join("");
 }
 
+// Two independent choices: Month / 14 Day / 7 Day picks WHICH ENGINE to look
+// at, and the target dropdown picks WHICH RESULT within that engine (a past
+// month/window to see how the forecast did, or the upcoming one). Switching
+// the horizon jumps to that engine's upcoming forecast by default; switching
+// the target alone just re-points at a different result in the same engine.
+function fcFamilies() {
+  const list = [{ key: "month", label: "Month" }];
+  FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => { if (fcState.engines["H" + H]) list.push({ key: "H" + H, label: H + " Day" }); });
+  return list;
+}
+function fcNextKeyOf(familyKey) {
+  const eng = fcState.engines[familyKey];
+  if (!eng) return "";
+  const nx = eng.results.find(r => r.mode === "next") || eng.results[eng.results.length - 1];
+  return nx ? nx.key : "";
+}
+function fcRenderHorizonOptions() {
+  const sel = $("fcHorizonSelect");
+  if (!sel || !fcState.engine) return;
+  sel.innerHTML = fcFamilies().map(f => `<option value="${f.key}" ${fcState.family === f.key ? "selected" : ""}>${f.label}</option>`).join("");
+}
 function fcRenderTargetOptions() {
   const sel = $("fcTargetSelect");
-  if (!sel || !fcState.engine) return;
-  const monthOpts = fcState.engine.results.slice().reverse().map(r => {
-    const tag = r.mode === "backtest" ? (r.trainN > 0 ? "Backtest" : "Backtest · baseline only") : FC_MODE_LABEL[r.mode];
-    const sel2 = (fcState.family === "month" && r.key === fcState.target) ? "selected" : "";
-    return `<option value="month::${r.key}" ${sel2}>${r.key} — ${tag}</option>`;
+  const eng = fcActiveEngine();
+  if (!sel || !eng) return;
+  sel.innerHTML = eng.results.map(r => {
+    const tag = r.mode === "next" ? " — Next" : (r.mode === "current" ? " — Live" : "");
+    return `<option value="${r.key}" ${fcState.target === r.key ? "selected" : ""}>${r.label}${tag}</option>`;
   }).join("");
-  let horizonOpts = "";
-  FC_HORIZONS.forEach(H => {
-    const eng = fcState.engines["H" + H];
-    if (!eng) return;
-    const nx = eng.results.find(r => r.mode === "next");
-    if (!nx) return;
-    const sel2 = fcState.family === ("H" + H) ? "selected" : "";
-    horizonOpts += `<option value="H${H}::${nx.key}" ${sel2}>${nx.key}</option>`;
-    eng.results.filter(r => r.mode === "backtest").slice().reverse().forEach(r => {
-      const s3 = (fcState.family === ("H" + H) && r.key === fcState.target) ? "selected" : "";
-      horizonOpts += `<option value="H${H}::${r.key}" ${s3}>&nbsp;&nbsp;${H}d backtest · ${r.key}</option>`;
-    });
-  });
-  sel.innerHTML = `<optgroup label="Calendar months">${monthOpts}</optgroup>` + (horizonOpts ? `<optgroup label="Rolling horizon (more accurate)">${horizonOpts}</optgroup>` : "");
 }
 function fcRenderBehaviorOptions() {
   const sel = $("fcBehaviorSelect"); if (!sel) return;
@@ -11446,7 +11512,7 @@ function fcRenderKpis() {
 
 // "How much can I trust this number?" — answered with measured results, at
 // every level the number gets used at, not with a claim.
-function fcTrustRow(rows) {
+function fcTrustRow(rows, res) {
   const skuAe = rows.reduce((s2, r) => s2 + Math.abs(r.forecast - r.actual), 0);
   const sumA = rows.reduce((s2, r) => s2 + r.actual, 0);
   const sumF = rows.reduce((s2, r) => s2 + r.forecast, 0);
@@ -11454,7 +11520,8 @@ function fcTrustRow(rows) {
   rows.forEach(r => { const c = r.prodCat || "Uncategorized"; (byCat[c] = byCat[c] || { f: 0, a: 0 }); byCat[c].f += r.forecast; byCat[c].a += r.actual; });
   let catAe = 0; Object.values(byCat).forEach(v => { catAe += Math.abs(v.f - v.a); });
   const banded = rows.filter(r => r.bandCalibrated && r.forecast > 0);
-  const inside = banded.filter(r => r.actual >= r.fMin && r.actual <= r.fMax).length;
+  const inside = banded.filter(r => { const b = fcRowRange(r, res); return r.actual >= b.lo && r.actual <= b.hi; }).length;
+  const width = banded.length ? banded.reduce((s2, r) => { const b = fcRowRange(r, res); return s2 + (b.hi - b.lo) / Math.max(1, r.forecast); }, 0) / banded.length : null;
   return {
     sku: sumA > 0 ? 100 * (1 - skuAe / sumA) : null,
     cat: sumA > 0 ? 100 * (1 - catAe / sumA) : null,
@@ -11471,7 +11538,7 @@ function fcRenderTrustTable() {
   if (!bts.length) { wrap.classList.add("hidden"); return; }
   wrap.classList.remove("hidden");
   const cols = bts.map(r => r.key.split(" ")[0].slice(0, 3));
-  const data = bts.map(r => fcTrustRow(r.rows));
+  const data = bts.map(r => fcTrustRow(r.rows, r));
   head.innerHTML = `<th>Level the number is used at</th>${cols.map(c => `<th class="num">${c}</th>`).join("")}<th class="num">Average</th><th>Verdict</th>`;
   const avg = (key) => { const v = data.map(d => d[key]).filter(x => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const verdict = (v, good, ok) => v === null ? "—" : (v >= good ? `<span class="badge-outline green">Trust it</span>` : (v >= ok ? `<span class="badge-outline orange">Directional</span>` : `<span class="badge-outline red">Don't decide on it</span>`));
@@ -11600,7 +11667,7 @@ function fcColumns(res) {
     { key: "ml", label: "ML", num: true, title: "Model output before blending (hurdle p × amount for Non-Linear / Volatile)." },
     { key: "w", label: "w", num: true, title: "Weight on ML: Final = w × ML + (1 − w) × Baseline." },
     { key: "forecast", label: "Forecast", num: true, cls: "text-blue font-bold", title: "Final forecast for the target month, after guardrails (and V2 when flagged)." },
-    { key: "fMin", label: "80% Range", num: true, title: "Where the real number lands 8 times out of 10, measured from how far past forecasts actually missed for this size segment." }
+    { key: "fMin", label: `${fcState.conf}% Range`, num: true, title: `Where the real number lands ${fcState.conf} times out of 100, measured from how far past forecasts actually missed for this size segment. A narrower level gives a tighter range that holds less often — the measured coverage is in the trust panel.` }
   ];
   if (res.mode === "backtest") return base.concat([
     { key: "actual", label: "Actual", num: true, cls: "text-green", title: "Actual confirmed pieces (debundled) in the target month." },
@@ -11651,7 +11718,7 @@ function fcCell(col, r, res) {
     case "seg": return `<span class="badge-outline ${r.seg === "A" ? "green" : (r.seg === "B" ? "blue" : "gray")}">${r.seg}</span>`;
     case "ml": return r.ml === null ? "—" : fcPcs(r.ml);
     case "w": return r.ml === null ? "—" : r.w.toFixed(2);
-    case "fMin": return `${fcPcs(r.fMin)} – ${fcPcs(r.fMax)}`;
+    case "fMin": { const b = fcRowRange(r, res); return `${fcPcs(b.lo)} – ${fcPcs(b.hi)}`; }
     case "errPct": {
       if (r.errPct === null || r.errPct === undefined) return "—";
       const cls = Math.abs(r.errPct) <= fcState.band ? "text-green" : (Math.abs(r.errPct) <= 2 * fcState.band ? "text-orange" : "text-red");
@@ -11730,9 +11797,13 @@ function fcWireControlsOnce() {
   if (fcState.wired) return;
   fcState.wired = true;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on("fcHorizonSelect", "change", (e) => {
+    fcState.family = String(e.target.value);
+    fcState.target = fcNextKeyOf(fcState.family);
+    fcState.catFilter = ""; fcRenderAll();
+  });
   on("fcTargetSelect", "change", (e) => {
-    const v = String(e.target.value), i = v.indexOf("::");
-    if (i > 0) { fcState.family = v.slice(0, i); fcState.target = v.slice(i + 2); } else { fcState.family = "month"; fcState.target = v; }
+    fcState.target = String(e.target.value);
     fcState.catFilter = ""; fcRenderAll();
   });
   on("fcCategorySelect", "change", (e) => { fcState.catFilter = e.target.value; fcApplyFilters(); });
@@ -11762,6 +11833,12 @@ function fcWireControlsOnce() {
     btn.classList.add("active");
     fcState.v2 = want;
     prepareForecastModelView(false);
+  }));
+  document.querySelectorAll("#fcConfToggle .segmented-btn").forEach(btn => btn.addEventListener("click", () => {
+    document.querySelectorAll("#fcConfToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fcState.conf = Number(btn.getAttribute("data-conf")) || 80;
+    fcRenderTrustTable(); fcRenderSkuTable();
   }));
 }
 
