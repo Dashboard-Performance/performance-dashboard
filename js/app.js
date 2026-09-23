@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.82";
+const APP_VERSION = "1.1.84";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11341,31 +11341,36 @@ function fcRenderMethod() {
   if (!el) return;
   const monthly = !!(fcState.granularity && fcState.granularity.monthly);
   const common = [
-    ["Demand", "Confirmed pieces per Single SKU (bundles debundled × quantity) — the same basis as DOH and Sellthrough. Where the history tab and Main cover the same day, Main wins; duplicate rows are counted once."],
-    ["Behavior", "Every SKU is classified so incompatible patterns are never mixed: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky. Training and prediction happen per behavior."],
-    ["Blending", "Final = w × ML + (1 − w) × Baseline, then category guardrails. w is higher when the model agrees with the behavior and volatility is moderate, lower when they conflict."],
-    ["V2 outliers", "SKUs that missed by more than 100% last month, or that are sparse and volatile, are flagged and their deviation from baseline is halved (toggle with V2 On/Off)."],
-    ["No leakage", "A backtest for any month is trained only on month pairs that ended before it, then compared to that month's actual. The Naive column shows what simply repeating last month would have scored, so you can see what the model adds."]
+    ["Demand", "Confirmed pieces per Single SKU (bundles are split into their components). Same basis as DOH and Sellthrough. If a day exists in both the History tab and Main, Main wins — no double-counting."],
+    ["Behavior", "Every SKU is tagged with one pattern: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, or Spiky. Each pattern gets its own model and its own rules — they're never mixed."],
+  ];
+  const tail = [
+    ["Blending", "When the winning method is model-based: Final = w × ML + (1 − w) × Baseline. w rises when the model agrees with the behavior pattern and volatility is moderate, and drops when they conflict."],
+    ["Guardrails & V2", "Every forecast is capped by rules for its behavior pattern (below), so it can't run away. SKUs that missed by 100%+ last month, or that are thin and erratic, get flagged 'V2' and their deviation from the baseline is halved (toggle V2 on/off)."],
+    ["No leakage, ever", "A backtest for any month trains only on month-pairs that ended before it, then checks the real result. The Naive column shows what just repeating last month would have scored — so Lift = what the model actually adds over doing nothing."]
   ];
   const specific = monthly
     ? [
-      ["Source (monthly tab)", "The history tab carries one row per SKU per month (a period column dated on the 1st), so the model runs month-over-month. Features: last month, the two months before it, a recency-weighted average, the max and median month, month-over-month growth, trend slope and R², volatility across months, and how many months were zero. Every month is normalised to 30 days so different month lengths are comparable."],
-      ["Horizon", "The target can be a calendar month or a rolling window of the next 7, 14 or 30 days. Shorter is markedly more accurate on this data — measured across every past window: 7 days scores about 54% accuracy with a 67% hit rate, 14 days about 48% and 54%, a full month about 46% and 35%. Use the month for planning and purchasing volume, and the 7 or 14 day view for what to act on this week."],
-      ["Size segments", "SKUs are split by recent volume: A (100+ pieces a month), B (30–99), C (under 30). Measured on this data, the model earns its keep on A and loses to a plain recent-rate rule on C — which is most of the catalogue — so the method is chosen per segment instead of one rule for everything. Each segment also gets a calibration factor (clamped to ±25%) that removes its systematic over/under-forecast."],
-      ["Method picking", "For each segment, every candidate — the model, last 10 / 14 / 21 / 30 days, and mixes of them — is scored on earlier months (always with models that only saw data before those months). The one with the lowest error wins, and it only moves off 'last 30 days' when the gain is real, so the forecast can't quietly end up worse than doing nothing. The winner per segment is shown in the Method by SKU Size panel."],
-      ["Model", "Ridge regression per behavior on the change vs last month, so when the model has nothing to go on it falls back to 'same as last month' instead of drifting toward the average. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount. The weight on ML is scaled down when there are few training month pairs."],
-      ["Baselines", "Up: last month continued at its growth rate (capped at 1.5×). Down: a decayed last month. Steady: recency-weighted average of the last 3 months. Non-Linear / Volatile: max(3-month average, last month). Spiky: median month."],
-      ["Guardrails", "Up: floor ≥ 0.85 × last month. Down: ceiling ≤ 1.10 × baseline. Steady: within ±15% of last month. Non-Linear / Volatile: cap ≤ 2.75 × last month. Spiky: cap ≤ 1.5 × last month."],
-      ["Next month", "Forecast from the open month projected to a full month (month-to-date scaled by the days elapsed), so the newest signal is used."]
+      ["Source (monthly tab)", "One row per SKU per month. Features: last month, the two before it, a recency-weighted average, the max and median month, month-over-month growth, trend slope, volatility, and how many months were zero — every month normalised to 30 days first."],
+      ["Horizon", "Target can be a calendar month or a rolling 7/14/30-day window. Shorter is more accurate on this data (measured: 7d ≈ 54% accuracy / 67% hit rate, 14d ≈ 48% / 54%, a full month ≈ 46% / 35%). Use the month for purchasing volume, the 7/14-day view for what to act on this week."],
+      ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
+      ["Method picking", "For each segment, every candidate (the model, last 10/14/21/30 days, blends of them) is scored on earlier months only, using models that never saw those months. Lowest real error wins — it only moves off 'last 30 days' when the gain is real, measured, and repeatable. Segment A also gets a bias-correction factor, clamped to ±25%."],
+      ["Model", "Ridge regression per behavior on the change vs last month, so with nothing to go on it falls back to 'same as last month' instead of drifting to the average. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
+      ["Baselines", "Up: last month continued at its growth rate (capped 1.5×). Down: a decayed last month. Steady: recency-weighted 3-month average. Non-Linear / Volatile: max(3-month average, last month). Spiky: median month."],
+      ["Guardrails", "Up: floor ≥ 0.85× last month. Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of last month. Non-Linear / Volatile: cap ≤ 2.75× last month. Spiky: cap ≤ 1.5× last month."],
+      ["Next month", "Forecast from the open month, projected to a full month using month-to-date scaled by days elapsed — the newest signal available."]
     ]
     : [
-      ["Source (daily tab)", "The source window is the last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope and R², momentum, and share of zero days."],
+      ["Source (daily tab)", "The last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope, momentum, and share of zero days."],
+      ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
+      ["Method picking", "For segment A, every candidate (last 10/14/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
+      ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
-      ["Guardrails", "Up: floor ≥ 0.85 × (last 7 × 4). Down: ceiling ≤ 1.10 × baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75 × 30-day total. Spiky: cap ≤ 1.5 × 30-day total."],
+      ["Guardrails", "Up: floor ≥ 0.85× (last 7 × 4). Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75× 30-day total. Spiky: cap ≤ 1.5× 30-day total."],
       ["Next month", "Forecast from the last 30 full days of data."]
     ];
-  el.innerHTML = common.slice(0, 2).concat(specific).concat(common.slice(2)).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
+  el.innerHTML = common.concat(specific).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
 }
 
 function fcRenderStatus() {

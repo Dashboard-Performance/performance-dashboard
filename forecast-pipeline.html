@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forecast Pipeline</title>
+<style>
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-2:#eaeee9; --border:#d7ded8;
+  --ink:#1a2420; --ink-dim:#5b6b62; --ink-faint:#8b978f;
+  --accent:#1f6f5c; --accent-ink:#0d3a2e; --accent-soft:#e2f0ea;
+  --warn:#a15a12; --warn-soft:#f7e9d9;
+  --bad:#a13f3f; --bad-soft:#f6e2e2;
+  --seg-a:#1f6f5c; --seg-a-soft:#e2f0ea;
+  --seg-b:#3a6ea5; --seg-b-soft:#e3ecf6;
+  --seg-c:#6b6b6b; --seg-c-soft:#eceeec;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121815; --surface:#1a2320; --surface-2:#212c27; --border:#2d3a34;
+    --ink:#e9efe9; --ink-dim:#a6b5ac; --ink-faint:#77857c;
+    --accent:#4fd3ac; --accent-ink:#c9f3e2; --accent-soft:#1c332b;
+    --warn:#e3a768; --warn-soft:#332a1a;
+    --bad:#e08787; --bad-soft:#332020;
+    --seg-a:#4fd3ac; --seg-a-soft:#1c332b;
+    --seg-b:#7fb2e8; --seg-b-soft:#1c2733;
+    --seg-c:#a9b2ad; --seg-c-soft:#242b27;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121815; --surface:#1a2320; --surface-2:#212c27; --border:#2d3a34;
+  --ink:#e9efe9; --ink-dim:#a6b5ac; --ink-faint:#77857c;
+  --accent:#4fd3ac; --accent-ink:#c9f3e2; --accent-soft:#1c332b;
+  --warn:#e3a768; --warn-soft:#332a1a;
+  --bad:#e08787; --bad-soft:#332020;
+  --seg-a:#4fd3ac; --seg-a-soft:#1c332b;
+  --seg-b:#7fb2e8; --seg-b-soft:#1c2733;
+  --seg-c:#a9b2ad; --seg-c-soft:#242b27;
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding-inline:16px; padding-block:32px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:920px; margin:0 auto;}
+h1,h2,h3{font-family:"Fraunces","IBM Plex Sans",serif; font-weight:600; text-wrap:balance; margin:0;}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;}
+header.page{margin-bottom:36px;}
+header.page .eyebrow{
+  font-size:12.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent-ink);
+  background:var(--accent-soft); display:inline-block; padding:4px 10px; border-radius:5px; margin-bottom:14px;
+}
+header.page h1{font-size:clamp(28px,5vw,40px); line-height:1.1; color:var(--ink);}
+header.page p{color:var(--ink-dim); font-size:15.5px; line-height:1.6; max-width:62ch; margin-top:12px;}
+
+/* ---- pipeline ---- */
+.pipeline{position:relative; margin-top:28px;}
+.pipeline::before{
+  content:""; position:absolute; left:19px; top:8px; bottom:8px; width:2px;
+  background:repeating-linear-gradient(var(--border),var(--border) 4px,transparent 4px,transparent 9px);
+}
+.stage{position:relative; padding-left:56px; margin-bottom:6px;}
+.stage-num{
+  position:absolute; left:0; top:0; width:40px; height:40px; border-radius:50%;
+  background:var(--surface); border:2px solid var(--accent); color:var(--accent-ink);
+  display:flex; align-items:center; justify-content:center; font-family:"IBM Plex Mono",monospace;
+  font-size:14px; font-weight:600; z-index:1;
+}
+.stage-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:18px 20px; margin-bottom:22px;
+}
+.stage-card h3{font-size:17px; margin-bottom:6px;}
+.stage-card .desc{color:var(--ink-dim); font-size:14.5px; line-height:1.6;}
+.stage-card .tag-row{display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;}
+.tag{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; background:var(--surface-2);
+  border:1px solid var(--border); border-radius:6px; padding:3px 8px; color:var(--ink-dim);
+}
+
+/* segment split */
+.segsplit{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:14px;}
+@media (max-width:640px){.segsplit{grid-template-columns:1fr;}}
+.seg-card{border-radius:10px; padding:14px 14px; border:1px solid var(--border);}
+.seg-card.a{background:var(--seg-a-soft); border-color:var(--seg-a);}
+.seg-card.b{background:var(--seg-b-soft); border-color:var(--seg-b);}
+.seg-card.c{background:var(--seg-c-soft); border-color:var(--seg-c);}
+.seg-card .label{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:13px; margin-bottom:4px;}
+.seg-card.a .label{color:var(--seg-a);}
+.seg-card.b .label{color:var(--seg-b);}
+.seg-card.c .label{color:var(--seg-c);}
+.seg-card .vol{font-size:12px; color:var(--ink-dim); margin-bottom:8px;}
+.seg-card .method{font-size:13.5px; line-height:1.55; color:var(--ink);}
+
+/* behavior badges */
+.behaviors{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;}
+.beh{
+  font-size:13px; padding:5px 10px; border-radius:999px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--ink-dim); white-space:nowrap;
+}
+
+/* blend formula box */
+.formula{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  padding:14px 16px; font-family:"IBM Plex Mono",monospace; font-size:14px; margin-top:12px;
+  color:var(--ink); overflow-x:auto;
+}
+.formula .op{color:var(--accent-ink);}
+
+/* guardrail table */
+.gtable{width:100%; border-collapse:collapse; margin-top:12px; font-size:13.5px;}
+.gtable th,.gtable td{text-align:left; padding:7px 10px; border-bottom:1px solid var(--border);}
+.gtable th{color:var(--ink-faint); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em;}
+.gtable td.f{font-family:"IBM Plex Mono",monospace; color:var(--ink-dim);}
+
+/* leakage loop callout */
+.loop-callout{
+  border:1px dashed var(--accent); background:var(--accent-soft); border-radius:12px;
+  padding:16px 18px; margin-top:8px; margin-bottom:32px; margin-left:56px;
+}
+.loop-callout h3{font-size:15px; color:var(--accent-ink); margin-bottom:6px;}
+.loop-callout p{font-size:14px; color:var(--ink); line-height:1.6; margin:0;}
+
+/* final outcome */
+.outcome{
+  display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;
+}
+@media (max-width:640px){.outcome{grid-template-columns:1fr;}}
+.outcome .box{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:14px 16px;}
+.outcome .box .k{font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); margin-bottom:4px;}
+.outcome .box .v{font-family:"IBM Plex Mono",monospace; font-size:14.5px; color:var(--ink);}
+
+footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); color:var(--ink-faint); font-size:13px; line-height:1.6;}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+
+</head>
+<body>
+<a href="index.html" style="position:fixed;top:14px;right:16px;z-index:50;font-family:'IBM Plex Sans',sans-serif;font-size:13px;text-decoration:none;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent);border-radius:7px;padding:6px 12px;">&larr; Back to dashboard</a>
+<div class="wrap">
+
+  <header class="page">
+    <span class="eyebrow">Forecast Model — Admin Panel</span>
+    <h1>How the demand forecast is built</h1>
+    <p>One pipeline, run per SKU, per month. Every stage below is a real rule in the code — nothing here is decorative. Follow the line top to bottom.</p>
+  </header>
+
+  <div class="pipeline">
+
+    <div class="stage">
+      <div class="stage-num">1</div>
+      <div class="stage-card">
+        <h3>Demand — confirmed pieces per Single SKU</h3>
+        <p class="desc">Bundles are split into their component Singles × quantity. If the History tab and Main both cover the same day, Main wins — nothing is double-counted. Same basis as DOH and Sellthrough, so numbers line up across the dashboard.</p>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">2</div>
+      <div class="stage-card">
+        <h3>Source window — last 30 full days</h3>
+        <p class="desc">Every feature is computed from the 30 days right before the target month, so nothing from the target month itself ever leaks in.</p>
+        <div class="tag-row">
+          <span class="tag">last 3/7/10/14/15/20/30 days</span>
+          <span class="tag">first 7 days</span>
+          <span class="tag">max day / max week</span>
+          <span class="tag">StdDev / CV</span>
+          <span class="tag">trend slope + R²</span>
+          <span class="tag">momentum</span>
+          <span class="tag">% zero days</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">3</div>
+      <div class="stage-card">
+        <h3>Behavior classification</h3>
+        <p class="desc">Every SKU is tagged with exactly one demand pattern from those 30-day features. Incompatible patterns are never trained or predicted together.</p>
+        <div class="behaviors">
+          <span class="beh">Shifting Up</span>
+          <span class="beh">Shifting Down</span>
+          <span class="beh">Steady</span>
+          <span class="beh">Non-Linear / Volatile</span>
+          <span class="beh">Spiky</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">4</div>
+      <div class="stage-card">
+        <h3>Size segment — split by volume, not just behavior</h3>
+        <p class="desc">Independently of behavior, every SKU also falls into a volume segment. The forecasting <em>method</em> is chosen per segment, because one method does not win everywhere.</p>
+        <div class="segsplit">
+          <div class="seg-card a">
+            <div class="label">SEGMENT A</div>
+            <div class="vol">100+ pcs / month</div>
+            <div class="method">Method re-scored every run from real backtests. Gets a bias-correction factor (±25% cap) — this is where the ML model actually earns its keep.</div>
+          </div>
+          <div class="seg-card b">
+            <div class="label">SEGMENT B</div>
+            <div class="vol">30–99 pcs / month</div>
+            <div class="method">Fixed method: last 14 days × 30/14. A per-month "winner" overfits noisy scores here — measured worse than just fixing the window.</div>
+          </div>
+          <div class="seg-card c">
+            <div class="label">SEGMENT C</div>
+            <div class="vol">under 30 pcs / month</div>
+            <div class="method">Fixed method: last 21 days × 30/21. Same reasoning as B, wider window since C is even noisier.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">5</div>
+      <div class="stage-card">
+        <h3>Method picking — tested on the past, not assumed</h3>
+        <p class="desc">For Segment A, every candidate method below is scored against real past months, using models that never saw those months. Lowest real error wins — the forecast can't quietly end up worse than doing nothing.</p>
+        <div class="tag-row">
+          <span class="tag">last 10d × 3 (capped ±40% of naive)</span>
+          <span class="tag">last 14d × 30/14</span>
+          <span class="tag">last 21d × 30/21</span>
+          <span class="tag">half last-14 + half last-30</span>
+          <span class="tag">the ML model</span>
+          <span class="tag">half model + half last-14</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">6</div>
+      <div class="stage-card">
+        <h3>Model — ridge regression, per behavior</h3>
+        <p class="desc">Trained on <span class="mono">log(1 + next-month demand)</span>, so an uninformative model lands on "same as last 30 days" instead of drifting to the catalogue average. Non-Linear / Volatile SKUs get a hurdle model instead: probability of selling at all × expected amount.</p>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">7</div>
+      <div class="stage-card">
+        <h3>Baseline — the rule-based anchor</h3>
+        <p class="desc">A non-ML estimate, one formula per behavior. This is what the ML forecast is blended against and capped around — a transparent number you can explain without touching the model.</p>
+        <table class="gtable">
+          <tr><th>Behavior</th><th>Baseline formula</th></tr>
+          <tr><td>Shifting Up</td><td class="f">max(30d total, last10×3, last7×4)</td></tr>
+          <tr><td>Shifting Down</td><td class="f">0.6×(first7×4) + 0.4×(last14×30/14)</td></tr>
+          <tr><td>Steady</td><td class="f">mean day × 30</td></tr>
+          <tr><td>Non-Linear / Volatile</td><td class="f">max(maxWeek, maxDay×7, 30d total)</td></tr>
+          <tr><td>Spiky</td><td class="f">30-day total</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">8</div>
+      <div class="stage-card">
+        <h3>Blend</h3>
+        <div class="formula">Final = <span class="op">w</span> × ML&nbsp;&nbsp;+&nbsp;&nbsp;(1&nbsp;−&nbsp;<span class="op">w</span>) × Baseline</div>
+        <p class="desc" style="margin-top:10px;"><span class="mono">w</span> rises when the model agrees with the behavior pattern and volatility (CV) is moderate. It drops when the model and the pattern disagree — the forecast leans back on the transparent baseline instead.</p>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">9</div>
+      <div class="stage-card">
+        <h3>Guardrails — the forecast can't run away</h3>
+        <table class="gtable">
+          <tr><th>Behavior</th><th>Cap</th></tr>
+          <tr><td>Shifting Up</td><td class="f">floor ≥ 0.85 × (last7×4)</td></tr>
+          <tr><td>Shifting Down</td><td class="f">ceiling ≤ 1.10 × baseline</td></tr>
+          <tr><td>Steady</td><td class="f">within ±15% of its level</td></tr>
+          <tr><td>Non-Linear / Volatile</td><td class="f">cap ≤ 2.75 × 30d total</td></tr>
+          <tr><td>Spiky</td><td class="f">cap ≤ 1.5 × 30d total</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">10</div>
+      <div class="stage-card">
+        <h3>V2 outlier dampening</h3>
+        <p class="desc">SKUs that missed by 100%+ last month, or that are thin and erratic (≤5 selling days, CV &gt; 2), get flagged. Their deviation from the baseline is halved before the guardrail is applied — a second, targeted brake on the SKUs most likely to overshoot. Toggle with V2 On/Off.</p>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">11</div>
+      <div class="stage-card">
+        <h3>Output — forecast + confidence range</h3>
+        <div class="outcome">
+          <div class="box">
+            <div class="k">Point forecast</div>
+            <div class="v">scaled to the target month's day count</div>
+          </div>
+          <div class="box">
+            <div class="k">50 / 80 / 90% range</div>
+            <div class="v">built from how far past forecasts actually missed, per size segment</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="loop-callout">
+    <h3>No leakage, anywhere in this pipeline</h3>
+    <p>Every "past months" reference above — the method scoring in step 5, the model training in step 6, the confidence range in step 11 — uses only month-pairs that ended <em>before</em> the month being predicted. A backtest for March is trained as if April never happened. The Naive column in the Accuracy Trend table shows what simply repeating last month would have scored, so Lift = what this whole pipeline actually adds over doing nothing.</p>
+  </div>
+
+  <footer>
+    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.83) — every formula and cap above is copied from the running code, not summarized from memory.
+  </footer>
+
+</div>
+
+</body>
+</html>
