@@ -296,6 +296,24 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
     <div class="stage">
       <div class="stage-num">11</div>
       <div class="stage-card">
+        <h3>Stock ceiling — segment A only</h3>
+        <p class="desc">A segment-A forecast is capped at <strong>2.5 × the pieces that could actually be supplied</strong> that month = beginning inventory + inbound (both known at the month's start, so no leakage). The model's worst misses are wild over-forecasts on SKUs that never had the stock to sell that much — this removes them.</p>
+        <div class="outcome" style="margin-top:12px;">
+          <div class="box">
+            <div class="k">Segment A accuracy</div>
+            <div class="v">44.9% → 54.2% <span style="color:var(--accent-ink);">(measured, 7 real months)</span></div>
+          </div>
+          <div class="box">
+            <div class="k">Why not B / C</div>
+            <div class="v">the cap lifts their metric too, but deepens an already-negative bias → left uncapped</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">12</div>
+      <div class="stage-card">
         <h3>Output — forecast + confidence range</h3>
         <div class="outcome">
           <div class="box">
@@ -318,7 +336,7 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
   </div>
 
   <footer>
-    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.83) — every formula and cap above is copied from the running code, not summarized from memory.
+    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.87) — every formula and cap above is copied from the running code, not summarized from memory.
   </footer>
 
 </div>

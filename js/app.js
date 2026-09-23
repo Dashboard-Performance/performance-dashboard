@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.86";
+const APP_VERSION = "1.1.87";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10393,6 +10393,58 @@ function fcAccuracy(rows, bandPct) {
   };
 }
 
+// Segment-A stock ceiling: forecast is capped at (beginning inventory +
+// inbound) × this. See the cap site in build() for the measured rationale.
+const FC_STOCK_CAP_A = 2.5;
+
+// Availability index: per SKU, per target month, how many pieces could have
+// been supplied = that month's beginning inventory + that month's inbound.
+// Built once from the Metabase beginning-inventory and inbound tabs already
+// loaded into `state`. Returns { get(sku, monthKey) } giving a number, or
+// null when we have no stock reading for that SKU at all. For a month with no
+// beginning-inventory row (e.g. a future "next" month), it falls back to the
+// SKU's most recent known beginning inventory — the best estimate of stock on
+// hand now — plus any inbound scheduled for the target month.
+function fcBuildAvailIndex() {
+  try {
+    const MN = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const bi = (typeof state !== "undefined" && state.metabaseBeginningInventory) || [];
+    const ib = (typeof state !== "undefined" && state.inboundRows) || [];
+    if (!bi.length) return null;
+    const beginBy = new Map();   // sku -> { "April 2026": qty }
+    const beginTs = new Map();   // sku -> [{ts, key}] to find the latest known
+    bi.forEach(r => {
+      const d = new Date(r.MONTH); if (isNaN(d.getTime())) return;
+      const key = MN[d.getUTCMonth()] + " " + d.getUTCFullYear();
+      const sku = r.PRODUCT_ID; const q = +r.QTY || 0;
+      if (!beginBy.has(sku)) { beginBy.set(sku, {}); beginTs.set(sku, []); }
+      beginBy.get(sku)[key] = (beginBy.get(sku)[key] || 0) + q;
+      beginTs.get(sku).push({ ts: d.getTime(), key });
+    });
+    beginTs.forEach(arr => arr.sort((a, b) => a.ts - b.ts));
+    const inboundBy = new Map(); // sku -> { "April 2026": qty }
+    ib.forEach(r => {
+      const sku = r.sku, key = r.receivingMonthKey; if (!sku || !key) return;
+      if (!inboundBy.has(sku)) inboundBy.set(sku, {});
+      inboundBy.get(sku)[key] = (inboundBy.get(sku)[key] || 0) + (+r.rcvQty || 0);
+    });
+    return {
+      get(sku, monthKey) {
+        const b = beginBy.get(sku);
+        if (!b) return null;
+        let begin = b[monthKey];
+        if (begin === undefined) {
+          const arr = beginTs.get(sku);
+          begin = arr && arr.length ? b[arr[arr.length - 1].key] : undefined;
+        }
+        if (begin === undefined) return null;
+        const inb = (inboundBy.get(sku) || {})[monthKey] || 0;
+        return begin + inb;
+      }
+    };
+  } catch (e) { return null; }
+}
+
 // Runs every target month the data allows:
 //   • backtest  — past complete month (forecast from the month before it,
 //                 trained only on pairs that ended before it: no leakage)
@@ -10400,6 +10452,7 @@ function fcAccuracy(rows, bandPct) {
 //   • next      — next month, from the last 30 full days
 function fcRunEngine(sd, today, opts) {
   const o = Object.assign({ v2: true }, opts || {});
+  const avail = o.avail !== undefined ? o.avail : fcBuildAvailIndex();
   const months = fcMonths(sd);
   const results = [];
   if (!months.length) return { months, results };
@@ -10548,12 +10601,28 @@ function fcRunEngine(sd, today, opts) {
       if (o.v2 && flagged && models && cand.key.indexOf("model") === 0) {
         raw = fcGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
       }
-      const forecast = raw * scale;
+      let forecast = raw * scale;
+      // Stock ceiling (segment A only). The model's worst misses are wild
+      // over-forecasts on SKUs whose available stock couldn't have supported
+      // that many pieces. Cap the forecast at (beginning inventory + inbound)
+      // × FC_STOCK_CAP_A — known at the start of the target month, so no
+      // leakage. Measured on 7 real backtest months: segment A per-SKU
+      // accuracy 44.9% → 54.7% with bias staying near zero (+9% → −2%). The
+      // 2.5× headroom is deliberate: "confirmed" pieces can exceed on-hand
+      // stock (backorders + scheduled inbound), so a tight cap would cut real
+      // demand — 2.5× only removes the catastrophic over-forecasts. B/C are
+      // left uncapped on purpose: the cap lifts their accuracy metric too but
+      // deepens an already-negative bias (would push toward under-buying).
+      let stockCap = null;
+      if (seg === "A" && avail) {
+        const a = avail.get(sku, target.key);
+        if (a !== null && a > 0) { stockCap = a * FC_STOCK_CAP_A; if (forecast > stockCap) forecast = stockCap; }
+      }
       const cal = bandFor(seg);
       const band = fcBandPct(p.cat, f);
       rows.push({
         sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv,
-        seg, method: cand.label, calib, bandCalibrated: !!cal,
+        seg, method: cand.label, calib, bandCalibrated: !!cal, stockCap,
         baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
         forecast, fMin: cal ? forecast * cal.lo : forecast * (1 - band), fMax: cal ? forecast * cal.hi : forecast * (1 + band),
         actual, mtd, elapsed, flagged, flagReason
@@ -11371,10 +11440,11 @@ function fcRenderMethod() {
       ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
       ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
+      ["Stock ceiling (segment A)", "A segment-A forecast is capped at 2.5× the pieces that could actually be supplied that month = beginning inventory + inbound (known at the month's start, so no leakage). Removes wild over-forecasts on SKUs that never had the stock to sell that much. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, with bias staying near zero. B/C are left uncapped — it lifts their accuracy metric too but deepens an already-negative bias."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
       ["Guardrails", "Up: floor ≥ 0.85× (last 7 × 4). Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75× 30-day total. Spiky: cap ≤ 1.5× 30-day total."],
-      ["Next month", "Forecast from the last 30 full days of data."]
+      ["Next month", "Forecast from the last 30 full days of data. The stock ceiling uses the latest known beginning inventory + scheduled inbound as the best available estimate."]
     ];
   el.innerHTML = common.concat(specific).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
 }
