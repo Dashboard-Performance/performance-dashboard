@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.89";
+const APP_VERSION = "1.1.91";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -3674,10 +3674,27 @@ function preparePpmAnalystSingleData() {
   const d7Start = todayMs - (7 * 86400000);
   const confirmed3dBySingle = new Map();
   const confirmed7dBySingle = new Map();
+  // ASP DELIVERED (10D) — بطلب صريح: نجمع Delivered GMV و Delivered Pieces على
+  // آخر 10 أيام الـ Single ده "اشتغل" فيها فعلًا (يوم فيه Delivered Pieces > 0)،
+  // Overall (هو لوحده + نصيبه المرجّح من كل بندل هو جواه)، وبعدين ASP = مجموع
+  // GMV ÷ مجموع Pieces على الـ 10 أيام دول بس. بنستخدم mainRowsAll (مش monthRows)
+  // عشان الـ 10 أيام النشطة ممكن تمتد للشهر اللي فات.
+  const deliveredByDateBySingle = new Map(); // singleId -> Map(dayMs -> {gmv, pieces})
   mainRowsAll.forEach(r => {
     if (!r.sku) return;
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
     const rTime = rDate.getTime();
+    // Delivered-by-day: كل التواريخ (مش مقيّدة بـ 7 أيام) عشان نلاقي آخر 10 أيام نشطة.
+    if ((r.deliveredPieces || 0) > 0) {
+      mappingsFor(r.sku).forEach(mp => {
+        const g = (r.deliveredGmv || 0) * (mp.cogsWeight != null ? mp.cogsWeight : 1);
+        const p = (r.deliveredPieces || 0) * (mp.quantity || 1);
+        let dm = deliveredByDateBySingle.get(mp.singleId);
+        if (!dm) { dm = new Map(); deliveredByDateBySingle.set(mp.singleId, dm); }
+        const e = dm.get(rTime) || { gmv: 0, pieces: 0 };
+        e.gmv += g; e.pieces += p; dm.set(rTime, e);
+      });
+    }
     if (rTime >= todayMs || rTime < d7Start) return; // متطلعش النهاردة، وبرا نطاق الـ 7 أيام
     mappingsFor(r.sku).forEach(mp => {
       const pcs = (r.confirmedPieces || 0) * (mp.quantity || 1);
@@ -3724,6 +3741,17 @@ function preparePpmAnalystSingleData() {
     const avgLast3d = (confirmed3dBySingle.get(singleId) || 0) / 3;
     const avgLast7d = (confirmed7dBySingle.get(singleId) || 0) / 7;
 
+    // ASP DELIVERED (10D): آخر 10 أيام فيها Delivered فعلي، مجموع GMV ÷ مجموع Pieces.
+    let aspDeliveredLast10 = 0, aspDeliveredDays = 0;
+    const dMap = deliveredByDateBySingle.get(singleId);
+    if (dMap && dMap.size) {
+      const last10 = Array.from(dMap.entries()).sort((a, b) => b[0] - a[0]).slice(0, 10);
+      let g = 0, p = 0;
+      last10.forEach(([, e]) => { g += e.gmv; p += e.pieces; });
+      aspDeliveredDays = last10.length;
+      aspDeliveredLast10 = p > 0 ? g / p : 0;
+    }
+
     // ACTIVE DAYS — عدد الأيام الشهر ده اللي الـ Single ده اشتغل فيها (Placed
     // Pieces > 1)، Overall: b.placedByDate اتبني فوق من monthRows.forEach عن
     // طريق mappingsFor(r.sku) اللي بيوزّع صفوف البندل على الـ Singles اللي
@@ -3739,7 +3767,7 @@ function preparePpmAnalystSingleData() {
       avgLast3d, avgLast7d,
       crPct, drPct, ndrPct,
       stock: Math.round(stock || 0), doh: Math.round(doh),
-      lastAspPlaced,
+      lastAspPlaced, aspDeliveredLast10, aspDeliveredDays,
       sellingPrice, profit, asp, cogs,
       deliveredGmv: b.deliveredGmv, contrGmvPct,
       ppmSku, ppmPct, ppmSuggestPpmSku, totalDeliveredPpm: b.ppm,
@@ -3817,6 +3845,7 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="num text-blue">${fmtMoneyCompactCell(m.sellingPrice)}</td>
       <td class="num text-green">${fmtMoneyCompactCell(m.profit)}</td>
       <td class="num font-bold">${fmtMoneyCompactCell(m.asp)}</td>
+      <td class="num font-bold text-green" title="${m.aspDeliveredDays ? `over last ${m.aspDeliveredDays} active day(s)` : "no delivered activity"}">${m.aspDeliveredLast10 > 0 ? fmtMoneyCompactCell(m.aspDeliveredLast10) : "—"}</td>
       <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.lastAspPlaced)}</td>
       <td class="num text-red">${fmtMoneyCompactCell(m.cogs)}</td>
       <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
@@ -11256,6 +11285,7 @@ const fcState = {
   engine: null, engineSig: "", byKey: new Map(),
   engines: {}, family: "month", conf: 80,
   target: "", catFilter: "", behaviorFilter: "", search: "", band: 25, v2: true,
+  level: "single",
   sortKey: "forecast", sortDir: "desc", page: 0, filtered: [],
   chart: null, wired: false, series: null
 };
@@ -11281,7 +11311,7 @@ async function prepareForecastModelView(forceReload) {
   fcWireControlsOnce();
   if (fcState.loading) return;
   const needHist = forceReload || (!fcState.hist && !fcState.histError);
-  const sig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
+  const sig = `${fcMainSignature()}|v2:${fcState.v2}|lvl:${fcState.level||"single"}|h:${fcState.hist ? fcState.hist.length : "x"}`;
   if (!needHist && fcState.engine && fcState.engineSig === sig) { fcRenderAll(); return; }
   fcState.loading = true;
   try {
@@ -11296,9 +11326,15 @@ async function prepareForecastModelView(forceReload) {
         fcState.histError = { message: e.message || String(e), labels: e.labels || null };
       }
     }
-    fcSetProgress("Building daily demand per SKU (debundled)…", 45); await fcNextFrame();
+    const rawLevel = fcState.level === "raw";
+    fcSetProgress(rawLevel ? "Building daily demand per SKU (as sold)…" : "Building daily demand per SKU (debundled)…", 45); await fcNextFrame();
     const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-    const mappingsFor = (sku) => { const m = bundleProductMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
+    // Default: debundle bundles into their component Singles and pool the same
+    // Single across every bundle — more data per SKU, measurably more accurate.
+    // "raw" level keeps every listing (bundles included) as its own series.
+    const mappingsFor = rawLevel
+      ? (sku) => [{ singleId: sku, quantity: 1 }]
+      : (sku) => { const m = bundleProductMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
     const sd = fcBuildSeries(fcState.hist || [], state.allParsedRows || [], mappingsFor, new Date());
     fcState.series = sd;
     // The history tab can be daily or monthly (one row per SKU per month) —
@@ -11328,7 +11364,7 @@ async function prepareForecastModelView(forceReload) {
     if (!engines[fcState.family]) fcState.family = "month";
     fcState.engine = engine;
     fcState.byKey = new Map(engine.results.map(r => [r.key, r]));
-    fcState.engineSig = `${fcMainSignature()}|v2:${fcState.v2}|h:${fcState.hist ? fcState.hist.length : "x"}`;
+    fcState.engineSig = `${fcMainSignature()}|v2:${fcState.v2}|lvl:${fcState.level||"single"}|h:${fcState.hist ? fcState.hist.length : "x"}`;
     if (!fcState.engines[fcState.family]) fcState.family = "month";
     fcState.target = fcNextKeyOf(fcState.family);
     fcSetProgress("Done", 100); await fcNextFrame();
@@ -11926,6 +11962,15 @@ function fcWireControlsOnce() {
     btn.classList.add("active");
     fcState.conf = Number(btn.getAttribute("data-conf")) || 80;
     fcRenderTrustTable(); fcRenderSkuTable();
+  }));
+  document.querySelectorAll("#fcLevelToggle .segmented-btn").forEach(btn => btn.addEventListener("click", () => {
+    const want = btn.getAttribute("data-level") === "raw" ? "raw" : "single";
+    if (want === (fcState.level || "single")) return;
+    document.querySelectorAll("#fcLevelToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fcState.level = want;
+    fcState.catFilter = "";
+    prepareForecastModelView(false);
   }));
 }
 
