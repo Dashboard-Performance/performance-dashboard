@@ -3113,6 +3113,24 @@
             <div class="metrics-grid fc-kpi-grid" id="fcKpiGrid"></div>
           </section>
 
+          <section class="mb-4 hidden" id="fcGmvTargetPanel">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>GMV Target — Delivered</h2>
+                  <p>What the forecast is worth in money, and what closing the gap to your target actually takes. Delivered basis: forecast pieces × delivery rate × selling price, each SKU on its own numbers.</p>
+                </div>
+                <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
+                  <label for="fcGmvTargetInput" class="text-dim" style="font-size:12.5px;">Target (EGP)</label>
+                  <input id="fcGmvTargetInput" type="number" min="0" step="100000" placeholder="e.g. 40000000"
+                         class="st-filter-select" style="width:190px;" />
+                  <button id="fcGmvTargetClear" type="button" class="btn btn-outline small">Clear</button>
+                </div>
+              </div>
+              <div id="fcGmvTargetBody" style="padding:4px 2px 2px;"></div>
+            </div>
+          </section>
+
           <section class="mb-4 hidden" id="fcTrustPanel">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">

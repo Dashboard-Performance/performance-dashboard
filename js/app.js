@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.93";
+const APP_VERSION = "1.1.96";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10643,6 +10643,10 @@ function fcRunEngine(sd, today, opts) {
         }
         if (n > 0) { ensemble = s / n; raw = FC_ENSEMBLE_W * ensemble + (1 - FC_ENSEMBLE_W) * raw; }
       }
+      // Segment A's number is a blend, so don't label it as one single method.
+      const methodLabel = (seg === "A" && ensemble !== null)
+        ? `${Math.round(FC_ENSEMBLE_W * 100)}% average of rules + ${Math.round((1 - FC_ENSEMBLE_W) * 100)}% ${cand.label}`
+        : cand.label;
       let forecast = raw * scale;
       // Stock ceiling (segment A only). The model's worst misses are wild
       // over-forecasts on SKUs whose available stock couldn't have supported
@@ -10664,7 +10668,7 @@ function fcRunEngine(sd, today, opts) {
       const band = fcBandPct(p.cat, f);
       rows.push({
         sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv,
-        seg, method: cand.label, calib, bandCalibrated: !!cal, stockCap,
+        seg, method: methodLabel, calib, bandCalibrated: !!cal, stockCap,
         baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
         forecast, fMin: cal ? forecast * cal.lo : forecast * (1 - band), fMax: cal ? forecast * cal.hi : forecast * (1 + band),
         actual, mtd, elapsed, flagged, flagReason
@@ -11048,9 +11052,16 @@ const FC_COLD_START_CAND = "mix14_30"; // nothing to learn from yet
 // The fixed method is now TSB, the intermittent-demand model (see fcTsbRate):
 // it beat the previous fixed short lookbacks out-of-sample on both accuracy and
 // bias — B 11.9% → 15.6% (bias −14% → −9%), C 5.1% → 6.0% (bias −49% → −45%).
-// Segment A isn't listed here: its dynamic pick + calibration keeps winning
-// (55.8% vs TSB's 47.8%), so it's left alone.
-const FC_FIXED_WINDOW_SEG = { B: "tsb_b", C: "tsb_c" };
+// Segment A's entry looks wrong until you see what it's for. A's forecast is
+// 70% the average of the recent-rate rules (FC_ENSEMBLE_W below); this key
+// only decides the remaining 30%. Measured leave-one-out, TSB wins that slot
+// in all 7 months independently — 58.75% vs 57.60% for letting the picker
+// choose it fresh each month. TSB is the *worst* single method for A on its
+// own (47.8% vs 55.8%), and that is exactly why it belongs here: it reads
+// demand in a completely different way from the recent-window rules, so it
+// corrects the errors they all share. In a blend, being different is worth
+// more than being individually strong.
+const FC_FIXED_WINDOW_SEG = { A: "tsb_c", B: "tsb_b", C: "tsb_c" };
 
 // Forecast combination for segment A. Picking a single winning method is a
 // single point of failure: when the pick is wrong for a month, the whole
@@ -11436,12 +11447,81 @@ async function prepareForecastModelView(forceReload) {
   fcRenderAll();
 }
 
+// Per Single SKU: the delivered selling price and the share of confirmed
+// pieces that actually get delivered, pooled across every bundle the Single
+// sits in (GMV by cost weight, pieces by quantity — the same split the ASP
+// columns use). These turn a forecast in pieces into money:
+//   delivered GMV = pieces × delivery rate × price
+// Window: the CURRENT MONTH, minus the most recent CM3_LAG_DAYS (5) days —
+// exactly the cutoff every other DR% in the dashboard uses. Orders inside that
+// 5-day tail haven't had time to be delivered yet, so counting them would drag
+// the delivery rate down and understate the money. Early in a month that
+// leaves too little to read, so if the eligible window is under a week the
+// index widens to the last 45 days rather than going blank.
+function fcBuildPriceIndex() {
+  const out = new Map();
+  try {
+    const all = (typeof state !== "undefined" && state.allParsedRows) || [];
+    if (!all.length) return out;
+    const { productMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+    const mapFor = (sku) => { const m = productMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }]; };
+
+    const now = new Date();
+    const currentMonthYear = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+    let rows = getMonthOrRangeRows(all, currentMonthYear);
+    let cutoffTs = getCm3LagCutoffTimestamp(rows);
+    // Start-of-month guard: if fewer than 7 days survive the 5-day cutoff,
+    // fall back to a 45-day window so the panel still has something to read.
+    let eligibleDays = 0;
+    if (cutoffTs) {
+      const seen = new Set();
+      rows.forEach(r => {
+        if (!r.timestamp) return;
+        const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0);
+        if (d.getTime() <= cutoffTs) seen.add(d.getTime());
+      });
+      eligibleDays = seen.size;
+    }
+    if (eligibleDays < 7) {
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+      const from = t0.getTime() - 45 * 86400000;
+      rows = all.filter(r => { const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); return d.getTime() >= from; });
+      cutoffTs = getCm3LagCutoffTimestamp(rows);
+    }
+
+    const agg = new Map();
+    rows.forEach(r => {
+      if (!r.sku) return;
+      if (!isCm3RowEligible(r, cutoffTs)) return; // 5-day delivery lag
+      mapFor(r.sku).forEach(mp => {
+        const w = mp.cogsWeight != null ? mp.cogsWeight : 1, q = mp.quantity || 1;
+        let e = agg.get(mp.singleId);
+        if (!e) { e = { gmv: 0, delivered: 0, confirmed: 0 }; agg.set(mp.singleId, e); }
+        e.gmv += (r.deliveredGmv || 0) * w;
+        e.delivered += (r.deliveredPieces || 0) * q;
+        e.confirmed += (r.confirmedPieces || 0) * q;
+      });
+    });
+    agg.forEach((e, sku) => {
+      const asp = e.delivered > 0 ? e.gmv / e.delivered : null;
+      const dr = e.confirmed > 0 ? Math.min(1, e.delivered / e.confirmed) : null;
+      if (asp !== null && dr !== null) out.set(sku, { asp, dr });
+    });
+  } catch (e) { /* leave empty — the panel just reports no price data */ }
+  return out;
+}
+
 function fcEnrichResults(engine) {
   const { singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
   let stockMap = null;
   try { stockMap = buildDebundledStockDohIndex(state.allParsedRows || []).stockByProductId; } catch (e) { stockMap = null; }
+  const priceIdx = fcBuildPriceIndex();
   for (const res of engine.results) {
     for (const r of res.rows) {
+      const pi = priceIdx.get(r.sku);
+      r.asp = pi ? pi.asp : null;
+      r.dr = pi ? pi.dr : null;
+      r.gmvDelivered = pi ? r.forecast * pi.dr * pi.asp : null;
       const inv = (state.inventoryMap && state.inventoryMap[r.sku]) || {};
       const prod = (state.productsMap && state.productsMap[r.sku]) || {};
       r.name = (singlesList && singlesList.get(r.sku)) || inv.skuName || prod.name || r.sku;
@@ -11500,11 +11580,173 @@ function fcRenderAll() {
   fcRenderBehaviorOptions();
   fcRenderProductCategoryOptions();
   fcRenderKpis();
+  fcRenderGmvTarget();
   fcRenderTrustTable();
   fcRenderSegmentTable();
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
   fcApplyFilters();
+}
+
+// GMV target panel — turns the piece forecast into money and shows what the
+// gap to a target actually takes. Two honest routes to close a gap: sell more
+// pieces, or deliver a higher share of what's already confirmed.
+const FC_GMV_TARGET_KEY = "fcGmvTargetDelivered";
+// Mix shift guardrails. Every confirmed piece is worth (delivery rate × price)
+// in delivered money, and that value differs enormously between SKUs — a piece
+// of something that delivers 60% at 1,000 EGP is worth far more than a piece
+// of something that delivers 30% at 300. So instead of wishing the delivery
+// rate up, move a slice of the plan toward the SKUs that actually deliver.
+// Constraints keep it from breaking anything else:
+//  • a receiving SKU can only take what its stock on hand already covers, so
+//    the shift needs no extra purchasing;
+//  • no SKU gives up more than FC_MIX_MAX_DONOR of its own plan, so nothing
+//    gets starved or delisted by accident;
+//  • the whole shift is capped at FC_MIX_MAX_TOTAL of the plan;
+//  • a move only happens when the receiver is worth more per piece than the
+//    donor, so every single move adds money.
+const FC_MIX_MAX_DONOR = 0.25;
+const FC_MIX_MAX_TOTAL = 0.10;
+function fcMixShift(live, gapNeeded) {
+  const empty = { movedPcs: 0, gain: 0, moves: [] };
+  if (!live || live.length < 2) return empty;
+  const receivers = live.filter(x => x.head > 0 && x.vpp > 0).slice().sort((a, b) => b.vpp - a.vpp);
+  const donors = live.filter(x => x.pcs > 0 && x.vpp > 0).slice().sort((a, b) => a.vpp - b.vpp);
+  if (!receivers.length || !donors.length) return empty;
+  const totalPcs = live.reduce((s, x) => s + x.pcs, 0);
+  let budget = totalPcs * FC_MIX_MAX_TOTAL;
+  const recCap = new Map(receivers.map(r => [r.sku, r.head]));
+  const donCap = new Map(donors.map(d => [d.sku, d.pcs * FC_MIX_MAX_DONOR]));
+  const up = new Map(), down = new Map();
+  let gain = 0, moved = 0, ri = 0, di = 0;
+  while (ri < receivers.length && di < donors.length && budget > 0.5 && gain < gapNeeded) {
+    const R = receivers[ri], D = donors[di];
+    if (R.sku === D.sku) { ri++; continue; }
+    if (R.vpp <= D.vpp) break;                       // no value left to gain
+    const rc = recCap.get(R.sku) || 0, dc = donCap.get(D.sku) || 0;
+    if (rc <= 0.5) { ri++; continue; }
+    if (dc <= 0.5) { di++; continue; }
+    const per = R.vpp - D.vpp;
+    const need = (gapNeeded - gain) / per;           // pieces still needed
+    const qty = Math.min(rc, dc, budget, need);
+    if (!(qty > 0.5)) break;
+    recCap.set(R.sku, rc - qty); donCap.set(D.sku, dc - qty);
+    budget -= qty; moved += qty; gain += qty * per;
+    up.set(R.sku, (up.get(R.sku) || 0) + qty);
+    down.set(D.sku, (down.get(D.sku) || 0) + qty);
+  }
+  if (moved <= 0.5) return empty;
+  const bySku = new Map(live.map(x => [x.sku, x]));
+  const moves = [];
+  up.forEach((pcs, sku) => { const x = bySku.get(sku); moves.push({ dir: "up", sku, name: x.name, pcs, dr: x.dr, vpp: x.vpp }); });
+  down.forEach((pcs, sku) => { const x = bySku.get(sku); moves.push({ dir: "down", sku, name: x.name, pcs, dr: x.dr, vpp: x.vpp }); });
+  moves.sort((a, b) => (b.pcs * b.vpp) - (a.pcs * a.vpp));
+  return { movedPcs: moved, gain, moves };
+}
+function fcGmvTargetValue() {
+  const el = $("fcGmvTargetInput");
+  const v = el ? Number(el.value) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+function fcRenderGmvTarget() {
+  const wrap = $("fcGmvTargetPanel"), body = $("fcGmvTargetBody");
+  if (!wrap || !body) return;
+  const eng = fcState.engines && fcState.engines.month;
+  const res = eng && eng.results ? eng.results.find(r => r.mode === "next") : null;
+  if (!res) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+
+  let gmv = 0, confPcs = 0, gmvConf = 0, priced = 0, unpriced = 0, unpricedPcs = 0;
+  const push = [];
+  const live = [];
+  res.rows.forEach(r => {
+    confPcs += r.forecast;
+    if (r.gmvDelivered === null || r.gmvDelivered === undefined) { unpriced++; unpricedPcs += r.forecast; return; }
+    priced++;
+    gmv += r.gmvDelivered;
+    gmvConf += r.forecast * r.asp;
+    const headPcs = Math.max(0, (r.stock || 0) - r.forecast);
+    if (headPcs > 0) push.push({ sku: r.sku, name: r.name, headPcs, headGmv: headPcs * r.dr * r.asp, asp: r.asp, dr: r.dr });
+    // value of one more confirmed piece of this SKU, in delivered money
+    live.push({ sku: r.sku, name: r.name, pcs: r.forecast, dr: r.dr, asp: r.asp, vpp: r.dr * r.asp, head: headPcs });
+  });
+  const blendedDr = gmvConf > 0 ? gmv / gmvConf : null;
+  const gmvPerPiece = confPcs > 0 ? gmv / confPcs : 0;
+  const target = fcGmvTargetValue();
+  const money = (n) => (n === null || !Number.isFinite(n)) ? "—" : fmtInt.format(Math.round(n));
+
+  const tile = (label, val, cls, sub) =>
+    `<div class="box" style="flex:1;min-width:170px;background:var(--surface-2,rgba(148,163,184,.08));border:1px solid var(--border,#334155);border-radius:10px;padding:12px 14px;">
+       <div class="text-dim" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">${label}</div>
+       <div class="${cls || ''}" style="font-size:19px;font-weight:700;">${val}</div>
+       ${sub ? `<div class="text-dim" style="font-size:11.5px;margin-top:3px;">${sub}</div>` : ""}
+     </div>`;
+
+  let html = `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+    ${tile("Projected delivered GMV", money(gmv), "text-blue", `${res.key} · ${fcPcs(confPcs)} pcs · delivery rate ${blendedDr === null ? "—" : (blendedDr * 100).toFixed(0) + "%"}`)}`;
+
+  if (target === null) {
+    html += tile("Target", "— not set —", "text-dim", "Type a delivered-GMV target above");
+    html += `</div><p class="text-dim" style="font-size:13px;margin:0;">Enter a target to see the gap, how many extra pieces it needs, and what delivery rate would close it without selling anything more.</p>`;
+  } else {
+    const gap = target - gmv;
+    const gapPct = gmv > 0 ? (gap / gmv) * 100 : null;
+    const onTrack = gap <= 0;
+    html += tile("Target (delivered)", money(target), "", "your number");
+    html += tile(onTrack ? "Surplus" : "Gap", (onTrack ? "+" : "") + money(Math.abs(gap)),
+      onTrack ? "text-green" : "text-red",
+      gapPct === null ? "" : `${gap > 0 ? "+" : ""}${gapPct.toFixed(1)}% vs projected`);
+    html += `</div>`;
+
+    if (onTrack) {
+      html += `<p style="font-size:13.5px;margin:0;"><span class="badge-outline green">On track</span> The forecast already clears the target by ${money(-gap)}.</p>`;
+    } else {
+      const extraPcs = gmvPerPiece > 0 ? gap / gmvPerPiece : null;
+      const headTotal = push.reduce((s, p) => s + p.headGmv, 0);
+      const shift = fcMixShift(live, gap);
+      const shiftLine = shift.movedPcs <= 0
+        ? `<span class="text-dim">no useful shift available</span> — the SKUs with spare stock don't deliver better than the ones you'd move volume away from.`
+        : `move <strong>${fcPcs(shift.movedPcs)}</strong> pieces (<strong>${confPcs > 0 ? ((shift.movedPcs / confPcs) * 100).toFixed(1) : "—"}%</strong> of the plan) out of weak-delivery SKUs and into strong-delivery ones that already have the stock: <strong class="text-green">+${money(shift.gain)}</strong>${shift.gain >= gap ? " — closes the gap on its own." : `, leaving ${money(gap - shift.gain)}.`}`;
+      html += `<div style="display:grid;gap:8px;font-size:13.5px;">
+        <div><span class="badge-outline blue">Route 1 · volume</span> sell <strong>${fcPcs(extraPcs)}</strong> more pieces (about <strong>${confPcs > 0 ? ((extraPcs / confPcs) * 100).toFixed(1) : "—"}%</strong> above the forecast), at today's price and delivery mix.</div>
+        <div><span class="badge-outline purple">Route 2 · mix shift</span> ${shiftLine}</div>
+        <div><span class="badge-outline ${headTotal >= gap ? "green" : "orange"}">Stock check</span> stock already on hand beyond the forecast could support about <strong>${money(headTotal)}</strong> of extra delivered GMV — ${headTotal >= gap ? "enough to cover this gap." : `<span class="text-orange">short of the gap by ${money(gap - headTotal)}; the rest needs inbound.</span>`}</div>
+      </div>`;
+      if (shift.moves.length) {
+        html += `<div style="margin-top:12px;"><div class="text-dim" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">The shift — push these, ease off those (stock-capped, ${(FC_MIX_MAX_DONOR * 100).toFixed(0)}% max off any one SKU)</div>
+        <div class="table-responsive"><table class="data-table"><thead><tr>
+          <th>Move</th><th>SKU</th><th>Name</th><th class="num">Pieces</th><th class="num">DR</th><th class="num">EGP / piece</th><th class="num">GMV effect</th>
+        </tr></thead><tbody>${shift.moves.slice(0, 10).map(m => `<tr>
+          <td><span class="badge-outline ${m.dir === "up" ? "green" : "orange"}">${m.dir === "up" ? "Push +" : "Ease −"}</span></td>
+          <td class="font-mono text-dim">${m.sku}</td>
+          <td class="truncate-cell" title="${m.name || ""}">${m.name || "—"}</td>
+          <td class="num">${fcPcs(m.pcs)}</td>
+          <td class="num">${(m.dr * 100).toFixed(0)}%</td>
+          <td class="num">${money(m.vpp)}</td>
+          <td class="num ${m.dir === "up" ? "text-green" : "text-red"}">${m.dir === "up" ? "+" : "−"}${money(m.pcs * m.vpp)}</td>
+        </tr>`).join("")}</tbody></table></div></div>`;
+      }
+      push.sort((a, b) => b.headGmv - a.headGmv);
+      const top = push.slice(0, 8);
+      if (top.length) {
+        html += `<div style="margin-top:12px;"><div class="text-dim" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Where the headroom is — stock on hand beyond the forecast</div>
+        <div class="table-responsive"><table class="data-table"><thead><tr>
+          <th>SKU</th><th>Name</th><th class="num">Spare stock</th><th class="num">ASP</th><th class="num">DR</th><th class="num">Extra GMV if sold</th>
+        </tr></thead><tbody>${top.map(p => `<tr>
+          <td class="font-mono text-dim">${p.sku}</td>
+          <td class="truncate-cell" title="${p.name || ""}">${p.name || "—"}</td>
+          <td class="num">${fcPcs(p.headPcs)}</td>
+          <td class="num">${money(p.asp)}</td>
+          <td class="num">${(p.dr * 100).toFixed(0)}%</td>
+          <td class="num text-green font-bold">${money(p.headGmv)}</td>
+        </tr>`).join("")}</tbody></table></div></div>`;
+      }
+    }
+  }
+  if (unpriced > 0) {
+    html += `<p class="text-dim" style="font-size:12px;margin-top:10px;">${unpriced} of ${res.rows.length} SKUs (${fcPcs(unpricedPcs)} pcs) had no recent delivered sales to read a price and delivery rate from, so they're left out of the money figures — the real GMV is a little higher than shown.</p>`;
+  }
+  body.innerHTML = html;
 }
 
 function fcRenderMethod() {
@@ -11537,7 +11779,8 @@ function fcRenderMethod() {
       ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use one fixed method instead."],
       ["Intermittent demand (B & C)", "B and C are thin, gappy series — most days sell nothing — so they use TSB, the standard intermittent-demand model. It tracks the size of a sale and the probability of selling on any given day separately, and fades a SKU down as quiet days accumulate instead of freezing it at its last rate. Measured leave-one-out on 7 real months, parameters chosen only from the other months: B 11.9% → 15.6% accuracy (bias −14% → −9%), C 5.1% → 6.0% (bias −49% → −45%). Segment A keeps its own method — TSB scored 47.8% there vs 55.8%."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
-      ["Forecast combination (A)", "Picking one winning method is a single point of failure — when the pick is wrong, the whole segment is wrong with it. So segment A's final number is 70% the plain average of all the recent-rate rules and 30% the picked method. Averaging is parameter-free (nothing fitted, nothing to overfit). Measured on 7 real months: accuracy 55.8% → 57.6%, and the worst month lifts from 33.9% to 46.1% with bias unchanged — its real value is insurance against a bad month, not a uniform gain."],
+      ["Forecast combination (A)", "Picking one winning method is a single point of failure — when the pick is wrong, the whole segment is wrong with it. So segment A's final number is 70% the plain average of all the recent-rate rules and 30% a second method. Averaging is parameter-free (nothing fitted, nothing to overfit). Measured on 7 real months: accuracy 55.8% → 57.6%, and the worst month lifts from 33.9% to 46.1% with bias unchanged."],
+      ["The 30% partner (A)", "That second method is TSB, the intermittent-demand model — fixed, not re-picked each month. It is the weakest single method for segment A on its own (47.8% against the recent-rate rules' 55.8%), which is precisely why it earns the slot: it reads demand in a completely different way, so it corrects errors the recent-window rules all make together. Measured leave-one-out it won that slot in all 7 months independently — 58.75% against 57.60% for re-picking the partner each month. In a blend, being different is worth more than being individually strong."],
       ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
@@ -12026,6 +12269,22 @@ function fcWireControlsOnce() {
     fcState.conf = Number(btn.getAttribute("data-conf")) || 80;
     fcRenderTrustTable(); fcRenderSkuTable();
   }));
+  // GMV target: remembered between visits, re-renders as you type (no reload —
+  // it only re-reads the already-computed forecast).
+  const gt = $("fcGmvTargetInput");
+  if (gt) {
+    try { const saved = localStorage.getItem(FC_GMV_TARGET_KEY); if (saved) gt.value = saved; } catch (e) { }
+    gt.addEventListener("input", () => {
+      try { localStorage.setItem(FC_GMV_TARGET_KEY, gt.value || ""); } catch (e) { }
+      fcRenderGmvTarget();
+    });
+  }
+  on("fcGmvTargetClear", "click", () => {
+    const el = $("fcGmvTargetInput");
+    if (el) el.value = "";
+    try { localStorage.removeItem(FC_GMV_TARGET_KEY); } catch (e) { }
+    fcRenderGmvTarget();
+  });
   document.querySelectorAll("#fcLevelToggle .segmented-btn").forEach(btn => btn.addEventListener("click", () => {
     const want = btn.getAttribute("data-level") === "raw" ? "raw" : "single";
     if (want === (fcState.level || "single")) return;
