@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.99";
+const APP_VERSION = "1.2.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11948,7 +11948,7 @@ function fcRenderMethod() {
   ];
   const tail = [
     ["Blending", "When the winning method is model-based: Final = w × ML + (1 − w) × Baseline. w rises when the model agrees with the behavior pattern and volatility is moderate, and drops when they conflict."],
-    ["Guardrails & V2", "Every forecast is capped by rules for its behavior pattern (below), so it can't run away. SKUs that missed by 100%+ last month, or that are thin and erratic, get flagged 'V2' and their deviation from the baseline is halved (toggle V2 on/off)."],
+    ["Guardrails & risk flags", "Caps per behavior pattern (below) stop any forecast running away. Separately, SKUs that missed by 100%+ last month, or that are thin and erratic, are flagged 'Risky' — that is a warning about confidence, not a change to the number."],
     ["No leakage, ever", "A backtest for any month trains only on month-pairs that ended before it, then checks the real result. The Naive column shows what just repeating last month would have scored — so Lift = what the model actually adds over doing nothing."]
   ];
   const specific = monthly
@@ -12102,7 +12102,7 @@ function fcRenderKpis() {
     : (FC_MODE_LABEL[res.mode] || res.mode);
   if (sub) sub.textContent = `${modeLabel} · source window ${res.sourceLabel} · ${trained}`;
   const cards = [];
-  cards.push(fcKpi("Total Forecast", fcPcs(total), `${fcPcs(rows.length)} SKUs · ${res.granularity === "horizon" ? `next ${res.dim} days` : `${fcPcs(flagged)} flagged by V2 · ${res.dim} days`}`, "text-blue"));
+  cards.push(fcKpi("Total Forecast", fcPcs(total), `${fcPcs(rows.length)} SKUs · ${res.granularity === "horizon" ? `next ${res.dim} days` : `${fcPcs(flagged)} flagged as unreliable · ${res.dim} days`}`, "text-blue"));
   if (res.mode === "backtest") {
     const acc = fcAccuracy(rows, fcState.band);
     const accEx = fcAccuracy(rows.filter(r => !r.flagged), fcState.band);
@@ -12180,20 +12180,55 @@ function fcRenderSegmentTable() {
   const picks = res && res.segPicks;
   if (!picks || !Object.keys(picks).length) { wrap.classList.add("hidden"); return; }
   wrap.classList.remove("hidden");
+
+  // The real thing: how the final forecast actually scored per segment across
+  // every backtest month — not how one candidate scored while being chosen.
+  const eng = fcActiveEngine();
+  const bts = (eng ? eng.results : []).filter(r => r.mode === "backtest");
+  const real = {};
+  FC_SEGMENTS.forEach(sg => { real[sg.key] = { ae: 0, sa: 0, nAe: 0, n: 0 }; });
+  bts.forEach(r => r.rows.forEach(x => {
+    if (x.actual === null || x.actual === undefined) return;
+    const o = real[x.seg]; if (!o) return;
+    o.ae += Math.abs(x.forecast - x.actual);
+    o.sa += x.actual;
+    o.nAe += Math.abs((x.srcTotal * (r.dim / FC_WINDOW_DAYS)) - x.actual); // plain "repeat last 30 days"
+    o.n++;
+  }));
+
+  // What each segment's number is actually made of, in order.
+  const recipe = (seg) => {
+    const parts = [];
+    if (seg === "A") {
+      parts.push(`${Math.round(FC_ENSEMBLE_W * 100)}% average of the recent-rate rules`);
+      parts.push(`${Math.round((1 - FC_ENSEMBLE_W) * 100)}% TSB`);
+    } else {
+      parts.push("TSB (intermittent demand)");
+    }
+    parts.push("price-change adjustment");
+    if (seg === "A") parts.push(`stock ceiling ×${FC_STOCK_CAP_A}`);
+    if (FC_RESID_SEGMENTS[seg]) parts.push("error-correction model");
+    return parts.join(" → ");
+  };
+
   body.innerHTML = FC_SEGMENTS.map(sg => {
-    const p = picks[sg.key];
     const rows = res.rows.filter(r => r.seg === sg.key);
     const fc = rows.reduce((s2, r) => s2 + r.forecast, 0);
-    if (!p) return `<tr><td>${sg.label}</td><td class="num">${fcPcs(rows.length)}</td><td class="num text-blue">${fcPcs(fc)}</td><td class="text-dim">Not enough history yet — using ${FC_CAND_BY_KEY[FC_COLD_START_CAND].label}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`;
-    const lift = (p.naiveAccuracy === null) ? null : p.accuracy - p.naiveAccuracy;
+    const o = real[sg.key];
+    const acc = (o && o.sa > 0) ? Math.max(0, (1 - o.ae / o.sa) * 100) : null;
+    const naive = (o && o.sa > 0) ? Math.max(0, (1 - o.nAe / o.sa) * 100) : null;
+    const lift = (acc === null || naive === null) ? null : acc - naive;
     const cls = lift === null ? "" : (lift >= 0 ? "text-green" : "text-red");
+    const corr = FC_RESID_SEGMENTS[sg.key]
+      ? `<span class="badge-outline green">on</span>`
+      : `<span class="text-dim">—</span>`;
     return `<tr>
       <td>${sg.label}</td>
       <td class="num">${fcPcs(rows.length)}</td>
       <td class="num text-blue font-bold">${fcPcs(fc)}</td>
-      <td>${p.cand.label}</td>
-      <td class="num">×${p.calib.toFixed(2)}</td>
-      <td class="num">${fcPct(p.accuracy)}</td>
+      <td class="text-dim" style="font-size:12px;">${recipe(sg.key)}</td>
+      <td class="num">${corr}</td>
+      <td class="num font-bold">${fcPct(acc)}</td>
       <td class="num ${cls}">${lift === null ? "—" : (lift > 0 ? "+" : "") + lift.toFixed(1)}</td>
     </tr>`;
   }).join("");
@@ -12284,11 +12319,11 @@ function fcColumns(res) {
     { key: "prodCat", label: "Category", cls: "truncate-cell", title: "Product category." },
     { key: "cat", label: "Behavior", title: "Demand behavior in the source window: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky." },
     { key: "seg", label: "Size", title: "Volume segment from the source window: A = 100+ pieces a month, B = 30 to 99, C = under 30. The forecasting method is chosen per segment." },
-    { key: "method", label: "Method", cls: "truncate-cell", title: "The method that won for this SKU's size segment on earlier months." },
+    { key: "method", label: "Method", cls: "truncate-cell", title: "How this SKU's forecast is built. Segment A blends the average of the recent-rate rules with TSB; B and C use TSB. A price-change adjustment, and for A a stock ceiling, are applied on top — and B/C get an error-correction model." },
     { key: "srcTotal", label: res.srcColLabel || "Last 30d", num: true, title: res.srcColLabel ? "Confirmed pieces in the source month." : "Confirmed pieces in the 30-day source window." },
-    { key: "baseline", label: "Baseline", num: true, title: "Category baseline (see How it works)." },
-    { key: "ml", label: "ML", num: true, title: "Model output before blending (hurdle p × amount for Non-Linear / Volatile)." },
-    { key: "w", label: "w", num: true, title: "Weight on ML: Final = w × ML + (1 − w) × Baseline." },
+    { key: "baseline", label: "Baseline (ref)", num: true, title: "Reference only — does NOT feed the forecast. The rule-of-thumb estimate for this SKU's behavior pattern, kept on screen so you can sanity-check the forecast against something simple and explainable." },
+    { key: "ml", label: "ML (ref)", num: true, title: "Reference only — does NOT feed the forecast. What a model predicting demand directly would have said. Tested exhaustively against every weighting: it earns zero weight, so the forecast ignores it. (The model that IS used works differently — it corrects the forecast's own past errors on segments B and C.)" },
+    { key: "w", label: "w (ref)", num: true, title: "Reference only — the weight this SKU would get on ML if a model-based method were selected. None currently is, so this does not affect the forecast." },
     { key: "forecast", label: "Forecast", num: true, cls: "text-blue font-bold", title: "Final forecast for the target month, after guardrails (and V2 when flagged)." },
     { key: "fMin", label: `${fcState.conf}% Range`, num: true, title: `Where the real number lands ${fcState.conf} times out of 100, measured from how far past forecasts actually missed for this size segment. A narrower level gives a tighter range that holds less often — the measured coverage is in the trust panel.` }
   ];
@@ -12336,7 +12371,7 @@ function fcCell(col, r, res) {
   switch (col.key) {
     case "cat": {
       const b = `<span class="badge-outline ${FC_CAT_BADGE[r.cat] || "gray"}">${r.cat}</span>`;
-      return r.flagged ? `${b} <span class="badge-outline yellow" title="${r.flagReason}${fcState.v2 ? " — deviation from baseline halved (V2)" : ""}">V2</span>` : b;
+      return r.flagged ? `${b} <span class="badge-outline yellow" title="${r.flagReason}. A reliability warning, not a correction — treat this SKU's number with less confidence.">Risky</span>` : b;
     }
     case "seg": return `<span class="badge-outline ${r.seg === "A" ? "green" : (r.seg === "B" ? "blue" : "gray")}">${r.seg}</span>`;
     case "ml": return r.ml === null ? "—" : fcPcs(r.ml);

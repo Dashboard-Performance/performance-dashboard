@@ -3091,7 +3091,11 @@
                   <button type="button" class="segmented-btn active" data-band="25">±25%</button>
                   <button type="button" class="segmented-btn" data-band="35">±35%</button>
                 </div>
-                <div class="segmented" id="fcV2Toggle" title="V2 outlier correction: SKUs that missed by more than 100% last month, or are sparse and volatile, get their deviation from baseline halved.">
+                <!-- V2 damped model-based forecasts only. No segment uses a model-based
+                     method any more (measured: toggling it changes 0 of 7,997 rows), so the
+                     control is hidden rather than left there pretending to do something. The
+                     flag itself is still shown per SKU as a reliability warning. -->
+                <div class="segmented hidden" id="fcV2Toggle">
                   <button type="button" class="segmented-btn active" data-v2="on">V2 On</button>
                   <button type="button" class="segmented-btn" data-v2="off">V2 Off</button>
                 </div>
@@ -3153,7 +3157,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
                   <h2>Method by SKU Size</h2>
-                  <p>The method is not fixed — for each size segment the dashboard uses whatever actually won on earlier months, plus a calibration for that segment's systematic bias.</p>
+                  <p>Each size segment is forecast differently, because different things work at different volumes. The accuracy here is the real result on past months — the final number after every step, not the score of any single method.</p>
                 </div>
               </div>
               <div class="table-responsive">
@@ -3163,10 +3167,10 @@
                       <th>Segment</th>
                       <th class="num">SKUs</th>
                       <th class="num text-blue">Forecast</th>
-                      <th>Method Chosen</th>
-                      <th class="num" title="Corrects the segment's systematic over/under-forecast, clamped to ±25%.">Calibration</th>
-                      <th class="num" title="Accuracy this method scored on the earlier months it was chosen from.">Accuracy Then</th>
-                      <th class="num" title="How much it beat plain 'last 30 days' by, on those months.">vs Last 30d</th>
+                      <th title="Every step that produces this segment's number, in order.">How It's Built</th>
+                      <th class="num" title="Whether a model correcting the forecast's own past errors is applied to this segment.">Error Correction</th>
+                      <th class="num" title="The real measured accuracy of the final forecast for this segment, across every backtest month (1 − WAPE).">Measured Accuracy</th>
+                      <th class="num" title="How far the final forecast beats simply repeating the last 30 days, on the same SKUs and months.">vs Last 30d</th>
                     </tr>
                   </thead>
                   <tbody id="fcSegTableBody"></tbody>
