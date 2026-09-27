@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.96";
+const APP_VERSION = "1.1.98";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -54,6 +54,11 @@ const IRQ_INVENTORY_GID = "133618857";
 // Forecast Model — daily demand history (April–July). Read lazily, only when
 // the Forecast Model tab is opened (never part of the startup snapshot).
 const FORECAST_HISTORY_GID = "1338407774";
+// Forecast Model — price-change history: one row per SKU per price-validity
+// window (VALID_FROM_DATE, PRODUCT_BASE_PRICE, PREV_PRICE, …). Read lazily
+// with the demand history. This is the set price the business actually chose,
+// not a realised average — which is what makes it usable (see fcPriceAdjust).
+const PRICE_HISTORY_GID = "1968659230";
 // شيت "Merchant Segmentation" الجديد (تحت Performance Merchant's / Merchant
 // Segmentation & Projections) — صف واحد لكل (Merchant × Month)، بالأعمدة
 // (0-based): 0 MONTH, 1 COUNTRY, 2 TAGER_ID, 3 TAGER_NAME, 4 ACC_MANAGER,
@@ -10426,6 +10431,66 @@ function fcAccuracy(rows, bandPct) {
 // inbound) × this. See the cap site in build() for the measured rationale.
 const FC_STOCK_CAP_A = 2.5;
 
+// Price elasticity. The demand history alone cannot see a price change: if a
+// SKU's price went up last week, the last 30 days were sold at the OLD price
+// and every recent-rate rule will over-forecast the coming month. This closes
+// that blind spot — forecast × (new price ÷ price the source window sold at)^E.
+// Leakage-safe: both prices are already set and known at the forecast cutoff.
+//
+// E must come from the SET price, not the realised ASP. Measured on realised
+// ASP the "elasticity" comes out at +1.47 — price up, demand up — which is
+// mix contamination (a richer sales mix lifts average price and volume at the
+// same time), and building on it would have told you to raise prices to sell
+// more. Measured on the real set-price changes in the price-history tab the
+// sign flips to where economics says it should be: −0.51 for segment A,
+// −0.53 overall. Leave-one-out picked −0.5 to −0.7 in every month, and the
+// accuracy curve is flat across that range, so −0.6 is the middle of a stable
+// plateau rather than a tuned point.
+//
+// Measured effect, on the SKUs whose price actually moved: A 62.1% → 63.3%,
+// C 11.9% → 13.0%, B 21.9% → 22.0%. Across all SKUs that dilutes to about
+// +0.24 (A) and +0.10 (C), because only ~a third of SKUs reprice in a month.
+const FC_PRICE_ELASTICITY = -0.6;
+
+// Builds sku -> [{from, price}] from the price-history tab, and answers "what
+// was this SKU's price on this date". Returns null when the tab is missing, in
+// which case the adjustment is simply skipped.
+function fcBuildPriceTimeline(rows) {
+  if (!rows || !rows.length) return null;
+  const bySku = new Map();
+  rows.forEach(r => {
+    if (!r.sku || !r.from || !(r.price > 0)) return;
+    if (!bySku.has(r.sku)) bySku.set(r.sku, []);
+    bySku.get(r.sku).push({ t: r.from.getTime(), price: r.price });
+  });
+  bySku.forEach(list => list.sort((a, b) => a.t - b.t));
+  return {
+    at(sku, date) {
+      const l = bySku.get(sku);
+      if (!l || !date) return null;
+      const t = date.getTime();
+      let cur = null;
+      for (const p of l) { if (p.t <= t) cur = p.price; else break; }
+      return cur;
+    },
+    size: bySku.size
+  };
+}
+
+// The multiplier for one SKU: how its price at the start of the target month
+// compares with the price its source window actually sold at. 1 when either
+// price is unknown or nothing changed.
+function fcPriceAdjust(timeline, sku, srcStartDate, srcEndDate, targetStartDate) {
+  if (!timeline) return 1;
+  const p1 = timeline.at(sku, srcStartDate), p2 = timeline.at(sku, srcEndDate), p3 = timeline.at(sku, targetStartDate);
+  if (!(p1 > 0) || !(p2 > 0) || !(p3 > 0)) return 1;
+  const sourceWindowPrice = (p1 + p2) / 2;
+  if (!(sourceWindowPrice > 0)) return 1;
+  const ratio = p3 / sourceWindowPrice;
+  if (!(ratio > 0) || Math.abs(Math.log(ratio)) <= 0.001) return 1;
+  return Math.pow(ratio, FC_PRICE_ELASTICITY);
+}
+
 // Availability index: per SKU, per target month, how many pieces could have
 // been supplied = that month's beginning inventory + that month's inbound.
 // Built once from the Metabase beginning-inventory and inbound tabs already
@@ -10481,6 +10546,7 @@ function fcBuildAvailIndex() {
 function fcRunEngine(sd, today, opts) {
   const o = Object.assign({ v2: true }, opts || {});
   const avail = o.avail !== undefined ? o.avail : fcBuildAvailIndex();
+  const priceTl = o.priceTimeline || null;
   const months = fcMonths(sd);
   const results = [];
   if (!months.length) return { months, results };
@@ -10647,6 +10713,11 @@ function fcRunEngine(sd, today, opts) {
       const methodLabel = (seg === "A" && ensemble !== null)
         ? `${Math.round(FC_ENSEMBLE_W * 100)}% average of rules + ${Math.round((1 - FC_ENSEMBLE_W) * 100)}% ${cand.label}`
         : cand.label;
+      // Price change the demand history can't see (see FC_PRICE_ELASTICITY).
+      const priceMult = fcPriceAdjust(priceTl, sku,
+        sd.days[Math.max(0, srcEnd - FC_WINDOW_DAYS + 1)], sd.days[srcEnd],
+        target.startIdx !== undefined ? sd.days[target.startIdx] : sd.days[sd.lastFullIdx]);
+      if (priceMult !== 1) raw *= priceMult;
       let forecast = raw * scale;
       // Stock ceiling (segment A only). The model's worst misses are wild
       // over-forecasts on SKUs whose available stock couldn't have supported
@@ -11002,9 +11073,20 @@ function fcSegmentOf(total) { return total >= 100 ? "A" : (total >= 30 ? "B" : "
 // B 11.9% → 15.6% accuracy with bias improving −14% → −9%, C 5.1% → 6.0% with
 // bias −49% → −45%. Segment A is left alone: TSB scored 47.8% there vs the
 // current method's 55.8%.
-function fcTsbRate(arr, endIdx, alpha, beta) {
+// Cached: TSB is a running update, so the rate at every index can be built in
+// one pass over the series and then read back in O(1). Without this the
+// rolling 7/14-day engines re-walk the whole series once per SKU per anchor
+// per candidate — which is what made this tab take minutes to open.
+const FC_TSB_CACHE = new WeakMap();
+function fcTsbSeries(arr, alpha, beta) {
+  let perParams = FC_TSB_CACHE.get(arr);
+  if (!perParams) { perParams = new Map(); FC_TSB_CACHE.set(arr, perParams); }
+  const key = alpha + ":" + beta;
+  const hit = perParams.get(key);
+  if (hit) return hit;
+  const pre = new Float64Array(arr.length);
   let size = null, prob = 0, started = false;
-  for (let i = 0; i <= endIdx; i++) {
+  for (let i = 0; i < arr.length; i++) {
     const d = arr[i] || 0;
     if (d > 0) {
       if (!started) { size = d; started = true; } else { size = alpha * d + (1 - alpha) * size; }
@@ -11012,8 +11094,15 @@ function fcTsbRate(arr, endIdx, alpha, beta) {
     } else {
       prob = (1 - beta) * prob;
     }
+    pre[i] = started ? prob * size : 0;
   }
-  return started ? prob * size : 0;
+  perParams.set(key, pre);
+  return pre;
+}
+function fcTsbRate(arr, endIdx, alpha, beta) {
+  if (endIdx < 0 || !arr || !arr.length) return 0;
+  const pre = fcTsbSeries(arr, alpha, beta);
+  return pre[Math.min(endIdx, pre.length - 1)];
 }
 
 const FC_CANDIDATES = [
@@ -11379,6 +11468,27 @@ function fcMainSignature() {
   return `${rows.length}|${maxTs}|${Math.round(sum)}`;
 }
 
+// Price-change history. Small tab (a few thousand rows), fetched alongside the
+// demand history. Any failure is non-fatal: the forecast just runs without the
+// price adjustment.
+async function fcLoadPriceHistory() {
+  const res = await fcLoadGvizQuery(PRICE_HISTORY_GID, "select A, C, G", 120000);
+  const parseDate = (v) => {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    const m = /Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/.exec(String(v));
+    return m ? new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : null;
+  };
+  const rows = [];
+  (res.table.rows || []).forEach(r => {
+    const sku = r.c[0] && r.c[0].v;
+    const from = parseDate(r.c[1] && r.c[1].v);
+    const price = r.c[2] ? Number(r.c[2].v) : null;
+    if (sku && from && price > 0) rows.push({ sku, from, price });
+  });
+  return rows;
+}
+
 async function prepareForecastModelView(forceReload) {
   fcWireControlsOnce();
   if (fcState.loading) return;
@@ -11390,12 +11500,24 @@ async function prepareForecastModelView(forceReload) {
     if (needHist) {
       fcState.histError = null;
       fcSetProgress("Connecting to the history tab…", 3); await fcNextFrame();
-      try {
-        const res = await fcLoadHistory((s, p) => fcSetProgress(s, p));
-        fcState.hist = res.rows; fcState.histMeta = res.meta;
-      } catch (e) {
+      // Both tabs are fetched at once — the price history is small and there is
+      // no reason to make it wait for the much larger demand history.
+      const wantPrices = !fcState.priceTimeline;
+      const [histOut, priceOut] = await Promise.all([
+        fcLoadHistory((s, p) => fcSetProgress(s, p)).then(r => ({ ok: true, r }), e => ({ ok: false, e })),
+        wantPrices
+          ? fcLoadPriceHistory().then(r => ({ ok: true, r }), e => ({ ok: false, e }))
+          : Promise.resolve(null)
+      ]);
+      if (histOut.ok) {
+        fcState.hist = histOut.r.rows; fcState.histMeta = histOut.r.meta;
+      } else {
         fcState.hist = null; fcState.histMeta = null;
-        fcState.histError = { message: e.message || String(e), labels: e.labels || null };
+        fcState.histError = { message: histOut.e.message || String(histOut.e), labels: histOut.e.labels || null };
+      }
+      if (priceOut) {
+        if (priceOut.ok) { try { fcState.priceTimeline = fcBuildPriceTimeline(priceOut.r); } catch (e) { fcState.priceTimeline = null; } }
+        else { fcState.priceTimeline = null; console.warn("price history unavailable", priceOut.e); }
       }
     }
     const rawLevel = fcState.level === "raw";
@@ -11422,13 +11544,16 @@ async function prepareForecastModelView(forceReload) {
       engine = fcRunEngineMonthly(sd, ms, { v2: fcState.v2 });
     } else {
       fcState.monthly = null;
-      engine = fcRunEngine(sd, new Date(), { v2: fcState.v2 });
+      engine = fcRunEngine(sd, new Date(), { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
     }
     fcSetProgress("Forecasting the next 7 / 14 / 30 days…", 80); await fcNextFrame();
     const engines = { month: engine };
     if (!gran.monthly) {
       // Rolling horizons only make sense with real daily history.
-      FC_HORIZONS.forEach(H => { try { engines["H" + H] = fcRunHorizonEngine(sd, H, { v2: fcState.v2 }); } catch (e) { console.warn("horizon " + H + " failed", e); } });
+      // Built on demand instead of here: the 7- and 14-day engines cost about
+      // 45s and 115s respectively (they re-score every candidate at every
+      // rolling anchor), and most visits never leave the Month view. They are
+      // now created the first time their horizon is actually selected.
     }
     fcSetProgress("Scoring and ranking…", 90); await fcNextFrame();
     Object.values(engines).forEach(e => fcEnrichResults(e));
@@ -11781,6 +11906,7 @@ function fcRenderMethod() {
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
       ["Forecast combination (A)", "Picking one winning method is a single point of failure — when the pick is wrong, the whole segment is wrong with it. So segment A's final number is 70% the plain average of all the recent-rate rules and 30% a second method. Averaging is parameter-free (nothing fitted, nothing to overfit). Measured on 7 real months: accuracy 55.8% → 57.6%, and the worst month lifts from 33.9% to 46.1% with bias unchanged."],
       ["The 30% partner (A)", "That second method is TSB, the intermittent-demand model — fixed, not re-picked each month. It is the weakest single method for segment A on its own (47.8% against the recent-rate rules' 55.8%), which is precisely why it earns the slot: it reads demand in a completely different way, so it corrects errors the recent-window rules all make together. Measured leave-one-out it won that slot in all 7 months independently — 58.75% against 57.60% for re-picking the partner each month. In a blend, being different is worth more than being individually strong."],
+      ["Price changes", "The demand history cannot see a price change: if a SKU was repriced last week, the last 30 days were sold at the old price and every recent-rate rule over- or under-forecasts the coming month. So the forecast is multiplied by (new price ÷ the price the source window actually sold at) raised to −0.6. Both prices are already set and known at the cutoff, so there is no leakage. The elasticity comes from real set-price changes, not from average selling price — measured on ASP it comes out positive (price up, demand up), which is mix contamination and would have told you to raise prices to sell more. On the SKUs that actually repriced: A 62.1% → 63.3%, C 11.9% → 13.0%."],
       ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
@@ -11858,7 +11984,10 @@ function fcRenderStatus() {
 // the target alone just re-points at a different result in the same engine.
 function fcFamilies() {
   const list = [{ key: "month", label: "Month" }];
-  FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => { if (fcState.engines["H" + H]) list.push({ key: "H" + H, label: H + " Day" }); });
+  // Listed even before the engine exists — picking one builds it (see the
+  // fcHorizonSelect handler). Only offered with real daily history.
+  const daily = !(fcState.granularity && fcState.granularity.monthly);
+  if (daily && fcState.series) FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => list.push({ key: "H" + H, label: H + " Day" }));
   return list;
 }
 function fcNextKeyOf(familyKey) {
@@ -12226,10 +12355,27 @@ function fcWireControlsOnce() {
   if (fcState.wired) return;
   fcState.wired = true;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
-  on("fcHorizonSelect", "change", (e) => {
-    fcState.family = String(e.target.value);
+  on("fcHorizonSelect", "change", async (e) => {
+    const fam = String(e.target.value);
+    fcState.family = fam;
+    fcState.catFilter = "";
+    // First time a rolling horizon is picked, build its engine now.
+    if (fam !== "month" && !fcState.engines[fam] && fcState.series) {
+      const H = Number(fam.slice(1));
+      fcSetProgress(`Building the ${H}-day forecast…`, 30);
+      await fcNextFrame();
+      try {
+        const eng = fcRunHorizonEngine(fcState.series, H, { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
+        fcEnrichResults(eng);
+        fcState.engines[fam] = eng;
+      } catch (err) {
+        console.warn("horizon " + H + " failed", err);
+        fcState.family = "month";
+      }
+      fcSetProgress(null);
+    }
     fcState.target = fcNextKeyOf(fcState.family);
-    fcState.catFilter = ""; fcRenderAll();
+    fcRenderAll();
   });
   on("fcTargetSelect", "change", (e) => {
     fcState.target = String(e.target.value);
