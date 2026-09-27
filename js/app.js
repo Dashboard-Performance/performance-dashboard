@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.91";
+const APP_VERSION = "1.1.92";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10974,8 +10974,36 @@ const FC_SEGMENTS = [
   { key: "C", label: "C — under 30", min: 0 }
 ];
 function fcSegmentOf(total) { return total >= 100 ? "A" : (total >= 30 ? "B" : "C"); }
+// TSB (Teunter–Syntetos–Babai) — the standard model for intermittent demand:
+// it tracks two things separately, the size of a sale when one happens and the
+// probability that any given day has a sale, and multiplies them for a daily
+// rate. Unlike Croston it decays the probability on every zero day, so a SKU
+// that goes quiet is faded down instead of being frozen at its last rate —
+// which is why it fits the thin, gappy B/C series. Measured leave-one-out on 7
+// real backtest months (parameters picked only from the OTHER months):
+// B 11.9% → 15.6% accuracy with bias improving −14% → −9%, C 5.1% → 6.0% with
+// bias −49% → −45%. Segment A is left alone: TSB scored 47.8% there vs the
+// current method's 55.8%.
+function fcTsbRate(arr, endIdx, alpha, beta) {
+  let size = null, prob = 0, started = false;
+  for (let i = 0; i <= endIdx; i++) {
+    const d = arr[i] || 0;
+    if (d > 0) {
+      if (!started) { size = d; started = true; } else { size = alpha * d + (1 - alpha) * size; }
+      prob = beta + (1 - beta) * prob;
+    } else {
+      prob = (1 - beta) * prob;
+    }
+  }
+  return started ? prob * size : 0;
+}
+
 const FC_CANDIDATES = [
   { key: "naive", label: "Last 30 days", fn: (f) => f.total },
+  // α/β below were chosen by leave-one-out across the real backtest months and
+  // came out stable (the same pair won in 6–7 of 7 months), not cherry-picked.
+  { key: "tsb_b", label: "TSB intermittent (α .2 / β .2)", fn: (f, a, E) => fcTsbRate(a, E, 0.2, 0.2) * FC_WINDOW_DAYS },
+  { key: "tsb_c", label: "TSB intermittent (α .5 / β .1)", fn: (f, a, E) => fcTsbRate(a, E, 0.5, 0.1) * FC_WINDOW_DAYS },
   // Every short-window candidate below is capped ±40% of the 30-day naive:
   // measured (7 real backtest months) that a raw extrapolation occasionally
   // way overreacts to a short-term blip — e.g. April 2026 segment A: raw
@@ -11001,11 +11029,14 @@ const FC_CAND_BY_KEY = {};
 FC_CANDIDATES.forEach(c => { FC_CAND_BY_KEY[c.key] = c; });
 const FC_COLD_START_CAND = "mix14_30"; // nothing to learn from yet
 // Segments B and C: measured (7 real backtest months, leave-one-out) that a
-// fixed short lookback beats picking a winner per month from noisy replay
-// scores — see the comment where this is used, in the monthly engine's
-// pickSegments(). Segment A isn't listed here: its dynamic pick + calibration
-// keeps winning, so it's left alone.
-const FC_FIXED_WINDOW_SEG = { B: "last14x", C: "last21x" };
+// FIXED method beats picking a winner per month from noisy replay scores — see
+// the comment where this is used, in the monthly engine's pickSegments().
+// The fixed method is now TSB, the intermittent-demand model (see fcTsbRate):
+// it beat the previous fixed short lookbacks out-of-sample on both accuracy and
+// bias — B 11.9% → 15.6% (bias −14% → −9%), C 5.1% → 6.0% (bias −49% → −45%).
+// Segment A isn't listed here: its dynamic pick + calibration keeps winning
+// (55.8% vs TSB's 47.8%), so it's left alone.
+const FC_FIXED_WINDOW_SEG = { B: "tsb_b", C: "tsb_c" };
 // Confidence levels offered for the range. Narrower = tighter range that holds
 // less often; each level's real coverage is measured and shown, so the trade
 // stays visible instead of hidden.
@@ -11473,7 +11504,8 @@ function fcRenderMethod() {
     : [
       ["Source (daily tab)", "The last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope, momentum, and share of zero days."],
       ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
-      ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use a fixed lookback instead (14 days for B, 21 for C) — it beats dynamic picking out-of-sample."],
+      ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use one fixed method instead."],
+      ["Intermittent demand (B & C)", "B and C are thin, gappy series — most days sell nothing — so they use TSB, the standard intermittent-demand model. It tracks the size of a sale and the probability of selling on any given day separately, and fades a SKU down as quiet days accumulate instead of freezing it at its last rate. Measured leave-one-out on 7 real months, parameters chosen only from the other months: B 11.9% → 15.6% accuracy (bias −14% → −9%), C 5.1% → 6.0% (bias −49% → −45%). Segment A keeps its own method — TSB scored 47.8% there vs 55.8%."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
       ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
