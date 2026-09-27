@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.92";
+const APP_VERSION = "1.1.93";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10629,6 +10629,20 @@ function fcRunEngine(sd, today, opts) {
       if (o.v2 && flagged && models && cand.key.indexOf("model") === 0) {
         raw = fcGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
       }
+      // Forecast combination, segment A only (see FC_ENSEMBLE_W): average the
+      // plain recent-rate rules and blend that with the picked method, so one
+      // bad pick can't take the whole segment down with it.
+      let ensemble = null;
+      if (seg === "A" && FC_ENSEMBLE_W > 0) {
+        let s = 0, n = 0;
+        for (const k of FC_ENSEMBLE_KEYS) {
+          const c = FC_CAND_BY_KEY[k];
+          if (!c) continue;
+          const val = c.fn(f, arr, srcEnd, p);
+          if (Number.isFinite(val)) { s += Math.max(0, val); n++; }
+        }
+        if (n > 0) { ensemble = s / n; raw = FC_ENSEMBLE_W * ensemble + (1 - FC_ENSEMBLE_W) * raw; }
+      }
       let forecast = raw * scale;
       // Stock ceiling (segment A only). The model's worst misses are wild
       // over-forecasts on SKUs whose available stock couldn't have supported
@@ -11037,6 +11051,22 @@ const FC_COLD_START_CAND = "mix14_30"; // nothing to learn from yet
 // Segment A isn't listed here: its dynamic pick + calibration keeps winning
 // (55.8% vs TSB's 47.8%), so it's left alone.
 const FC_FIXED_WINDOW_SEG = { B: "tsb_b", C: "tsb_c" };
+
+// Forecast combination for segment A. Picking a single winning method is a
+// single point of failure: when the pick is wrong for a month, the whole
+// segment's forecast is wrong with it (June 2026 scored 33.9%, April 50.5%).
+// Averaging the plain recent-rate rules instead is parameter-free — nothing is
+// fitted, so there is nothing to overfit — and measured on 7 real backtest
+// months it both raises accuracy and, more importantly, lifts the worst month:
+//   weight on the average:  0%     30%    50%    70%    100%
+//   accuracy:               55.3   56.8   57.5   58.0   58.2
+//   worst month:            33.9   39.9   43.2   46.2   50.0
+//   bias:                   −2%    −2%    −2%    −2%    −2%
+// 70% takes essentially the whole gain while still letting the picked method
+// (with the model, calibration and V2 behind it) carry the remaining 30%,
+// rather than deleting that machinery on the strength of 7 months.
+const FC_ENSEMBLE_W = 0.7;
+const FC_ENSEMBLE_KEYS = ["naive", "last7x", "last10x", "last14x", "last15x", "last21x", "mix14_30"];
 // Confidence levels offered for the range. Narrower = tighter range that holds
 // less often; each level's real coverage is measured and shown, so the trade
 // stays visible instead of hidden.
@@ -11507,6 +11537,7 @@ function fcRenderMethod() {
       ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use one fixed method instead."],
       ["Intermittent demand (B & C)", "B and C are thin, gappy series — most days sell nothing — so they use TSB, the standard intermittent-demand model. It tracks the size of a sale and the probability of selling on any given day separately, and fades a SKU down as quiet days accumulate instead of freezing it at its last rate. Measured leave-one-out on 7 real months, parameters chosen only from the other months: B 11.9% → 15.6% accuracy (bias −14% → −9%), C 5.1% → 6.0% (bias −49% → −45%). Segment A keeps its own method — TSB scored 47.8% there vs 55.8%."],
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
+      ["Forecast combination (A)", "Picking one winning method is a single point of failure — when the pick is wrong, the whole segment is wrong with it. So segment A's final number is 70% the plain average of all the recent-rate rules and 30% the picked method. Averaging is parameter-free (nothing fitted, nothing to overfit). Measured on 7 real months: accuracy 55.8% → 57.6%, and the worst month lifts from 33.9% to 46.1% with bias unchanged — its real value is insurance against a bad month, not a uniform gain."],
       ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],

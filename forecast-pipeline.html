@@ -203,7 +203,7 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
           <div class="seg-card a">
             <div class="label">SEGMENT A</div>
             <div class="vol">100+ pcs / month</div>
-            <div class="method">Method re-scored every run from real backtests. Gets a bias-correction factor (±25% cap) — this is where the ML model actually earns its keep.</div>
+            <div class="method">Method re-scored every run from real backtests + bias correction (±25% cap), then blended <strong>70% with the average of all rules</strong> so one bad pick can't sink the month. Measured: 55.8% → 57.6%, worst month 33.9% → 46.1%.</div>
           </div>
           <div class="seg-card b">
             <div class="label">SEGMENT B</div>
@@ -336,7 +336,7 @@ footer{margin-top:8px; padding-top:20px; border-top:1px solid var(--border); col
   </div>
 
   <footer>
-    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.92) — every formula and cap above is copied from the running code, not summarized from memory.
+    Generated from the live logic in <span class="mono">js/app.js</span> (Forecast Model engine, v1.1.93) — every formula and cap above is copied from the running code, not summarized from memory.
   </footer>
 
 </div>
