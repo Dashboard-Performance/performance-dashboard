@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.1.98";
+const APP_VERSION = "1.1.99";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -10538,6 +10538,66 @@ function fcBuildAvailIndex() {
   } catch (e) { return null; }
 }
 
+// Residual learning ("stacking"): instead of asking a model to predict demand
+// — which it loses at, every way it was tried — ask it to predict how wrong
+// the rule-based forecast will be, and correct by that. It reads the same
+// window features plus the price-change signal, is trained only on months
+// that finished before the one being forecast, and its correction is shrunk
+// toward 1 so a confident-but-wrong model cannot run away with the number.
+//
+// It is applied to B and C only. Measured leave-one-out with a full month's
+// training gap: B 14.98% → 21.14%, C 5.35% → 9.84%. On segment A the same
+// correction measured slightly WORSE (58.11% → 57.70%) — A already has the
+// rules average, the TSB partner and the stock ceiling, and there is no
+// systematic error left there for a model to pick up.
+//
+// Note on what is deliberately NOT a feature: target-month stock. Adding it
+// lifts the backtest hugely (A to 63.4%, B to 29.9%) because the model learns
+// the supply ceiling — but next month's opening stock does not exist yet when
+// the live forecast runs, so that gain is backtest-only and would not survive
+// contact with the real next-month number. Left out on purpose.
+const FC_RESID_SEGMENTS = { B: { lambda: 500, shrink: 0.75 }, C: { lambda: 10, shrink: 1.0 } };
+const FC_RESID_MIN_TRAIN = 200;
+const FC_RESID_CLAMP = 1.5; // max |log correction|, i.e. never more than ~4.5x either way
+
+function fcApplyResidualML(results) {
+  try {
+    if (typeof fcRidgeFit !== "function") return;
+    const done = [];           // backtests already seen, oldest first — the training pool
+    for (const res of results) {
+      const pool = [];
+      done.forEach(r => r.rows.forEach(x => {
+        if (!x.mlx || x.actual === null || x.actual === undefined || !(x.forecast > 0)) return;
+        pool.push({ x: x.mlx, y: Math.log((x.actual + 1) / (x.forecast + 1)) });
+      }));
+      if (pool.length >= FC_RESID_MIN_TRAIN) {
+        const X = pool.map(p => p.x), Y = pool.map(p => p.y);
+        const fitted = {};
+        Object.keys(FC_RESID_SEGMENTS).forEach(seg => {
+          const lam = FC_RESID_SEGMENTS[seg].lambda;
+          if (fitted[lam] === undefined) { try { fitted[lam] = fcRidgeFit(X, Y, lam); } catch (e) { fitted[lam] = null; } }
+        });
+        res.rows.forEach(r => {
+          const cfg = FC_RESID_SEGMENTS[r.seg];
+          if (!cfg || !r.mlx || !(r.forecast > 0)) return;
+          const model = fitted[cfg.lambda];
+          if (!model) return;
+          let pred = 0;
+          try { pred = fcRidgePredict(model, r.mlx); } catch (e) { return; }
+          if (!Number.isFinite(pred)) return;
+          pred = Math.max(-FC_RESID_CLAMP, Math.min(FC_RESID_CLAMP, pred));
+          const mult = Math.exp(cfg.shrink * pred);
+          r.forecast = Math.max(0, r.forecast * mult);
+          if (Number.isFinite(r.fMin)) r.fMin = Math.max(0, r.fMin * mult);
+          if (Number.isFinite(r.fMax)) r.fMax = Math.max(0, r.fMax * mult);
+          r.residualMult = mult;
+        });
+      }
+      if (res.mode === "backtest") done.push(res);
+    }
+  } catch (e) { console.warn("residual model skipped", e); }
+}
+
 // Runs every target month the data allows:
 //   • backtest  — past complete month (forecast from the month before it,
 //                 trained only on pairs that ended before it: no leakage)
@@ -10718,6 +10778,9 @@ function fcRunEngine(sd, today, opts) {
         sd.days[Math.max(0, srcEnd - FC_WINDOW_DAYS + 1)], sd.days[srcEnd],
         target.startIdx !== undefined ? sd.days[target.startIdx] : sd.days[sd.lastFullIdx]);
       if (priceMult !== 1) raw *= priceMult;
+      // Features the residual learner reads (see fcApplyResidualML).
+      const logPriceRatio = priceMult === 1 ? 0 : Math.log(priceMult) / FC_PRICE_ELASTICITY;
+      const mlx = fcFeatureVector(f).concat([logPriceRatio, seg === "A" ? 1 : 0, seg === "B" ? 1 : 0]);
       let forecast = raw * scale;
       // Stock ceiling (segment A only). The model's worst misses are wild
       // over-forecasts on SKUs whose available stock couldn't have supported
@@ -10739,7 +10802,7 @@ function fcRunEngine(sd, today, opts) {
       const band = fcBandPct(p.cat, f);
       rows.push({
         sku, cat: p.cat, srcTotal: f.total, daysSold: f.daysSold, cv: f.cv,
-        seg, method: methodLabel, calib, bandCalibrated: !!cal, stockCap,
+        seg, method: methodLabel, calib, bandCalibrated: !!cal, stockCap, mlx,
         baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
         forecast, fMin: cal ? forecast * cal.lo : forecast * (1 - band), fMax: cal ? forecast * cal.hi : forecast * (1 + band),
         actual, mtd, elapsed, flagged, flagReason
@@ -10782,6 +10845,7 @@ function fcRunEngine(sd, today, opts) {
     const nextT = { key: fcMonthLabel(ny, nm), dim: new Date(ny, nm + 1, 0).getDate() };
     results.push(build("next", nextT, sd.lastFullIdx, windowLabel(sd.lastFullIdx), lastComplete ? lastComplete.endIdx : -1));
   }
+  fcApplyResidualML(results);
   return { months, results };
 }
 // ===== FC_ENGINE_END =====
@@ -11906,6 +11970,7 @@ function fcRenderMethod() {
       ["Calibration", "Segment A's picked method also gets a bias-correction factor (its own average forecast-vs-actual ratio, clamped to ±25%). Measured to help A but hurt B/C, so it's applied to A only."],
       ["Forecast combination (A)", "Picking one winning method is a single point of failure — when the pick is wrong, the whole segment is wrong with it. So segment A's final number is 70% the plain average of all the recent-rate rules and 30% a second method. Averaging is parameter-free (nothing fitted, nothing to overfit). Measured on 7 real months: accuracy 55.8% → 57.6%, and the worst month lifts from 33.9% to 46.1% with bias unchanged."],
       ["The 30% partner (A)", "That second method is TSB, the intermittent-demand model — fixed, not re-picked each month. It is the weakest single method for segment A on its own (47.8% against the recent-rate rules' 55.8%), which is precisely why it earns the slot: it reads demand in a completely different way, so it corrects errors the recent-window rules all make together. Measured leave-one-out it won that slot in all 7 months independently — 58.75% against 57.60% for re-picking the partner each month. In a blend, being different is worth more than being individually strong."],
+      ["Learning from its own errors (B & C)", "A model that tries to predict demand directly loses to the simple rules — tested exhaustively, it earns zero weight. But asking it the other question works: predict how wrong the rule-based forecast will be, then correct by that. A ridge regression reads the same window features plus the price-change signal, trains only on months that finished before the one being forecast, and its correction is shrunk so it can never run away with the number. Measured leave-one-out with a full month of training gap: B 15.0% → 21.1%, C 5.4% → 9.8%, and every single backtest month improves. It is not applied to segment A — there the same correction measured slightly worse, because the rules average, the TSB partner and the stock ceiling have already taken out the systematic error."],
       ["Price changes", "The demand history cannot see a price change: if a SKU was repriced last week, the last 30 days were sold at the old price and every recent-rate rule over- or under-forecasts the coming month. So the forecast is multiplied by (new price ÷ the price the source window actually sold at) raised to −0.6. Both prices are already set and known at the cutoff, so there is no leakage. The elasticity comes from real set-price changes, not from average selling price — measured on ASP it comes out positive (price up, demand up), which is mix contamination and would have told you to raise prices to sell more. On the SKUs that actually repriced: A 62.1% → 63.3%, C 11.9% → 13.0%."],
       ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
