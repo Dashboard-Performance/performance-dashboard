@@ -3257,7 +3257,7 @@
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-orange">
                   <h2>Gap Plan — Recommends Forecast</h2>
-                  <p>SKUs we will <strong>not</strong> re-buy but still have stock to clear. The recommendation is a sell-down plan from each SKU's own live history: how much it still moves per month, capped by what's on hand, how long that lasts, and its real lifetime CR%/DR%/NDR%/ASP.</p>
+                  <p>SKUs <strong>not in the plan</strong> that still have stock to clear — computed live, no manual list. The recommendation is a sell-down plan from each SKU's own history: how much it still moves per month, capped by what's on hand, how long that lasts, and its real lifetime CR%/DR%/NDR%/ASP.</p>
                 </div>
                 <div class="table-controls">
                   <button id="fcGapExportBtn" class="btn btn-outline small" type="button" title="Download both groups as an Excel file (Recommends Forecast + split A/B sheets).">Download Excel</button>
@@ -3266,8 +3266,8 @@
               <div id="fcGapStatus" class="fc-data-status"></div>
 
               <div class="panel-title-wrapper border-orange" style="margin:14px 0 6px;">
-                <h3 style="font-size:15px;margin:0;">Group A · Repack (no confirmed on plan)</h3>
-                <p style="margin:2px 0 0;">Available = repack pieces on hand.</p>
+                <h3 style="font-size:15px;margin:0;">Group A · Repack — Damaged BOX, not in plan</h3>
+                <p style="margin:2px 0 0;">Available = Damaged-BOX (repack) pieces on hand, from the WareHouse sheet.</p>
               </div>
               <div class="table-responsive">
                 <table class="data-table">
@@ -3289,8 +3289,8 @@
               </div>
 
               <div class="panel-title-wrapper border-orange" style="margin:18px 0 6px;">
-                <h3 style="font-size:15px;margin:0;">Group B · Single stock &gt; 50, not in plan</h3>
-                <p style="margin:2px 0 0;">Available = single good stock on hand; inactive SKUs (no recent confirmed demand).</p>
+                <h3 style="font-size:15px;margin:0;">Group B · Single good stock &gt; 50, not in plan</h3>
+                <p style="margin:2px 0 0;">Available = good single stock on hand for SKUs with no target in the plan.</p>
               </div>
               <div class="table-responsive">
                 <table class="data-table">

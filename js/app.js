@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.4";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11812,39 +11812,48 @@ function fcLoadGvizBySheet(sheetName, tq, timeoutMs) {
     const script = document.createElement("script");
     script.id = cb;
     script.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); reject(new Error("load error")); } };
-    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tq=${encodeURIComponent(tq || "select *")}&tqx=out:json;responseHandler:${cb}`;
+    // headers=1 forces gviz to treat the first row as the header, so column
+    // labels come through reliably (without it, a mixed-type first row can be
+    // read as data and every label comes back blank).
+    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&headers=1&tq=${encodeURIComponent(tq || "select *")}&tqx=out:json;responseHandler:${cb}`;
     document.head.appendChild(script);
   });
 }
 
-// Read the curated "Gap Plan" tab → Group A universe. Columns (by header):
-// SKU_ID, PRODUCT_NAME, Repack, Sellable, Total, Cartoon, Cogs, Value,
-// Confirmed on Plan.
+// Read the curated "Gap Plan" tab → Group A universe. The tab's fixed layout
+// (matches the workbook): A SKU_ID, B PRODUCT_NAME, C Repack, D Sellable,
+// E Total, F Cartoon, G Cogs, H Value, I Confirmed on Plan. We match by header
+// label first, but fall back to these fixed column positions whenever a label
+// is missing — so a header that gviz fails to parse can't silently zero out
+// the Repack column.
+const FC_GAP_COLS = { sku: 0, name: 1, repack: 2, total: 4, cogs: 6, value: 7, conf: 8 };
 async function fcLoadGapPlanTab() {
   const resp = await fcLoadGvizBySheet("Gap Plan", "select *", 90000);
   const cols = (resp.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
-  const idx = (name) => cols.indexOf(name);
-  const iSku = idx("sku_id") >= 0 ? idx("sku_id") : 0;
-  const iName = idx("product_name");
-  const iRepack = idx("repack");
-  const iTotal = idx("total");
-  const iCogs = idx("cogs");
-  const iValue = idx("value");
-  const iConf = idx("confirmed on plan");
+  const pick = (label, fallbackPos) => { const i = cols.indexOf(label); return i >= 0 ? i : fallbackPos; };
+  const iSku = pick("sku_id", FC_GAP_COLS.sku);
+  const iName = pick("product_name", FC_GAP_COLS.name);
+  const iRepack = pick("repack", FC_GAP_COLS.repack);
+  const iTotal = pick("total", FC_GAP_COLS.total);
+  const iCogs = pick("cogs", FC_GAP_COLS.cogs);
+  const iValue = pick("value", FC_GAP_COLS.value);
+  const iConf = pick("confirmed on plan", FC_GAP_COLS.conf);
   const num = (c) => { const v = c && (c.v !== undefined ? c.v : null); const n = Number(v); return Number.isFinite(n) ? n : 0; };
   const out = new Map();
   (resp.table.rows || []).forEach(r => {
     const c = r.c || [];
-    const sku = c[iSku] && c[iSku].v;
+    let sku = c[iSku] && (c[iSku].v !== undefined && c[iSku].v !== null ? c[iSku].v : null);
     if (!sku) return;
-    out.set(String(sku).trim(), {
-      sku: String(sku).trim(),
-      name: iName >= 0 && c[iName] ? c[iName].v : "",
-      repack: iRepack >= 0 ? num(c[iRepack]) : 0,
-      total: iTotal >= 0 ? num(c[iTotal]) : 0,
-      cogs: iCogs >= 0 ? num(c[iCogs]) : 0,
-      value: iValue >= 0 ? num(c[iValue]) : 0,
-      confirmedOnPlan: iConf >= 0 ? num(c[iConf]) : 0
+    sku = String(sku).trim();
+    if (!sku || sku.toUpperCase() === "SKU_ID") return; // skip a header row read as data
+    out.set(sku, {
+      sku,
+      name: c[iName] && c[iName].v != null ? c[iName].v : "",
+      repack: num(c[iRepack]),
+      total: num(c[iTotal]),
+      cogs: num(c[iCogs]),
+      value: num(c[iValue]),
+      confirmedOnPlan: num(c[iConf])
     });
   });
   return out;
@@ -11894,10 +11903,21 @@ function fcMonthlyDemand(monthlyMap) {
   return w > 0 ? wsum / w : 0;
 }
 
+// A SKU is "in the plan" when it has a real target in the Single-SKU targets
+// sheet (any of the four daily targets is positive). Everything else is a gap.
+function fcIsInPlan(sku) {
+  const t = (state.singleSkuTargets || {})[sku];
+  if (!t) return false;
+  return (t.adjustedTarget > 0) || (t.placedDailyTarget > 0) || (t.dlvPcsDailyTarget > 0) || (t.dlvGmvDailyTarget > 0);
+}
+
 function fcBuildRecommends() {
   const { agg, singlesList } = fcBuildSingleLifetime();
   const { stockByProductId } = buildDebundledStockDohIndex(state.allParsedRows || [], 3);
-  const gapTab = fcGapState.gapTab || new Map();
+  // Repack = Damaged-BOX pieces, computed live from the WareHouse sheet
+  // (state.repackMap already sums TOTAL_COUNT where Condition = "Damaged BOX").
+  // Good single stock = the normal sellable stock the rest of the page uses.
+  const repackMap = state.repackMap || new Map();
 
   const perf = (e) => {
     const cr = e.placed > 0 ? (e.confirmed / e.placed) * 100 : 0;
@@ -11906,49 +11926,51 @@ function fcBuildRecommends() {
     const asp = e.delivered > 0 ? e.deliveredGmv / e.delivered : 0;
     return { cr, dr, ndr, asp };
   };
-  const nameOf = (sku, fallback) => (singlesList && singlesList.get(sku)) || fallback || ((state.productsMap && state.productsMap[sku] && state.productsMap[sku].name)) || sku;
-
-  const A = [], B = [];
-  const inA = new Set();
-
-  // Group A — repack gap from the curated tab (repack>0, not confirmed on plan).
-  gapTab.forEach((g, sku) => {
-    if (!(g.repack > 0) || g.confirmedOnPlan > 0) return;
-    inA.add(sku);
-    const e = agg.get(sku) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() };
+  const nameOf = (sku) => (singlesList && singlesList.get(sku)) ||
+    ((state.productsMap && state.productsMap[sku] && state.productsMap[sku].name)) ||
+    ((state.inventoryMap && state.inventoryMap[sku] && state.inventoryMap[sku].skuName)) || sku;
+  const emptyE = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() };
+  const row = (group, sku, avail) => {
+    const e = agg.get(sku) || emptyE;
     const p = perf(e);
     const demand = fcMonthlyDemand(e.monthly);
-    const avail = g.repack;
-    const rec = Math.min(demand, avail);
-    A.push({
-      group: "Repack", sku, name: nameOf(sku, g.name),
-      avail, demand, rec,
-      months: demand > 0 ? avail / demand : null,
-      value: g.value || (avail * p.asp),
-      cogs: g.cogs, cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
-      dead: demand <= 0, hist: e.delivered > 0
-    });
-  });
-
-  // Group B — single good stock > 50, inactive (no recent confirmed), not in A.
-  agg.forEach((e, sku) => {
-    if (inA.has(sku)) return;
-    const stock = stockByProductId.has(sku) ? (stockByProductId.get(sku) || 0) : 0;
-    if (!(stock > FC_GAP_STOCK_MIN)) return;
-    if (e.recentConf > FC_GAP_RECENT_CONF_MAX) return; // still selling → it's effectively "in plan"
-    const p = perf(e);
-    const demand = fcMonthlyDemand(e.monthly);
-    const avail = stock;
-    const rec = Math.min(demand, avail);
-    B.push({
-      group: "Single stock", sku, name: nameOf(sku),
-      avail, demand, rec,
+    return {
+      group, sku, name: nameOf(sku), avail, demand, rec: Math.min(demand, avail),
       months: demand > 0 ? avail / demand : null,
       value: avail * p.asp,
-      cogs: null, cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
+      cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
       dead: demand <= 0, hist: e.delivered > 0
-    });
+    };
+  };
+
+  const A = [], B = [];
+
+  // Group A — Repack (Damaged BOX) pieces on hand, for SKUs not in the plan.
+  repackMap.forEach((qty, sku) => {
+    if (!(qty > 0)) return;
+    if (fcIsInPlan(sku)) return;
+    A.push(row("Repack", sku, qty));
   });
+
+  // Group B — good single stock over the threshold, for SKUs not in the plan.
+  // Repack (damaged) and good stock are separate pools, so a not-in-plan SKU
+  // can legitimately appear in both — different pieces to clear.
+  const seenB = new Set();
+  const addB = (sku, stock) => {
+    if (seenB.has(sku)) return;
+    if (!(stock > FC_GAP_STOCK_MIN)) return;
+    if (fcIsInPlan(sku)) return;
+    seenB.add(sku);
+    B.push(row("Single stock", sku, stock));
+  };
+  stockByProductId.forEach((stock, sku) => addB(sku, stock || 0));
+  // Also cover singles that have stock in the inventory feed but no debundle row.
+  if (state.inventoryMap) {
+    Object.keys(state.inventoryMap).forEach(sku => {
+      if (seenB.has(sku) || stockByProductId.has(sku)) return;
+      addB(sku, (state.inventoryMap[sku] && state.inventoryMap[sku].stock) || 0);
+    });
+  }
 
   const byValue = (a, b) => (b.value || 0) - (a.value || 0);
   A.sort(byValue); B.sort(byValue);
@@ -11971,18 +11993,6 @@ function fcRenderRecommends() {
   if (!eng || !(state.allParsedRows && state.allParsedRows.length)) { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
 
-  // Load the curated Gap Plan tab once (best-effort). If it fails, Group A is
-  // simply empty and Group B (live-stock based) still renders.
-  if (!fcGapState.gapTab && !fcGapState.loading && !fcGapState.error) {
-    fcGapState.loading = true;
-    if (status) status.textContent = "Loading the Gap Plan tab…";
-    fcLoadGapPlanTab()
-      .then(m => { fcGapState.gapTab = m; fcGapState.error = null; })
-      .catch(e => { fcGapState.gapTab = new Map(); fcGapState.error = e; })
-      .finally(() => { fcGapState.loading = false; fcRenderRecommends(); });
-    return;
-  }
-
   const { A, B } = fcBuildRecommends();
   fcGapState.rows = { A, B };
 
@@ -12001,11 +12011,14 @@ function fcRenderRecommends() {
     <td>${r.dead ? '<span class="badge-outline orange">No live demand — clear/liquidate</span>' : (r.hist ? '<span class="badge-outline green">Sell-down</span>' : '<span class="badge-outline blue">No history</span>')}</td>
   </tr>`;
 
-  if (bodyA) bodyA.innerHTML = A.length ? A.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No repack-gap SKUs found${fcGapState.error ? " (couldn't read the “Gap Plan” tab)" : ""}.</td></tr>`;
+  if (bodyA) bodyA.innerHTML = A.length ? A.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No repack (Damaged BOX) pieces on hand for out-of-plan SKUs.</td></tr>`;
   if (bodyB) bodyB.innerHTML = B.length ? B.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No single-stock gap SKUs over ${FC_GAP_STOCK_MIN} pcs.</td></tr>`;
 
   const sumVal = (arr) => arr.reduce((s, r) => s + (r.value || 0), 0);
-  if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand)`;
+  const repackSkus = (state.repackMap && state.repackMap.size) || 0;
+  const plannedSkus = Object.keys(state.singleSkuTargets || {}).length;
+  const note = `computed live — ${repackSkus} SKUs have Damaged-BOX repack, ${plannedSkus} SKUs in the plan`;
+  if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand) · ${note}`;
 }
 
 // Real .xlsx export (SheetJS, loaded on demand from CDN) → one file with a
