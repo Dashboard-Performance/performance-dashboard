@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11691,10 +11691,22 @@ function fcBuildPriceIndex() {
         e.confirmed += (r.confirmedPieces || 0) * q;
       });
     });
+    // Pooled DR across all SKUs in the window — the prior we shrink thin
+    // per-SKU rates toward, so a SKU with a handful of confirmed pieces that
+    // happened to all deliver doesn't read a spurious 100%.
+    let poolConf = 0, poolDel = 0;
+    agg.forEach((e) => { poolConf += e.confirmed; poolDel += e.delivered; });
+    const pooledDr = poolConf > 0 ? Math.min(1, poolDel / poolConf) : 0.5;
+    const FC_DR_PRIOR_K = 40;   // pseudo-confirmed pieces of the pooled prior
+    const FC_DR_MIN_CONF = 15;  // below this confirmed volume, DR is not shown
     agg.forEach((e, sku) => {
       const asp = e.delivered > 0 ? e.gmv / e.delivered : null;
-      const dr = e.confirmed > 0 ? Math.min(1, e.delivered / e.confirmed) : null;
-      if (asp !== null && dr !== null) out.set(sku, { asp, dr });
+      // Shrink toward pooledDr: (delivered + k·prior) / (confirmed + k).
+      // Thin denominators collapse to ~pooledDr; heavy SKUs keep their own rate.
+      const dr = e.confirmed >= FC_DR_MIN_CONF
+        ? Math.min(1, (e.delivered + FC_DR_PRIOR_K * pooledDr) / (e.confirmed + FC_DR_PRIOR_K))
+        : null;
+      if (asp !== null && dr !== null) out.set(sku, { asp, dr, conf: e.confirmed });
     });
   } catch (e) { /* leave empty — the panel just reports no price data */ }
   return out;
