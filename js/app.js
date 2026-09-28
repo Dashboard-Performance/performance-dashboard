@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.2.7";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11800,7 +11800,15 @@ const FC_GAP_STOCK_MIN = 50;          // Group B: single good stock must exceed 
 const FC_GAP_RECENT_DAYS = 45;        // "not being sold now" window for Group B
 const FC_GAP_RECENT_CONF_MAX = 2;     // confirmed pcs in that window under which a SKU counts as inactive
 const FC_GAP_DEMAND_MONTHS = 3;       // how many recent active months feed the demand rate
-const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "" };
+// Exclusion lists live in the Commercial Plan spreadsheet (a DIFFERENT workbook
+// from the dashboard's data sheet), read live by gid:
+//   • Bundle-Single (in-plan singles) → excluded from Group B (stock).
+//   • Purchase Plan (SKUs already carrying a Repack line) → excluded from Group A.
+const FC_PLAN_SHEET_ID = "13laMNJ4ZuV9ToKtWEOVULbeuvDRHT8UOYTCXnK2u7S4";
+const FC_PLAN_BUNDLE_GID = "801350150";     // Bundle-Single → Group B exclusion (PLAN / Adjusted Single Pcs)
+const FC_PLAN_PURCHASE_GID = "2107930739";  // Purchase Plan → Group A (Repack) exclusion
+const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "",
+  stockExcl: null, repackExcl: null, exclLoaded: false, exclError: null };
 
 // gviz reader by SHEET NAME (not gid) — robust to gid changes and to the user
 // not knowing gids. Same JSONP transport as fcLoadGvizQuery.
@@ -11826,6 +11834,75 @@ function fcLoadGvizBySheet(sheetName, tq, timeoutMs) {
     script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&headers=1&tq=${encodeURIComponent(tq || "select *")}&tqx=out:json;responseHandler:${cb}`;
     document.head.appendChild(script);
   });
+}
+
+// Generic gviz reader for ANY spreadsheet by id + gid (used for the Commercial
+// Plan exclusion tabs, which live in a different workbook).
+function fcLoadGvizGid(spreadsheetId, gid, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cb = "fcGvizCb_" + Math.random().toString(36).slice(2);
+    let done = false;
+    const cleanup = () => { try { delete window[cb]; } catch (e) {} const s = document.getElementById(cb); if (s) s.remove(); };
+    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); reject(new Error("timeout")); } }, timeoutMs || 60000);
+    window[cb] = (resp) => { if (done) return; done = true; clearTimeout(timer); cleanup(); (resp && resp.table) ? resolve(resp) : reject(new Error("no table")); };
+    const script = document.createElement("script");
+    script.id = cb;
+    script.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); reject(new Error("load error")); } };
+    script.src = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${gid}&headers=1&tqx=out:json;responseHandler:${cb}`;
+    document.head.appendChild(script);
+  });
+}
+
+// Load the two exclusion lists from the Commercial Plan workbook, once.
+//   • stockExcl  = SINGLE_IDs that are In Plan / PLAN=1 / Adjusted Single Pcs>0
+//                  in the Bundle-Single tab → excluded from Group B (stock).
+//   • repackExcl = every SKU ID present in the Purchase Plan tab (already carries
+//                  a Repack line there) → excluded from Group A (repack).
+// Best-effort: if the workbook isn't reachable, we fall back to fcIsInPlan.
+async function fcLoadPlanExclusions() {
+  if (fcGapState.exclLoaded) return;
+  const cellV = (c) => (c && c.v !== undefined && c.v !== null) ? c.v : null;
+  const num = (c) => { const n = Number(cellV(c)); return Number.isFinite(n) ? n : 0; };
+  const truthy = (c) => { const v = cellV(c); if (v === null) return false; const s = String(v).trim().toLowerCase(); return v === true || s === "1" || s === "yes" || s === "true" || (Number(v) > 0); };
+  const findCol = (cols, ...names) => { const low = cols.map(c => (c.label || "").trim().toLowerCase()); for (const n of names) { const i = low.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
+  try {
+    const [bundleResp, purchaseResp] = await Promise.all([
+      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_BUNDLE_GID, 90000).catch(() => null),
+      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_PURCHASE_GID, 90000).catch(() => null)
+    ]);
+    if (bundleResp) {
+      const cols = bundleResp.table.cols || [];
+      const iSingle = findCol(cols, "single_id") >= 0 ? findCol(cols, "single_id") : 3;
+      const iPlan = findCol(cols, "plan");
+      const iInPlan = findCol(cols, "in plan");
+      const iAdj = findCol(cols, "adjusted single pcs");
+      const set = new Set();
+      (bundleResp.table.rows || []).forEach(r => {
+        const c = r.c || [];
+        const sid = cellV(c[iSingle]); if (!sid) return;
+        const inPlan = (iPlan >= 0 && truthy(c[iPlan])) || (iInPlan >= 0 && truthy(c[iInPlan])) || (iAdj >= 0 && num(c[iAdj]) > 0);
+        if (inPlan) set.add(String(sid).trim());
+      });
+      fcGapState.stockExcl = set;
+    }
+    if (purchaseResp) {
+      const cols = purchaseResp.table.cols || [];
+      const iSku = findCol(cols, "sku id", "sku_id") >= 0 ? findCol(cols, "sku id", "sku_id") : 0;
+      const set = new Set();
+      (purchaseResp.table.rows || []).forEach(r => {
+        const c = r.c || [];
+        const sku = cellV(c[iSku]); if (!sku) return;
+        const s = String(sku).trim();
+        if (s && s.toUpperCase() !== "SKU ID" && s.toUpperCase() !== "SKU_ID") set.add(s);
+      });
+      fcGapState.repackExcl = set;
+    }
+    fcGapState.exclError = (!bundleResp || !purchaseResp) ? "partial" : null;
+  } catch (e) {
+    fcGapState.exclError = e && e.message ? e.message : String(e);
+  } finally {
+    fcGapState.exclLoaded = true;
+  }
 }
 
 // Read the curated "Gap Plan" tab → Group A universe. The tab's fixed layout
@@ -12005,12 +12082,19 @@ function fcBuildRecommends() {
     };
   };
 
+  // Exclusion sets from the Commercial Plan workbook (best-effort; may be null).
+  const stockExcl = fcGapState.stockExcl;   // SINGLE_IDs already in the plan
+  const repackExcl = fcGapState.repackExcl; // SKUs already in the Purchase Plan (have a Repack line)
+  const excludedFromB = (sku) => stockExcl ? stockExcl.has(sku) : fcIsInPlan(sku);
+  const excludedFromA = (sku) => (repackExcl && repackExcl.has(sku)) || (!repackExcl && fcIsInPlan(sku));
+
   const A = [], B = [];
 
-  // Group A — Repack (Damaged BOX) pieces on hand, for SKUs not in the plan.
+  // Group A — Repack (Damaged BOX) pieces on hand. Exclude SKUs already carrying
+  // a Repack line in the Purchase Plan (they're handled there).
   repackMap.forEach((qty, sku) => {
     if (!(qty > 0)) return;
-    if (fcIsInPlan(sku)) return;
+    if (excludedFromA(sku)) return;
     A.push(row("Repack", sku, qty));
   });
 
@@ -12021,7 +12105,7 @@ function fcBuildRecommends() {
   const addB = (sku, stock) => {
     if (seenB.has(sku)) return;
     if (!(stock > FC_GAP_STOCK_MIN)) return;
-    if (fcIsInPlan(sku)) return;
+    if (excludedFromB(sku)) return;
     seenB.add(sku);
     B.push(row("Single stock", sku, stock));
   };
@@ -12080,8 +12164,10 @@ function fcRenderRecommends() {
 
   const sumVal = (arr) => arr.reduce((s, r) => s + (r.value || 0), 0);
   const repackSkus = (state.repackMap && state.repackMap.size) || 0;
-  const plannedSkus = Object.keys(state.singleSkuTargets || {}).length;
-  const note = `computed live — ${repackSkus} SKUs have Damaged-BOX repack, ${plannedSkus} SKUs in the plan`;
+  const exclNote = fcGapState.exclLoaded
+    ? `excluded ${fcGapState.stockExcl ? fcGapState.stockExcl.size : 0} in-plan (stock) & ${fcGapState.repackExcl ? fcGapState.repackExcl.size : 0} purchase-plan (repack)${fcGapState.exclError ? " ⚠️ plan workbook partly unreachable — used fallback" : ""}`
+    : "exclusions not loaded (fallback)";
+  const note = `computed live — ${repackSkus} SKUs have Damaged-BOX repack · ${exclNote}`;
   if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand) · ${note}`;
 }
 
@@ -12104,17 +12190,51 @@ async function fcExportRecommends() {
   if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
   try {
     const XLSX = await fcEnsureSheetJs();
-    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
     const srcOf = (r) => r.estimated ? ("Estimated (" + r.basis + " peers)") : (r.hist ? "Own history" : "None");
+    const statusOf = (r) => r.estimated ? ("Est. from " + r.basis) : (r.dead ? "No demand & no peers — manual review" : (r.hist ? "Sell-down (own history)" : "No history"));
+
+    // Per-pool sheets (A and B) keep their own rows.
+    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
     const toAoA = (arr) => [header].concat(arr.map(r => [
       r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.demand || 0), srcOf(r), Math.round(r.rec || 0),
       (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
       Math.round(r.value || 0),
       Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round((r.asp > 0 ? r.asp : r.unit) || 0),
-      r.estimated ? ("Est. from " + r.basis) : (r.dead ? "No demand & no peers — manual review" : (r.hist ? "Sell-down (own history)" : "No history"))
+      statusOf(r)
     ]));
+
+    // Combined "Recommends Forecast" sheet: ONE row per SKU. If a SKU is in both
+    // pools, group = "Repack + Single stock" and Available = repack + good stock,
+    // with the split shown, and Recommend/Months/Value recomputed on the total.
+    const merged = new Map();
+    const collect = (r) => {
+      let m = merged.get(r.sku);
+      if (!m) { m = { sku: r.sku, name: r.name, demand: r.demand, cr: r.cr, dr: r.dr, ndr: r.ndr, asp: r.asp, unit: r.unit, hist: r.hist, estimated: r.estimated, basis: r.basis, dead: r.dead, repackPcs: 0, stockPcs: 0, groups: new Set() }; merged.set(r.sku, m); }
+      m.groups.add(r.group);
+      if (r.group === "Repack") m.repackPcs += (r.avail || 0); else m.stockPcs += (r.avail || 0);
+    };
+    data.A.forEach(collect); data.B.forEach(collect);
+    const mergedRows = Array.from(merged.values()).map(m => {
+      const avail = m.repackPcs + m.stockPcs;
+      const group = m.groups.size > 1 ? "Repack + Single stock" : Array.from(m.groups)[0];
+      const rec = Math.min(m.demand, avail);
+      const months = m.demand > 0 ? avail / m.demand : null;
+      const unit = m.asp > 0 ? m.asp : m.unit;
+      return { ...m, group, avail, rec, months, value: avail * (unit || 0), unit };
+    }).sort((a, b) => (b.value || 0) - (a.value || 0));
+
+    const headerC = ["Group", "SKU", "Name", "Available (pcs)", "Repack pcs", "Good stock pcs", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
+    const combinedAoA = [headerC].concat(mergedRows.map(r => [
+      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.repackPcs || 0), Math.round(r.stockPcs || 0),
+      Math.round(r.demand || 0), srcOf(r), Math.round(r.rec || 0),
+      (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
+      Math.round(r.value || 0),
+      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round((r.asp > 0 ? r.asp : r.unit) || 0),
+      statusOf(r)
+    ]));
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A.concat(data.B))), "Recommends Forecast");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(combinedAoA), "Recommends Forecast");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A)), "Gap A - Repack");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.B)), "Gap B - Single stock");
     XLSX.writeFile(wb, "Recommends Forecast - Gap Plan.xlsx");
@@ -12153,6 +12273,16 @@ function prepareGapPlanRecommends() {
   const status = $("fcGapStatus");
   if (!(state.allParsedRows && state.allParsedRows.length)) {
     if (status) status.textContent = "Loading data… open again in a moment.";
+    return;
+  }
+  // Load the Commercial Plan exclusion lists once, then render. If they fail,
+  // we still render using the fcIsInPlan fallback.
+  if (!fcGapState.exclLoaded) {
+    if (status) status.textContent = "Loading plan exclusions…";
+    fcLoadPlanExclusions().finally(() => {
+      try { fcRenderRecommends(); }
+      catch (e) { if (status) status.textContent = "Couldn't build the recommendations: " + (e && e.message ? e.message : e); }
+    });
     return;
   }
   try { fcRenderRecommends(); }
