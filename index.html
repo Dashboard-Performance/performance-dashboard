@@ -83,6 +83,7 @@
             <a class="nav-item-sub" id="navSellthroughPanel">Sellthrough Rate Panel</a>
             <a class="nav-item-sub" id="navWeeklyInventory">Weekly Inventory &amp; Inbound</a>
             <a class="nav-item-sub" id="navForecastModel">Forecast Model</a>
+            <a class="nav-item-sub" id="navGapPlanRecommends">Recommends Forecast (Gap Plan)</a>
           </div>
         </div>
         <!-- ظاهر بس للـ Manager (نفس الإيميل المحدد في PRESENCE_ADMIN_EMAIL
@@ -3252,12 +3253,21 @@
             </div>
           </section>
 
-          <section class="mb-4 mt-4 hidden" id="fcGapPlanPanel">
+          <section class="mb-4 mt-4">
+            <details class="panel fc-method">
+              <summary><strong>How this forecast works</strong> <a href="forecast-pipeline.html" class="btn btn-outline small" style="margin-left:10px;" onclick="event.stopPropagation()">View pipeline diagram</a></summary>
+              <div class="fc-method-body" id="fcMethodBody"></div>
+            </details>
+          </section>
+        </div>
+
+        <div id="viewGapPlanRecommends" class="view-section hidden">
+          <section class="mb-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-orange">
                   <h2>Gap Plan — Recommends Forecast</h2>
-                  <p>SKUs <strong>not in the plan</strong> that still have stock to clear — computed live, no manual list. The recommendation is a sell-down plan from each SKU's own history: how much it still moves per month, capped by what's on hand, how long that lasts, and its real lifetime CR%/DR%/NDR%/ASP.</p>
+                  <p>SKUs <strong>not in the plan</strong> that still have stock to clear — computed live, no manual list. The recommendation is a sell-down plan from each SKU's own history (or, when a SKU has no history of its own, a conservative estimate from its category peers): how much it still moves per month, capped by what's on hand, how long that lasts, and its real lifetime CR%/DR%/NDR%/ASP.</p>
                 </div>
                 <div class="table-controls">
                   <button id="fcGapExportBtn" class="btn btn-outline small" type="button" title="Download both groups as an Excel file (Recommends Forecast + split A/B sheets).">Download Excel</button>
@@ -3274,14 +3284,14 @@
                   <thead><tr>
                     <th>SKU</th><th>Name</th>
                     <th class="num" title="Pieces on hand we can still sell (no re-buy).">Available</th>
-                    <th class="num text-blue" title="Recency-weighted monthly delivered from this SKU's own history.">Monthly demand</th>
+                    <th class="num text-blue" title="Monthly demand from this SKU's own history — or, marked with *, a conservative estimate from category peers when it has none.">Monthly demand</th>
                     <th class="num" title="Recommended pieces next month = min(monthly demand, available).">Recommend</th>
                     <th class="num" title="Available ÷ monthly demand.">Months to clear</th>
-                    <th class="num" title="Available × ASP (or plan value).">Value</th>
+                    <th class="num" title="Available × ASP (or selling price when there's no delivered history).">Value</th>
                     <th class="num" title="Confirmed ÷ Placed, lifetime.">CR%</th>
                     <th class="num" title="Delivered ÷ Confirmed, lifetime.">DR%</th>
                     <th class="num" title="CR% × DR%.">NDR%</th>
-                    <th class="num" title="Delivered GMV ÷ delivered pieces, lifetime.">ASP</th>
+                    <th class="num" title="Delivered GMV ÷ delivered pieces, lifetime (or selling price when no history).">ASP</th>
                     <th>Status</th>
                   </tr></thead>
                   <tbody id="fcGapBodyA"></tbody>
@@ -3311,13 +3321,6 @@
                 </table>
               </div>
             </div>
-          </section>
-
-          <section class="mb-4 mt-4">
-            <details class="panel fc-method">
-              <summary><strong>How this forecast works</strong> <a href="forecast-pipeline.html" class="btn btn-outline small" style="margin-left:10px;" onclick="event.stopPropagation()">View pipeline diagram</a></summary>
-              <div class="fc-method-body" id="fcMethodBody"></div>
-            </details>
           </section>
         </div>
       </main>

@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -678,6 +678,7 @@ const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
 const navForecastModel = $("navForecastModel");
+const navGapPlanRecommends = $("navGapPlanRecommends");
 const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
 const navIncentivesCaret = $("navIncentivesCaret");
@@ -961,6 +962,7 @@ function switchView(viewName) {
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
   if(navForecastModel) navForecastModel.classList.remove("active");
+  if(navGapPlanRecommends) navGapPlanRecommends.classList.remove("active");
   if(navIncMerchants) navIncMerchants.classList.remove("active");
 
   let activeSection = null;
@@ -1004,6 +1006,11 @@ function switchView(viewName) {
       if(navForecastModel) navForecastModel.classList.add("active");
       prepareForecastModelView(false);
   }
+  else if (viewName === "gapPlanRecommends") {
+      activeSection = $("viewGapPlanRecommends");
+      if(navGapPlanRecommends) navGapPlanRecommends.classList.add("active");
+      prepareGapPlanRecommends();
+  }
   else if (viewName === "incentiveMerchants") {
       activeSection = $("viewIncMerchants");
       if(navIncMerchants) navIncMerchants.classList.add("active");
@@ -1042,6 +1049,7 @@ if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => re
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
 if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
+if(navGapPlanRecommends) navGapPlanRecommends.addEventListener("click", () => requestAdminAccess("gapPlanRecommends"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
 // -------------------------------------------------------------------------
@@ -11911,6 +11919,21 @@ function fcIsInPlan(sku) {
   return (t.adjustedTarget > 0) || (t.placedDailyTarget > 0) || (t.dlvPcsDailyTarget > 0) || (t.dlvGmvDailyTarget > 0);
 }
 
+// Peer-based demand for a SKU that has NO history of its own. We look at
+// siblings that DO sell — same sub-category first, then category — and take
+// the MEDIAN of their monthly demand (robust to the odd high-flyer), then
+// dampen it, because a revived dead SKU won't match a healthy sibling. Capped
+// later by available stock. Deliberately conservative: no single peer's number
+// is copied, and the median×damp keeps it to a sane level (never a peer's 100/day).
+const FC_GAP_PEER_MIN = 3;      // need at least this many selling siblings to trust a group
+const FC_GAP_PEER_DAMP = 0.5;   // take half the typical sibling — conservative for a dead SKU
+function fcMedian(arr) {
+  if (!arr || !arr.length) return 0;
+  const s = arr.slice().sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 function fcBuildRecommends() {
   const { agg, singlesList } = fcBuildSingleLifetime();
   const { stockByProductId } = buildDebundledStockDohIndex(state.allParsedRows || [], 3);
@@ -11929,17 +11952,56 @@ function fcBuildRecommends() {
   const nameOf = (sku) => (singlesList && singlesList.get(sku)) ||
     ((state.productsMap && state.productsMap[sku] && state.productsMap[sku].name)) ||
     ((state.inventoryMap && state.inventoryMap[sku] && state.inventoryMap[sku].skuName)) || sku;
+  const catOf = (sku) => {
+    const p = state.productsMap && state.productsMap[sku];
+    const inv = state.inventoryMap && state.inventoryMap[sku];
+    return {
+      sub: ((p && p.subCategory) || "").trim().toLowerCase(),
+      cat: ((p && p.category) || (inv && inv.category) || "").trim().toLowerCase()
+    };
+  };
+  const priceOf = (sku) => {
+    const p = state.productsMap && state.productsMap[sku];
+    return (p && p.price > 0) ? p.price : 0;
+  };
+
+  // Build peer demand pools from every single that DOES have real demand.
+  const bySub = new Map(), byCat = new Map();
+  agg.forEach((e, sku) => {
+    const d = fcMonthlyDemand(e.monthly);
+    if (!(d > 0)) return;
+    const { sub, cat } = catOf(sku);
+    if (sub) { if (!bySub.has(sub)) bySub.set(sub, []); bySub.get(sub).push(d); }
+    if (cat) { if (!byCat.has(cat)) byCat.set(cat, []); byCat.get(cat).push(d); }
+  });
+  const peerEstimate = (sku) => {
+    const { sub, cat } = catOf(sku);
+    let arr = sub && bySub.get(sub), basis = "sub-category";
+    if (!arr || arr.length < FC_GAP_PEER_MIN) { arr = cat && byCat.get(cat); basis = "category"; }
+    if (!arr || arr.length < FC_GAP_PEER_MIN) return { est: 0, basis: "none" };
+    return { est: fcMedian(arr) * FC_GAP_PEER_DAMP, basis };
+  };
+
   const emptyE = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() };
   const row = (group, sku, avail) => {
     const e = agg.get(sku) || emptyE;
     const p = perf(e);
-    const demand = fcMonthlyDemand(e.monthly);
+    const ownDemand = fcMonthlyDemand(e.monthly);
+    let demand = ownDemand, estimated = false, basis = null;
+    if (ownDemand <= 0) {
+      const pe = peerEstimate(sku);
+      demand = pe.est; estimated = pe.est > 0; basis = pe.basis;
+    }
+    // Value: real ASP when we have it, else the selling price (so dead stock
+    // still shows the money tied up instead of zero).
+    const unit = p.asp > 0 ? p.asp : priceOf(sku);
     return {
       group, sku, name: nameOf(sku), avail, demand, rec: Math.min(demand, avail),
       months: demand > 0 ? avail / demand : null,
-      value: avail * p.asp,
-      cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
-      dead: demand <= 0, hist: e.delivered > 0
+      value: avail * unit,
+      cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp, unit,
+      hist: e.delivered > 0, estimated, basis,
+      dead: ownDemand <= 0 && !estimated
     };
   };
 
@@ -11986,29 +12048,31 @@ function fcRecCell(n, kind) {
 }
 
 function fcRenderRecommends() {
-  const panel = $("fcGapPlanPanel");
-  if (!panel) return;
   const bodyA = $("fcGapBodyA"), bodyB = $("fcGapBodyB"), status = $("fcGapStatus");
-  const eng = fcState.engines && fcState.engines.month;
-  if (!eng || !(state.allParsedRows && state.allParsedRows.length)) { panel.classList.add("hidden"); return; }
-  panel.classList.remove("hidden");
+  if (!bodyA && !bodyB) return;
+  if (!(state.allParsedRows && state.allParsedRows.length)) { return; }
 
   const { A, B } = fcBuildRecommends();
   fcGapState.rows = { A, B };
 
+  const statusCell = (r) => {
+    if (r.estimated) return `<span class="badge-outline blue" title="No own sales history — estimated from ${r.basis} peers (median × 0.5).">Est. from ${r.basis}</span>`;
+    if (r.dead) return '<span class="badge-outline orange">No demand & no peers — manual review</span>';
+    return r.hist ? '<span class="badge-outline green">Sell-down (own history)</span>' : '<span class="badge-outline blue">No history</span>';
+  };
   const rowHtml = (r) => `<tr>
     <td class="mono">${r.sku}</td>
     <td>${r.name || ""}</td>
     <td class="num">${fcRecCell(r.avail)}</td>
-    <td class="num text-blue">${fcRecCell(r.demand)}</td>
+    <td class="num text-blue">${fcRecCell(r.demand)}${r.estimated ? ' <span class="text-dim" title="estimated from peers">*</span>' : ''}</td>
     <td class="num font-bold">${fcRecCell(r.rec)}</td>
     <td class="num">${fcRecCell(r.months, "months")}</td>
     <td class="num">${fcRecCell(r.value, "money")}</td>
     <td class="num">${fcRecCell(r.cr, "pct")}</td>
     <td class="num">${fcRecCell(r.dr, "pct")}</td>
     <td class="num">${fcRecCell(r.ndr, "pct")}</td>
-    <td class="num">${fcRecCell(r.asp, "money")}</td>
-    <td>${r.dead ? '<span class="badge-outline orange">No live demand — clear/liquidate</span>' : (r.hist ? '<span class="badge-outline green">Sell-down</span>' : '<span class="badge-outline blue">No history</span>')}</td>
+    <td class="num">${fcRecCell(r.asp > 0 ? r.asp : r.unit, "money")}</td>
+    <td>${statusCell(r)}</td>
   </tr>`;
 
   if (bodyA) bodyA.innerHTML = A.length ? A.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No repack (Damaged BOX) pieces on hand for out-of-plan SKUs.</td></tr>`;
@@ -12040,13 +12104,14 @@ async function fcExportRecommends() {
   if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
   try {
     const XLSX = await fcEnsureSheetJs();
-    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand (hist)", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP", "Status"];
+    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
+    const srcOf = (r) => r.estimated ? ("Estimated (" + r.basis + " peers)") : (r.hist ? "Own history" : "None");
     const toAoA = (arr) => [header].concat(arr.map(r => [
-      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.demand || 0), Math.round(r.rec || 0),
+      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.demand || 0), srcOf(r), Math.round(r.rec || 0),
       (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
       Math.round(r.value || 0),
-      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round(r.asp || 0),
-      r.dead ? "No live demand — clear/liquidate" : (r.hist ? "Sell-down" : "No history")
+      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round((r.asp > 0 ? r.asp : r.unit) || 0),
+      r.estimated ? ("Est. from " + r.basis) : (r.dead ? "No demand & no peers — manual review" : (r.hist ? "Sell-down (own history)" : "No history"))
     ]));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A.concat(data.B))), "Recommends Forecast");
@@ -12074,7 +12139,24 @@ function fcRenderAll() {
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
   fcApplyFilters();
-  try { fcRenderRecommends(); } catch (e) { /* gap-plan panel is best-effort; never break the forecast view */ }
+}
+
+// Gap Plan — Recommends Forecast is its own view now (own nav item under
+// Forecast Model). It needs only the main data + repack/targets, not the
+// forecast engine, so it renders fast and independently.
+function prepareGapPlanRecommends() {
+  if (!fcGapState.wired) {
+    const btn = $("fcGapExportBtn");
+    if (btn) btn.addEventListener("click", fcExportRecommends);
+    fcGapState.wired = true;
+  }
+  const status = $("fcGapStatus");
+  if (!(state.allParsedRows && state.allParsedRows.length)) {
+    if (status) status.textContent = "Loading data… open again in a moment.";
+    return;
+  }
+  try { fcRenderRecommends(); }
+  catch (e) { if (status) status.textContent = "Couldn't build the recommendations: " + (e && e.message ? e.message : e); }
 }
 
 // GMV target panel — turns the piece forecast into money and shows what the
@@ -12786,7 +12868,6 @@ function fcWireControlsOnce() {
   let t = null;
   on("fcSearchInput", "input", (e) => { clearTimeout(t); const v = e.target.value; t = setTimeout(() => { fcState.search = v; fcApplyFilters(); }, 250); });
   on("fcDownloadBtn", "click", fcDownloadCsv);
-  on("fcGapExportBtn", "click", fcExportRecommends);
   on("fcReloadBtn", "click", () => prepareForecastModelView(true));
   on("fcPrevPage", "click", () => { if (fcState.page > 0) { fcState.page--; fcRenderSkuTable(); } });
   on("fcNextPage", "click", () => { const tp = Math.max(1, Math.ceil(fcState.filtered.length / PAGE_SIZE)); if (fcState.page < tp - 1) { fcState.page++; fcRenderSkuTable(); } });
