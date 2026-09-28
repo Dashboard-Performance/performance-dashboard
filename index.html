@@ -3252,6 +3252,67 @@
             </div>
           </section>
 
+          <section class="mb-4 mt-4 hidden" id="fcGapPlanPanel">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>Gap Plan — Recommends Forecast</h2>
+                  <p>SKUs we will <strong>not</strong> re-buy but still have stock to clear. The recommendation is a sell-down plan from each SKU's own live history: how much it still moves per month, capped by what's on hand, how long that lasts, and its real lifetime CR%/DR%/NDR%/ASP.</p>
+                </div>
+                <div class="table-controls">
+                  <button id="fcGapExportBtn" class="btn btn-outline small" type="button" title="Download both groups as an Excel file (Recommends Forecast + split A/B sheets).">Download Excel</button>
+                </div>
+              </div>
+              <div id="fcGapStatus" class="fc-data-status"></div>
+
+              <div class="panel-title-wrapper border-orange" style="margin:14px 0 6px;">
+                <h3 style="font-size:15px;margin:0;">Group A · Repack (no confirmed on plan)</h3>
+                <p style="margin:2px 0 0;">Available = repack pieces on hand.</p>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr>
+                    <th>SKU</th><th>Name</th>
+                    <th class="num" title="Pieces on hand we can still sell (no re-buy).">Available</th>
+                    <th class="num text-blue" title="Recency-weighted monthly delivered from this SKU's own history.">Monthly demand</th>
+                    <th class="num" title="Recommended pieces next month = min(monthly demand, available).">Recommend</th>
+                    <th class="num" title="Available ÷ monthly demand.">Months to clear</th>
+                    <th class="num" title="Available × ASP (or plan value).">Value</th>
+                    <th class="num" title="Confirmed ÷ Placed, lifetime.">CR%</th>
+                    <th class="num" title="Delivered ÷ Confirmed, lifetime.">DR%</th>
+                    <th class="num" title="CR% × DR%.">NDR%</th>
+                    <th class="num" title="Delivered GMV ÷ delivered pieces, lifetime.">ASP</th>
+                    <th>Status</th>
+                  </tr></thead>
+                  <tbody id="fcGapBodyA"></tbody>
+                </table>
+              </div>
+
+              <div class="panel-title-wrapper border-orange" style="margin:18px 0 6px;">
+                <h3 style="font-size:15px;margin:0;">Group B · Single stock &gt; 50, not in plan</h3>
+                <p style="margin:2px 0 0;">Available = single good stock on hand; inactive SKUs (no recent confirmed demand).</p>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr>
+                    <th>SKU</th><th>Name</th>
+                    <th class="num">Available</th>
+                    <th class="num text-blue">Monthly demand</th>
+                    <th class="num">Recommend</th>
+                    <th class="num">Months to clear</th>
+                    <th class="num">Value</th>
+                    <th class="num">CR%</th>
+                    <th class="num">DR%</th>
+                    <th class="num">NDR%</th>
+                    <th class="num">ASP</th>
+                    <th>Status</th>
+                  </tr></thead>
+                  <tbody id="fcGapBodyB"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <section class="mb-4 mt-4">
             <details class="panel fc-method">
               <summary><strong>How this forecast works</strong> <a href="forecast-pipeline.html" class="btn btn-outline small" style="margin-left:10px;" onclick="event.stopPropagation()">View pipeline diagram</a></summary>

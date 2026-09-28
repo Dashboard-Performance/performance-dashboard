@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11773,6 +11773,280 @@ function fcLatestBacktest() {
   return bts.length ? bts[bts.length - 1] : null;
 }
 
+// =========================================================================
+// Gap Plan — Recommends Forecast
+// -------------------------------------------------------------------------
+// SKUs we will NOT buy again, but still have stock/repack to clear. Two
+// groups, exactly as the commercial plan defines them:
+//   • Group A (Repack): from the curated "Gap Plan" tab — repack pieces with
+//     no confirmed on the plan. Available = repack pieces.
+//   • Group B (Single stock): single SKUs holding good stock > 50 that are not
+//     being sold now (no recent confirmed demand) — i.e. not in the plan or
+//     coming in at 0. Available = single good stock on hand.
+// For each, the recommendation is a SELL-DOWN plan, not a buy: how much its own
+// history says it will still move per month, capped by what's on hand (no
+// re-buy), how long the stock lasts, and its real lifetime CR%/DR%/NDR%/ASP —
+// all computed live from the raw daily rows, because inactive SKUs read as zero
+// in the current-window summary tabs.
+const FC_GAP_STOCK_MIN = 50;          // Group B: single good stock must exceed this
+const FC_GAP_RECENT_DAYS = 45;        // "not being sold now" window for Group B
+const FC_GAP_RECENT_CONF_MAX = 2;     // confirmed pcs in that window under which a SKU counts as inactive
+const FC_GAP_DEMAND_MONTHS = 3;       // how many recent active months feed the demand rate
+const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "" };
+
+// gviz reader by SHEET NAME (not gid) — robust to gid changes and to the user
+// not knowing gids. Same JSONP transport as fcLoadGvizQuery.
+function fcLoadGvizBySheet(sheetName, tq, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cb = "fcGapCb_" + Math.random().toString(36).slice(2);
+    let done = false;
+    const cleanup = () => { try { delete window[cb]; } catch (e) {} const s = document.getElementById(cb); if (s) s.remove(); };
+    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); reject(new Error("timeout")); } }, timeoutMs || 60000);
+    window[cb] = (resp) => {
+      if (done) return; done = true; clearTimeout(timer); cleanup();
+      try {
+        if (!resp || !resp.table) { reject(new Error("no table")); return; }
+        resolve(resp);
+      } catch (e) { reject(e); }
+    };
+    const script = document.createElement("script");
+    script.id = cb;
+    script.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); reject(new Error("load error")); } };
+    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tq=${encodeURIComponent(tq || "select *")}&tqx=out:json;responseHandler:${cb}`;
+    document.head.appendChild(script);
+  });
+}
+
+// Read the curated "Gap Plan" tab → Group A universe. Columns (by header):
+// SKU_ID, PRODUCT_NAME, Repack, Sellable, Total, Cartoon, Cogs, Value,
+// Confirmed on Plan.
+async function fcLoadGapPlanTab() {
+  const resp = await fcLoadGvizBySheet("Gap Plan", "select *", 90000);
+  const cols = (resp.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
+  const idx = (name) => cols.indexOf(name);
+  const iSku = idx("sku_id") >= 0 ? idx("sku_id") : 0;
+  const iName = idx("product_name");
+  const iRepack = idx("repack");
+  const iTotal = idx("total");
+  const iCogs = idx("cogs");
+  const iValue = idx("value");
+  const iConf = idx("confirmed on plan");
+  const num = (c) => { const v = c && (c.v !== undefined ? c.v : null); const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const out = new Map();
+  (resp.table.rows || []).forEach(r => {
+    const c = r.c || [];
+    const sku = c[iSku] && c[iSku].v;
+    if (!sku) return;
+    out.set(String(sku).trim(), {
+      sku: String(sku).trim(),
+      name: iName >= 0 && c[iName] ? c[iName].v : "",
+      repack: iRepack >= 0 ? num(c[iRepack]) : 0,
+      total: iTotal >= 0 ? num(c[iTotal]) : 0,
+      cogs: iCogs >= 0 ? num(c[iCogs]) : 0,
+      value: iValue >= 0 ? num(c[iValue]) : 0,
+      confirmedOnPlan: iConf >= 0 ? num(c[iConf]) : 0
+    });
+  });
+  return out;
+}
+
+// Lifetime per-single aggregation from the raw daily rows, debundled the same
+// way the rest of the forecast page does. Returns per singleId:
+//   placed, confirmed, delivered, deliveredGmv, recentConf (last N days),
+//   monthly = Map(yyyy-mm -> delivered pcs).
+function fcBuildSingleLifetime() {
+  const all = (typeof state !== "undefined" && state.allParsedRows) || [];
+  const { productMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const mapFor = (sku) => { const m = productMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }]; };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const recentStart = today.getTime() - FC_GAP_RECENT_DAYS * 86400000;
+  const agg = new Map();
+  for (const r of all) {
+    if (!r.sku) continue;
+    const d = new Date(r.timestamp);
+    const mk = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    const rt = new Date(r.timestamp); rt.setHours(0, 0, 0, 0);
+    const isRecent = rt.getTime() >= recentStart;
+    mapFor(r.sku).forEach(mp => {
+      const q = mp.quantity || 1, w = mp.cogsWeight != null ? mp.cogsWeight : 1;
+      let e = agg.get(mp.singleId);
+      if (!e) { e = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() }; agg.set(mp.singleId, e); }
+      e.placed += (r.placedPieces || 0) * q;
+      e.confirmed += (r.confirmedPieces || 0) * q;
+      e.delivered += (r.deliveredPieces || 0) * q;
+      e.deliveredGmv += (r.deliveredGmv || 0) * w;
+      if (isRecent) e.recentConf += (r.confirmedPieces || 0) * q;
+      if ((r.deliveredPieces || 0) > 0) e.monthly.set(mk, (e.monthly.get(mk) || 0) + (r.deliveredPieces || 0) * q);
+    });
+  }
+  return { agg, singlesList };
+}
+
+// Recency-weighted monthly demand from the last FC_GAP_DEMAND_MONTHS active
+// (delivered>0) calendar months, excluding the current partial month. Weights
+// 3/2/1 most-recent-first. Returns pcs/month.
+function fcMonthlyDemand(monthlyMap) {
+  const nowKey = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); })();
+  const keys = Array.from(monthlyMap.keys()).filter(k => k < nowKey).sort().reverse().slice(0, FC_GAP_DEMAND_MONTHS);
+  if (!keys.length) return 0;
+  let wsum = 0, w = 0;
+  keys.forEach((k, i) => { const wt = keys.length - i; wsum += (monthlyMap.get(k) || 0) * wt; w += wt; });
+  return w > 0 ? wsum / w : 0;
+}
+
+function fcBuildRecommends() {
+  const { agg, singlesList } = fcBuildSingleLifetime();
+  const { stockByProductId } = buildDebundledStockDohIndex(state.allParsedRows || [], 3);
+  const gapTab = fcGapState.gapTab || new Map();
+
+  const perf = (e) => {
+    const cr = e.placed > 0 ? (e.confirmed / e.placed) * 100 : 0;
+    const dr = e.confirmed > 0 ? (e.delivered / e.confirmed) * 100 : 0;
+    const ndr = (cr * dr) / 100;
+    const asp = e.delivered > 0 ? e.deliveredGmv / e.delivered : 0;
+    return { cr, dr, ndr, asp };
+  };
+  const nameOf = (sku, fallback) => (singlesList && singlesList.get(sku)) || fallback || ((state.productsMap && state.productsMap[sku] && state.productsMap[sku].name)) || sku;
+
+  const A = [], B = [];
+  const inA = new Set();
+
+  // Group A — repack gap from the curated tab (repack>0, not confirmed on plan).
+  gapTab.forEach((g, sku) => {
+    if (!(g.repack > 0) || g.confirmedOnPlan > 0) return;
+    inA.add(sku);
+    const e = agg.get(sku) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() };
+    const p = perf(e);
+    const demand = fcMonthlyDemand(e.monthly);
+    const avail = g.repack;
+    const rec = Math.min(demand, avail);
+    A.push({
+      group: "Repack", sku, name: nameOf(sku, g.name),
+      avail, demand, rec,
+      months: demand > 0 ? avail / demand : null,
+      value: g.value || (avail * p.asp),
+      cogs: g.cogs, cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
+      dead: demand <= 0, hist: e.delivered > 0
+    });
+  });
+
+  // Group B — single good stock > 50, inactive (no recent confirmed), not in A.
+  agg.forEach((e, sku) => {
+    if (inA.has(sku)) return;
+    const stock = stockByProductId.has(sku) ? (stockByProductId.get(sku) || 0) : 0;
+    if (!(stock > FC_GAP_STOCK_MIN)) return;
+    if (e.recentConf > FC_GAP_RECENT_CONF_MAX) return; // still selling → it's effectively "in plan"
+    const p = perf(e);
+    const demand = fcMonthlyDemand(e.monthly);
+    const avail = stock;
+    const rec = Math.min(demand, avail);
+    B.push({
+      group: "Single stock", sku, name: nameOf(sku),
+      avail, demand, rec,
+      months: demand > 0 ? avail / demand : null,
+      value: avail * p.asp,
+      cogs: null, cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp,
+      dead: demand <= 0, hist: e.delivered > 0
+    });
+  });
+
+  const byValue = (a, b) => (b.value || 0) - (a.value || 0);
+  A.sort(byValue); B.sort(byValue);
+  return { A, B };
+}
+
+function fcRecCell(n, kind) {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (kind === "pct") return n.toFixed(1) + "%";
+  if (kind === "money") return fcCompact(n);
+  if (kind === "months") return n >= 999 ? "∞" : n.toFixed(1);
+  return fmtInt.format(Math.round(n));
+}
+
+function fcRenderRecommends() {
+  const panel = $("fcGapPlanPanel");
+  if (!panel) return;
+  const bodyA = $("fcGapBodyA"), bodyB = $("fcGapBodyB"), status = $("fcGapStatus");
+  const eng = fcState.engines && fcState.engines.month;
+  if (!eng || !(state.allParsedRows && state.allParsedRows.length)) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+
+  // Load the curated Gap Plan tab once (best-effort). If it fails, Group A is
+  // simply empty and Group B (live-stock based) still renders.
+  if (!fcGapState.gapTab && !fcGapState.loading && !fcGapState.error) {
+    fcGapState.loading = true;
+    if (status) status.textContent = "Loading the Gap Plan tab…";
+    fcLoadGapPlanTab()
+      .then(m => { fcGapState.gapTab = m; fcGapState.error = null; })
+      .catch(e => { fcGapState.gapTab = new Map(); fcGapState.error = e; })
+      .finally(() => { fcGapState.loading = false; fcRenderRecommends(); });
+    return;
+  }
+
+  const { A, B } = fcBuildRecommends();
+  fcGapState.rows = { A, B };
+
+  const rowHtml = (r) => `<tr>
+    <td class="mono">${r.sku}</td>
+    <td>${r.name || ""}</td>
+    <td class="num">${fcRecCell(r.avail)}</td>
+    <td class="num text-blue">${fcRecCell(r.demand)}</td>
+    <td class="num font-bold">${fcRecCell(r.rec)}</td>
+    <td class="num">${fcRecCell(r.months, "months")}</td>
+    <td class="num">${fcRecCell(r.value, "money")}</td>
+    <td class="num">${fcRecCell(r.cr, "pct")}</td>
+    <td class="num">${fcRecCell(r.dr, "pct")}</td>
+    <td class="num">${fcRecCell(r.ndr, "pct")}</td>
+    <td class="num">${fcRecCell(r.asp, "money")}</td>
+    <td>${r.dead ? '<span class="badge-outline orange">No live demand — clear/liquidate</span>' : (r.hist ? '<span class="badge-outline green">Sell-down</span>' : '<span class="badge-outline blue">No history</span>')}</td>
+  </tr>`;
+
+  if (bodyA) bodyA.innerHTML = A.length ? A.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No repack-gap SKUs found${fcGapState.error ? " (couldn't read the “Gap Plan” tab)" : ""}.</td></tr>`;
+  if (bodyB) bodyB.innerHTML = B.length ? B.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No single-stock gap SKUs over ${FC_GAP_STOCK_MIN} pcs.</td></tr>`;
+
+  const sumVal = (arr) => arr.reduce((s, r) => s + (r.value || 0), 0);
+  if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand)`;
+}
+
+// Real .xlsx export (SheetJS, loaded on demand from CDN) → one file with a
+// "Recommends Forecast" sheet plus split A/B sheets, all under the gap plan.
+function fcEnsureSheetJs() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => reject(new Error("Could not load the Excel library."));
+    document.head.appendChild(s);
+  });
+}
+async function fcExportRecommends() {
+  const btn = $("fcGapExportBtn");
+  if (!fcGapState.rows) { try { fcRenderRecommends(); } catch (e) {} }
+  const data = fcGapState.rows || { A: [], B: [] };
+  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+  try {
+    const XLSX = await fcEnsureSheetJs();
+    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand (hist)", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP", "Status"];
+    const toAoA = (arr) => [header].concat(arr.map(r => [
+      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.demand || 0), Math.round(r.rec || 0),
+      (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
+      Math.round(r.value || 0),
+      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round(r.asp || 0),
+      r.dead ? "No live demand — clear/liquidate" : (r.hist ? "Sell-down" : "No history")
+    ]));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A.concat(data.B))), "Recommends Forecast");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A)), "Gap A - Repack");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.B)), "Gap B - Single stock");
+    XLSX.writeFile(wb, "Recommends Forecast - Gap Plan.xlsx");
+  } catch (e) {
+    alert("Export failed: " + (e && e.message ? e.message : e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Download Excel"; }
+  }
+}
+
 function fcRenderAll() {
   fcRenderStatus();
   fcRenderMethod();
@@ -11787,6 +12061,7 @@ function fcRenderAll() {
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
   fcApplyFilters();
+  try { fcRenderRecommends(); } catch (e) { /* gap-plan panel is best-effort; never break the forecast view */ }
 }
 
 // GMV target panel — turns the piece forecast into money and shows what the
@@ -12498,6 +12773,7 @@ function fcWireControlsOnce() {
   let t = null;
   on("fcSearchInput", "input", (e) => { clearTimeout(t); const v = e.target.value; t = setTimeout(() => { fcState.search = v; fcApplyFilters(); }, 250); });
   on("fcDownloadBtn", "click", fcDownloadCsv);
+  on("fcGapExportBtn", "click", fcExportRecommends);
   on("fcReloadBtn", "click", () => prepareForecastModelView(true));
   on("fcPrevPage", "click", () => { if (fcState.page > 0) { fcState.page--; fcRenderSkuTable(); } });
   on("fcNextPage", "click", () => { const tp = Math.max(1, Math.ceil(fcState.filtered.length / PAGE_SIZE)); if (fcState.page < tp - 1) { fcState.page++; fcRenderSkuTable(); } });
