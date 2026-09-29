@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.3";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -12006,13 +12006,16 @@ function fcMonthlyDemand(monthlyMap) {
 }
 
 // Median of the SKU's OWN monthly PLACED pieces across its whole loaded history
-// (every month with placed>0, excluding the current partial month). This is the
-// "how much this SKU can push per month" number the Recommended column shows.
+// (excluding the current partial month). Months with placed BELOW
+// FC_GAP_PLACED_MIN are dropped first — those tiny months just drag the median
+// down and don't reflect what the SKU can really push. This is the "how much
+// this SKU can push per month" number the Recommended column shows.
+const FC_GAP_PLACED_MIN = 5;   // ignore months whose placed is under this when taking the median
 function fcMedianMonthlyPlaced(monthlyPlacedMap) {
   if (!monthlyPlacedMap || !monthlyPlacedMap.size) return 0;
   const nowKey = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); })();
   const vals = [];
-  monthlyPlacedMap.forEach((v, k) => { if (k < nowKey && v > 0) vals.push(v); });
+  monthlyPlacedMap.forEach((v, k) => { if (k < nowKey && v >= FC_GAP_PLACED_MIN) vals.push(v); });
   return fcMedian(vals);
 }
 
@@ -12185,6 +12188,7 @@ function fcRecCell(n, kind) {
   if (kind === "pct") return n.toFixed(1) + "%";
   if (kind === "money") return fcCompact(n);
   if (kind === "months") return n >= 999 ? "∞" : n.toFixed(1);
+  if (kind === "rate") return n >= 10 ? fmtInt.format(Math.round(n)) : n.toFixed(1);
   return fmtInt.format(Math.round(n));
 }
 
@@ -12266,7 +12270,7 @@ async function fcExportRecommends() {
     const merged = new Map();
     const collect = (r) => {
       let m = merged.get(r.sku);
-      if (!m) { m = { sku: r.sku, name: r.name, demand: r.demand, cr: r.cr, dr: r.dr, ndr: r.ndr, asp: r.asp, unit: r.unit, hist: r.hist, estimated: r.estimated, basis: r.basis, dead: r.dead, repackPcs: 0, stockPcs: 0, groups: new Set() }; merged.set(r.sku, m); }
+      if (!m) { m = { sku: r.sku, name: r.name, demand: r.demand, rec: r.rec, cr: r.cr, dr: r.dr, ndr: r.ndr, asp: r.asp, unit: r.unit, hist: r.hist, estimated: r.estimated, basis: r.basis, dead: r.dead, repackPcs: 0, stockPcs: 0, groups: new Set() }; merged.set(r.sku, m); }
       m.groups.add(r.group);
       if (r.group === "Repack") m.repackPcs += (r.avail || 0); else m.stockPcs += (r.avail || 0);
     };
@@ -12274,10 +12278,9 @@ async function fcExportRecommends() {
     const mergedRows = Array.from(merged.values()).map(m => {
       const avail = m.repackPcs + m.stockPcs;
       const group = m.groups.size > 1 ? "Repack + Single stock" : Array.from(m.groups)[0];
-      const rec = Math.min(m.demand, avail);
       const months = m.demand > 0 ? avail / m.demand : null;
       const unit = m.asp > 0 ? m.asp : m.unit;
-      return { ...m, group, avail, rec, months, value: avail * (unit || 0), unit };
+      return { ...m, group, avail, months, value: avail * (unit || 0), unit };
     }).sort((a, b) => (b.value || 0) - (a.value || 0));
 
     const headerC = ["Group", "SKU", "Name", "Available (pcs)", "Repack pcs", "Good stock pcs", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
