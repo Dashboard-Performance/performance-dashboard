@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.7";
+const APP_VERSION = "1.2.9";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11873,15 +11873,14 @@ async function fcLoadPlanExclusions() {
     if (bundleResp) {
       const cols = bundleResp.table.cols || [];
       const iSingle = findCol(cols, "single_id") >= 0 ? findCol(cols, "single_id") : 3;
-      const iPlan = findCol(cols, "plan");
-      const iInPlan = findCol(cols, "in plan");
-      const iAdj = findCol(cols, "adjusted single pcs");
+      // PLAN is column S (index 18) in the Bundle-Single tab. Per the rule: a
+      // single with PLAN = 1 is "in the plan" → excluded from Group B (stock).
+      const iPlan = findCol(cols, "plan") >= 0 ? findCol(cols, "plan") : 18;
       const set = new Set();
       (bundleResp.table.rows || []).forEach(r => {
         const c = r.c || [];
         const sid = cellV(c[iSingle]); if (!sid) return;
-        const inPlan = (iPlan >= 0 && truthy(c[iPlan])) || (iInPlan >= 0 && truthy(c[iInPlan])) || (iAdj >= 0 && num(c[iAdj]) > 0);
-        if (inPlan) set.add(String(sid).trim());
+        if (truthy(c[iPlan])) set.add(String(sid).trim());
       });
       fcGapState.stockExcl = set;
     }
@@ -12014,10 +12013,21 @@ function fcMedian(arr) {
 function fcBuildRecommends() {
   const { agg, singlesList } = fcBuildSingleLifetime();
   const { stockByProductId } = buildDebundledStockDohIndex(state.allParsedRows || [], 3);
-  // Repack = Damaged-BOX pieces, computed live from the WareHouse sheet
-  // (state.repackMap already sums TOTAL_COUNT where Condition = "Damaged BOX").
-  // Good single stock = the normal sellable stock the rest of the page uses.
-  const repackMap = state.repackMap || new Map();
+  // Repack = Damaged-BOX pieces from the WareHouse sheet (state.repackMap sums
+  // TOTAL_COUNT where Condition = "Damaged BOX"), keyed by the SKU_ID as stored —
+  // which can be a BUNDLE code. Debundle it to single level (a damaged bundle box
+  // = its component singles × quantity) so Group A is single-level like the plan,
+  // the forecast and the exclusions. Everything on this page is one Single-SKU.
+  const rawRepack = state.repackMap || new Map();
+  const { productMap, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const mapFor = (sku) => { const m = productMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
+  const repackMap = new Map();
+  rawRepack.forEach((qty, sku) => {
+    if (!(qty > 0)) return;
+    mapFor(sku).forEach(mp => {
+      repackMap.set(mp.singleId, (repackMap.get(mp.singleId) || 0) + qty * (mp.quantity || 1));
+    });
+  });
 
   const perf = (e) => {
     const cr = e.placed > 0 ? (e.confirmed / e.placed) * 100 : 0;
@@ -12098,9 +12108,11 @@ function fcBuildRecommends() {
     A.push(row("Repack", sku, qty));
   });
 
-  // Group B — good single stock over the threshold, for SKUs not in the plan.
-  // Repack (damaged) and good stock are separate pools, so a not-in-plan SKU
-  // can legitimately appear in both — different pieces to clear.
+  // Group B — good SINGLE stock over the threshold, for singles not in the plan.
+  // Iterate REAL singles only (from the debundle map) and use each single's own
+  // stock (col H) — never product/bundle stock — so no bundle/offer code appears.
+  // Repack (damaged) and good stock are separate pools, so a not-in-plan single
+  // can appear in both — different pieces to clear.
   const seenB = new Set();
   const addB = (sku, stock) => {
     if (seenB.has(sku)) return;
@@ -12109,13 +12121,13 @@ function fcBuildRecommends() {
     seenB.add(sku);
     B.push(row("Single stock", sku, stock));
   };
-  stockByProductId.forEach((stock, sku) => addB(sku, stock || 0));
-  // Also cover singles that have stock in the inventory feed but no debundle row.
-  if (state.inventoryMap) {
-    Object.keys(state.inventoryMap).forEach(sku => {
-      if (seenB.has(sku) || stockByProductId.has(sku)) return;
-      addB(sku, (state.inventoryMap[sku] && state.inventoryMap[sku].stock) || 0);
-    });
+  const stockForSingle = (sid) => {
+    if (stockBySingle && stockBySingle.has(sid)) return stockBySingle.get(sid) || 0;
+    const inv = state.inventoryMap && state.inventoryMap[sid];
+    return (inv && inv.stock) || 0;
+  };
+  if (singlesList && singlesList.forEach) {
+    singlesList.forEach((_name, sid) => addB(sid, stockForSingle(sid)));
   }
 
   const byValue = (a, b) => (b.value || 0) - (a.value || 0);
