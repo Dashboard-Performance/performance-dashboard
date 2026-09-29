@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -12131,14 +12131,15 @@ function fcBuildRecommends() {
   const stockExcl = fcGapState.stockExcl;   // SINGLE_IDs with PLAN=1
   const repackExcl = fcGapState.repackExcl; // SKUs already in the Purchase Plan (have a Repack line)
   const adjustMap = fcGapState.adjustMap;   // SINGLE_ID → Adjust Confirmed
-  // A single is truly "in plan" (→ excluded from Group B) only when PLAN=1 AND
-  // its Adjust Confirmed > 0. PLAN=1 with Adjust 0 means the SKU has a problem,
-  // so it stays in the recommendations.
+  // "In plan" (→ excluded from Group B) is decided by Adjust Confirmed > 0 — the
+  // real confirmed target. A SKU with Adjust>0 is planned even if the PLAN column
+  // isn't flagged; a SKU with Adjust=0 is NOT really planned even if PLAN=1
+  // (the SKU has a problem), so it stays in the recommendations. PLAN=1 is only a
+  // fallback when the Adjust Confirmed tab is unreachable.
   const excludedFromB = (sku) => {
-    if (!stockExcl) return fcIsInPlan(sku);           // fallback when the sheet is unreachable
-    if (!stockExcl.has(sku)) return false;            // not PLAN=1 → not in plan
-    if (!adjustMap) return true;                       // no adjust data → PLAN=1 is enough
-    return (adjustMap.get(sku) || 0) > 0;              // PLAN=1 and Adjust>0 → really in plan
+    if (adjustMap) return (adjustMap.get(sku) || 0) > 0;   // authoritative: in plan iff Adjust Confirmed > 0
+    if (stockExcl) return stockExcl.has(sku);              // fallback: PLAN=1
+    return fcIsInPlan(sku);                                 // last resort
   };
   const excludedFromA = (sku) => (repackExcl && repackExcl.has(sku)) || (!repackExcl && fcIsInPlan(sku));
 
