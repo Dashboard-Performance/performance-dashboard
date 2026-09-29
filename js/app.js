@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.3.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11805,10 +11805,11 @@ const FC_GAP_DEMAND_MONTHS = 3;       // how many recent active months feed the 
 //   • Bundle-Single (in-plan singles) → excluded from Group B (stock).
 //   • Purchase Plan (SKUs already carrying a Repack line) → excluded from Group A.
 const FC_PLAN_SHEET_ID = "13laMNJ4ZuV9ToKtWEOVULbeuvDRHT8UOYTCXnK2u7S4";
-const FC_PLAN_BUNDLE_GID = "801350150";     // Bundle-Single → Group B exclusion (PLAN / Adjusted Single Pcs)
+const FC_PLAN_BUNDLE_GID = "801350150";     // Bundle-Single → Group B exclusion (PLAN col S)
 const FC_PLAN_PURCHASE_GID = "2107930739";  // Purchase Plan → Group A (Repack) exclusion
+const FC_PLAN_ADJUST_GID = "1593693420";    // Adjust Confirmed tab → a single counts as "in plan" only if Adjust Confirmed > 0
 const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "",
-  stockExcl: null, repackExcl: null, exclLoaded: false, exclError: null };
+  stockExcl: null, repackExcl: null, adjustMap: null, exclLoaded: false, exclError: null };
 
 // gviz reader by SHEET NAME (not gid) — robust to gid changes and to the user
 // not knowing gids. Same JSONP transport as fcLoadGvizQuery.
@@ -11866,10 +11867,26 @@ async function fcLoadPlanExclusions() {
   const truthy = (c) => { const v = cellV(c); if (v === null) return false; const s = String(v).trim().toLowerCase(); return v === true || s === "1" || s === "yes" || s === "true" || (Number(v) > 0); };
   const findCol = (cols, ...names) => { const low = cols.map(c => (c.label || "").trim().toLowerCase()); for (const n of names) { const i = low.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
   try {
-    const [bundleResp, purchaseResp] = await Promise.all([
+    const [bundleResp, purchaseResp, adjustResp] = await Promise.all([
       fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_BUNDLE_GID, 90000).catch(() => null),
-      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_PURCHASE_GID, 90000).catch(() => null)
+      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_PURCHASE_GID, 90000).catch(() => null),
+      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_ADJUST_GID, 90000).catch(() => null)
     ]);
+    if (adjustResp) {
+      // Adjust Confirmed tab: Product ID + Adjust Confirmed. A single is only
+      // truly "in the plan" if its Adjust Confirmed > 0 — PLAN=1 with Adjust 0
+      // means the SKU itself has a problem, so it should NOT be treated as planned.
+      const cols = adjustResp.table.cols || [];
+      const iPid = findCol(cols, "product id", "product_id") >= 0 ? findCol(cols, "product id", "product_id") : 0;
+      const iAdj = findCol(cols, "adjust confirmed") >= 0 ? findCol(cols, "adjust confirmed") : 19;
+      const m = new Map();
+      (adjustResp.table.rows || []).forEach(r => {
+        const c = r.c || [];
+        const pid = cellV(c[iPid]); if (!pid) return;
+        m.set(String(pid).trim(), num(c[iAdj]));
+      });
+      fcGapState.adjustMap = m;
+    }
     if (bundleResp) {
       const cols = bundleResp.table.cols || [];
       const iSingle = findCol(cols, "single_id") >= 0 ? findCol(cols, "single_id") : 3;
@@ -11896,7 +11913,7 @@ async function fcLoadPlanExclusions() {
       });
       fcGapState.repackExcl = set;
     }
-    fcGapState.exclError = (!bundleResp || !purchaseResp) ? "partial" : null;
+    fcGapState.exclError = (!bundleResp || !purchaseResp || !adjustResp) ? "partial" : null;
   } catch (e) {
     fcGapState.exclError = e && e.message ? e.message : String(e);
   } finally {
@@ -11963,13 +11980,14 @@ function fcBuildSingleLifetime() {
     mapFor(r.sku).forEach(mp => {
       const q = mp.quantity || 1, w = mp.cogsWeight != null ? mp.cogsWeight : 1;
       let e = agg.get(mp.singleId);
-      if (!e) { e = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() }; agg.set(mp.singleId, e); }
+      if (!e) { e = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map(), monthlyPlaced: new Map() }; agg.set(mp.singleId, e); }
       e.placed += (r.placedPieces || 0) * q;
       e.confirmed += (r.confirmedPieces || 0) * q;
       e.delivered += (r.deliveredPieces || 0) * q;
       e.deliveredGmv += (r.deliveredGmv || 0) * w;
       if (isRecent) e.recentConf += (r.confirmedPieces || 0) * q;
       if ((r.deliveredPieces || 0) > 0) e.monthly.set(mk, (e.monthly.get(mk) || 0) + (r.deliveredPieces || 0) * q);
+      if ((r.placedPieces || 0) > 0) e.monthlyPlaced.set(mk, (e.monthlyPlaced.get(mk) || 0) + (r.placedPieces || 0) * q);
     });
   }
   return { agg, singlesList };
@@ -11985,6 +12003,17 @@ function fcMonthlyDemand(monthlyMap) {
   let wsum = 0, w = 0;
   keys.forEach((k, i) => { const wt = keys.length - i; wsum += (monthlyMap.get(k) || 0) * wt; w += wt; });
   return w > 0 ? wsum / w : 0;
+}
+
+// Median of the SKU's OWN monthly PLACED pieces across its whole loaded history
+// (every month with placed>0, excluding the current partial month). This is the
+// "how much this SKU can push per month" number the Recommended column shows.
+function fcMedianMonthlyPlaced(monthlyPlacedMap) {
+  if (!monthlyPlacedMap || !monthlyPlacedMap.size) return 0;
+  const nowKey = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); })();
+  const vals = [];
+  monthlyPlacedMap.forEach((v, k) => { if (k < nowKey && v > 0) vals.push(v); });
+  return fcMedian(vals);
 }
 
 // A SKU is "in the plan" when it has a real target in the Single-SKU targets
@@ -12069,21 +12098,27 @@ function fcBuildRecommends() {
     return { est: fcMedian(arr) * FC_GAP_PEER_DAMP, basis };
   };
 
-  const emptyE = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map() };
+  const emptyE = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map(), monthlyPlaced: new Map() };
   const row = (group, sku, avail) => {
     const e = agg.get(sku) || emptyE;
     const p = perf(e);
+    // Monthly demand (delivered rate) — used for Months-to-clear context.
     const ownDemand = fcMonthlyDemand(e.monthly);
     let demand = ownDemand, estimated = false, basis = null;
     if (ownDemand <= 0) {
       const pe = peerEstimate(sku);
       demand = pe.est; estimated = pe.est > 0; basis = pe.basis;
     }
+    // Recommended next-month pcs = the MEDIAN of this SKU's own monthly PLACED
+    // across its history (what it can push per month). If it has no placed
+    // history, fall back to the peer estimate.
+    const ownPlaced = fcMedianMonthlyPlaced(e.monthlyPlaced);
+    const rec = ownPlaced > 0 ? ownPlaced : (estimated ? demand : peerEstimate(sku).est);
     // Value: real ASP when we have it, else the selling price (so dead stock
     // still shows the money tied up instead of zero).
     const unit = p.asp > 0 ? p.asp : priceOf(sku);
     return {
-      group, sku, name: nameOf(sku), avail, demand, rec: Math.min(demand, avail),
+      group, sku, name: nameOf(sku), avail, demand, rec,
       months: demand > 0 ? avail / demand : null,
       value: avail * unit,
       cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp, unit,
@@ -12093,9 +12128,18 @@ function fcBuildRecommends() {
   };
 
   // Exclusion sets from the Commercial Plan workbook (best-effort; may be null).
-  const stockExcl = fcGapState.stockExcl;   // SINGLE_IDs already in the plan
+  const stockExcl = fcGapState.stockExcl;   // SINGLE_IDs with PLAN=1
   const repackExcl = fcGapState.repackExcl; // SKUs already in the Purchase Plan (have a Repack line)
-  const excludedFromB = (sku) => stockExcl ? stockExcl.has(sku) : fcIsInPlan(sku);
+  const adjustMap = fcGapState.adjustMap;   // SINGLE_ID → Adjust Confirmed
+  // A single is truly "in plan" (→ excluded from Group B) only when PLAN=1 AND
+  // its Adjust Confirmed > 0. PLAN=1 with Adjust 0 means the SKU has a problem,
+  // so it stays in the recommendations.
+  const excludedFromB = (sku) => {
+    if (!stockExcl) return fcIsInPlan(sku);           // fallback when the sheet is unreachable
+    if (!stockExcl.has(sku)) return false;            // not PLAN=1 → not in plan
+    if (!adjustMap) return true;                       // no adjust data → PLAN=1 is enough
+    return (adjustMap.get(sku) || 0) > 0;              // PLAN=1 and Adjust>0 → really in plan
+  };
   const excludedFromA = (sku) => (repackExcl && repackExcl.has(sku)) || (!repackExcl && fcIsInPlan(sku));
 
   const A = [], B = [];
@@ -12177,7 +12221,7 @@ function fcRenderRecommends() {
   const sumVal = (arr) => arr.reduce((s, r) => s + (r.value || 0), 0);
   const repackSkus = (state.repackMap && state.repackMap.size) || 0;
   const exclNote = fcGapState.exclLoaded
-    ? `excluded ${fcGapState.stockExcl ? fcGapState.stockExcl.size : 0} in-plan (stock) & ${fcGapState.repackExcl ? fcGapState.repackExcl.size : 0} purchase-plan (repack)${fcGapState.exclError ? " ⚠️ plan workbook partly unreachable — used fallback" : ""}`
+    ? `PLAN=1: ${fcGapState.stockExcl ? fcGapState.stockExcl.size : 0} · Adjust>0 gate: ${fcGapState.adjustMap ? "on" : "off"} · purchase-plan (repack): ${fcGapState.repackExcl ? fcGapState.repackExcl.size : 0}${fcGapState.exclError ? " ⚠️ plan workbook partly unreachable — used fallback" : ""}`
     : "exclusions not loaded (fallback)";
   const note = `computed live — ${repackSkus} SKUs have Damaged-BOX repack · ${exclNote}`;
   if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand) · ${note}`;
