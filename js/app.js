@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.3.4";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -53,7 +53,7 @@ const IRQ_COGS_GID = "775718300";               // شيت الـ COGS الخاص
 const IRQ_INVENTORY_GID = "133618857";
 // Forecast Model — daily demand history (April–July). Read lazily, only when
 // the Forecast Model tab is opened (never part of the startup snapshot).
-const FORECAST_HISTORY_GID = "1338407774";
+const FORECAST_HISTORY_GID = "1433599782";
 // Forecast Model — price-change history: one row per SKU per price-validity
 // window (VALID_FROM_DATE, PRODUCT_BASE_PRICE, PREV_PRICE, …). Read lazily
 // with the demand history. This is the set price the business actually chose,
