@@ -62,6 +62,7 @@
             <a class="nav-item-sub" id="navHealthyUnlocking">Unlocking Action's</a>
             <a class="nav-item-sub" id="navMpMatches">Performance-Matches</a>
             <a class="nav-item-sub" id="navMpNewMatches">New Matches</a>
+            <a class="nav-item-sub" id="navMpDeclineWatch">Decline Watch</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -1927,6 +1928,79 @@
                   <button id="nextPageMpNewMatches" class="btn btn-outline small">Next</button>
                 </div>
               </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- DECLINE WATCH (under Marketplace, after New Matches) -->
+        <div id="viewMpDeclineWatch" class="view-section hidden">
+          <section class="mb-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-purple">
+                <h2>Decline Watch</h2>
+                <p id="dwSubtitle">Top 20 matches (Merchant × SKU) that pulled Placed down yesterday vs. their previous 4-day average (DAY2–DAY5)</p>
+              </div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Placed Drop <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="dwTotalDrop">0</div>
+                <div class="metric-sub text-dim">Pieces, all declining matches</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Top 20 Share <span class="icon-box"></span></div>
+                <div class="metric-value" id="dwTop20Share">0%</div>
+                <div class="metric-sub text-dim">Of the total drop</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Out of Stock <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="dwOos">0</div>
+                <div class="metric-sub text-dim">Of the Top 20</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Key Drivers <span class="icon-box"></span></div>
+                <div class="metric-value text-red" id="dwKeyDrivers">0</div>
+                <div class="metric-sub text-dim">Merchants driving 50%+ of their SKU's drop</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Locked <span class="icon-box"></span></div>
+                <div class="metric-value" id="dwLocked">0</div>
+                <div class="metric-sub text-dim">Of the Top 20 (active lock)</div>
+              </div>
+            </div>
+          </section>
+          <section class="table-section">
+            <div class="panel">
+              <div class="table-controls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <select id="dwAcmFilter" class="date-filter-input" aria-label="ACM filter"><option value="All">All ACMs</option></select>
+                <input id="dwSearch" type="search" placeholder="Search SKU or Merchant..." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" />
+                <span style="flex:1"></span>
+                <span id="dwSendStatus" class="text-dim" style="font-size:12px;"></span>
+                <button id="dwSendBtn" class="btn btn-outline small" title="Sends the current Top 20 to the configured test recipient">✉ Send me this email</button>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="dwTable">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th class="font-mono">SKU ID / Name</th>
+                      <th class="font-mono">Merchant ID / Name</th>
+                      <th>ACM</th>
+                      <th class="num" title="Average Placed pieces over DAY2–DAY5 (the 4 days before yesterday).">4D Avg</th>
+                      <th class="num" title="Placed pieces yesterday (DAY1).">Yesterday</th>
+                      <th class="num">Drop</th>
+                      <th class="num">Drop %</th>
+                      <th title="Merchant's drop as % of the SKU's 4D-avg Placed across all merchants, and its share of the SKU's total drop. KEY DRIVER = 50% or more.">Impact on SKU</th>
+                      <th title="Match's share of the total drop across all declining matches.">Contr%</th>
+                      <th class="num" title="Available stock for the SKU (Inventory tab).">Stock</th>
+                      <th class="num" title="Remaining pieces of the merchant's active lock on this SKU (Availability Locking tab).">Locked</th>
+                      <th>Likely Cause</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dwTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer"><span id="dwRowCount">0 Matches</span></div>
             </div>
           </section>
         </div>

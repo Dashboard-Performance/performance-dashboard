@@ -131,6 +131,7 @@ function doPost(e) {
   if (action === "add_new_locked_matches") return handleAddNewLockedMatches(payload);
   if (action === "publish_computed_batch") return handlePublishComputedBatch(payload);
   if (action === "publish_analyst_single_daily") return handlePublishAnalystSingleDaily(payload);
+  if (action === "send_decline_digest") return handleSendDeclineDigest(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
@@ -1061,6 +1062,120 @@ function getUsersSheet() {
 function isAllowedEmail(email) {
   var re = new RegExp("^[^\\s@]+@" + ALLOWED_EMAIL_DOMAIN.replace(".", "\\.") + "$", "i");
   return re.test(email);
+}
+
+
+// ============================================================================
+//  DECLINE WATCH — daily "Top 20 declining matches" email
+//  Called by the dashboard's "Send me this email" button (js/app.js ->
+//  sendDeclineDigestEmail). The browser only sends the computed rows; the
+//  recipients are fixed HERE (never taken from the request), and the HTML is
+//  built server-side from escaped values, so the endpoint can't be used to
+//  mail arbitrary people or arbitrary content.
+//
+//  NOTE: the first time you deploy this, Apps Script asks to authorize the
+//  "Send email as you" scope (MailApp) — run any function once from the
+//  editor (e.g. testDeclineDigest below) and accept, then redeploy a NEW
+//  version of the web app.
+// ============================================================================
+var DECLINE_DIGEST_RECIPIENTS = ["youssef.hanafy@taager.com"]; // test phase: only this address
+var DECLINE_DIGEST_MAX_ROWS = 20;
+var DECLINE_DIGEST_MIN_GAP_MS = 20 * 1000; // basic flood guard between sends
+
+function handleSendDeclineDigest(payload) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var last = Number(props.getProperty("DECLINE_DIGEST_LAST_SENT") || 0);
+    if (Date.now() - last < DECLINE_DIGEST_MIN_GAP_MS) {
+      return jsonResponse({ success: false, message: "Please wait a few seconds before sending again." });
+    }
+    var rows = (payload.rows || []).slice(0, DECLINE_DIGEST_MAX_ROWS);
+    if (!rows.length) return jsonResponse({ success: false, message: "No rows to send." });
+    var meta = payload.meta || {};
+    var html = buildDeclineDigestHtml_(rows, meta);
+    var subject = "Decline Watch · Top " + rows.length + " Placed declines · " + String(meta.dateLabel || "");
+    MailApp.sendEmail({
+      to: DECLINE_DIGEST_RECIPIENTS.join(","),
+      subject: subject,
+      htmlBody: html,
+      body: "Decline Watch — open this email in an HTML-capable client to see the table.",
+      name: "Marketplace Dashboard"
+    });
+    props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
+    return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.join(", ") });
+  } catch (err) {
+    return jsonResponse({ success: false, message: String(err && err.message ? err.message : err) });
+  }
+}
+
+// Run from the Apps Script editor once to authorize MailApp and to preview
+// the email with a tiny fake row (goes to DECLINE_DIGEST_RECIPIENTS).
+function testDeclineDigest() {
+  var rows = [{ skuId: "SKU-TEST", skuName: "Test product", merchantId: "100001", merchantName: "Test merchant", acm: "Test ACM",
+    base: 100, y: 20, drop: 80, dropPct: 80, impactPct: 40, skuSharePct: 100, contrPct: 10, stock: 0, locked: 0, hasLock: false, cause: "Out of stock" }];
+  MailApp.sendEmail({ to: DECLINE_DIGEST_RECIPIENTS.join(","), subject: "Decline Watch (test)",
+    htmlBody: buildDeclineDigestHtml_(rows, { dateLabel: "test", totalDrop: 800, topDrop: 80, acm: "All", dashboardUrl: "" }) });
+}
+
+function ddEsc_(v) {
+  return String(v === null || v === undefined ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function ddNum_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+function ddInt_(v) { return Math.round(ddNum_(v)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+function buildDeclineDigestHtml_(rows, meta) {
+  var totalDrop = ddNum_(meta.totalDrop), topDrop = ddNum_(meta.topDrop);
+  var share = totalDrop ? topDrop / totalDrop * 100 : 0;
+  var oos = 0, locked = 0, keyDrivers = 0, tb = 0, ty = 0;
+  var trs = "";
+  rows.forEach(function (r, i) {
+    var base = ddNum_(r.base), y = ddNum_(r.y), drop = ddNum_(r.drop), stock = ddNum_(r.stock);
+    var cause = r.cause === "Out of stock" || r.cause === "Locked" ? r.cause : "Demand drop";
+    var cc = cause === "Out of stock" ? ["#FDECEC", "#B42318"] : cause === "Locked" ? ["#FFF4E0", "#B54708"] : ["#E8EEF7", "#1F3F5F"];
+    var kd = ddNum_(r.skuSharePct) >= 50;
+    if (cause === "Out of stock") oos++; if (cause === "Locked") locked++; if (kd) keyDrivers++;
+    tb += base; ty += y;
+    var bg = i % 2 ? "#F7F9FC" : "#FFFFFF";
+    var tdp = "padding:10px 8px;";
+    trs += '<tr style="background:' + bg + '">' +
+      '<td style="' + tdp + 'color:#8A97A6;font-size:12px">' + (i + 1) + '</td>' +
+      '<td style="' + tdp + 'min-width:150px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.skuId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(r.skuName) + '</div></td>' +
+      '<td style="' + tdp + 'min-width:110px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.merchantId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(r.merchantName) + '</div></td>' +
+      '<td style="' + tdp + 'color:#4A5B6E;font-size:12px;white-space:nowrap">' + ddEsc_(r.acm) + '</td>' +
+      '<td align="right" style="' + tdp + 'color:#5A6B7B;font-size:13px">' + base.toFixed(1) + '</td>' +
+      '<td align="right" style="' + tdp + 'color:#14243A;font-size:13px">' + ddInt_(y) + '</td>' +
+      '<td align="right" style="' + tdp + 'color:#B42318;font-weight:700;font-size:13px">&minus;' + drop.toFixed(1) + '</td>' +
+      '<td align="right" style="' + tdp + 'color:#B42318;font-size:12px">&minus;' + ddNum_(r.dropPct).toFixed(0) + '%</td>' +
+      '<td style="' + tdp + 'white-space:nowrap"><div style="font-size:13px;font-weight:700;color:' + (kd ? "#B42318" : "#14243A") + '">&minus;' + ddNum_(r.impactPct).toFixed(1) + '% <span style="font-size:11px;font-weight:400;color:#7A889A">of SKU</span></div>' +
+        '<div style="font-size:11px;color:#7A889A;margin-top:2px">' + ddNum_(r.skuSharePct).toFixed(0) + '% of SKU\'s drop' + (kd ? ' <span style="background:#FDECEC;color:#B42318;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px">KEY DRIVER</span>' : '') + '</div></td>' +
+      '<td style="' + tdp + 'width:92px"><div style="font-size:12px;color:#14243A;font-weight:600">' + ddNum_(r.contrPct).toFixed(1) + '%</div><div style="background:#E6EBF2;height:4px;border-radius:2px;margin-top:4px"><div style="background:#2F5D8A;height:4px;border-radius:2px;width:' + Math.min(100, ddNum_(r.contrPct) * 6).toFixed(0) + '%"></div></div></td>' +
+      '<td align="right" style="' + tdp + 'font-size:13px;color:' + (stock <= 0 ? "#B42318;font-weight:700" : "#14243A") + '">' + ddInt_(stock) + '</td>' +
+      '<td align="right" style="' + tdp + 'font-size:13px;color:#5A6B7B">' + (r.hasLock ? ddInt_(r.locked) : "&ndash;") + '</td>' +
+      '<td style="' + tdp + '"><span style="background:' + cc[0] + ';color:' + cc[1] + ';font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap">' + ddEsc_(cause) + '</span></td></tr>';
+  });
+  var kpi = function (label, val, sub, col) {
+    return '<td width="20%" style="padding:0 5px;vertical-align:top"><div style="background:#F4F7FB;border:1px solid #E1E8F0;border-radius:10px;padding:14px"><div style="font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.6px">' + label + '</div><div style="font-size:24px;font-weight:700;color:' + (col || "#14243A") + ';margin-top:4px">' + val + '</div><div style="font-size:11px;color:#8A97A6;margin-top:2px">' + sub + '</div></div></td>';
+  };
+  var th = function (t, a) { return '<th align="' + (a || "left") + '" style="padding:10px 8px;font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #D5DEE9;font-weight:700">' + t + '</th>'; };
+  var btn = meta.dashboardUrl ? '<tr><td align="center" style="padding:22px 30px 26px"><a href="' + ddEsc_(meta.dashboardUrl) + '" style="display:inline-block;background:#2F5D8A;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">Open in Dashboard</a></td></tr>' : '';
+  var acmNote = meta.acm && meta.acm !== "All" ? ' · ACM: ' + ddEsc_(meta.acm) : '';
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Decline Watch</title></head>' +
+  '<body style="margin:0;background:#EAEFF5;font-family:Segoe UI,Arial,Helvetica,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" style="background:#EAEFF5"><tr><td align="center" style="padding:28px 12px">' +
+  '<table width="1040" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;border:1px solid #D9E1EB">' +
+  '<tr><td style="background:#1F3F5F;padding:26px 30px"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:6px">Decline Watch</div>' +
+  '<div style="font-size:13px;color:#C9D8E8;margin-top:6px">Top ' + rows.length + ' matches that pulled Placed down yesterday &middot; ' + ddEsc_(meta.dateLabel) + acmNote + '</div></td></tr>' +
+  '<tr><td style="padding:24px 25px 6px"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
+  kpi("Total Placed drop", "&minus;" + ddInt_(totalDrop), "pieces vs. 4-day avg", "#B42318") + kpi("Top " + rows.length + " share", share.toFixed(0) + "%", "of the total drop") +
+  kpi("Out of stock", oos, "of the Top " + rows.length, "#B42318") + kpi("Key drivers", keyDrivers, "merchants driving 50%+ of their SKU's drop", "#B42318") + kpi("Locked", locked, "of the Top " + rows.length, "#B54708") +
+  '</tr></table></td></tr>' +
+  '<tr><td style="padding:14px 30px 6px"><div style="font-size:13px;color:#4A5B6E;line-height:1.55">The ' + rows.length + ' matches below account for <b>' + share.toFixed(0) + '%</b> of yesterday\'s Placed decline. <b>' + oos + '</b> are out of stock and <b>' + locked + '</b> have an active lock, so those can be checked on the supply side first.</div></td></tr>' +
+  '<tr><td style="padding:12px 22px 8px"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>' +
+  th("#") + th("SKU ID / Name") + th("Merchant ID / Name") + th("ACM") + th("4D avg", "right") + th("Yesterday", "right") + th("Drop", "right") + th("Drop %", "right") + th("Impact on SKU") + th("Contr%") + th("Stock", "right") + th("Locked", "right") + th("Likely cause") +
+  '</tr>' + trs +
+  '<tr style="background:#EEF3F9"><td></td><td colspan="3" style="padding:11px 8px;font-weight:700;color:#14243A;font-size:13px">Top ' + rows.length + ' total</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + tb.toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + ddInt_(ty) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + (tb - ty).toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:12px">&minus;' + (tb ? ((tb - ty) / tb * 100).toFixed(0) : 0) + '%</td><td></td><td style="padding:11px 8px;font-weight:700;font-size:12px">' + share.toFixed(1) + '%</td><td colspan="3"></td></tr>' +
+  '</table></td></tr>' + btn +
+  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed only if its drop exceeds the normal day-to-day variation (standard deviation) of its own 4 days. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Locked = the merchant has an active lock on the SKU; otherwise Demand drop.<br>Marketplace Performance Dashboard</div></td></tr>' +
+  '</table></td></tr></table></body></html>';
 }
 
 function jsonResponse(obj) {

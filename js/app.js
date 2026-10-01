@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.9";
+const APP_VERSION = "1.3.10";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -687,6 +687,7 @@ const navHealthyUnlocking = $("navHealthyUnlocking");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navMpMatches = $("navMpMatches");
 const navMpNewMatches = $("navMpNewMatches");
+const navMpDeclineWatch = $("navMpDeclineWatch");
 const navAdminToggle = $("navAdminToggle");
 const adminSubmenu = $("adminSubmenu");
 const navAdminCaret = $("navAdminCaret");
@@ -974,6 +975,7 @@ function switchView(viewName) {
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
   if(navMpNewMatches) navMpNewMatches.classList.remove("active");
+  if(navMpDeclineWatch) navMpDeclineWatch.classList.remove("active");
   if(navSegmentationPanel) navSegmentationPanel.classList.remove("active");
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
@@ -1006,6 +1008,7 @@ function switchView(viewName) {
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
   else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); prepareMpNewMatchesData(); }
+  else if (viewName === "mpDeclineWatch") { activeSection = $("viewMpDeclineWatch"); if(navMpDeclineWatch) navMpDeclineWatch.classList.add("active"); prepareMpDeclineWatchData(); }
   else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); renderSegmentationPanel(); }
   else if (viewName === "sellthrough") {      
       activeSection = $("viewSellthroughPanel");      
@@ -1061,6 +1064,7 @@ if(navHealthyUnlocking) navHealthyUnlocking.addEventListener("click", () => swit
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
+if(navMpDeclineWatch) navMpDeclineWatch.addEventListener("click", () => switchView("mpDeclineWatch"));
 if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
@@ -2442,6 +2446,7 @@ function parseMerchantSkuDailySheet(payload) {
     if (!skuId || skuId === "SKU_ID") continue; // تخطي صف العناوين لو موجود جوه rows
     rows.push({
       skuId,
+      skuName: cellText(c[1]), merchantName: cellText(c[3]), acm: cellText(c[4]),
       tagerId: cellText(c[2]).trim(),
       day0: cellNumber(c[13]), day1: cellNumber(c[14]), day2: cellNumber(c[15]),
       day3: cellNumber(c[16]), day4: cellNumber(c[17]), day5: cellNumber(c[18]),
@@ -5253,6 +5258,7 @@ async function updateDashboard(rows) {
   await yieldToMainThread();
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
+  if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) prepareMpDeclineWatchData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
   // الأقسام دي مكنتش بترندر تلقائي مع باقي الفلاتر (كانت بس بترندر أول ما
   // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
@@ -14675,6 +14681,179 @@ function prepareMpNewMatchesData() {
   renderMpNewMatchesCategoryBoxes();
   applyMpNewMatchesSearchAndSort();
 }
+
+
+// =====================================================================
+// DECLINE WATCH (تحت Marketplace، بعد New Matches) — أكتر 20 ماتش
+// (Merchant × SKU) وقّعوا الـ Placed امبارح (DAY1) مقارنةً بمتوسط الـ 4
+// أيام اللي قبله (DAY2..DAY5)، من شيت MERCHANT_SKU_DAILY_GID (461854229).
+//   Drop        = متوسط DAY2..DAY5 − DAY1 (بس لو موجب = نزول فعلي)، ولازم يعدّي STDEV أيام الماتش (حارس ضوضاء) وأقل حد DW_MIN_DROP_PCS
+//   Contr%      = Drop الماتش ÷ إجمالي Drop كل الماتشات النازلة
+//   Impact/SKU  = Drop الماتش ÷ متوسط الـ 4 أيام للـ SKU كله (كل التجار)،
+//                 + حصته من إجمالي نزول الـ SKU (KEY DRIVER لو 50%+)
+//   Stock       = state.inventoryMap[sku].stock (تاب الـ Inventory)
+//   Locked      = مجموع REMAINING_PIECES للأقفال النشطة للتاجر ده على الـ SKU
+//   Cause       = Out of stock (ستوك صفر) / Locked (فيه قفل نشط) / Demand drop
+// زرار "Send me this email" بيبعت الـ Top 20 المعروضة للـ Backend
+// (action=send_decline_digest) اللي بيبني الإيميل ويبعته لقايمة المستلمين
+// المحددة جوه Code.gs (DECLINE_DIGEST_RECIPIENTS) — مش من المتصفح.
+// =====================================================================
+const DW_TOP_N = 20;
+const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الماتش يدخل الترتيب (يتفادى الضوضاء)
+const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
+const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
+
+function dwYesterdayLabel() {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
+
+function dwComputeAll() {
+  const daily = state.merchantSkuDailyRows || [];
+  const todayMs = new Date().setHours(0, 0, 0, 0);
+
+  const lockByMatch = new Map();
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
+    const k = l.tagerId + "||" + l.singleId;
+    lockByMatch.set(k, (lockByMatch.get(k) || 0) + (l.remainingPieces || 0));
+  });
+  const activeLockKeys = new Set();
+  (state.availabilityLockingRows || []).forEach(l => {
+    if (l.singleId && l.tagerId && alIsLockActive(l, todayMs)) activeLockKeys.add(l.tagerId + "||" + l.singleId);
+  });
+
+  const skuBase = new Map(), skuDrop = new Map();
+  const rows = [];
+  daily.forEach(r => {
+    if (!r.skuId || !r.tagerId) return;
+    const base = ((r.day2 || 0) + (r.day3 || 0) + (r.day4 || 0) + (r.day5 || 0)) / 4;
+    const y = r.day1 || 0;
+    const drop = base - y;
+    skuBase.set(r.skuId, (skuBase.get(r.skuId) || 0) + base);
+    if (drop > 0) skuDrop.set(r.skuId, (skuDrop.get(r.skuId) || 0) + drop);
+    // STDEV (عينة) لأيام DAY2..DAY5 — حارس ضوضاء: النزول لازم يعدّي التذبذب الطبيعي للماتش نفسه.
+    const vals = [r.day2 || 0, r.day3 || 0, r.day4 || 0, r.day5 || 0];
+    const sd = Math.sqrt(vals.reduce((a, v) => a + (v - base) * (v - base), 0) / (vals.length - 1));
+    if (drop > 0) rows.push({ r, base, y, drop, sd });
+  });
+  const totalDrop = rows.reduce((a, x) => a + x.drop, 0);
+
+  const out = rows.filter(x => x.drop >= DW_MIN_DROP_PCS && x.drop > x.sd).map(x => {
+    const r = x.r, key = r.tagerId + "||" + r.skuId;
+    const inv = state.inventoryMap[r.skuId] || {};
+    const stock = Math.round(inv.stock || 0);
+    const hasLock = activeLockKeys.has(key);
+    const locked = Math.round(lockByMatch.get(key) || 0);
+    const sb = skuBase.get(r.skuId) || x.base, sd = skuDrop.get(r.skuId) || x.drop;
+    const cause = stock <= 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop");
+    return {
+      skuId: r.skuId, skuName: r.skuName || inv.skuName || "",
+      merchantId: r.tagerId, merchantName: r.merchantName || r.tagerId, acm: r.acm || "",
+      base: x.base, y: x.y, drop: x.drop, dropPct: x.base ? (x.drop / x.base) * 100 : 0,
+      impactPct: sb ? (x.drop / sb) * 100 : 0, skuSharePct: sd ? (x.drop / sd) * 100 : 0,
+      contrPct: totalDrop ? (x.drop / totalDrop) * 100 : 0,
+      stock, locked, hasLock, cause
+    };
+  });
+  out.sort((a, b) => b.drop - a.drop);
+  dwState.all = out; dwState.totalDrop = totalDrop; dwState.dateLabel = dwYesterdayLabel();
+}
+
+function prepareMpDeclineWatchData() {
+  dwComputeAll();
+  const sel = $("dwAcmFilter");
+  if (sel) {
+    const cur = sel.value || "All";
+    const acms = Array.from(new Set(dwState.all.map(x => x.acm).filter(Boolean))).sort();
+    sel.innerHTML = '<option value="All">All ACMs</option>' + acms.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+    sel.value = acms.includes(cur) ? cur : "All";
+  }
+  renderMpDeclineWatch();
+}
+
+function renderMpDeclineWatch() {
+  const acm = $("dwAcmFilter") ? $("dwAcmFilter").value : "All";
+  const term = $("dwSearch") ? $("dwSearch").value.trim().toLowerCase() : "";
+  let list = dwState.all.filter(x => acm === "All" || x.acm === acm);
+  if (term) list = list.filter(x => (x.skuId + " " + x.skuName + " " + x.merchantId + " " + x.merchantName).toLowerCase().includes(term));
+  const top = list.slice(0, DW_TOP_N);
+  dwState.view = top;
+  const topDrop = top.reduce((a, x) => a + x.drop, 0);
+  const keyDrivers = top.filter(x => x.skuSharePct >= DW_KEY_DRIVER_SHARE).length;
+  const set = (id, v) => { if ($(id)) $(id).textContent = v; };
+  set("dwTotalDrop", "−" + fmtInt.format(Math.round(dwState.totalDrop)));
+  set("dwTop20Share", dwState.totalDrop ? fmtPct((topDrop / dwState.totalDrop) * 100) : "0%");
+  set("dwOos", top.filter(x => x.cause === "Out of stock").length);
+  set("dwKeyDrivers", keyDrivers);
+  set("dwLocked", top.filter(x => x.cause === "Locked").length);
+  set("dwRowCount", `${top.length} Matches · ${dwState.dateLabel}`);
+
+  const badge = (c) => {
+    const st = c === "Out of stock" ? "background:#FDECEC;color:#B42318" : c === "Locked" ? "background:#FFF4E0;color:#B54708" : "background:#E8EEF7;color:#1F3F5F";
+    return `<span style="${st};font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap">${escapeHtml(c)}</span>`;
+  };
+  const body = $("dwTableBody"); if (!body) return;
+  body.innerHTML = top.length ? top.map((x, i) => {
+    const kd = x.skuSharePct >= DW_KEY_DRIVER_SHARE;
+    return `<tr>
+      <td class="text-dim">${i + 1}</td>
+      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.skuId)}</div><div class="text-dim" style="font-size:11px">${escapeHtml(x.skuName)}</div></td>
+      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.merchantId)}</div><div class="text-dim" style="font-size:11px">${escapeHtml(x.merchantName)}</div></td>
+      <td>${escapeHtml(x.acm)}</td>
+      <td class="num">${x.base.toFixed(1)}</td>
+      <td class="num">${fmtInt.format(x.y)}</td>
+      <td class="num text-red" style="font-weight:700">−${x.drop.toFixed(1)}</td>
+      <td class="num text-red">−${x.dropPct.toFixed(0)}%</td>
+      <td style="white-space:nowrap"><div style="font-weight:700;${kd ? "color:#B42318" : ""}">−${x.impactPct.toFixed(1)}% <span class="text-dim" style="font-weight:400;font-size:11px">of SKU</span></div><div class="text-dim" style="font-size:11px">${x.skuSharePct.toFixed(0)}% of SKU's drop${kd ? ' <span style="background:#FDECEC;color:#B42318;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px">KEY DRIVER</span>' : ""}</div></td>
+      <td>${x.contrPct.toFixed(1)}%</td>
+      <td class="num ${x.stock <= 0 ? "text-red" : ""}">${fmtInt.format(x.stock)}</td>
+      <td class="num">${x.hasLock ? fmtInt.format(x.locked) : "–"}</td>
+      <td>${badge(x.cause)}</td></tr>`;
+  }).join("") : '<tr><td colspan="13" class="text-dim" style="text-align:center;padding:18px">No declining matches found.</td></tr>';
+}
+
+async function sendDeclineDigestEmail() {
+  const btn = $("dwSendBtn"), st = $("dwSendStatus");
+  const setStatus = (m, c) => { if (st) { st.textContent = m; st.style.color = c || ""; } };
+  if (!dwState.view.length) { setStatus("Nothing to send.", "#B42318"); return; }
+  const user = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
+  if (!user) { setStatus("Please log in first.", "#B42318"); return; }
+  if (!MATCHES_FEEDBACK_API_URL) { setStatus("Backend is not configured.", "#B42318"); return; }
+  const topDrop = dwState.view.reduce((a, x) => a + x.drop, 0);
+  if (btn) btn.disabled = true;
+  setStatus("Sending...", "");
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "send_decline_digest",
+        requestedBy: user.email || user.name || "",
+        meta: {
+          dateLabel: dwState.dateLabel, totalDrop: dwState.totalDrop, topDrop,
+          acm: $("dwAcmFilter") ? $("dwAcmFilter").value : "All",
+          dashboardUrl: location.href.split("#")[0]
+        },
+        rows: dwState.view.map(x => ({
+          skuId: x.skuId, skuName: x.skuName, merchantId: x.merchantId, merchantName: x.merchantName, acm: x.acm,
+          base: x.base, y: x.y, drop: x.drop, dropPct: x.dropPct, impactPct: x.impactPct, skuSharePct: x.skuSharePct,
+          contrPct: x.contrPct, stock: x.stock, locked: x.locked, hasLock: x.hasLock, cause: x.cause
+        }))
+      })
+    });
+    const data = await resp.json();
+    if (!data || data.success === false) throw new Error((data && (data.message || data.error)) || "Send failed");
+    setStatus("Sent to " + (data.sentTo || "recipient") + " ✓", "#067647");
+  } catch (err) {
+    setStatus("Failed: " + (err && err.message ? err.message : err), "#B42318");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+if ($("dwAcmFilter")) $("dwAcmFilter").addEventListener("change", renderMpDeclineWatch);
+if ($("dwSearch")) $("dwSearch").addEventListener("input", renderMpDeclineWatch);
+if ($("dwSendBtn")) $("dwSendBtn").addEventListener("click", sendDeclineDigestEmail);
 
 // كروت السامري فوق الجدول: إجمالي Placed/Confirmed/Delivered Pcs (بدون أي
 // لاج) + CR%/DR%/NDR% مجمّعين على كل الماتشات الجديدة في mpNewMatchesState
