@@ -1986,6 +1986,12 @@
                   <p>Target Confirmed Orders vs. Actual (MTD) &amp; Run Rate, with bonus earned/projected per merchant</p>
                 </div>
                 <div class="table-controls">
+                  <div class="filter-group section-date-filter" data-section-date="incentiveMerchants" title="Pick a month (or any range) to read the merchants' confirmed orders for that period instead of the current month. Clear to go back to this month.">
+                    <input id="startDate_incentiveMerchants" type="date" class="date-filter-input" aria-label="Start Date" />
+                    <span class="text-dim" style="padding:0 4px;">→</span>
+                    <input id="endDate_incentiveMerchants" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_incentiveMerchants" class="btn btn-outline small hidden" data-clear-date="incentiveMerchants">Clear</button>
+                  </div>
                   <input id="searchIncMerchInput" type="search" placeholder="Search Merchant ID or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>

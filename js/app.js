@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.4";
+const APP_VERSION = "1.3.5";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5729,19 +5729,43 @@ function prepareMerchantTableData(rows) {
 function prepareIncentiveMerchantsData() {
   const now = new Date();
   const currentMonthStr = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const elapsedDays = now.getDate() || 1;
-  // بعكس prepareMerchantTableData (اللي بتطرح يوم النهارده عشان بياناته لسه
-  // مش كاملة): هنا الـ MTD Confirmed جاي من شيت شهري إجمالي (مش يومي)، يعني
-  // مفيش طريقة نفصل "بس لحد امبارح" من "شامل النهارده" أصلاً — الرقم اللي
-  // وصلنا فيه هو نفسه لحد النهارده. فبنقسم على عدد الأيام لحد النهارده
-  // (شامل)، مش لحد امبارح.
-  const segElapsedDays = Math.max(elapsedDays, 1);
 
-  // Confirmed Orders MTD لكل تاجر لشهر النهارده الحالي بس
+  // Period follows the section's date filter (startDate_/endDate_incentiveMerchants).
+  // With no filter → the current month, exactly as before. With a filter → every
+  // whole month the chosen range covers (the actuals source is monthly, so the
+  // filter is honored at month granularity — pick a month and it reads that month).
+  const df = getActiveDateRangeFilter("incentiveMerchants");
+  const coveredMonths = new Set();
+  let periodLabel;
+  if (df) {
+    const d = new Date(df.startTs); d.setDate(1); d.setHours(0, 0, 0, 0);
+    const endD = new Date(df.endTs);
+    while (d <= endD) { coveredMonths.add(d.toLocaleString('en-US', { month: 'long', year: 'numeric' })); d.setMonth(d.getMonth() + 1); }
+    periodLabel = df.startVal + " → " + df.endVal;
+  } else {
+    coveredMonths.add(currentMonthStr);
+    periodLabel = currentMonthStr;
+  }
+  const monthsCount = Math.max(1, coveredMonths.size);
+
+  // Days across the covered months: past months count in full, the current month
+  // up to today, future months not at all — so the run-rate projection stays right.
+  let totalDays = 0, elapsedDays = 0;
+  coveredMonths.forEach(my => {
+    const d = new Date(my); if (isNaN(d.getTime())) return;
+    const y = d.getFullYear(), m = d.getMonth();
+    const dim = new Date(y, m + 1, 0).getDate();
+    totalDays += dim;
+    if (y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth())) elapsedDays += dim;
+    else if (y === now.getFullYear() && m === now.getMonth()) elapsedDays += (now.getDate() || 1);
+  });
+  totalDays = Math.max(1, totalDays);
+  const segElapsedDays = Math.max(1, elapsedDays);
+
+  // Confirmed Orders for each merchant, summed over the covered months.
   const mtdConfirmedMap = new Map();
   (state.merchantSegSourceRows || []).forEach(r => {
-    if (!r.merchantId || r.monthYear !== currentMonthStr) return;
+    if (!r.merchantId || !coveredMonths.has(r.monthYear)) return;
     mtdConfirmedMap.set(r.merchantId, (mtdConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
   });
 
@@ -5762,7 +5786,9 @@ function prepareIncentiveMerchantsData() {
     const acmName = acmMap.get(row.merchantId) || "Unassigned";
     const mtdConfirmed = mtdConfirmedMap.get(row.merchantId) || 0;
     const runRateConfirmed = (mtdConfirmed / segElapsedDays) * totalDays;
-    const target = row.targetConfirmedOrders || 0;
+    // Monthly target × number of covered months (so a multi-month filter compares
+    // against the right total; ×1 for the normal single-month case).
+    const target = (row.targetConfirmedOrders || 0) * monthsCount;
     // Target Confirmed MTD: التارجت الشهري بتاعه موزّع بالتناسب على عدد
     // الأيام اللي عدت من الشهر لحد النهارده — عشان تتقارن بيه Confirmed
     // (MTD) وتشوف هوا ماشي بالسرعة المطلوبة ولا لأ.
@@ -5785,7 +5811,7 @@ function prepareIncentiveMerchantsData() {
     const totalBonus = bonusTarget + earnedBonusActual;
     return {
       ...row,
-      currentMonthStr, acmName, mtdConfirmed, runRateConfirmed, targetConfirmedMTD,
+      currentMonthStr: periodLabel, acmName, mtdConfirmed, runRateConfirmed, targetConfirmedMTD,
       attainmentActualPct, attainmentRunRatePct, status,
       extraOrdersActual, earnedBonusActual, bonusTarget, totalBonus
     };
@@ -17503,7 +17529,8 @@ const SECTION_DATE_FILTER_REFRESH = {
   mpSalesPlan: () => prepareMpSalesPlanData(),
   cm3AnalystProducts: () => prepareCm3AnalystProductsData(),
   weeklyInvPurchase: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); },
-  weeklyInvSale: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); }
+  weeklyInvSale: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); },
+  incentiveMerchants: () => renderIncentiveMerchantsPanel()
 };
 function onSectionDateFilterChange(sectionKey) {
   const startInput = $("startDate_" + sectionKey); const endInput = $("endDate_" + sectionKey);
