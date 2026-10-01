@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.7";
+const APP_VERSION = "1.3.8";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -79,6 +79,13 @@ const MERCHANT_SEGMENTATION_GID = "620123165";
 // الأساسي لوحده). أضف الـ GID بتاع أي شهر جديد هنا.
 // 693757028 = September 2026.
 const MERCHANT_SEG_HISTORY_GIDS = ["693757028"];
+
+// الشهر اللي لوحة Incentive Merchants بتفتح عليه افتراضيًا (من غير ما المستخدم
+// يعمل فلتر) — بطلب صريح: أول ما تفتح تعرض شهر 9 (داتا تاب الأرشيف 693757028).
+// المستخدم لسه يقدر يغيّر لأي شهر من فلتر التاريخ فوق الجدول عادي. خليها "" لو
+// يومًا عايزها ترجع تفتح على الشهر الحالي تلقائيًا زي الأول. الصيغة لازم تطابق
+// شكل الشهر المعروض بالظبط: "Month YYYY" (زي "September 2026").
+const INCENTIVE_DEFAULT_MONTH = "September 2026";
 
 // شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
 // في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
@@ -5766,6 +5773,10 @@ function prepareIncentiveMerchantsData() {
     const endD = new Date(df.endTs);
     while (d <= endD) { coveredMonths.add(d.toLocaleString('en-US', { month: 'long', year: 'numeric' })); d.setMonth(d.getMonth() + 1); }
     periodLabel = df.startVal + " → " + df.endVal;
+  } else if (INCENTIVE_DEFAULT_MONTH) {
+    // مفيش فلتر → بتفتح على الشهر الافتراضي المطلوب (شهر 9) بدل الشهر الحالي.
+    coveredMonths.add(INCENTIVE_DEFAULT_MONTH);
+    periodLabel = INCENTIVE_DEFAULT_MONTH;
   } else {
     coveredMonths.add(currentMonthStr);
     periodLabel = currentMonthStr;
