@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.5";
+const APP_VERSION = "1.3.7";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -71,6 +71,14 @@ const PRICE_HISTORY_GID = "1968659230";
 // بالظبط — بدل ما كانت بتتحسب من تجميع MAIN_GID زي باقي أعمدة الجدول التاني
 // (Performance Merchant's) اللي فاضلة زي ما هي.
 const MERCHANT_SEGMENTATION_GID = "620123165";
+
+// تابات شهور سابقة بنفس أعمدة Merchant Segmentation بالظبط (snapshot أرشيفي لكل
+// شهر — التاب الأساسي فوق بيتكتب فوقه كل شهر، فالشهور القديمة بتتحفظ هنا). دي
+// مصدر إضافي لـ "Incentive Merchants" بس عشان فلتر الشهر يقدر يقرا شهور فاتت —
+// مش بتأثر على جدول Merchant Segmentation & Projections (اللي فاضل على التاب
+// الأساسي لوحده). أضف الـ GID بتاع أي شهر جديد هنا.
+// 693757028 = September 2026.
+const MERCHANT_SEG_HISTORY_GIDS = ["693757028"];
 
 // شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
 // في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
@@ -322,6 +330,7 @@ const state = {
   mpSalesPlanPage: 0,
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
   merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
+  merchantSegHistoryRows: [], // أرشيف شهور سابقة (MERCHANT_SEG_HISTORY_GIDS) — مصدر Incentive Merchants للشهور الفاتت فقط
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
   purchasePlanData: [], purchasePlanFiltered: [], purchasePlanSearch: "", purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
@@ -5730,6 +5739,21 @@ function prepareIncentiveMerchantsData() {
   const now = new Date();
   const currentMonthStr = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
+  // مصدر الأكتشوال لهذه اللوحة = التاب الأساسي (الشهر الحالي) + أرشيف الشهور
+  // السابقة (MERCHANT_SEG_HISTORY_GIDS). ده بيخلي فلتر الشهر يقرا شهور فاتت
+  // كمان — من غير ما يمس جدول Merchant Segmentation & Projections (اللي لسه
+  // بيستخدم merchantSegSourceRows لوحده). دمج آمن: لو شهر اتكرر في الاتنين
+  // بنمنع التكرار بمفتاح (merchantId + monthYear).
+  const segRows = (() => {
+    const base = state.merchantSegSourceRows || [];
+    const hist = state.merchantSegHistoryRows || [];
+    if (!hist.length) return base;
+    const seen = new Set(base.map(r => r.merchantId + "|" + r.monthYear));
+    const merged = base.slice();
+    hist.forEach(r => { const k = r.merchantId + "|" + r.monthYear; if (!seen.has(k)) { seen.add(k); merged.push(r); } });
+    return merged;
+  })();
+
   // Period follows the section's date filter (startDate_/endDate_incentiveMerchants).
   // With no filter → the current month, exactly as before. With a filter → every
   // whole month the chosen range covers (the actuals source is monthly, so the
@@ -5748,6 +5772,20 @@ function prepareIncentiveMerchantsData() {
   }
   const monthsCount = Math.max(1, coveredMonths.size);
 
+  // Which months does the actuals source (Merchant Segmentation) PHYSICALLY hold?
+  // That tab is a snapshot overwritten each month, so in practice it carries only
+  // the latest month (currently October). If the chosen filter asks for a month
+  // the source doesn't have, we must NOT silently show zeros (that reads as "every
+  // merchant failed"); we flag it instead. This keeps the numbers honest.
+  const availableMonths = new Set();
+  segRows.forEach(r => { if (r.monthYear) availableMonths.add(r.monthYear); });
+  const missingMonths = [...coveredMonths].filter(m => !availableMonths.has(m));
+  state.incentiveMerchantsNotice = {
+    missingMonths,
+    availableMonths: [...availableMonths],
+    noDataAtAll: missingMonths.length === coveredMonths.size && coveredMonths.size > 0
+  };
+
   // Days across the covered months: past months count in full, the current month
   // up to today, future months not at all — so the run-rate projection stays right.
   let totalDays = 0, elapsedDays = 0;
@@ -5764,7 +5802,7 @@ function prepareIncentiveMerchantsData() {
 
   // Confirmed Orders for each merchant, summed over the covered months.
   const mtdConfirmedMap = new Map();
-  (state.merchantSegSourceRows || []).forEach(r => {
+  segRows.forEach(r => {
     if (!r.merchantId || !coveredMonths.has(r.monthYear)) return;
     mtdConfirmedMap.set(r.merchantId, (mtdConfirmedMap.get(r.merchantId) || 0) + (r.confirmedOrders || 0));
   });
@@ -5773,7 +5811,7 @@ function prepareIncentiveMerchantsData() {
   // بيانات، مش بس شهر النهارده، عشان أي تاجر جديد لسه ملوش صف الشهر ده
   // برضو يظهر ليه ACM من آخر شهر معروف).
   const acmMap = new Map(); const acmLatestTs = new Map();
-  (state.merchantSegSourceRows || []).forEach(r => {
+  segRows.forEach(r => {
     if (!r.merchantId || !r.acmName) return;
     const ts = new Date(r.monthYear).getTime(); const rowTs = isNaN(ts) ? 0 : ts;
     if (!acmLatestTs.has(r.merchantId) || rowTs >= acmLatestTs.get(r.merchantId)) {
@@ -5841,6 +5879,30 @@ function renderIncentiveMerchantsPanel() {
   const monthLabel = allRows.length ? allRows[0].currentMonthStr : new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   if ($("incMerchMonthLabel")) $("incMerchMonthLabel").textContent = monthLabel;
+
+  // Honest-data banner: warn when the filter asks for month(s) the actuals source
+  // doesn't store (it keeps only the latest month). Otherwise the empty months
+  // would show as zeros and look like every merchant missed their target.
+  const notice = state.incentiveMerchantsNotice || null;
+  const noticeEl = $("incMerchDataNotice");
+  if (noticeEl) {
+    if (notice && notice.missingMonths && notice.missingMonths.length) {
+      const have = notice.availableMonths && notice.availableMonths.length
+        ? notice.availableMonths.join(", ") : "none";
+      if (notice.noDataAtAll) {
+        noticeEl.innerHTML = `<strong>No merchant data stored for ${notice.missingMonths.join(", ")}.</strong> `
+          + `The Incentive / Merchant-Segmentation source keeps only the latest month (currently: ${have}), `
+          + `so past months can't be shown. Clear the date filter to see the current month.`;
+      } else {
+        noticeEl.innerHTML = `<strong>Partial data:</strong> no stored actuals for ${notice.missingMonths.join(", ")} `
+          + `(the source keeps only ${have}). The figures below cover the available month(s) only.`;
+      }
+      noticeEl.classList.remove("hidden");
+    } else {
+      noticeEl.classList.add("hidden");
+    }
+  }
+
   if ($("incMerchTotal")) $("incMerchTotal").textContent = fmtInt.format(totalMerchants);
   if ($("incMerchAchieved")) $("incMerchAchieved").textContent = `${fmtInt.format(achievedCount)} / ${fmtInt.format(totalMerchants)}`;
   if ($("incMerchOnTrack")) $("incMerchOnTrack").textContent = `${fmtInt.format(onTrackCount)} / ${fmtInt.format(totalMerchants)}`;
@@ -17147,6 +17209,20 @@ async function fetchAllSheetsSnapshot() {
     }
   }
 
+  // تابات الشهور السابقة لـ Merchant Segmentation (أرشيف) — مصدر إضافي لفلتر
+  // Incentive Merchants عشان يقدر يقرا شهور فاتت. أي تاب يفشل بيتتخطى بهدوء
+  // (الفلتر هيكمل على الشهور المتاحة، والبانر بيوضح الناقص).
+  if (Array.isArray(MERCHANT_SEG_HISTORY_GIDS)) {
+    for (const hgid of MERCHANT_SEG_HISTORY_GIDS) {
+      if (!hgid || sheets[hgid]) continue;
+      try {
+        sheets[hgid] = await loadSheetWithRetry(hgid);
+      } catch (err) {
+        console.warn("[Merchant Seg History] could not load GID " + hgid + ":", err);
+      }
+    }
+  }
+
   // شيت الـ Main — بقى بيتقرا حصريًا برا Apps Script خالص (نفس باترن
   // Incentive Merchants/Confirmed by Day فوق): أولًا نمسح أي قيمة جاية من
   // Apps Script عشان منسبهاش fallback ضمني، وبعدين نجرب الـ Worker (فيه
@@ -17239,6 +17315,9 @@ async function fetchAllSheetsSnapshot() {
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
+    merchantSegHistoryRows: (Array.isArray(MERCHANT_SEG_HISTORY_GIDS) && MERCHANT_SEG_HISTORY_GIDS.some(g => sheets[g]))
+      ? MERCHANT_SEG_HISTORY_GIDS.reduce((acc, g) => sheets[g] ? acc.concat(parseMerchantSegmentationSheet(sheets[g])) : acc, [])
+      : state.merchantSegHistoryRows, // <-- أرشيف شهور Merchant Segmentation (مصدر Incentive Merchants للشهور الفاتت فقط)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
     confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
@@ -17338,6 +17417,7 @@ function applySnapshotToState(snapshot) {
   state.productsMatchesRows = snapshot.productsMatchesRows || state.productsMatchesRows || [];
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
+  state.merchantSegHistoryRows = snapshot.merchantSegHistoryRows || state.merchantSegHistoryRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
   state.incentiveMerchantsRows = snapshot.incentiveMerchantsRows || state.incentiveMerchantsRows || []; // <-- Incentives Tracker (Incentive Merchants)
