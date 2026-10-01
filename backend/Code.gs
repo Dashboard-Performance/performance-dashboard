@@ -1099,7 +1099,7 @@ function handleSendDeclineDigest(payload) {
     if (!rows.length) return jsonResponse({ success: false, message: "No rows to send." });
     var meta = payload.meta || {};
     var html = buildDeclineDigestHtml_(rows, meta);
-    var subject = "Decline Watch · Top " + rows.length + " Placed declines · " + String(meta.dateLabel || "");
+    var subject = "Marketplace Decline Watch — " + String(meta.dateLabel || "");
     sendDeclineMail_(subject, html);
     props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
     return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.join(", ") });
@@ -1116,11 +1116,13 @@ function sendDeclineMail_(subject, html) {
       payload: JSON.stringify({ secret: DECLINE_MAIL_RELAY_SECRET, to: to, subject: subject, html: html })
     });
     var out;
-    try { out = JSON.parse(resp.getContentText()); } catch (e) { throw new Error("Mail relay returned an unexpected response (check its deployment access = Anyone)."); }
+    try { out = JSON.parse(resp.getContentText()); } catch (e) {
+      var snippet = resp.getContentText().replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 180);
+      throw new Error("Mail relay returned an unexpected response (HTTP " + resp.getResponseCode() + "): " + snippet);
+    }
     if (!out || out.success !== true) throw new Error("Mail relay: " + (out && out.message ? out.message : "failed"));
     return;
   }
-  html = html.replace(/<img[^>]*cid:logo[^>]*>/, "");
   MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: "Marketplace Dashboard",
     body: "Decline Watch — open this email in an HTML-capable client to see the table." });
 }
@@ -1143,6 +1145,100 @@ function testDeclineDigest() {
   }
   var html = buildDeclineDigestHtml_(rows, { dateLabel: "Sample", totalDrop: 3300, topDrop: top, acm: "All", dashboardUrl: "", sample: true });
   sendDeclineMail_("Decline Watch \u00b7 SAMPLE DATA (design preview)", html);
+}
+
+
+// ============================================================================
+//  REAL NUMBERS, computed here from the Google Sheet (no dashboard needed).
+//  Same logic as the dashboard's Decline Watch page:
+//   Drop = avg(DAY2..DAY5) - DAY1 (Placed), listed only if Drop >= 3 pcs and
+//   Drop > STDEV of those 4 days; ranked by Drop; Contr% vs total drop;
+//   Impact on SKU = Drop / SKU's 4-day avg across all merchants;
+//   Stock from the Inventory tab; Locked = active lock remaining pieces.
+// ============================================================================
+var DD_DAILY_GID = 461854229;       // MERCHANT_SKU_DAILY_GID
+var DD_INVENTORY_GID = 1780730573;  // INVENTORY_GID
+var DD_LOCKING_GID = 2085802038;    // AVAILABILITY_LOCKING_GID
+var DD_MIN_DROP = 3;
+var DD_TOP_N = 20;
+var DD_TIMEZONE = "Africa/Cairo";
+var DD_DASHBOARD_URL = ""; // optional: paste your dashboard link to get an "Open in Dashboard" button
+
+function ddSheetByGid_(ss, gid) {
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) if (sheets[i].getSheetId() === gid) return sheets[i];
+  throw new Error("Sheet with GID " + gid + " not found.");
+}
+
+function computeDeclineDigest_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var n = function (v) { var x = Number(v); return isFinite(x) ? x : 0; };
+  var s = function (v) { return String(v === null || v === undefined ? "" : v).trim(); };
+
+  var inv = {};
+  ddSheetByGid_(ss, DD_INVENTORY_GID).getDataRange().getValues().forEach(function (r, i) {
+    var id = s(r[0]); if (!id || id === "SKU_ID") return;
+    inv[id] = { name: s(r[1]), stock: Math.round(n(r[2])) };
+  });
+
+  var todayMs = new Date().setHours(0, 0, 0, 0);
+  var lockRemaining = {}, lockActive = {};
+  ddSheetByGid_(ss, DD_LOCKING_GID).getDataRange().getValues().forEach(function (r) {
+    var single = s(r[0]), tager = s(r[2]);
+    if (!single || single === "PRODUCT_ID" || !tager) return;
+    var flag = s(r[9]).toLowerCase();
+    if (flag.indexOf("cancel") > -1 || flag.indexOf("expired") > -1 || flag.indexOf("inactive") > -1 || flag.indexOf("released") > -1 || flag === "false" || flag === "0") return;
+    var exp = r[7] instanceof Date ? r[7].getTime() : (s(r[7]) ? new Date(s(r[7])).getTime() : null);
+    if (exp && !isNaN(exp) && exp < todayMs) return;
+    var k = tager + "||" + single;
+    lockActive[k] = true;
+    lockRemaining[k] = (lockRemaining[k] || 0) + n(r[12]);
+  });
+
+  var skuBase = {}, skuDrop = {}, cand = [], totalDrop = 0;
+  ddSheetByGid_(ss, DD_DAILY_GID).getDataRange().getValues().forEach(function (r) {
+    var sku = s(r[0]), tager = s(r[2]);
+    if (!sku || sku === "SKU_ID" || !tager) return;
+    var v = [n(r[15]), n(r[16]), n(r[17]), n(r[18])];            // DAY2..DAY5
+    var base = (v[0] + v[1] + v[2] + v[3]) / 4, y = n(r[14]);     // DAY1 = yesterday
+    var drop = base - y;
+    skuBase[sku] = (skuBase[sku] || 0) + base;
+    if (drop > 0) { skuDrop[sku] = (skuDrop[sku] || 0) + drop; totalDrop += drop; }
+    var sd = Math.sqrt(v.reduce(function (a, x) { return a + (x - base) * (x - base); }, 0) / 3);
+    if (drop >= DD_MIN_DROP && drop > sd) cand.push({ sku: sku, tager: tager, name: s(r[1]), mname: s(r[3]), acm: s(r[4]), base: base, y: y, drop: drop });
+  });
+
+  cand.sort(function (a, b) { return b.drop - a.drop; });
+  var rows = cand.slice(0, DD_TOP_N).map(function (c) {
+    var key = c.tager + "||" + c.sku, i = inv[c.sku] || {};
+    var stock = i.stock || 0, hasLock = !!lockActive[key];
+    return {
+      skuId: c.sku, skuName: c.name || i.name || "", merchantId: c.tager, merchantName: c.mname || c.tager, acm: c.acm,
+      base: c.base, y: c.y, drop: c.drop, dropPct: c.base ? c.drop / c.base * 100 : 0,
+      impactPct: skuBase[c.sku] ? c.drop / skuBase[c.sku] * 100 : 0, skuSharePct: skuDrop[c.sku] ? c.drop / skuDrop[c.sku] * 100 : 0,
+      contrPct: totalDrop ? c.drop / totalDrop * 100 : 0,
+      stock: stock, locked: Math.round(lockRemaining[key] || 0), hasLock: hasLock,
+      cause: stock <= 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop")
+    };
+  });
+  var topDrop = rows.reduce(function (a, r) { return a + r.drop; }, 0);
+  var dateLabel = Utilities.formatDate(new Date(Date.now() - 86400000), DD_TIMEZONE, "EEE, dd MMM yyyy");
+  return { rows: rows, meta: { dateLabel: dateLabel, totalDrop: totalDrop, topDrop: topDrop, acm: "All", dashboardUrl: DD_DASHBOARD_URL } };
+}
+
+// RUN THIS to send the real email now (to DECLINE_DIGEST_RECIPIENTS).
+function sendDeclineDigestNow() {
+  var d = computeDeclineDigest_();
+  if (!d.rows.length) { Logger.log("No declining matches found - nothing sent."); return; }
+  sendDeclineMail_("Marketplace Decline Watch — " + d.meta.dateLabel, buildDeclineDigestHtml_(d.rows, d.meta));
+  Logger.log("Sent Top " + d.rows.length + " to " + DECLINE_DIGEST_RECIPIENTS.join(", "));
+}
+
+// RUN THIS ONCE to schedule the email every day at 12:00 Cairo time.
+function installDailyDeclineTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "sendDeclineDigestNow") ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("sendDeclineDigestNow").timeBased().everyDays(1).atHour(12).inTimeZone(DD_TIMEZONE).create();
+  Logger.log("Daily trigger installed: 12:00 " + DD_TIMEZONE);
 }
 
 function ddEsc_(v) {
@@ -1191,7 +1287,6 @@ function buildDeclineDigestHtml_(rows, meta) {
   '<body style="margin:0;background:#EAEFF5;font-family:Segoe UI,Arial,Helvetica,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" style="background:#EAEFF5"><tr><td align="center" style="padding:28px 12px">' +
   '<table width="1040" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;border:1px solid #D9E1EB">' +
   '<tr><td style="background:#1F3F5F;padding:24px 30px"><table cellpadding="0" cellspacing="0"><tr>' +
-  '<td style="vertical-align:middle;padding-right:16px"><img src="cid:logo" width="56" height="56" alt="" style="display:block;border:0;border-radius:10px"></td>' +
   '<td style="vertical-align:middle"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:4px">Decline Watch</div>' +
   '<div style="font-size:13px;color:#C9D8E8;margin-top:4px">Top ' + rows.length + ' matches that pulled Placed down yesterday &middot; ' + ddEsc_(meta.dateLabel) + acmNote + '</div></td></tr></table></td></tr>' +
   (meta.sample ? '<tr><td style="background:#FFF4E0;color:#B54708;font-size:12px;font-weight:700;padding:8px 30px;letter-spacing:.4px">SAMPLE DATA &mdash; design preview only, these numbers are not real.</td></tr>' : '') +
