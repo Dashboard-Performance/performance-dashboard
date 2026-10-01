@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.13";
+const APP_VERSION = "1.3.14";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14703,7 +14703,6 @@ function prepareMpNewMatchesData() {
 const DW_TOP_N = 20;
 const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الماتش يدخل الترتيب (يتفادى الضوضاء)
 const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
-const DW_LOCK_OVER_PCT = 10;    // Locked Qty أكبر من الـ avg بـ 10%+ = مشكلة قفل
 // Avg Placed Target (قطع/يوم) لكل شهر — حدّثه أول كل شهر. المفتاح YYYY-MM.
 const DW_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
@@ -14777,8 +14776,8 @@ function dwComputeAll() {
     const hasLock = activeLockKeys.has(key);
     const locked = Math.round(lockByMatch.get(key) || 0);
     const sb = skuBase.get(r.skuId) || x.base, sd = skuDrop.get(r.skuId) || x.drop;
-    // Locked Qty أقل من الـ avg، أو أكبر منه بـ 10%+ → سبب قفل. غير كده Demand drop.
-    const lockedProblem = hasLock && (locked < x.base || locked > x.base * (1 + DW_LOCK_OVER_PCT / 100));
+    // Locked Qty أقل من الـ avg → سبب قفل (القفل هو اللي بيحدّ البيع). غير كده Demand drop.
+    const lockedProblem = hasLock && locked < x.base;
     const cause = stock <= 0 ? "Out of stock" : (lockedProblem ? "Locked Qty" : "Demand drop");
     return {
       skuId: r.skuId, skuName: r.skuName || inv.skuName || "",
