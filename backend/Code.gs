@@ -1099,7 +1099,7 @@ function handleSendDeclineDigest(payload) {
     if (!rows.length) return jsonResponse({ success: false, message: "No rows to send." });
     var meta = payload.meta || {};
     var html = buildDeclineDigestHtml_(rows, meta);
-    var subject = "Marketplace Decline Watch — " + String(meta.dateLabel || "");
+    var subject = "Marketplace Decline Matches — " + String(meta.dateLabel || "");
     sendDeclineMail_(subject, html);
     props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
     return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.join(", ") });
@@ -1124,7 +1124,7 @@ function sendDeclineMail_(subject, html) {
     return;
   }
   MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: "Marketplace Dashboard",
-    body: "Decline Watch — open this email in an HTML-capable client to see the table." });
+    body: "Decline Matches — open this email in an HTML-capable client to see the table." });
 }
 
 // Run from the Apps Script editor: sends the FULL design preview (20 sample
@@ -1144,13 +1144,13 @@ function testDeclineDigest() {
       cause: stock === 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop") });
   }
   var html = buildDeclineDigestHtml_(rows, { dateLabel: "Sample", totalDrop: 3300, topDrop: top, acm: "All", dashboardUrl: "", sample: true });
-  sendDeclineMail_("Decline Watch \u00b7 SAMPLE DATA (design preview)", html);
+  sendDeclineMail_("Decline Matches \u00b7 SAMPLE DATA (design preview)", html);
 }
 
 
 // ============================================================================
 //  REAL NUMBERS, computed here from the Google Sheet (no dashboard needed).
-//  Same logic as the dashboard's Decline Watch page:
+//  Same logic as the dashboard's Decline Matches page:
 //   Drop = avg(DAY2..DAY5) - DAY1 (Placed), listed only if Drop >= 3 pcs and
 //   Drop > STDEV of those 4 days; ranked by Drop; Contr% vs total drop;
 //   Impact on SKU = Drop / SKU's 4-day avg across all merchants;
@@ -1162,6 +1162,9 @@ var DD_LOCKING_GID = 2085802038;    // AVAILABILITY_LOCKING_GID
 var DD_MIN_DROP = 3;
 var DD_TOP_N = 20;
 var DD_TIMEZONE = "Africa/Cairo";
+var DD_LOCK_OVER_PCT = 30;  // Locked Qty above avg by 30%+ (or below avg) = lock qty issue
+// Avg Placed Target (pieces/day) per month, key YYYY-MM. Update at the start of each month.
+var DD_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 var DD_DASHBOARD_URL = ""; // optional: paste your dashboard link to get an "Open in Dashboard" button
 
 function ddSheetByGid_(ss, gid) {
@@ -1195,7 +1198,7 @@ function computeDeclineDigest_() {
     lockRemaining[k] = (lockRemaining[k] || 0) + n(r[12]);
   });
 
-  var skuBase = {}, skuDrop = {}, cand = [], totalDrop = 0;
+  var skuBase = {}, skuDrop = {}, cand = [], totalDrop = 0, lostGmv = 0, dailyRows = [];
   ddSheetByGid_(ss, DD_DAILY_GID).getDataRange().getValues().forEach(function (r) {
     var sku = s(r[0]), tager = s(r[2]);
     if (!sku || sku === "SKU_ID" || !tager) return;
@@ -1203,9 +1206,10 @@ function computeDeclineDigest_() {
     var base = (v[0] + v[1] + v[2] + v[3]) / 4, y = n(r[14]);     // DAY1 = yesterday
     var drop = base - y;
     skuBase[sku] = (skuBase[sku] || 0) + base;
-    if (drop > 0) { skuDrop[sku] = (skuDrop[sku] || 0) + drop; totalDrop += drop; }
+    if (drop > 0) { skuDrop[sku] = (skuDrop[sku] || 0) + drop; totalDrop += drop; lostGmv += drop * n(r[12]); }
+    var days = []; for (var q = 0; q < 32; q++) days.push(n(r[13 + q])); dailyRows.push(days);
     var sd = Math.sqrt(v.reduce(function (a, x) { return a + (x - base) * (x - base); }, 0) / 3);
-    if (drop >= DD_MIN_DROP && drop > sd) cand.push({ sku: sku, tager: tager, name: s(r[1]), mname: s(r[3]), acm: s(r[4]), base: base, y: y, drop: drop });
+    if (drop >= DD_MIN_DROP && drop > sd) cand.push({ sku: sku, tager: tager, name: s(r[1]), mname: s(r[3]), acm: s(r[4]), base: base, y: y, drop: drop, asp: n(r[12]) });
   });
 
   cand.sort(function (a, b) { return b.drop - a.drop; });
@@ -1218,19 +1222,33 @@ function computeDeclineDigest_() {
       impactPct: skuBase[c.sku] ? c.drop / skuBase[c.sku] * 100 : 0, skuSharePct: skuDrop[c.sku] ? c.drop / skuDrop[c.sku] * 100 : 0,
       contrPct: totalDrop ? c.drop / totalDrop * 100 : 0,
       stock: stock, locked: Math.round(lockRemaining[key] || 0), hasLock: hasLock,
-      cause: stock <= 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop")
+      asp: c.asp, lostGmv: c.drop * c.asp,
+      cause: stock <= 0 ? "Out of stock" : ((hasLock && (lockRemaining[key] < c.base || lockRemaining[key] > c.base * (1 + DD_LOCK_OVER_PCT / 100))) ? "Locked Qty" : "Demand drop")
     };
   });
   var topDrop = rows.reduce(function (a, r) { return a + r.drop; }, 0);
+  var topGmv = rows.reduce(function (a, r) { return a + r.lostGmv; }, 0);
+  // MTD: full days of the current month = DAY1..DAY(dom-1)
+  var dom = Number(Utilities.formatDate(new Date(), DD_TIMEZONE, "d")), mtdDays = Math.min(dom - 1, 31), mtdPlaced = 0, mtdLost = 0;
+  for (var k = 1; k <= mtdDays; k++) {
+    dailyRows.forEach(function (d) {
+      var cur = d[k] || 0; mtdPlaced += cur;
+      var sum = 0, cnt = 0;
+      for (var j = k + 1; j <= Math.min(k + 4, 31); j++) { sum += d[j] || 0; cnt++; }
+      if (cnt) { var b = sum / cnt; if (b > cur) mtdLost += b - cur; }
+    });
+  }
+  var monthKey = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM");
   var dateLabel = Utilities.formatDate(new Date(Date.now() - 86400000), DD_TIMEZONE, "EEE, dd MMM yyyy");
-  return { rows: rows, meta: { dateLabel: dateLabel, totalDrop: totalDrop, topDrop: topDrop, acm: "All", dashboardUrl: DD_DASHBOARD_URL } };
+  return { rows: rows, meta: { dateLabel: dateLabel, totalDrop: totalDrop, topDrop: topDrop, acm: "All", dashboardUrl: DD_DASHBOARD_URL,
+    lostGmv: lostGmv, lostGmvTop: topGmv, mtdLost: mtdLost, mtdDays: mtdDays, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, avgTarget: DD_AVG_PLACED_TARGETS[monthKey] || 0 } };
 }
 
 // RUN THIS to send the real email now (to DECLINE_DIGEST_RECIPIENTS).
 function sendDeclineDigestNow() {
   var d = computeDeclineDigest_();
   if (!d.rows.length) { Logger.log("No declining matches found - nothing sent."); return; }
-  sendDeclineMail_("Marketplace Decline Watch — " + d.meta.dateLabel, buildDeclineDigestHtml_(d.rows, d.meta));
+  sendDeclineMail_("Marketplace Decline Matches — " + d.meta.dateLabel, buildDeclineDigestHtml_(d.rows, d.meta));
   Logger.log("Sent Top " + d.rows.length + " to " + DECLINE_DIGEST_RECIPIENTS.join(", "));
 }
 
@@ -1244,6 +1262,7 @@ function installDailyDeclineTrigger() {
 function ddEsc_(v) {
   return String(v === null || v === undefined ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+function ddTrunc_(v, n) { v = String(v === null || v === undefined ? "" : v); return v.length > n ? v.slice(0, n - 1) + "\u2026" : v; }
 function ddNum_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
 function ddInt_(v) { return Math.round(ddNum_(v)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
@@ -1254,17 +1273,17 @@ function buildDeclineDigestHtml_(rows, meta) {
   var trs = "";
   rows.forEach(function (r, i) {
     var base = ddNum_(r.base), y = ddNum_(r.y), drop = ddNum_(r.drop), stock = ddNum_(r.stock);
-    var cause = r.cause === "Out of stock" || r.cause === "Locked" ? r.cause : "Demand drop";
-    var cc = cause === "Out of stock" ? ["#FDECEC", "#B42318"] : cause === "Locked" ? ["#FFF4E0", "#B54708"] : ["#E8EEF7", "#1F3F5F"];
+    var cause = r.cause === "Out of stock" || r.cause === "Locked Qty" ? r.cause : "Demand drop";
+    var cc = cause === "Out of stock" ? ["#FDECEC", "#B42318"] : cause === "Locked Qty" ? ["#FFF4E0", "#B54708"] : ["#E8EEF7", "#1F3F5F"];
     var kd = ddNum_(r.skuSharePct) >= 50;
-    if (cause === "Out of stock") oos++; if (cause === "Locked") locked++; if (kd) keyDrivers++;
+    if (cause === "Out of stock") oos++; if (cause === "Locked Qty") locked++; if (kd) keyDrivers++;
     tb += base; ty += y;
     var bg = i % 2 ? "#F7F9FC" : "#FFFFFF";
     var tdp = "padding:10px 8px;";
     trs += '<tr style="background:' + bg + '">' +
       '<td style="' + tdp + 'color:#8A97A6;font-size:12px">' + (i + 1) + '</td>' +
-      '<td style="' + tdp + 'min-width:150px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.skuId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(r.skuName) + '</div></td>' +
-      '<td style="' + tdp + 'min-width:110px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.merchantId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(r.merchantName) + '</div></td>' +
+      '<td style="' + tdp + 'min-width:150px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.skuId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(ddTrunc_(r.skuName, 40)) + '</div></td>' +
+      '<td style="' + tdp + 'min-width:110px"><div style="font-weight:700;color:#14243A;font-size:13px;white-space:nowrap">' + ddEsc_(r.merchantId) + '</div><div style="color:#7A889A;font-size:11px;margin-top:2px;white-space:nowrap">' + ddEsc_(ddTrunc_(r.merchantName, 28)) + '</div></td>' +
       '<td style="' + tdp + 'color:#4A5B6E;font-size:12px;white-space:nowrap">' + ddEsc_(r.acm) + '</td>' +
       '<td align="right" style="' + tdp + 'color:#5A6B7B;font-size:13px">' + base.toFixed(1) + '</td>' +
       '<td align="right" style="' + tdp + 'color:#14243A;font-size:13px">' + ddInt_(y) + '</td>' +
@@ -1278,29 +1297,40 @@ function buildDeclineDigestHtml_(rows, meta) {
       '<td style="' + tdp + '"><span style="background:' + cc[0] + ';color:' + cc[1] + ';font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap">' + ddEsc_(cause) + '</span></td></tr>';
   });
   var kpi = function (label, val, sub, col) {
-    return '<td width="20%" style="padding:0 5px;vertical-align:top"><div style="background:#F4F7FB;border:1px solid #E1E8F0;border-radius:10px;padding:14px"><div style="font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.6px">' + label + '</div><div style="font-size:24px;font-weight:700;color:' + (col || "#14243A") + ';margin-top:4px">' + val + '</div><div style="font-size:11px;color:#8A97A6;margin-top:2px">' + sub + '</div></div></td>';
+    return '<td width="25%" style="padding:0 5px;vertical-align:top"><div style="background:#F4F7FB;border:1px solid #E1E8F0;border-radius:10px;padding:14px"><div style="font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.6px">' + label + '</div><div style="font-size:24px;font-weight:700;color:' + (col || "#14243A") + ';margin-top:4px">' + val + '</div><div style="font-size:11px;color:#8A97A6;margin-top:2px">' + sub + '</div></div></td>';
   };
-  var th = function (t, a) { return '<th align="' + (a || "left") + '" style="padding:10px 8px;font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #D5DEE9;font-weight:700">' + t + '</th>'; };
+  var th = function (t, a) { return '<th align="' + (a || "left") + '" style="white-space:nowrap;padding:10px 8px;font-size:11px;color:#6B7A8C;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #D5DEE9;font-weight:700">' + t + '</th>'; };
+  var tgt = ddNum_(meta.avgTarget), act = ddNum_(meta.avgActual), gapTxt = "&mdash;", gapSub = "set this month's target", gapCol = "#14243A";
+  if (tgt && !ddNum_(meta.mtdDays)) { gapSub = "target " + ddInt_(tgt) + "/day &middot; no full day yet"; }
+  else if (tgt) { var gap = act - tgt; gapTxt = (gap >= 0 ? "+" : "&minus;") + ddInt_(Math.abs(gap)) + " (" + (gap >= 0 ? "+" : "&minus;") + Math.abs(gap / tgt * 100).toFixed(1) + "%)"; gapSub = "actual " + ddInt_(act) + "/day vs target " + ddInt_(tgt) + "/day"; gapCol = gap >= 0 ? "#067647" : "#B42318"; }
   var btn = meta.dashboardUrl ? '<tr><td align="center" style="padding:22px 30px 26px"><a href="' + ddEsc_(meta.dashboardUrl) + '" style="display:inline-block;background:#2F5D8A;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">Open in Dashboard</a></td></tr>' : '';
   var acmNote = meta.acm && meta.acm !== "All" ? ' · ACM: ' + ddEsc_(meta.acm) : '';
-  return '<!doctype html><html><head><meta charset="utf-8"><title>Decline Watch</title></head>' +
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Decline Matches</title></head>' +
   '<body style="margin:0;background:#EAEFF5;font-family:Segoe UI,Arial,Helvetica,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" style="background:#EAEFF5"><tr><td align="center" style="padding:28px 12px">' +
   '<table width="1040" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;border:1px solid #D9E1EB">' +
   '<tr><td style="background:#1F3F5F;padding:24px 30px"><table cellpadding="0" cellspacing="0"><tr>' +
-  '<td style="vertical-align:middle"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:4px">Decline Watch</div>' +
+  '<td style="vertical-align:middle"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:4px">Decline Matches</div>' +
   '<div style="font-size:13px;color:#C9D8E8;margin-top:4px">Top ' + rows.length + ' matches that pulled Placed down yesterday &middot; ' + ddEsc_(meta.dateLabel) + acmNote + '</div></td></tr></table></td></tr>' +
   (meta.sample ? '<tr><td style="background:#FFF4E0;color:#B54708;font-size:12px;font-weight:700;padding:8px 30px;letter-spacing:.4px">SAMPLE DATA &mdash; design preview only, these numbers are not real.</td></tr>' : '') +
-  '<tr><td style="padding:24px 25px 6px"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
-  kpi("Total Placed drop", "&minus;" + ddInt_(totalDrop), "pieces vs. 4-day avg", "#B42318") + kpi("Top " + rows.length + " share", share.toFixed(0) + "%", "of the total drop") +
-  kpi("Out of stock", oos, "of the Top " + rows.length, "#B42318") + kpi("Key drivers", keyDrivers, "merchants driving 50%+ of their SKU's drop", "#B42318") + kpi("Locked", locked, "of the Top " + rows.length, "#B54708") +
+  '<tr><td style="padding:24px 25px 0"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
+  kpi("Total Placed drop", "&minus;" + ddInt_(totalDrop), "pieces vs. 4-day avg", "#B42318") +
+  kpi("Lost GMV (Placed)", "&minus;" + ddInt_(meta.lostGmv), "Top " + rows.length + ": &minus;" + ddInt_(meta.lostGmvTop), "#B42318") +
+  kpi("Lost Placed MTD", ddNum_(meta.mtdDays) ? "&minus;" + ddInt_(meta.mtdLost) : "&mdash;", ddNum_(meta.mtdDays) ? "pieces, " + ddNum_(meta.mtdDays) + " full day(s) this month" : "no full day yet this month", "#B42318") +
+  kpi("Avg Placed vs Target", gapTxt, gapSub, gapCol) +
   '</tr></table></td></tr>' +
-  '<tr><td style="padding:14px 30px 6px"><div style="font-size:13px;color:#4A5B6E;line-height:1.55">The ' + rows.length + ' matches below account for <b>' + share.toFixed(0) + '%</b> of yesterday\'s Placed decline. <b>' + oos + '</b> are out of stock and <b>' + locked + '</b> have an active lock, so those can be checked on the supply side first.</div></td></tr>' +
+  '<tr><td style="padding:10px 25px 6px"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
+  kpi("Top " + rows.length + " share", share.toFixed(0) + "%", "of the total drop") +
+  kpi("Out of stock", oos, "of the Top " + rows.length, "#B42318") +
+  kpi("Key drivers", keyDrivers, "merchants driving 50%+ of their SKU's drop", "#B42318") +
+  kpi("Locked Qty", locked, "of the Top " + rows.length, "#B54708") +
+  '</tr></table></td></tr>' +
+  '<tr><td style="padding:14px 30px 6px"><div style="font-size:13px;color:#4A5B6E;line-height:1.55">The ' + rows.length + ' matches below account for <b>' + share.toFixed(0) + '%</b> of yesterday\'s Placed decline. <b>' + oos + '</b> are out of stock and <b>' + locked + '</b> have a lock quantity issue, so those can be checked on the supply side first.</div></td></tr>' +
   '<tr><td style="padding:12px 22px 8px"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>' +
   th("#") + th("SKU ID / Name") + th("Merchant ID / Name") + th("ACM") + th("4D avg", "right") + th("Yesterday", "right") + th("Drop", "right") + th("Drop %", "right") + th("Impact on SKU") + th("Contr%") + th("Stock", "right") + th("Locked", "right") + th("Likely cause") +
   '</tr>' + trs +
   '<tr style="background:#EEF3F9"><td></td><td colspan="3" style="padding:11px 8px;font-weight:700;color:#14243A;font-size:13px">Top ' + rows.length + ' total</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + tb.toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + ddInt_(ty) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + (tb - ty).toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:12px">&minus;' + (tb ? ((tb - ty) / tb * 100).toFixed(0) : 0) + '%</td><td></td><td style="padding:11px 8px;font-weight:700;font-size:12px">' + share.toFixed(1) + '%</td><td colspan="3"></td></tr>' +
   '</table></td></tr>' + btn +
-  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed only if its drop exceeds the normal day-to-day variation (standard deviation) of its own 4 days. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Locked = the merchant has an active lock on the SKU; otherwise Demand drop.<br>Marketplace Performance Dashboard</div></td></tr>' +
+  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed only if its drop exceeds the normal day-to-day variation (standard deviation) of its own 4 days. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Locked Qty = the merchant has an active lock whose remaining quantity is below his 4-day average, or more than 30% above it; otherwise Demand drop. Lost GMV = drop &times; ASP. Lost Placed MTD = sum of daily drops (vs. each day\'s previous 4-day average) over the full days of the current month. Avg Placed vs Target compares the actual daily Placed average this month to the monthly target.<br>Marketplace Performance Dashboard</div></td></tr>' +
   '</table></td></tr></table></body></html>';
 }
 

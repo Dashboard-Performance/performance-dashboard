@@ -2450,6 +2450,7 @@ function parseMerchantSkuDailySheet(payload) {
       tagerId: cellText(c[2]).trim(),
       day0: cellNumber(c[13]), day1: cellNumber(c[14]), day2: cellNumber(c[15]),
       day3: cellNumber(c[16]), day4: cellNumber(c[17]), day5: cellNumber(c[18]),
+      days: Array.from({ length: 32 }, (_, i) => cellNumber(c[13 + i])), // DAY0..DAY31 Placed (Decline Matches MTD)
       // CR_2_DAY / DR_5_DAYS: مستخدمين هنا في Sales Plan-ACM عشان نحسب منهم
       // Confirmed/Delivered MTD Target بتاع كل ماتش (SKU × Merchant) — راجع
       // prepareMpSalesPlanData. بنستخدم merchantSkuDailyPercent() بدل
@@ -14684,7 +14685,7 @@ function prepareMpNewMatchesData() {
 
 
 // =====================================================================
-// DECLINE WATCH (تحت Marketplace، بعد New Matches) — أكتر 20 ماتش
+// DECLINE MATCHES (تحت Marketplace، بعد New Matches) — أكتر 20 ماتش
 // (Merchant × SKU) وقّعوا الـ Placed امبارح (DAY1) مقارنةً بمتوسط الـ 4
 // أيام اللي قبله (DAY2..DAY5)، من شيت MERCHANT_SKU_DAILY_GID (461854229).
 //   Drop        = متوسط DAY2..DAY5 − DAY1 (بس لو موجب = نزول فعلي)، ولازم يعدّي STDEV أيام الماتش (حارس ضوضاء) وأقل حد DW_MIN_DROP_PCS
@@ -14701,6 +14702,9 @@ function prepareMpNewMatchesData() {
 const DW_TOP_N = 20;
 const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الماتش يدخل الترتيب (يتفادى الضوضاء)
 const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
+const DW_LOCK_OVER_PCT = 30;    // Locked Qty أكبر من الـ avg بـ 30%+ = مشكلة قفل
+// Avg Placed Target (قطع/يوم) لكل شهر — حدّثه أول كل شهر. المفتاح YYYY-MM.
+const DW_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
 
 function dwYesterdayLabel() {
@@ -14724,6 +14728,7 @@ function dwComputeAll() {
   });
 
   const skuBase = new Map(), skuDrop = new Map();
+  let lostGmvTotal = 0;
   const rows = [];
   daily.forEach(r => {
     if (!r.skuId || !r.tagerId) return;
@@ -14731,7 +14736,7 @@ function dwComputeAll() {
     const y = r.day1 || 0;
     const drop = base - y;
     skuBase.set(r.skuId, (skuBase.get(r.skuId) || 0) + base);
-    if (drop > 0) skuDrop.set(r.skuId, (skuDrop.get(r.skuId) || 0) + drop);
+    if (drop > 0) { skuDrop.set(r.skuId, (skuDrop.get(r.skuId) || 0) + drop); lostGmvTotal += drop * (r.asp || 0); }
     // STDEV (عينة) لأيام DAY2..DAY5 — حارس ضوضاء: النزول لازم يعدّي التذبذب الطبيعي للماتش نفسه.
     const vals = [r.day2 || 0, r.day3 || 0, r.day4 || 0, r.day5 || 0];
     const sd = Math.sqrt(vals.reduce((a, v) => a + (v - base) * (v - base), 0) / (vals.length - 1));
@@ -14746,17 +14751,35 @@ function dwComputeAll() {
     const hasLock = activeLockKeys.has(key);
     const locked = Math.round(lockByMatch.get(key) || 0);
     const sb = skuBase.get(r.skuId) || x.base, sd = skuDrop.get(r.skuId) || x.drop;
-    const cause = stock <= 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop");
+    // Locked Qty أقل من الـ avg، أو أكبر منه بـ 30%+ → سبب قفل. غير كده Demand drop.
+    const lockedProblem = hasLock && (locked < x.base || locked > x.base * (1 + DW_LOCK_OVER_PCT / 100));
+    const cause = stock <= 0 ? "Out of stock" : (lockedProblem ? "Locked Qty" : "Demand drop");
     return {
       skuId: r.skuId, skuName: r.skuName || inv.skuName || "",
       merchantId: r.tagerId, merchantName: r.merchantName || r.tagerId, acm: r.acm || "",
       base: x.base, y: x.y, drop: x.drop, dropPct: x.base ? (x.drop / x.base) * 100 : 0,
       impactPct: sb ? (x.drop / sb) * 100 : 0, skuSharePct: sd ? (x.drop / sd) * 100 : 0,
       contrPct: totalDrop ? (x.drop / totalDrop) * 100 : 0,
-      stock, locked, hasLock, cause
+      stock, locked, hasLock, cause, asp: r.asp || 0, lostGmv: x.drop * (r.asp || 0)
     };
   });
   out.sort((a, b) => b.drop - a.drop);
+
+  // MTD (الأيام الكاملة في الشهر الحالي = DAY1..DAY(dom-1)): Avg Placed الفعلي + إجمالي الـ Lost Placed
+  const now = new Date(), dom = now.getDate(), mtdDays = Math.min(dom - 1, 31);
+  let mtdPlaced = 0, mtdLost = 0;
+  for (let k = 1; k <= mtdDays; k++) {
+    daily.forEach(r => {
+      const d = r.days; if (!d) return;
+      const cur = d[k] || 0; mtdPlaced += cur;
+      let sum = 0, cnt = 0;
+      for (let j = k + 1; j <= Math.min(k + 4, 31); j++) { sum += d[j] || 0; cnt++; }
+      if (cnt) { const b = sum / cnt; if (b > cur) mtdLost += b - cur; }
+    });
+  }
+  const monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+  dwState.mtd = { days: mtdDays, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
+  dwState.lostGmvTotal = lostGmvTotal;
   dwState.all = out; dwState.totalDrop = totalDrop; dwState.dateLabel = dwYesterdayLabel();
 }
 
@@ -14786,11 +14809,25 @@ function renderMpDeclineWatch() {
   set("dwTop20Share", dwState.totalDrop ? fmtPct((topDrop / dwState.totalDrop) * 100) : "0%");
   set("dwOos", top.filter(x => x.cause === "Out of stock").length);
   set("dwKeyDrivers", keyDrivers);
-  set("dwLocked", top.filter(x => x.cause === "Locked").length);
+  set("dwLocked", top.filter(x => x.cause === "Locked Qty").length);
+  const topGmv = top.reduce((a, x) => a + x.lostGmv, 0);
+  set("dwLostGmv", "−" + fmtInt.format(Math.round(dwState.lostGmvTotal || 0)));
+  set("dwLostGmvSub", "Top " + top.length + ": −" + fmtInt.format(Math.round(topGmv)));
+  const m = dwState.mtd || { days: 0, avgActual: 0, lost: 0, target: 0 };
+  set("dwMtdLost", m.days ? "−" + fmtInt.format(Math.round(m.lost)) : "—");
+  set("dwMtdLostSub", m.days ? `Pieces, over ${m.days} full day${m.days > 1 ? "s" : ""} this month` : "No full day yet this month");
+  if (!m.target) { set("dwTargetGap", "—"); set("dwTargetSub", "Set DW_AVG_PLACED_TARGETS for this month"); }
+  else if (!m.days) { set("dwTargetGap", "—"); set("dwTargetSub", "Target " + fmtInt.format(m.target) + "/day · no full day yet"); }
+  else {
+    const gap = m.avgActual - m.target;
+    const gEl = $("dwTargetGap");
+    if (gEl) { gEl.textContent = (gap >= 0 ? "+" : "−") + fmtInt.format(Math.abs(Math.round(gap))) + " (" + (gap >= 0 ? "+" : "−") + Math.abs((gap / m.target) * 100).toFixed(1) + "%)"; gEl.style.color = gap >= 0 ? "#067647" : "#B42318"; }
+    set("dwTargetSub", "Actual " + fmtInt.format(Math.round(m.avgActual)) + "/day vs Target " + fmtInt.format(m.target) + "/day");
+  }
   set("dwRowCount", `${top.length} Matches · ${dwState.dateLabel}`);
 
   const badge = (c) => {
-    const st = c === "Out of stock" ? "background:#FDECEC;color:#B42318" : c === "Locked" ? "background:#FFF4E0;color:#B54708" : "background:#E8EEF7;color:#1F3F5F";
+    const st = c === "Out of stock" ? "background:#FDECEC;color:#B42318" : c === "Locked Qty" ? "background:#FFF4E0;color:#B54708" : "background:#E8EEF7;color:#1F3F5F";
     return `<span style="${st};font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap">${escapeHtml(c)}</span>`;
   };
   const body = $("dwTableBody"); if (!body) return;
@@ -14798,8 +14835,8 @@ function renderMpDeclineWatch() {
     const kd = x.skuSharePct >= DW_KEY_DRIVER_SHARE;
     return `<tr>
       <td class="text-dim">${i + 1}</td>
-      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.skuId)}</div><div class="text-dim" style="font-size:11px">${escapeHtml(x.skuName)}</div></td>
-      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.merchantId)}</div><div class="text-dim" style="font-size:11px">${escapeHtml(x.merchantName)}</div></td>
+      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.skuId)}</div><div class="text-dim" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(x.skuName)}">${escapeHtml(x.skuName)}</div></td>
+      <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.merchantId)}</div><div class="text-dim" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(x.merchantName)}">${escapeHtml(x.merchantName)}</div></td>
       <td>${escapeHtml(x.acm)}</td>
       <td class="num">${x.base.toFixed(1)}</td>
       <td class="num">${fmtInt.format(x.y)}</td>
@@ -14833,7 +14870,10 @@ async function sendDeclineDigestEmail() {
         meta: {
           dateLabel: dwState.dateLabel, totalDrop: dwState.totalDrop, topDrop,
           acm: $("dwAcmFilter") ? $("dwAcmFilter").value : "All",
-          dashboardUrl: location.href.split("#")[0]
+          dashboardUrl: location.href.split("#")[0],
+          lostGmv: dwState.lostGmvTotal || 0, lostGmvTop: dwState.view.reduce((a, x) => a + x.lostGmv, 0),
+          mtdLost: dwState.mtd ? dwState.mtd.lost : 0, mtdDays: dwState.mtd ? dwState.mtd.days : 0,
+          avgActual: dwState.mtd ? dwState.mtd.avgActual : 0, avgTarget: dwState.mtd ? dwState.mtd.target : 0
         },
         rows: dwState.view.map(x => ({
           skuId: x.skuId, skuName: x.skuName, merchantId: x.merchantId, merchantName: x.merchantName, acm: x.acm,
