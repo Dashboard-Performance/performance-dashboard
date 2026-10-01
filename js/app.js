@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.10";
+const APP_VERSION = "1.3.12";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1992,6 +1992,7 @@ function parseAvailabilityLockingSheet(payload) {
       tagerId: cellText(c[2]).trim(),
       merchantName: cellText(c[3]) || cellText(c[2]),
       allocatedQty: cellNumber(c[4]),
+      allocatedBlank: cellText(c[4]).trim() === "", // ALLOCATED_QUANTITY فاضي = مفيش قفل (التاجر مفتوحله) — Decline Matches
       usedQty: cellNumber(c[5]),
       usedAtText: cellText(c[6]),
       expiryText: expiryText, expiryTs,
@@ -14712,21 +14713,46 @@ function dwYesterdayLabel() {
   return d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 }
 
+// ASP لكل Match = PLACED_ASP (عمود X في شيت الـ Main) مرجّح بالـ Placed pcs لآخر 4 أيام فيها Placed فعلاً (قبل النهاردة).
+// لو مفيش داتا للماتش في الـ Main نرجع لعمود ASP في شيت الـ Placed daily.
+function dwBuildPlacedAspMap() {
+  const todayMs = new Date().setHours(0, 0, 0, 0);
+  const byMatch = new Map();
+  (state.allParsedRows || []).forEach(r => {
+    if (!r.merchantId || !r.sku || !(r.placedPieces > 0) || !(r.placedAsp > 0)) return;
+    if (!r.timestamp || r.timestamp >= todayMs) return;
+    const k = r.merchantId + "||" + r.sku;
+    let m = byMatch.get(k); if (!m) { m = new Map(); byMatch.set(k, m); }
+    const e = m.get(r.timestamp) || { pcs: 0, gmv: 0 };
+    e.pcs += r.placedPieces; e.gmv += r.placedPieces * r.placedAsp;
+    m.set(r.timestamp, e);
+  });
+  const out = new Map();
+  byMatch.forEach((m, k) => {
+    let pcs = 0, gmv = 0;
+    Array.from(m.entries()).sort((a, b) => b[0] - a[0]).slice(0, 4).forEach(([, e]) => { pcs += e.pcs; gmv += e.gmv; });
+    if (pcs > 0) out.set(k, gmv / pcs);
+  });
+  return out;
+}
+
 function dwComputeAll() {
   const daily = state.merchantSkuDailyRows || [];
   const todayMs = new Date().setHours(0, 0, 0, 0);
 
   const lockByMatch = new Map();
   (state.availabilityLockingRows || []).forEach(l => {
-    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
+    if (!l.singleId || !l.tagerId || l.allocatedBlank || !alIsLockActive(l, todayMs)) return;
     const k = l.tagerId + "||" + l.singleId;
     lockByMatch.set(k, (lockByMatch.get(k) || 0) + (l.remainingPieces || 0));
   });
   const activeLockKeys = new Set();
   (state.availabilityLockingRows || []).forEach(l => {
-    if (l.singleId && l.tagerId && alIsLockActive(l, todayMs)) activeLockKeys.add(l.tagerId + "||" + l.singleId);
+    if (l.singleId && l.tagerId && !l.allocatedBlank && alIsLockActive(l, todayMs)) activeLockKeys.add(l.tagerId + "||" + l.singleId);
   });
 
+  const aspMap = dwBuildPlacedAspMap();
+  const aspOf = r => aspMap.get(r.tagerId + "||" + r.skuId) || r.asp || 0;
   const skuBase = new Map(), skuDrop = new Map();
   let lostGmvTotal = 0;
   const rows = [];
@@ -14736,7 +14762,7 @@ function dwComputeAll() {
     const y = r.day1 || 0;
     const drop = base - y;
     skuBase.set(r.skuId, (skuBase.get(r.skuId) || 0) + base);
-    if (drop > 0) { skuDrop.set(r.skuId, (skuDrop.get(r.skuId) || 0) + drop); lostGmvTotal += drop * (r.asp || 0); }
+    if (drop > 0) { skuDrop.set(r.skuId, (skuDrop.get(r.skuId) || 0) + drop); lostGmvTotal += drop * aspOf(r); }
     // STDEV (عينة) لأيام DAY2..DAY5 — حارس ضوضاء: النزول لازم يعدّي التذبذب الطبيعي للماتش نفسه.
     const vals = [r.day2 || 0, r.day3 || 0, r.day4 || 0, r.day5 || 0];
     const sd = Math.sqrt(vals.reduce((a, v) => a + (v - base) * (v - base), 0) / (vals.length - 1));
@@ -14760,7 +14786,7 @@ function dwComputeAll() {
       base: x.base, y: x.y, drop: x.drop, dropPct: x.base ? (x.drop / x.base) * 100 : 0,
       impactPct: sb ? (x.drop / sb) * 100 : 0, skuSharePct: sd ? (x.drop / sd) * 100 : 0,
       contrPct: totalDrop ? (x.drop / totalDrop) * 100 : 0,
-      stock, locked, hasLock, cause, asp: r.asp || 0, lostGmv: x.drop * (r.asp || 0)
+      stock, locked, hasLock, cause, asp: aspOf(r), lostGmv: x.drop * aspOf(r)
     };
   });
   out.sort((a, b) => b.drop - a.drop);
@@ -14844,10 +14870,12 @@ function renderMpDeclineWatch() {
       <td class="num text-red">−${x.dropPct.toFixed(0)}%</td>
       <td style="white-space:nowrap"><div style="font-weight:700;${kd ? "color:#B42318" : ""}">−${x.impactPct.toFixed(1)}% <span class="text-dim" style="font-weight:400;font-size:11px">of SKU</span></div><div class="text-dim" style="font-size:11px">${x.skuSharePct.toFixed(0)}% of SKU's drop${kd ? ' <span style="background:#FDECEC;color:#B42318;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px">KEY DRIVER</span>' : ""}</div></td>
       <td>${x.contrPct.toFixed(1)}%</td>
+      <td class="num text-red" style="font-weight:700">−${fmtInt.format(Math.round(x.lostGmv))}</td>
+      <td class="num">${(dwState.lostGmvTotal ? x.lostGmv / dwState.lostGmvTotal * 100 : 0).toFixed(1)}%</td>
       <td class="num ${x.stock <= 0 ? "text-red" : ""}">${fmtInt.format(x.stock)}</td>
       <td class="num">${x.hasLock ? fmtInt.format(x.locked) : "–"}</td>
       <td>${badge(x.cause)}</td></tr>`;
-  }).join("") : '<tr><td colspan="13" class="text-dim" style="text-align:center;padding:18px">No declining matches found.</td></tr>';
+  }).join("") : '<tr><td colspan="15" class="text-dim" style="text-align:center;padding:18px">No declining matches found.</td></tr>';
 }
 
 async function sendDeclineDigestEmail() {
@@ -14878,7 +14906,7 @@ async function sendDeclineDigestEmail() {
         rows: dwState.view.map(x => ({
           skuId: x.skuId, skuName: x.skuName, merchantId: x.merchantId, merchantName: x.merchantName, acm: x.acm,
           base: x.base, y: x.y, drop: x.drop, dropPct: x.dropPct, impactPct: x.impactPct, skuSharePct: x.skuSharePct,
-          contrPct: x.contrPct, stock: x.stock, locked: x.locked, hasLock: x.hasLock, cause: x.cause
+          contrPct: x.contrPct, lostGmv: x.lostGmv, stock: x.stock, locked: x.locked, hasLock: x.hasLock, cause: x.cause
         }))
       })
     });
