@@ -1074,11 +1074,17 @@ function isAllowedEmail(email) {
 //  mail arbitrary people or arbitrary content.
 //
 //  NOTE: the first time you deploy this, Apps Script asks to authorize the
-//  "Send email as you" scope (MailApp) — run any function once from the
+//  "Send email as you" (MailApp) and "Connect to an external service" (UrlFetchApp) scopes — run any function once from the
 //  editor (e.g. testDeclineDigest below) and accept, then redeploy a NEW
 //  version of the web app.
 // ============================================================================
 var DECLINE_DIGEST_RECIPIENTS = ["youssef.hanafy@taager.com"]; // test phase: only this address
+// DELIVERY: if DECLINE_MAIL_RELAY_URL is set, the email is sent by the small
+// "Mail Relay" script (backend/MailRelay.gs) deployed from a normal Gmail
+// account — this avoids the taager.com DMARC rejection (550 5.7.26) when the
+// company domain has no DKIM set up. Leave "" to send directly with MailApp.
+var DECLINE_MAIL_RELAY_URL = "https://script.google.com/macros/s/AKfycbxB7ozNPLztohCN6mhAUxjnqK8dIwyOaydox67vg7hLOSi7CBkVEffKml9pPgPRAJ81hg/exec";
+var DECLINE_MAIL_RELAY_SECRET = "METUY8tMu1u7vH1pG7tto-3fBTQVZj-Y"; // must match RELAY_SECRET in MailRelay.gs
 var DECLINE_DIGEST_MAX_ROWS = 20;
 var DECLINE_DIGEST_MIN_GAP_MS = 20 * 1000; // basic flood guard between sends
 
@@ -1094,13 +1100,7 @@ function handleSendDeclineDigest(payload) {
     var meta = payload.meta || {};
     var html = buildDeclineDigestHtml_(rows, meta);
     var subject = "Decline Watch · Top " + rows.length + " Placed declines · " + String(meta.dateLabel || "");
-    MailApp.sendEmail({
-      to: DECLINE_DIGEST_RECIPIENTS.join(","),
-      subject: subject,
-      htmlBody: html,
-      body: "Decline Watch — open this email in an HTML-capable client to see the table.",
-      name: "Marketplace Dashboard"
-    });
+    sendDeclineMail_(subject, html);
     props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
     return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.join(", ") });
   } catch (err) {
@@ -1108,13 +1108,41 @@ function handleSendDeclineDigest(payload) {
   }
 }
 
-// Run from the Apps Script editor once to authorize MailApp and to preview
-// the email with a tiny fake row (goes to DECLINE_DIGEST_RECIPIENTS).
+function sendDeclineMail_(subject, html) {
+  var to = DECLINE_DIGEST_RECIPIENTS.join(",");
+  if (DECLINE_MAIL_RELAY_URL && DECLINE_MAIL_RELAY_URL.indexOf("http") === 0) {
+    var resp = UrlFetchApp.fetch(DECLINE_MAIL_RELAY_URL, {
+      method: "post", contentType: "application/json", muteHttpExceptions: true, followRedirects: true,
+      payload: JSON.stringify({ secret: DECLINE_MAIL_RELAY_SECRET, to: to, subject: subject, html: html })
+    });
+    var out;
+    try { out = JSON.parse(resp.getContentText()); } catch (e) { throw new Error("Mail relay returned an unexpected response (check its deployment access = Anyone)."); }
+    if (!out || out.success !== true) throw new Error("Mail relay: " + (out && out.message ? out.message : "failed"));
+    return;
+  }
+  html = html.replace(/<img[^>]*cid:logo[^>]*>/, "");
+  MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: "Marketplace Dashboard",
+    body: "Decline Watch — open this email in an HTML-capable client to see the table." });
+}
+
+// Run from the Apps Script editor: sends the FULL design preview (20 sample
+// rows, clearly labelled SAMPLE DATA) to DECLINE_DIGEST_RECIPIENTS. Also
+// authorizes MailApp / UrlFetchApp the first time.
 function testDeclineDigest() {
-  var rows = [{ skuId: "SKU-TEST", skuName: "Test product", merchantId: "100001", merchantName: "Test merchant", acm: "Test ACM",
-    base: 100, y: 20, drop: 80, dropPct: 80, impactPct: 40, skuSharePct: 100, contrPct: 10, stock: 0, locked: 0, hasLock: false, cause: "Out of stock" }];
-  MailApp.sendEmail({ to: DECLINE_DIGEST_RECIPIENTS.join(","), subject: "Decline Watch (test)",
-    htmlBody: buildDeclineDigestHtml_(rows, { dateLabel: "test", totalDrop: 800, topDrop: 80, acm: "All", dashboardUrl: "" }) });
+  var names = ["Wireless Earbuds Pro","Smart Watch Series 5","Hair Dryer 2200W","Air Fryer 5L","LED Desk Lamp","Phone Case Bundle","Yoga Mat Premium","Blender 600W","Bluetooth Speaker Mini","Electric Kettle 1.7L","Men Sneakers Classic","Kids Backpack","Power Bank 20000mAh","Ceramic Cookware Set","Facial Cleansing Brush","Gaming Mouse RGB","Trimmer Pro Kit","Car Phone Holder","Steam Iron 2400W","Water Bottle 1L"];
+  var merch = ["Nile Trade","Delta Goods","Cairo Prime","Alex Hub","Giza Select","Sphinx Retail","Oasis Store","Lotus Market"];
+  var acms = ["Ahmed S.","Mona K.","Omar T.","Sara H."];
+  var rows = [], top = 0;
+  for (var i = 0; i < 20; i++) {
+    var base = 300 - i * 8, drop = 240 - i * 9, stock = (i % 5 === 0) ? 0 : 80 + i * 17, hasLock = (i % 4 === 1);
+    top += drop;
+    rows.push({ skuId: "SKU-" + (10400 + i * 37), skuName: names[i], merchantId: String(100200 + (i % 8) * 113), merchantName: merch[i % 8], acm: acms[i % 4],
+      base: base, y: base - drop, drop: drop, dropPct: drop / base * 100, impactPct: 15 + (i * 7) % 45, skuSharePct: (i % 3 === 0) ? 100 : 30 + (i * 11) % 55,
+      contrPct: drop / 3300 * 100, stock: stock, locked: hasLock ? 40 + i * 3 : 0, hasLock: hasLock,
+      cause: stock === 0 ? "Out of stock" : (hasLock ? "Locked" : "Demand drop") });
+  }
+  var html = buildDeclineDigestHtml_(rows, { dateLabel: "Sample", totalDrop: 3300, topDrop: top, acm: "All", dashboardUrl: "", sample: true });
+  sendDeclineMail_("Decline Watch \u00b7 SAMPLE DATA (design preview)", html);
 }
 
 function ddEsc_(v) {
@@ -1162,8 +1190,11 @@ function buildDeclineDigestHtml_(rows, meta) {
   return '<!doctype html><html><head><meta charset="utf-8"><title>Decline Watch</title></head>' +
   '<body style="margin:0;background:#EAEFF5;font-family:Segoe UI,Arial,Helvetica,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" style="background:#EAEFF5"><tr><td align="center" style="padding:28px 12px">' +
   '<table width="1040" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;border:1px solid #D9E1EB">' +
-  '<tr><td style="background:#1F3F5F;padding:26px 30px"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:6px">Decline Watch</div>' +
-  '<div style="font-size:13px;color:#C9D8E8;margin-top:6px">Top ' + rows.length + ' matches that pulled Placed down yesterday &middot; ' + ddEsc_(meta.dateLabel) + acmNote + '</div></td></tr>' +
+  '<tr><td style="background:#1F3F5F;padding:24px 30px"><table cellpadding="0" cellspacing="0"><tr>' +
+  '<td style="vertical-align:middle;padding-right:16px"><img src="cid:logo" width="56" height="56" alt="" style="display:block;border:0;border-radius:10px"></td>' +
+  '<td style="vertical-align:middle"><div style="font-size:11px;color:#9FB6CF;letter-spacing:1.4px;text-transform:uppercase">Marketplace &middot; Daily Digest</div><div style="font-size:26px;font-weight:700;color:#fff;margin-top:4px">Decline Watch</div>' +
+  '<div style="font-size:13px;color:#C9D8E8;margin-top:4px">Top ' + rows.length + ' matches that pulled Placed down yesterday &middot; ' + ddEsc_(meta.dateLabel) + acmNote + '</div></td></tr></table></td></tr>' +
+  (meta.sample ? '<tr><td style="background:#FFF4E0;color:#B54708;font-size:12px;font-weight:700;padding:8px 30px;letter-spacing:.4px">SAMPLE DATA &mdash; design preview only, these numbers are not real.</td></tr>' : '') +
   '<tr><td style="padding:24px 25px 6px"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
   kpi("Total Placed drop", "&minus;" + ddInt_(totalDrop), "pieces vs. 4-day avg", "#B42318") + kpi("Top " + rows.length + " share", share.toFixed(0) + "%", "of the total drop") +
   kpi("Out of stock", oos, "of the Top " + rows.length, "#B42318") + kpi("Key drivers", keyDrivers, "merchants driving 50%+ of their SKU's drop", "#B42318") + kpi("Locked", locked, "of the Top " + rows.length, "#B54708") +
