@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.8";
+const APP_VERSION = "1.3.9";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1380,13 +1380,22 @@ function computeSnapshotFingerprint(snapshot) {
     sumGmv += r.deliveredGmv || 0; sumCm3 += r.cm3 || 0;
     if (r.timestamp > maxTs) maxTs = r.timestamp;
   });
+  // Merchant Segmentation (base + history/archive months) — نضمّنها في البصمة
+  // عشان لو اتغيّرت أرقام Confirmed في أي شهر (زي تصحيح قيمة تاجر من 2085 لـ
+  // 2160) البصمة تتغيّر، فالداشبورد يعتبرها "Live — updated" ويحدّث الكاش
+  // بدل ما يفضل شايف رقم قديم. (العرض نفسه بيتطبّق لايف كل مرة أصلاً، بس ده
+  // بيخلي حالة المزامنة/الكاش متسقة مع التغيير.)
+  let segConfirmed = 0, segRowsCount = 0;
+  (snapshot.merchantSegSourceRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
+  (snapshot.merchantSegHistoryRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
   const parts = [
     rows.length, Math.round(sumPlaced), Math.round(sumConfirmed), Math.round(sumDelivered),
     Math.round(sumGmv), Math.round(sumCm3), maxTs,
     (snapshot.acmSalesPlanData || []).length,
     (snapshot.debundleMap || []).length, Object.keys(snapshot.singleSkuTargets || {}).length,
     (snapshot.inboundRows || []).length, (snapshot.newSegRows || []).length,
-    (snapshot.availabilityLockingRows || []).length
+    (snapshot.availabilityLockingRows || []).length,
+    segRowsCount, Math.round(segConfirmed)
   ];
   return parts.join("|");
 }
@@ -17035,6 +17044,7 @@ const GID_LABELS = {
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
+  "693757028": "Merchant Segmentation (September 2026)",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
   [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)",
@@ -17229,7 +17239,11 @@ async function fetchAllSheetsSnapshot() {
       try {
         sheets[hgid] = await loadSheetWithRetry(hgid);
       } catch (err) {
+        // متشيلش الخطأ بصمت: لو التاب ده فشل، الداشبورد بيرجع لآخر نسخة
+        // متخزنة منه (ممكن تبقى أرقام قديمة). نعلّمه كـ stale عشان يظهر تحذير
+        // "didn't refresh" بدل ما المستخدم يفتكر الأرقام القديمة لايف.
         console.warn("[Merchant Seg History] could not load GID " + hgid + ":", err);
+        staleGids.push(hgid);
       }
     }
   }
