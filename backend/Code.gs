@@ -1163,7 +1163,7 @@ var DD_LOCKING_GID = 2085802038;    // AVAILABILITY_LOCKING_GID
 var DD_MIN_DROP = 3;
 var DD_TOP_N = 20;
 var DD_TIMEZONE = "Africa/Cairo";
-var DD_LOCK_OVER_PCT = 30;  // Locked Qty above avg by 30%+ (or below avg) = lock qty issue
+var DD_LOCK_OVER_PCT = 10;  // Locked Qty above avg by 10%+ (or below avg) = lock qty issue
 // Avg Placed Target (pieces/day) per month, key YYYY-MM. Update at the start of each month.
 var DD_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 var DD_DASHBOARD_URL = ""; // optional: paste your dashboard link to get an "Open in Dashboard" button
@@ -1200,16 +1200,16 @@ function computeDeclineDigest_() {
     lockRemaining[k] = (lockRemaining[k] || 0) + n(r[12]);
   });
 
-  // ASP per match = PLACED_ASP (Main col X) weighted by placed pcs over the last 4 days that had placed pcs (before today).
+  // ASP per match = total Placed GMV (Main col V) / total Placed pcs (col P) over the last 4 days that had placed pcs (before today).
   var aspByMatch = {};
   ddSheetByGid_(ss, DD_MAIN_GID).getDataRange().getValues().forEach(function (r) {
-    var tg = s(r[1]), sk = s(r[3]), pcs = n(r[15]), asp = n(r[23]);
-    if (!tg || !sk || !(pcs > 0) || !(asp > 0)) return;
+    var tg = s(r[1]), sk = s(r[3]), pcs = n(r[15]), gmvv = n(r[21]);
+    if (!tg || !sk || !(pcs > 0) || !(gmvv > 0)) return;
     var dt = r[0] instanceof Date ? r[0].getTime() : new Date(s(r[0])).getTime();
     if (!dt || isNaN(dt) || dt >= todayMs) return;
     var k = tg + "||" + sk, m = aspByMatch[k] || (aspByMatch[k] = {});
     var e = m[dt] || (m[dt] = { pcs: 0, gmv: 0 });
-    e.pcs += pcs; e.gmv += pcs * asp;
+    e.pcs += pcs; e.gmv += gmvv;
   });
   Object.keys(aspByMatch).forEach(function (k) {
     var m = aspByMatch[k], ds = Object.keys(m).map(Number).sort(function (a, b) { return b - a; }).slice(0, 4), p = 0, g = 0;
@@ -1352,7 +1352,7 @@ function buildDeclineDigestHtml_(rows, meta) {
   '</tr>' + trs +
   '<tr style="background:#EEF3F9"><td></td><td colspan="3" style="padding:11px 8px;font-weight:700;color:#14243A;font-size:13px">Top ' + rows.length + ' total</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + tb.toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + ddInt_(ty) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + (tb - ty).toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:12px">&minus;' + (tb ? ((tb - ty) / tb * 100).toFixed(0) : 0) + '%</td><td></td><td style="padding:11px 8px;font-weight:700;font-size:12px">' + share.toFixed(1) + '%</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + ddInt_(meta.lostGmvTop) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:12px">' + (ddNum_(meta.lostGmv) ? ddNum_(meta.lostGmvTop) / ddNum_(meta.lostGmv) * 100 : 0).toFixed(1) + '%</td><td colspan="3"></td></tr>' +
   '</table></td></tr>' + btn +
-  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed only if its drop exceeds the normal day-to-day variation (standard deviation) of its own 4 days. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Locked Qty = the merchant has an active lock whose remaining quantity is below his 4-day average, or more than 30% above it; otherwise Demand drop. Lost GMV = drop &times; ASP. Lost Placed MTD = sum of daily drops (vs. each day\'s previous 4-day average) over the full days of the current month. Avg Placed vs Target compares the actual daily Placed average this month to the monthly target.<br>Marketplace Performance Dashboard</div></td></tr>' +
+  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed only if its drop exceeds the normal day-to-day variation (standard deviation) of its own 4 days. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Locked Qty = the merchant has an active lock whose remaining quantity is below his 4-day average, or more than 10% above it; otherwise Demand drop. Lost GMV = drop &times; ASP. Lost Placed MTD = sum of daily drops (vs. each day\'s previous 4-day average) over the full days of the current month. Avg Placed vs Target compares the actual daily Placed average this month to the monthly target.<br>Marketplace Performance Dashboard</div></td></tr>' +
   '</table></td></tr></table></body></html>';
 }
 

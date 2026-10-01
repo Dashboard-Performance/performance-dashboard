@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.12";
+const APP_VERSION = "1.3.13";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14703,7 +14703,7 @@ function prepareMpNewMatchesData() {
 const DW_TOP_N = 20;
 const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الماتش يدخل الترتيب (يتفادى الضوضاء)
 const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
-const DW_LOCK_OVER_PCT = 30;    // Locked Qty أكبر من الـ avg بـ 30%+ = مشكلة قفل
+const DW_LOCK_OVER_PCT = 10;    // Locked Qty أكبر من الـ avg بـ 10%+ = مشكلة قفل
 // Avg Placed Target (قطع/يوم) لكل شهر — حدّثه أول كل شهر. المفتاح YYYY-MM.
 const DW_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
@@ -14713,18 +14713,18 @@ function dwYesterdayLabel() {
   return d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 }
 
-// ASP لكل Match = PLACED_ASP (عمود X في شيت الـ Main) مرجّح بالـ Placed pcs لآخر 4 أيام فيها Placed فعلاً (قبل النهاردة).
+// ASP لكل Match = إجمالي Placed GMV ÷ إجمالي Placed pcs لآخر 4 أيام فيها Placed فعلاً (قبل النهاردة) — نفس منطق Placed ASP في الداشبورد.
 // لو مفيش داتا للماتش في الـ Main نرجع لعمود ASP في شيت الـ Placed daily.
 function dwBuildPlacedAspMap() {
   const todayMs = new Date().setHours(0, 0, 0, 0);
   const byMatch = new Map();
   (state.allParsedRows || []).forEach(r => {
-    if (!r.merchantId || !r.sku || !(r.placedPieces > 0) || !(r.placedAsp > 0)) return;
+    if (!r.merchantId || !r.sku || !(r.placedPieces > 0) || !(r.placedGmv > 0)) return;
     if (!r.timestamp || r.timestamp >= todayMs) return;
     const k = r.merchantId + "||" + r.sku;
     let m = byMatch.get(k); if (!m) { m = new Map(); byMatch.set(k, m); }
     const e = m.get(r.timestamp) || { pcs: 0, gmv: 0 };
-    e.pcs += r.placedPieces; e.gmv += r.placedPieces * r.placedAsp;
+    e.pcs += r.placedPieces; e.gmv += r.placedGmv;
     m.set(r.timestamp, e);
   });
   const out = new Map();
@@ -14777,7 +14777,7 @@ function dwComputeAll() {
     const hasLock = activeLockKeys.has(key);
     const locked = Math.round(lockByMatch.get(key) || 0);
     const sb = skuBase.get(r.skuId) || x.base, sd = skuDrop.get(r.skuId) || x.drop;
-    // Locked Qty أقل من الـ avg، أو أكبر منه بـ 30%+ → سبب قفل. غير كده Demand drop.
+    // Locked Qty أقل من الـ avg، أو أكبر منه بـ 10%+ → سبب قفل. غير كده Demand drop.
     const lockedProblem = hasLock && (locked < x.base || locked > x.base * (1 + DW_LOCK_OVER_PCT / 100));
     const cause = stock <= 0 ? "Out of stock" : (lockedProblem ? "Locked Qty" : "Demand drop");
     return {
