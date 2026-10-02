@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.14";
+const APP_VERSION = "1.3.17";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14705,6 +14705,8 @@ const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الما
 const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
 // Avg Placed Target (قطع/يوم) لكل شهر — حدّثه أول كل شهر. المفتاح YYYY-MM.
 const DW_AVG_PLACED_TARGETS = { "2026-10": 5429 };
+// Merchants مستبعدين من الـ Decline Matches بالكامل (الـ Drop والإجماليات والـ MTD Lost). الـ Avg Placed الفعلي بيفضل بيحسبهم.
+const DW_EXCLUDED_MERCHANTS = new Set(["1160154"]);
 const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
 
 function dwYesterdayLabel() {
@@ -14756,7 +14758,7 @@ function dwComputeAll() {
   let lostGmvTotal = 0;
   const rows = [];
   daily.forEach(r => {
-    if (!r.skuId || !r.tagerId) return;
+    if (!r.skuId || !r.tagerId || DW_EXCLUDED_MERCHANTS.has(String(r.tagerId))) return;
     const base = ((r.day2 || 0) + (r.day3 || 0) + (r.day4 || 0) + (r.day5 || 0)) / 4;
     const y = r.day1 || 0;
     const drop = base - y;
@@ -14778,7 +14780,9 @@ function dwComputeAll() {
     const sb = skuBase.get(r.skuId) || x.base, sd = skuDrop.get(r.skuId) || x.drop;
     // Locked Qty أقل من الـ avg → سبب قفل (القفل هو اللي بيحدّ البيع). غير كده Demand drop.
     const lockedProblem = hasLock && locked < x.base;
-    const cause = stock <= 0 ? "Out of stock" : (lockedProblem ? "Locked Qty" : "Demand drop");
+    // السبب ممكن يبقى أكتر من حاجة مع بعض: مشكلة Stock (صفر = Out of stock، أقل من الـ 4D Avg = Low stock) + Locked Qty.
+    const stockLabel = stock <= 0 ? "Out of stock" : (stock < x.base ? "Low stock" : "");
+    const cause = [stockLabel, lockedProblem ? "Locked Qty" : ""].filter(Boolean).join(" + ") || "Demand drop";
     return {
       skuId: r.skuId, skuName: r.skuName || inv.skuName || "",
       merchantId: r.tagerId, merchantName: r.merchantName || r.tagerId, acm: r.acm || "",
@@ -14799,7 +14803,7 @@ function dwComputeAll() {
       const cur = d[k] || 0; mtdPlaced += cur;
       let sum = 0, cnt = 0;
       for (let j = k + 1; j <= Math.min(k + 4, 31); j++) { sum += d[j] || 0; cnt++; }
-      if (cnt) { const b = sum / cnt; if (b > cur) mtdLost += b - cur; }
+      if (cnt && !DW_EXCLUDED_MERCHANTS.has(String(r.tagerId))) { const b = sum / cnt; if (b > cur) mtdLost += b - cur; }
     });
   }
   const monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
@@ -14810,6 +14814,7 @@ function dwComputeAll() {
 
 function prepareMpDeclineWatchData() {
   dwComputeAll();
+  dwLoadFeedback();
   const sel = $("dwAcmFilter");
   if (sel) {
     const cur = sel.value || "All";
@@ -14823,7 +14828,10 @@ function prepareMpDeclineWatchData() {
 function renderMpDeclineWatch() {
   const acm = $("dwAcmFilter") ? $("dwAcmFilter").value : "All";
   const term = $("dwSearch") ? $("dwSearch").value.trim().toLowerCase() : "";
-  let list = dwState.all.filter(x => acm === "All" || x.acm === acm);
+  // فلتر الـ ACM اللي فوق في الهيدر (acmSelect) بيفلتر الصفحة دي كمان، كل Account Manager يشوف الميرشنتس بتوعه بس.
+  const gAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  let list = dwState.all.filter(x => (acm === "All" || x.acm === acm) && (gAcm === "All" || !gAcm || same(x.acm, gAcm)));
   if (term) list = list.filter(x => (x.skuId + " " + x.skuName + " " + x.merchantId + " " + x.merchantName).toLowerCase().includes(term));
   const top = list.slice(0, DW_TOP_N);
   dwState.view = top;
@@ -14832,9 +14840,9 @@ function renderMpDeclineWatch() {
   const set = (id, v) => { if ($(id)) $(id).textContent = v; };
   set("dwTotalDrop", "−" + fmtInt.format(Math.round(dwState.totalDrop)));
   set("dwTop20Share", dwState.totalDrop ? fmtPct((topDrop / dwState.totalDrop) * 100) : "0%");
-  set("dwOos", top.filter(x => x.cause === "Out of stock").length);
+  set("dwOos", top.filter(x => /stock/i.test(x.cause)).length);
   set("dwKeyDrivers", keyDrivers);
-  set("dwLocked", top.filter(x => x.cause === "Locked Qty").length);
+  set("dwLocked", top.filter(x => /Locked Qty/.test(x.cause)).length);
   const topGmv = top.reduce((a, x) => a + x.lostGmv, 0);
   set("dwLostGmv", "−" + fmtInt.format(Math.round(dwState.lostGmvTotal || 0)));
   set("dwLostGmvSub", "Top " + top.length + ": −" + fmtInt.format(Math.round(topGmv)));
@@ -14851,14 +14859,14 @@ function renderMpDeclineWatch() {
   }
   set("dwRowCount", `${top.length} Matches · ${dwState.dateLabel}`);
 
-  const badge = (c) => {
-    const st = c === "Out of stock" ? "background:#FDECEC;color:#B42318" : c === "Locked Qty" ? "background:#FFF4E0;color:#B54708" : "background:#E8EEF7;color:#1F3F5F";
-    return `<span style="${st};font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap">${escapeHtml(c)}</span>`;
-  };
+  const badge = (cs) => String(cs).split(" + ").map(c => {
+    const st = c === "Out of stock" ? "background:#FDECEC;color:#B42318" : c === "Low stock" ? "background:#FDECEC;color:#B42318" : c === "Locked Qty" ? "background:#FFF4E0;color:#B54708" : "background:#E8EEF7;color:#1F3F5F";
+    return `<span style="${st};font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap;display:inline-block;margin:1px 2px 1px 0">${escapeHtml(c)}</span>`;
+  }).join("");
   const body = $("dwTableBody"); if (!body) return;
   body.innerHTML = top.length ? top.map((x, i) => {
     const kd = x.skuSharePct >= DW_KEY_DRIVER_SHARE;
-    return `<tr>
+    return `<tr data-fbk="${escapeHtml(dwFbKey(x))}">
       <td class="text-dim">${i + 1}</td>
       <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.skuId)}</div><div class="text-dim" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(x.skuName)}">${escapeHtml(x.skuName)}</div></td>
       <td><div class="font-mono" style="font-weight:700">${escapeHtml(x.merchantId)}</div><div class="text-dim" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(x.merchantName)}">${escapeHtml(x.merchantName)}</div></td>
@@ -14873,8 +14881,9 @@ function renderMpDeclineWatch() {
       <td class="num">${(dwState.lostGmvTotal ? x.lostGmv / dwState.lostGmvTotal * 100 : 0).toFixed(1)}%</td>
       <td class="num ${x.stock <= 0 ? "text-red" : ""}">${fmtInt.format(x.stock)}</td>
       <td class="num">${x.hasLock ? fmtInt.format(x.locked) : "–"}</td>
-      <td>${badge(x.cause)}</td></tr>`;
-  }).join("") : '<tr><td colspan="15" class="text-dim" style="text-align:center;padding:18px">No declining matches found.</td></tr>';
+      <td>${badge(x.cause)}</td>
+      <td style="min-width:260px">${dwFeedbackCell(x)}</td></tr>`;
+  }).join("") : '<tr><td colspan="16" class="text-dim" style="text-align:center;padding:18px">No declining matches found.</td></tr>';
 }
 
 async function sendDeclineDigestEmail() {
@@ -14918,6 +14927,106 @@ async function sendDeclineDigestEmail() {
     if (btn) btn.disabled = false;
   }
 }
+
+// ---------------------------------------------------------------------
+// Feedback لكل Match: بيتحفظ في تاب "Decline Feedback" في الشيت (Apps Script)
+// بتاريخ اليوم، وبيتعرض تاني في الصفحة لنفس يوم الـ Decline.
+// ---------------------------------------------------------------------
+dwState.fb = {}; dwState.drafts = {};
+function dwDayKey() { return new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }); }
+function dwFbKey(x) { return x.merchantId + "||" + x.skuId; }
+
+function dwFeedbackCell(x) {
+  const k = dwFbKey(x), saved = dwState.fb[k];
+  const draft = dwState.drafts[k];
+  const val = draft !== undefined ? draft : (saved ? saved.feedback : "");
+  const meta = saved ? `Saved by ${escapeHtml(saved.by || "")}${saved.at ? " · " + escapeHtml(saved.at) : ""}` : "";
+  return `<div style="display:flex;gap:6px;align-items:flex-start">
+    <textarea class="dw-fb-input" rows="2" placeholder="Write feedback…" style="flex:1;min-width:190px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit;resize:vertical">${escapeHtml(val)}</textarea>
+    <button class="btn btn-outline small dw-fb-save" type="button">Save</button></div>
+    <div class="dw-fb-status text-dim" style="font-size:11px;margin-top:3px;min-height:14px">${meta}</div>`;
+}
+
+async function dwLoadFeedback() {
+  if (!MATCHES_FEEDBACK_API_URL) return;
+  const day = dwDayKey();
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "get_decline_feedback", declineDay: day })
+    });
+    const data = await resp.json();
+    if (data && data.success && data.items) {
+      dwState.fb = data.items;
+      renderMpDeclineWatch();
+    }
+  } catch (e) { console.warn("dwLoadFeedback", e); }
+}
+
+async function dwSaveFeedback(tr) {
+  const st = tr.querySelector(".dw-fb-status"), btn = tr.querySelector(".dw-fb-save"), ta = tr.querySelector(".dw-fb-input");
+  const setSt = (m, c) => { if (st) { st.textContent = m; st.style.color = c || ""; } };
+  const text = (ta.value || "").trim();
+  if (!text) { setSt("Write feedback first", "#B42318"); return; }
+  const user = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
+  if (!user) { setSt("Please log in first", "#B42318"); return; }
+  const key = tr.dataset.fbk;
+  const x = dwState.all.find(r => dwFbKey(r) === key);
+  if (!x) return;
+  btn.disabled = true; setSt("Saving…", "");
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "save_decline_feedback", declineDay: dwDayKey(), feedback: text,
+        userName: user.name || "", userEmail: user.email || "",
+        row: { skuId: x.skuId, skuName: x.skuName, merchantId: x.merchantId, merchantName: x.merchantName, acm: x.acm,
+               base: x.base, y: x.y, drop: x.drop, lostGmv: x.lostGmv, cause: x.cause }
+      })
+    });
+    const data = await resp.json();
+    if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
+    dwState.fb[key] = { feedback: text, by: user.name || "", at: data.at || "" };
+    delete dwState.drafts[key];
+    setSt("Saved ✓ " + (data.at || ""), "#067647");
+  } catch (err) {
+    setSt("Failed: " + (err && err.message ? err.message : err), "#B42318");
+  } finally { btn.disabled = false; }
+}
+if ($("dwTableBody")) {
+  $("dwTableBody").addEventListener("click", (e) => {
+    const b = e.target.closest(".dw-fb-save"); if (!b) return;
+    dwSaveFeedback(b.closest("tr"));
+  });
+  $("dwTableBody").addEventListener("input", (e) => {
+    const ta = e.target.closest(".dw-fb-input"); if (!ta) return;
+    const tr = ta.closest("tr"); if (tr) dwState.drafts[tr.dataset.fbk] = ta.value;
+  });
+}
+// الفلتر العام اللي فوق (All ACMs) يحدّث الصفحة دي لو مفتوحة
+if ($("acmSelect")) $("acmSelect").addEventListener("change", () => {
+  if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) renderMpDeclineWatch();
+});
+
+// Deep link من الإيميل: ?view=decline يفتح Marketplace > Decline Matches بعد تسجيل الدخول
+(function dwDeepLink() {
+  let want = false;
+  try { want = new URLSearchParams(location.search).get("view") === "decline"; } catch (e) {}
+  if (!want) return;
+  let tries = 0;
+  const iv = setInterval(() => {
+    tries++;
+    const user = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
+    if (user || tries > 120) {
+      clearInterval(iv);
+      if (user) {
+        if (marketplaceSubmenu) marketplaceSubmenu.classList.remove("hidden");
+        switchView("mpDeclineWatch");
+      }
+    }
+  }, 500);
+})();
+
 if ($("dwAcmFilter")) $("dwAcmFilter").addEventListener("change", renderMpDeclineWatch);
 if ($("dwSearch")) $("dwSearch").addEventListener("input", renderMpDeclineWatch);
 if ($("dwSendBtn")) $("dwSendBtn").addEventListener("click", sendDeclineDigestEmail);

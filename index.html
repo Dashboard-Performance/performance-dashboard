@@ -1968,9 +1968,9 @@
                 <div class="metric-sub text-dim">Of the total drop</div>
               </div>
               <div class="metric-card hover-glow">
-                <div class="metric-title">Out of Stock <span class="icon-box"></span></div>
+                <div class="metric-title">Stock Issue <span class="icon-box"></span></div>
                 <div class="metric-value text-red" id="dwOos">0</div>
-                <div class="metric-sub text-dim">Of the Top 20</div>
+                <div class="metric-sub text-dim">Out of / low stock (below 4D avg), of the Top 20</div>
               </div>
               <div class="metric-card hover-glow">
                 <div class="metric-title">Key Drivers <span class="icon-box"></span></div>
@@ -1984,14 +1984,23 @@
               </div>
             </div>
           </section>
-          <section class="table-section">
-            <div class="panel">
-              <div class="table-controls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                <select id="dwAcmFilter" class="date-filter-input" aria-label="ACM filter"><option value="All">All ACMs</option></select>
-                <input id="dwSearch" type="search" placeholder="Search SKU or Merchant..." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" />
-                <span style="flex:1"></span>
-                <span id="dwSendStatus" class="text-dim" style="font-size:12px;"></span>
-                <button id="dwSendBtn" class="btn btn-outline small" title="Sends the current Top 20 to the configured test recipient">✉ Send me this email</button>
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Decline Matches</h2>
+                  <p>Top 20 declining matches with stock, locked qty, likely cause and your feedback. Use the ACM filter at the top to see your merchants only.</p>
+                </div>
+                <div class="table-controls">
+                  <select id="dwAcmFilter" class="date-filter-input" aria-label="ACM filter"><option value="All">All ACMs</option></select>
+                </div>
+                <div class="table-controls">
+                  <input id="dwSearch" type="search" placeholder="Search SKU or Merchant..." autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" />
+                </div>
+                <div class="table-controls">
+                  <span id="dwSendStatus" class="text-dim" style="font-size:12px;"></span>
+                  <button id="dwSendBtn" class="btn btn-outline small" title="Sends the current Top 20 to the configured recipients">✉ Send me this email</button>
+                </div>
               </div>
               <div class="table-responsive">
                 <table class="data-table" id="dwTable" style="white-space:nowrap">
@@ -2012,6 +2021,7 @@
                       <th class="num" title="Available stock for the SKU (Inventory tab).">Stock</th>
                       <th class="num" title="Remaining pieces of the merchant's active lock on this SKU (Availability Locking tab).">Locked Qty</th>
                       <th>Likely Cause</th>
+                      <th title="Write your feedback on this match. It is saved with today's date.">Feedback</th>
                     </tr>
                   </thead>
                   <tbody id="dwTableBody"></tbody>
