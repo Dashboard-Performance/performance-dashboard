@@ -1,0 +1,4 @@
+releases/
+backend/
+cloudflare-worker/
+*.zip
