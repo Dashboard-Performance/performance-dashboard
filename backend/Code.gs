@@ -1131,9 +1131,9 @@ function handleSendDeclineDigest(payload) {
     var meta = payload.meta || {};
     var html = buildDeclineDigestHtml_(rows, meta);
     var subject = "Marketplace Decline Matches — " + String(meta.dateLabel || "");
-    sendDeclineMail_(subject, html, ["youssef.hanafy@taager.com"]); // the dashboard button only ever sends to you
+    sendDeclineMail_(subject, html); // the dashboard button sends to everyone in DECLINE_DIGEST_RECIPIENTS (only YOU can press it)
     props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
-    return jsonResponse({ success: true, sentTo: "youssef.hanafy@taager.com" });
+    return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.length + " people" });
   } catch (err) {
     return jsonResponse({ success: false, message: String(err && err.message ? err.message : err) });
   }

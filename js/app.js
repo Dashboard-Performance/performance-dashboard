@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.26";
+const APP_VERSION = "1.3.27";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -18463,7 +18463,7 @@ if (typeof document !== "undefined") {
 //    (PRODUCT_ID == SINGLE_ID) — نفس مصدر Stock في Recommended Tracker.
 // -------------------------------------------------------------------------
 const DOH_DEFAULTS = { cutoffDays: 5, windowDays: 10, crFloorBelow: 30, crFloorTo: 60, onlyPlacedYday: true };
-const dohState = { wired: false, rows: [], view: [], meta: null, sortKey: "dohPlaced", sortDir: "asc", search: "" };
+const dohState = { wired: false, rows: [], view: [], meta: null, sortKey: "diffAbs", sortDir: "desc", search: "", maxDoh: null };
 
 function dohReadParams() {
   const num = (id, def, min, max) => {
@@ -18546,6 +18546,7 @@ function dohComputeRows(params) {
     rows.push({
       sku: id, name: singlesList.get(id) || inv.skuName || "", category: inv.category || (state.productsMap && state.productsMap[id] && state.productsMap[id].category) || "",
       stock, placedYday: a.placedYday, avg3, cr, dr, ndr, crUsed, floored, expConf,
+      diff: expConf - avg3, diffAbs: Math.abs(expConf - avg3),
       wPlaced: a.wPlaced, wConf: a.wConf, wDel: a.wDel,
       dohPlaced: expConf > 0 ? stock / expConf : null,
       dohAvg3: avg3 > 0 ? stock / avg3 : null
@@ -18562,6 +18563,8 @@ function dohDohClass(v) { return v === null ? "text-dim" : (v < 7 ? "text-red" :
 function dohSortAndFilter() {
   const q = (dohState.search || "").trim().toLowerCase();
   let rows = dohState.rows.filter(r => !q || String(r.sku).toLowerCase().includes(q) || String(r.name).toLowerCase().includes(q));
+  // فلتر DOH (Placed × CR) < الرقم المدخل. الـ SKUs اللي DOH بتاعها "—" (مفيش طلب) بتتشال لما الفلتر يكون شغال.
+  if (dohState.maxDoh !== null) rows = rows.filter(r => r.dohPlaced !== null && r.dohPlaced < dohState.maxDoh);
   const key = dohState.sortKey, dir = dohState.sortDir === "asc" ? 1 : -1;
   rows = rows.slice().sort((a, b) => {
     const x = a[key], y = b[key];
@@ -18594,10 +18597,11 @@ function renderDohPlanner() {
       <td class="num">${dohPct(r.ndr)}</td>
       <td class="num ${r.floored ? "text-orange" : ""}" title="${escapeHtml(usedTip)}">${dohPct(r.crUsed)}${r.floored ? " *" : ""}</td>
       <td class="num">${dohNum(r.expConf, 1)}</td>
+      <td class="num font-bold ${r.diff > 0 ? "text-green" : (r.diff < 0 ? "text-red" : "")}" title="Placed × CR ${dohNum(r.expConf, 1)} − Avg 3D ${dohNum(r.avg3, 1)}">${r.diff > 0 ? "+" : ""}${dohNum(r.diff, 1)}</td>
       <td class="num font-bold ${dohDohClass(r.dohPlaced)}">${dohNum(r.dohPlaced, 1)}</td>
       <td class="num font-bold ${dohDohClass(r.dohAvg3)}">${dohNum(r.dohAvg3, 1)}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="13" class="text-dim" style="text-align:center;padding:20px;">No Single SKUs match.</td></tr>`;
+  }).join("") : `<tr><td colspan="14" class="text-dim" style="text-align:center;padding:20px;">No Single SKUs match.</td></tr>`;
 
   document.querySelectorAll("#dohTable thead th[data-dkey]").forEach(th => {
     th.classList.toggle("sorted", th.getAttribute("data-dkey") === dohState.sortKey);
@@ -18605,7 +18609,7 @@ function renderDohPlanner() {
   const st = $("dohStatus");
   if (st && m) {
     const flooredN = dohState.rows.filter(r => r.floored).length;
-    st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong> · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
+    st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown${dohState.maxDoh !== null ? ` (DOH Placed × CR < ${dohState.maxDoh})` : ""} · sorted by gap size (Placed × CR vs Avg 3D) · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong> · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
   }
   if ($("dohSubtitle") && m) $("dohSubtitle").textContent = `Single SKUs (bundles debundled) placed yesterday — stock and DOH worked out two ways: Stock ÷ (Placed Yesterday × CR) and Stock ÷ Avg 3D Confirmed. CR/DR/NDR use a ${m.params.windowDays}-day window after a ${m.params.cutoffDays}-day cutoff.`;
 }
@@ -18629,12 +18633,12 @@ function dohRecalculate() {
 function dohDownloadCsv() {
   if (!dohState.meta) return;
   const m = dohState.meta;
-  const header = ["SKU", "Name", "Category", "Stock", "Placed Yesterday", "Avg 3D Confirmed", "CR% (window)", "DR% (window)", "NDR% (window)", "CR% Used", "CR Floored", "Placed x CR", "DOH (Placed x CR)", "DOH (Avg 3D)", "Window Placed", "Window Confirmed", "Window Delivered"];
+  const header = ["SKU", "Name", "Category", "Stock", "Placed Yesterday", "Avg 3D Confirmed", "CR% (window)", "DR% (window)", "NDR% (window)", "CR% Used", "CR Floored", "Placed x CR", "Diff (Placed x CR - Avg 3D)", "DOH (Placed x CR)", "DOH (Avg 3D)", "Window Placed", "Window Confirmed", "Window Delivered"];
   const esc = (v) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const n = (v, d) => (v === null || v === undefined || !Number.isFinite(v)) ? "" : (d ? v.toFixed(d) : Math.round(v));
   const lines = [header.join(",")];
   dohState.view.forEach(r => {
-    lines.push([esc(r.sku), esc(r.name), esc(r.category), n(r.stock), n(r.placedYday), n(r.avg3, 2), n(r.cr, 1), n(r.dr, 1), n(r.ndr, 1), n(r.crUsed, 1), r.floored ? "Yes" : "No", n(r.expConf, 2), n(r.dohPlaced, 1), n(r.dohAvg3, 1), n(r.wPlaced), n(r.wConf), n(r.wDel)].join(","));
+    lines.push([esc(r.sku), esc(r.name), esc(r.category), n(r.stock), n(r.placedYday), n(r.avg3, 2), n(r.cr, 1), n(r.dr, 1), n(r.ndr, 1), n(r.crUsed, 1), r.floored ? "Yes" : "No", n(r.expConf, 2), n(r.diff, 2), n(r.dohPlaced, 1), n(r.dohAvg3, 1), n(r.wPlaced), n(r.wConf), n(r.wDel)].join(","));
   });
   const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), lines.join("\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -18650,6 +18654,7 @@ function dohWireOnce() {
   dohState.wired = true;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on("dohSearchInput", "input", (e) => { dohState.search = e.target.value; renderDohPlanner(); });
+  on("dohMaxDoh", "input", (e) => { const v = e.target.value.trim(); const n = Number(v); dohState.maxDoh = (v === "" || !Number.isFinite(n)) ? null : n; renderDohPlanner(); });
   on("dohReloadBtn", "click", dohRecalculate);
   on("dohDownloadBtn", "click", dohDownloadCsv);
   ["dohCutoffDays", "dohWindowDays", "dohCrFloorBelow", "dohCrFloorTo"].forEach(id => on(id, "change", dohRecalculate));

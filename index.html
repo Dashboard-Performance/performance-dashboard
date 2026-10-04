@@ -3460,6 +3460,9 @@
                   <input id="dohCrFloorBelow" type="number" min="0" max="100" step="1" value="30" style="width:56px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" /><span>% → use</span>
                   <input id="dohCrFloorTo" type="number" min="0" max="100" step="1" value="60" style="width:56px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" /><span>%</span>
                 </label>
+                <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;" title="Show only SKUs whose DOH (Placed × CR) is less than this number of days. Leave empty to show all."><span>DOH (Placed × CR) &lt;</span>
+                  <input id="dohMaxDoh" type="number" min="0" step="any" placeholder="e.g. 7" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" /><span>days</span>
+                </label>
                 <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;" title="Untick to also list Singles that had no placed pieces yesterday but still sold in the last 3 days.">
                   <input id="dohOnlyPlacedYday" type="checkbox" checked /> Only placed yesterday
                 </label>
@@ -3479,6 +3482,7 @@
                     <th class="num" data-dkey="ndr" title="CR% × DR% (= Delivered ÷ Placed) over the same window.">NDR%</th>
                     <th class="num" data-dkey="crUsed" title="CR% actually used in the forecast. If the measured CR% is at/below the floor trigger (30%), it is replaced by 60%.">CR% Used</th>
                     <th class="num" data-dkey="expConf" title="Placed Yesterday × CR% Used = expected confirmed pieces per day.">Placed × CR</th>
+                    <th class="num" data-dkey="diffAbs" title="Placed × CR minus Avg 3D Confirmed (pieces/day). Positive = expected confirmed is higher than the recent 3-day average. The table is sorted by the size of this gap, largest first.">Diff (Placed×CR − Avg 3D)</th>
                     <th class="num text-green" data-dkey="dohPlaced" title="Stock ÷ (Placed Yesterday × CR% Used).">DOH (Placed × CR)</th>
                     <th class="num text-blue" data-dkey="dohAvg3" title="Stock ÷ Avg 3D Confirmed.">DOH (Avg 3D)</th>
                   </tr></thead>
