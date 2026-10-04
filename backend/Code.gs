@@ -1080,7 +1080,33 @@ function isAllowedEmail(email) {
 //  editor (e.g. testDeclineDigest below) and accept, then redeploy a NEW
 //  version of the web app.
 // ============================================================================
-var DECLINE_DIGEST_RECIPIENTS = ["youssef.hanafy@taager.com"]; // test phase: only this address
+// ALL emails (the daily 12:00 digest and the one-time intro) go to you + this team list.
+var DECLINE_TEAM_RECIPIENTS = [
+  "mohamed.rihan@taager.com",
+  "somaya.youssef@taager.com",
+  "omar.afifi@taager.com",
+  "mai.gamal@taager.com",
+  "diina.bahgat@taager.com",
+  "mayar.maged@taager.com",
+  "marwan.gamal@taager.com",
+  "amgad.metwally@taager.com",
+  "fady.safwat@taager.com",
+  "mohamed.khalaf@taager.com",
+  "sanaa.lotfy@taager.com",
+  "nada.sherif@taager.com",
+  "nada.amer@taager.com",
+  "asmaa.adel@taager.com",
+  "mostafa.medhat@taager.com",
+  "nada.atef@taager.com",
+  "mahmoud.sameh@taager.com",
+  "rawda.emam@taager.com",
+  "mohamed.arafa@taager.com",
+  "sherif.hafez@taager.com",
+  "aya.ahmed@taager.com",
+  "mostafa.ashraf@taager.com",
+  "youssef.elbaroudy@taager.com"
+];
+var DECLINE_DIGEST_RECIPIENTS = ["youssef.hanafy@taager.com"].concat(DECLINE_TEAM_RECIPIENTS);
 // DELIVERY: if DECLINE_MAIL_RELAY_URL is set, the email is sent by the small
 // "Mail Relay" script (backend/MailRelay.gs) deployed from a normal Gmail
 // account — this avoids the taager.com DMARC rejection (550 5.7.26) when the
@@ -1105,9 +1131,9 @@ function handleSendDeclineDigest(payload) {
     var meta = payload.meta || {};
     var html = buildDeclineDigestHtml_(rows, meta);
     var subject = "Marketplace Decline Matches — " + String(meta.dateLabel || "");
-    sendDeclineMail_(subject, html);
+    sendDeclineMail_(subject, html, ["youssef.hanafy@taager.com"]); // the dashboard button only ever sends to you
     props.setProperty("DECLINE_DIGEST_LAST_SENT", String(Date.now()));
-    return jsonResponse({ success: true, sentTo: DECLINE_DIGEST_RECIPIENTS.join(", ") });
+    return jsonResponse({ success: true, sentTo: "youssef.hanafy@taager.com" });
   } catch (err) {
     return jsonResponse({ success: false, message: String(err && err.message ? err.message : err) });
   }
@@ -1332,20 +1358,20 @@ function computeDeclineDigest_() {
   var topDrop = rows.reduce(function (a, r) { return a + r.drop; }, 0);
   var topGmv = rows.reduce(function (a, r) { return a + r.lostGmv; }, 0);
   // MTD: full days of the current month = DAY1..DAY(dom-1)
-  var dom = Number(Utilities.formatDate(new Date(), DD_TIMEZONE, "d")), mtdDays = Math.min(dom - 1, 31), mtdPlaced = 0, mtdLost = 0;
+  var dom = Number(Utilities.formatDate(new Date(), DD_TIMEZONE, "d")), mtdDays = Math.min(dom - 1, 31), mtdPlaced = 0, mtdLost = 0, mtdGain = 0;
   for (var k = 1; k <= mtdDays; k++) {
     dailyRows.forEach(function (row) {
       var d = row.d;
       var cur = d[k] || 0; mtdPlaced += cur;
       var sum = 0, cnt = 0;
       for (var j = k + 1; j <= Math.min(k + 4, 31); j++) { sum += d[j] || 0; cnt++; }
-      if (cnt && !row.ex) { var b = sum / cnt; if (b > cur) mtdLost += b - cur; }
+      if (cnt && !row.ex) { var b = sum / cnt; if (b > cur) mtdLost += b - cur; else mtdGain += cur - b; }
     });
   }
   var monthKey = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM");
   var dateLabel = Utilities.formatDate(new Date(Date.now() - 86400000), DD_TIMEZONE, "EEE, dd MMM yyyy");
   return { rows: rows, meta: { dateLabel: dateLabel, totalDrop: totalDrop, topDrop: topDrop, acm: "All", dashboardUrl: DD_DASHBOARD_URL,
-    lostGmv: lostGmv, lostGmvTop: topGmv, mtdLost: mtdLost, mtdDays: mtdDays, mtdPlaced: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, avgTarget: DD_AVG_PLACED_TARGETS[monthKey] || 0 } };
+    lostGmv: lostGmv, lostGmvTop: topGmv, mtdLost: mtdLost, mtdGain: mtdGain, mtdDays: mtdDays, mtdPlaced: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, avgTarget: DD_AVG_PLACED_TARGETS[monthKey] || 0 } };
 }
 
 // RUN THIS to send the real email now (to DECLINE_DIGEST_RECIPIENTS).
@@ -1424,7 +1450,7 @@ function buildDeclineDigestHtml_(rows, meta) {
   '<tr><td style="padding:24px 25px 0"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
   kpi("Total Placed drop", "&minus;" + ddInt_(totalDrop), "pieces vs. 4-day avg", "#B42318") +
   kpi("Lost GMV (Placed)", "&minus;" + ddInt_(meta.lostGmv), "Top " + rows.length + ": &minus;" + ddInt_(meta.lostGmvTop), "#B42318") +
-  kpi("Lost Placed MTD vs Target", ddNum_(meta.mtdDays) ? "&minus;" + ddInt_(meta.mtdLost) : "&mdash;", ddNum_(meta.mtdDays) ? "pieces, " + ddNum_(meta.mtdDays) + " full day(s) this month" : "no full day yet this month", "#B42318") +
+  kpi("Lost Placed MTD vs Target", ddNum_(meta.mtdDays) ? ((ddNum_(meta.mtdGain) - ddNum_(meta.mtdLost)) >= 0 ? "+" : "&minus;") + ddInt_(Math.abs(ddNum_(meta.mtdGain) - ddNum_(meta.mtdLost))) : "&mdash;", ddNum_(meta.mtdDays) ? "net vs previous 4-day avg &middot; lost &minus;" + ddInt_(meta.mtdLost) + " &middot; gained +" + ddInt_(meta.mtdGain) + " &middot; " + ddNum_(meta.mtdDays) + " full day(s)" : "no full day yet this month", (ddNum_(meta.mtdGain) - ddNum_(meta.mtdLost)) >= 0 ? "#067647" : "#B42318") +
   kpi("Avg Placed MTD vs Target", gapTxt, gapSub, gapCol) +
   '</tr></table></td></tr>' +
   '<tr><td style="padding:10px 25px 6px"><table width="100%" cellpadding="0" cellspacing="0"><tr>' +
@@ -1439,7 +1465,7 @@ function buildDeclineDigestHtml_(rows, meta) {
   '</tr>' + trs +
   '<tr style="background:#EEF3F9"><td></td><td colspan="3" style="padding:11px 8px;font-weight:700;color:#14243A;font-size:13px">Top ' + rows.length + ' total</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + tb.toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:13px">' + ddInt_(ty) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + (tb - ty).toFixed(1) + '</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:12px">&minus;' + (tb ? ((tb - ty) / tb * 100).toFixed(0) : 0) + '%</td><td></td><td style="padding:11px 8px;font-weight:700;font-size:12px">' + share.toFixed(1) + '%</td><td align="right" style="padding:11px 8px;font-weight:700;color:#B42318;font-size:13px">&minus;' + ddInt_(meta.lostGmvTop) + '</td><td align="right" style="padding:11px 8px;font-weight:700;font-size:12px">' + (ddNum_(meta.lostGmv) ? ddNum_(meta.lostGmvTop) / ddNum_(meta.lostGmv) * 100 : 0).toFixed(1) + '%</td><td colspan="3"></td></tr>' +
   '</table></td></tr>' + btn +
-  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed if its drop is at least 3 pieces. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Low stock = SKU stock is below the match\'s 4-day average; a match can have a stock issue and a lock issue together; Locked Qty = the merchant has an active lock whose remaining quantity is below his 4-day average; otherwise Demand drop. Lost GMV = drop &times; ASP. Lost Placed MTD = sum of daily drops (vs. each day\'s previous 4-day average) over the full days of the current month. Avg Placed MTD vs Target compares the average daily Placed since the start of the month (total Placed over full days / number of days) to the monthly target.<br>Marketplace Performance Dashboard</div></td></tr>' +
+  '<tr><td style="background:#F4F7FB;padding:16px 30px;border-top:1px solid #E1E8F0"><div style="font-size:11px;color:#7A889A;line-height:1.6"><b>How to read:</b> Drop = average Placed over the 4 days before yesterday minus yesterday\'s Placed, in pieces. A match is listed if its drop is at least 3 pieces. Contr% = the match\'s share of the total drop across all declining matches. Impact on SKU = this merchant\'s drop as % of the SKU\'s 4-day average Placed across all merchants, plus its share of the SKU\'s total drop (KEY DRIVER = 50% or more). Likely cause: Out of stock = SKU stock is 0; Low stock = SKU stock is below the match\'s 4-day average; a match can have a stock issue and a lock issue together; Locked Qty = the merchant has an active lock whose remaining quantity is below his 4-day average; otherwise Demand drop. Lost GMV = drop &times; ASP. Lost Placed MTD = net change (gains minus drops) vs. each day\'s previous 4-day average, summed over all matches and the full days of the current month. Avg Placed MTD vs Target compares the average daily Placed since the start of the month (total Placed over full days / number of days) to the monthly target.<br>Marketplace Performance Dashboard</div></td></tr>' +
   '</table></td></tr></table></body></html>';
 }
 
@@ -1454,7 +1480,7 @@ function jsonResponse(obj) {
 //  2) Run sendDeclineIntroEmail() from the editor. Leave the default to send
 //     only to yourself as a test.
 // ============================================================================
-var DECLINE_INTRO_RECIPIENTS = ["youssef.hanafy@taager.com"];
+var DECLINE_INTRO_RECIPIENTS = DECLINE_DIGEST_RECIPIENTS;
 
 function buildDeclineIntroHtml_() {
   var url = DD_DASHBOARD_URL + "?view=decline";

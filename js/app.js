@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.22";
+const APP_VERSION = "1.3.25";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14801,18 +14801,18 @@ function dwComputeAll() {
 
   // MTD (الأيام الكاملة في الشهر الحالي = DAY1..DAY(dom-1)): Avg Placed الفعلي + إجمالي الـ Lost Placed
   const now = new Date(), dom = now.getDate(), mtdDays = Math.min(dom - 1, 31);
-  let mtdPlaced = 0, mtdLost = 0;
+  let mtdPlaced = 0, mtdLost = 0, mtdGain = 0;
   for (let k = 1; k <= mtdDays; k++) {
     daily.forEach(r => {
       const d = r.days; if (!d) return;
       const cur = d[k] || 0; mtdPlaced += cur;
       let sum = 0, cnt = 0;
       for (let j = k + 1; j <= Math.min(k + 4, 31); j++) { sum += d[j] || 0; cnt++; }
-      if (cnt && !DW_EXCLUDED_MERCHANTS.has(String(r.tagerId))) { const b = sum / cnt; if (b > cur) mtdLost += b - cur; }
+      if (cnt && !DW_EXCLUDED_MERCHANTS.has(String(r.tagerId))) { const b = sum / cnt; if (b > cur) mtdLost += b - cur; else mtdGain += cur - b; }
     });
   }
   const monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-  dwState.mtd = { days: mtdDays, placed: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
+  dwState.mtd = { days: mtdDays, placed: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, gain: mtdGain, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
   dwState.lostGmvTotal = lostGmvTotal;
   dwState.all = out; dwState.totalDrop = totalDrop; dwState.dateLabel = dwYesterdayLabel();
 }
@@ -14861,8 +14861,10 @@ function renderMpDeclineWatch() {
   set("dwLostGmv", "−" + fmtInt.format(Math.round(dwState.lostGmvTotal || 0)));
   set("dwLostGmvSub", "Top " + top.length + ": −" + fmtInt.format(Math.round(topGmv)));
   const m = dwState.mtd || { days: 0, avgActual: 0, lost: 0, target: 0 };
-  set("dwMtdLost", m.days ? "−" + fmtInt.format(Math.round(m.lost)) : "—");
-  set("dwMtdLostSub", m.days ? `Pieces, over ${m.days} full day${m.days > 1 ? "s" : ""} this month` : "No full day yet this month");
+  const net = (m.gain || 0) - (m.lost || 0); // موجب = الطلوع أكبر من النزول (صافي كسب)
+  set("dwMtdLost", m.days ? (net >= 0 ? "+" : "−") + fmtInt.format(Math.abs(Math.round(net))) : "—");
+  { const el = $("dwMtdLost"); if (el) { el.classList.remove("text-red", "text-green"); el.style.color = m.days ? (net >= 0 ? "#067647" : "#B42318") : ""; } }
+  set("dwMtdLostSub", m.days ? `Net vs previous 4-day avg · Lost −${fmtInt.format(Math.round(m.lost))} · Gained +${fmtInt.format(Math.round(m.gain || 0))} · ${m.days} full day${m.days > 1 ? "s" : ""}` : "No full day yet this month");
   if (!m.target) { set("dwTargetGap", "—"); set("dwTargetSub", "Set DW_AVG_PLACED_TARGETS for this month"); }
   else if (!m.days) { set("dwTargetGap", "—"); set("dwTargetSub", "Target " + fmtInt.format(m.target) + "/day · no full day yet"); }
   else {
@@ -14922,7 +14924,7 @@ async function sendDeclineDigestEmail() {
           acm: $("dwAcmFilter") ? $("dwAcmFilter").value : "All",
           dashboardUrl: location.href.split("#")[0],
           lostGmv: dwState.lostGmvTotal || 0, lostGmvTop: dwState.view.reduce((a, x) => a + x.lostGmv, 0),
-          mtdLost: dwState.mtd ? dwState.mtd.lost : 0, mtdDays: dwState.mtd ? dwState.mtd.days : 0,
+          mtdLost: dwState.mtd ? dwState.mtd.lost : 0, mtdGain: dwState.mtd ? (dwState.mtd.gain || 0) : 0, mtdDays: dwState.mtd ? dwState.mtd.days : 0,
           avgActual: dwState.mtd ? dwState.mtd.avgActual : 0, mtdPlaced: dwState.mtd ? (dwState.mtd.placed || 0) : 0, avgTarget: dwState.mtd ? dwState.mtd.target : 0
         },
         rows: dwState.view.map(x => ({
