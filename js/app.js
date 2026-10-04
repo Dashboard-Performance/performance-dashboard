@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.17";
+const APP_VERSION = "1.3.18";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5772,9 +5772,11 @@ function prepareIncentiveMerchantsData() {
     const base = state.merchantSegSourceRows || [];
     const hist = state.merchantSegHistoryRows || [];
     if (!hist.length) return base;
-    const seen = new Set(base.map(r => r.merchantId + "|" + r.monthYear));
-    const merged = base.slice();
-    hist.forEach(r => { const k = r.merchantId + "|" + r.monthYear; if (!seen.has(k)) { seen.add(k); merged.push(r); } });
+    // الأرشيف (History) هو الرقم النهائي للشهر المقفول، أما الشيت الأساسي لقطة بتتحدّث لحد ما يتقفل الشهر
+    // وممكن تفضل قديمة (مثلاً Confirmed 2,085 بدل 2,160 النهائي). فلو نفس (تاجر + شهر) موجود في الاتنين نفضّل الـ History.
+    const histKeys = new Set(hist.map(r => r.merchantId + "|" + r.monthYear));
+    const merged = base.filter(r => !histKeys.has(r.merchantId + "|" + r.monthYear));
+    hist.forEach(r => merged.push(r));
     return merged;
   })();
 
