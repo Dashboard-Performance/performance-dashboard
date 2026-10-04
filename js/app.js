@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.25";
+const APP_VERSION = "1.3.26";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -696,6 +696,7 @@ const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
 const navForecastModel = $("navForecastModel");
 const navGapPlanRecommends = $("navGapPlanRecommends");
+const navDohPlanner = $("navDohPlanner");
 const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
 const navIncentivesCaret = $("navIncentivesCaret");
@@ -981,6 +982,7 @@ function switchView(viewName) {
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
   if(navForecastModel) navForecastModel.classList.remove("active");
   if(navGapPlanRecommends) navGapPlanRecommends.classList.remove("active");
+  if(navDohPlanner) navDohPlanner.classList.remove("active");
   if(navIncMerchants) navIncMerchants.classList.remove("active");
 
   let activeSection = null;
@@ -1030,6 +1032,11 @@ function switchView(viewName) {
       if(navGapPlanRecommends) navGapPlanRecommends.classList.add("active");
       prepareGapPlanRecommends();
   }
+  else if (viewName === "dohPlanner") {
+      activeSection = $("viewDohPlanner");
+      if(navDohPlanner) navDohPlanner.classList.add("active");
+      prepareDohPlannerData();
+  }
   else if (viewName === "incentiveMerchants") {
       activeSection = $("viewIncMerchants");
       if(navIncMerchants) navIncMerchants.classList.add("active");
@@ -1070,6 +1077,7 @@ if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requ
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
 if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
 if(navGapPlanRecommends) navGapPlanRecommends.addEventListener("click", () => requestAdminAccess("gapPlanRecommends"));
+if(navDohPlanner) navDohPlanner.addEventListener("click", () => requestAdminAccess("dohPlanner"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
 // -------------------------------------------------------------------------
@@ -18428,6 +18436,237 @@ if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") { lastSyncMetaPollTick(); mainMetaPollTick(); }
   });
+}
+
+
+// -------------------------------------------------------------------------
+// DOH PLANNER (Admin Panel) — Single SKUs placed yesterday.
+//
+// كل الأرقام Debundled على مستوى الـ Single SKU: أي صف في MAIN_GID بيكون
+// PRODUCT_ID بتاعه بندل بيتوزع على كل Single جواه × PRODUCT_QUANTITY (نفس
+// buildDebundleProductMap المستخدمة في Recommended Tracker / Commercial
+// Debundlized)، وأي PRODUCT_ID مالوش ماب بيتعامل كـ Single بكمية 1.
+//
+//  • "النهاردة" = تاريخ الجهاز الفعلي (زي Recommended Tracker بالظبط).
+//  • Placed Yesterday = Placed Pieces امبارح.
+//  • Avg 3D Confirmed = Confirmed Pieces آخر 3 أيام كاملة (امبارح + اللي قبله
+//    بيومين، من غير النهاردة) ÷ 3.
+//  • CR% / DR% / NDR% = على Window (افتراضي 10 أيام) بتنتهي عند الـ Cutoff
+//    (افتراضي 5 أيام قبل النهاردة — يعني آخر 5 أيام مستبعدة لأنهم لسه ما
+//    استقروش). الصف بيدخل لو تاريخه <= cutoff وتاريخه >= cutoff-(window-1).
+//      CR% = Confirmed ÷ Placed، DR% = Delivered ÷ Confirmed، NDR% = CR% × DR%.
+//  • CR% Used = لو CR% المقاس <= 30% (أو مفيش Placed في الـ Window أصلاً) بنعتبره 60%.
+//  • Placed × CR = Placed Yesterday × CR% Used (Confirmed متوقع في اليوم).
+//  • DOH (Placed × CR) = Stock ÷ (Placed × CR)،  DOH (Avg 3D) = Stock ÷ Avg 3D.
+//    لو المقام صفر (مفيش طلب) الـ DOH بيبان "—" (مش ملانهاية ولا Stock).
+//  • Stock = عمود H (STOCK) في شيت الديبندلايز لصف الـ Single نفسه
+//    (PRODUCT_ID == SINGLE_ID) — نفس مصدر Stock في Recommended Tracker.
+// -------------------------------------------------------------------------
+const DOH_DEFAULTS = { cutoffDays: 5, windowDays: 10, crFloorBelow: 30, crFloorTo: 60, onlyPlacedYday: true };
+const dohState = { wired: false, rows: [], view: [], meta: null, sortKey: "dohPlaced", sortDir: "asc", search: "" };
+
+function dohReadParams() {
+  const num = (id, def, min, max) => {
+    const el = $(id); const v = el ? Number(el.value) : NaN;
+    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
+  };
+  return {
+    cutoffDays: Math.round(num("dohCutoffDays", DOH_DEFAULTS.cutoffDays, 0, 60)),
+    windowDays: Math.max(1, Math.round(num("dohWindowDays", DOH_DEFAULTS.windowDays, 1, 90))),
+    crFloorBelow: num("dohCrFloorBelow", DOH_DEFAULTS.crFloorBelow, 0, 100),
+    crFloorTo: num("dohCrFloorTo", DOH_DEFAULTS.crFloorTo, 0, 100),
+    onlyPlacedYday: $("dohOnlyPlacedYday") ? $("dohOnlyPlacedYday").checked : DOH_DEFAULTS.onlyPlacedYday
+  };
+}
+
+function dohFmtDate(ms) {
+  const d = new Date(ms);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function dohComputeRows(params) {
+  const DAY = 86400000;
+  const mainRows = state.allParsedRows || [];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const ydayMs = todayMs - DAY;
+  const d3Start = todayMs - 3 * DAY;
+  const cutoffMs = todayMs - params.cutoffDays * DAY;
+  const winStartMs = cutoffMs - (params.windowDays - 1) * DAY;
+
+  const { productMap, singlesList, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
+  const stockOf = new Map();
+  (state.debundleMap || []).forEach(r => {
+    // Stock الـ Single نفسه: صف PRODUCT_ID == SINGLE_ID (أول قيمة، من غير جمع).
+    if (r.productId && r.productId === r.singleId && !stockOf.has(r.singleId)) stockOf.set(r.singleId, r.stock || 0);
+  });
+
+  const agg = new Map(); // singleId -> accumulators
+  const get = (id) => {
+    let a = agg.get(id);
+    if (!a) { a = { placedYday: 0, conf3: 0, wPlaced: 0, wConf: 0, wDel: 0 }; agg.set(id, a); }
+    return a;
+  };
+
+  mainRows.forEach(r => {
+    if (!r.sku || !r.timestamp) return;
+    const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0);
+    const t = d.getTime();
+    const isYday = t === ydayMs;
+    const in3 = t >= d3Start && t < todayMs;
+    const inWin = t >= winStartMs && t <= cutoffMs;
+    if (!isYday && !in3 && !inWin) return;
+    const maps = productMap.get(r.sku);
+    const targets = (maps && maps.length) ? maps : [{ singleId: r.sku, quantity: 1 }];
+    targets.forEach(mp => {
+      const q = mp.quantity || 1;
+      const a = get(mp.singleId);
+      if (isYday) a.placedYday += (r.placedPieces || 0) * q;
+      if (in3) a.conf3 += (r.confirmedPieces || 0) * q;
+      if (inWin) {
+        a.wPlaced += (r.placedPieces || 0) * q;
+        a.wConf += (r.confirmedPieces || 0) * q;
+        a.wDel += (r.deliveredPieces || 0) * q;
+      }
+    });
+  });
+
+  const rows = [];
+  agg.forEach((a, id) => {
+    if (params.onlyPlacedYday ? !(a.placedYday > 0) : !(a.placedYday > 0 || a.conf3 > 0)) return;
+    const inv = (state.inventoryMap && state.inventoryMap[id]) || {};
+    const stock = stockOf.has(id) ? stockOf.get(id) : (stockBySingle.get(id) || 0);
+    const cr = a.wPlaced > 0 ? (a.wConf / a.wPlaced) * 100 : null;
+    const dr = a.wConf > 0 ? (a.wDel / a.wConf) * 100 : null;
+    const ndr = (cr !== null && dr !== null) ? (cr * dr) / 100 : null;
+    const floored = (cr === null) || (cr <= params.crFloorBelow);
+    const crUsed = floored ? params.crFloorTo : cr;
+    const expConf = a.placedYday * (crUsed / 100);
+    const avg3 = a.conf3 / 3;
+    rows.push({
+      sku: id, name: singlesList.get(id) || inv.skuName || "", category: inv.category || (state.productsMap && state.productsMap[id] && state.productsMap[id].category) || "",
+      stock, placedYday: a.placedYday, avg3, cr, dr, ndr, crUsed, floored, expConf,
+      wPlaced: a.wPlaced, wConf: a.wConf, wDel: a.wDel,
+      dohPlaced: expConf > 0 ? stock / expConf : null,
+      dohAvg3: avg3 > 0 ? stock / avg3 : null
+    });
+  });
+  const meta = { todayMs, ydayMs, d3Start, cutoffMs, winStartMs, params, singles: rows.length };
+  return { rows, meta };
+}
+
+function dohNum(v, d) { return (v === null || v === undefined || !Number.isFinite(v)) ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
+function dohPct(v) { return (v === null || v === undefined || !Number.isFinite(v)) ? "—" : v.toFixed(1) + "%"; }
+function dohDohClass(v) { return v === null ? "text-dim" : (v < 7 ? "text-red" : (v < 14 ? "text-orange" : "text-green")); }
+
+function dohSortAndFilter() {
+  const q = (dohState.search || "").trim().toLowerCase();
+  let rows = dohState.rows.filter(r => !q || String(r.sku).toLowerCase().includes(q) || String(r.name).toLowerCase().includes(q));
+  const key = dohState.sortKey, dir = dohState.sortDir === "asc" ? 1 : -1;
+  rows = rows.slice().sort((a, b) => {
+    const x = a[key], y = b[key];
+    // قيم "—" (null) دايمًا في الآخر مهما كان اتجاه الترتيب.
+    const xn = (x === null || x === undefined), yn = (y === null || y === undefined);
+    if (xn || yn) return xn === yn ? 0 : (xn ? 1 : -1);
+    if (typeof x === "string" || typeof y === "string") return String(x).localeCompare(String(y)) * dir;
+    return (x - y) * dir;
+  });
+  dohState.view = rows;
+}
+
+function renderDohPlanner() {
+  const body = $("dohBody"); if (!body) return;
+  dohSortAndFilter();
+  const m = dohState.meta;
+  body.innerHTML = dohState.view.length ? dohState.view.map(r => {
+    const crTip = `Window: Confirmed ${dohNum(r.wConf)} ÷ Placed ${dohNum(r.wPlaced)}`;
+    const drTip = `Window: Delivered ${dohNum(r.wDel)} ÷ Confirmed ${dohNum(r.wConf)}`;
+    const usedTip = r.floored ? (r.cr === null ? "No placed pieces in the window — floor value used." : `Measured CR ${r.cr.toFixed(1)}% is at/below ${m.params.crFloorBelow}% — replaced by ${m.params.crFloorTo}%.`) : "Measured CR% used as is.";
+    return `<tr>
+      <td class="font-mono text-dim">${escapeHtml(r.sku)}</td>
+      <td class="truncate-cell" style="max-width:260px;" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
+      <td class="text-dim">${escapeHtml(r.category)}</td>
+      <td class="num">${dohNum(r.stock)}</td>
+      <td class="num font-bold">${dohNum(r.placedYday)}</td>
+      <td class="num">${dohNum(r.avg3, 1)}</td>
+      <td class="num" title="${escapeHtml(crTip)}">${dohPct(r.cr)}</td>
+      <td class="num" title="${escapeHtml(drTip)}">${dohPct(r.dr)}</td>
+      <td class="num">${dohPct(r.ndr)}</td>
+      <td class="num ${r.floored ? "text-orange" : ""}" title="${escapeHtml(usedTip)}">${dohPct(r.crUsed)}${r.floored ? " *" : ""}</td>
+      <td class="num">${dohNum(r.expConf, 1)}</td>
+      <td class="num font-bold ${dohDohClass(r.dohPlaced)}">${dohNum(r.dohPlaced, 1)}</td>
+      <td class="num font-bold ${dohDohClass(r.dohAvg3)}">${dohNum(r.dohAvg3, 1)}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="13" class="text-dim" style="text-align:center;padding:20px;">No Single SKUs match.</td></tr>`;
+
+  document.querySelectorAll("#dohTable thead th[data-dkey]").forEach(th => {
+    th.classList.toggle("sorted", th.getAttribute("data-dkey") === dohState.sortKey);
+  });
+  const st = $("dohStatus");
+  if (st && m) {
+    const flooredN = dohState.rows.filter(r => r.floored).length;
+    st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong> · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
+  }
+  if ($("dohSubtitle") && m) $("dohSubtitle").textContent = `Single SKUs (bundles debundled) placed yesterday — stock and DOH worked out two ways: Stock ÷ (Placed Yesterday × CR) and Stock ÷ Avg 3D Confirmed. CR/DR/NDR use a ${m.params.windowDays}-day window after a ${m.params.cutoffDays}-day cutoff.`;
+}
+
+function dohRecalculate() {
+  const status = $("dohStatus");
+  if (!(state.allParsedRows && state.allParsedRows.length) || !(state.debundleMap && state.debundleMap.length)) {
+    if (status) status.textContent = "Loading data… open again in a moment.";
+    return;
+  }
+  try {
+    const { rows, meta } = dohComputeRows(dohReadParams());
+    dohState.rows = rows; dohState.meta = meta;
+    renderDohPlanner();
+  } catch (e) {
+    console.error("DOH Planner error:", e);
+    if (status) status.textContent = "Couldn't build the DOH Planner: " + (e && e.message ? e.message : e);
+  }
+}
+
+function dohDownloadCsv() {
+  if (!dohState.meta) return;
+  const m = dohState.meta;
+  const header = ["SKU", "Name", "Category", "Stock", "Placed Yesterday", "Avg 3D Confirmed", "CR% (window)", "DR% (window)", "NDR% (window)", "CR% Used", "CR Floored", "Placed x CR", "DOH (Placed x CR)", "DOH (Avg 3D)", "Window Placed", "Window Confirmed", "Window Delivered"];
+  const esc = (v) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const n = (v, d) => (v === null || v === undefined || !Number.isFinite(v)) ? "" : (d ? v.toFixed(d) : Math.round(v));
+  const lines = [header.join(",")];
+  dohState.view.forEach(r => {
+    lines.push([esc(r.sku), esc(r.name), esc(r.category), n(r.stock), n(r.placedYday), n(r.avg3, 2), n(r.cr, 1), n(r.dr, 1), n(r.ndr, 1), n(r.crUsed, 1), r.floored ? "Yes" : "No", n(r.expConf, 2), n(r.dohPlaced, 1), n(r.dohAvg3, 1), n(r.wPlaced), n(r.wConf), n(r.wDel)].join(","));
+  });
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date(m.todayMs).toISOString().slice(0, 10);
+  a.href = url; a.download = `doh-planner-${stamp}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function dohWireOnce() {
+  if (dohState.wired) return;
+  dohState.wired = true;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on("dohSearchInput", "input", (e) => { dohState.search = e.target.value; renderDohPlanner(); });
+  on("dohReloadBtn", "click", dohRecalculate);
+  on("dohDownloadBtn", "click", dohDownloadCsv);
+  ["dohCutoffDays", "dohWindowDays", "dohCrFloorBelow", "dohCrFloorTo"].forEach(id => on(id, "change", dohRecalculate));
+  on("dohOnlyPlacedYday", "change", dohRecalculate);
+  document.querySelectorAll("#dohTable thead th[data-dkey]").forEach(th => {
+    th.addEventListener("click", () => {
+      const k = th.getAttribute("data-dkey");
+      if (dohState.sortKey === k) dohState.sortDir = dohState.sortDir === "asc" ? "desc" : "asc";
+      else { dohState.sortKey = k; dohState.sortDir = (k === "sku" || k === "name" || k === "category") ? "asc" : "desc"; }
+      renderDohPlanner();
+    });
+  });
+}
+
+function prepareDohPlannerData() {
+  dohWireOnce();
+  dohRecalculate();
 }
 
 setupTicker();

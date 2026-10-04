@@ -1385,7 +1385,7 @@ function sendDeclineDigestNow() {
 // RUN THIS ONCE to schedule the email every day at 12:00 Cairo time.
 function installDailyDeclineTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "sendDeclineDigestNow") ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger("sendDeclineDigestNow").timeBased().everyDays(1).atHour(12).inTimeZone(DD_TIMEZONE).create();
+  ScriptApp.newTrigger("sendDeclineDigestNow").timeBased().everyDays(1).atHour(12).inTimezone(DD_TIMEZONE).create();
   Logger.log("Daily trigger installed: 12:00 " + DD_TIMEZONE);
 }
 

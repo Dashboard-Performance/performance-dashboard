@@ -85,6 +85,7 @@
             <a class="nav-item-sub" id="navWeeklyInventory">Weekly Inventory &amp; Inbound</a>
             <a class="nav-item-sub" id="navForecastModel">Forecast Model</a>
             <a class="nav-item-sub" id="navGapPlanRecommends">Recommends Forecast (Gap Plan)</a>
+            <a class="nav-item-sub" id="navDohPlanner">DOH Planner (Single SKUs)</a>
           </div>
         </div>
         <!-- ظاهر بس للـ Manager (نفس الإيميل المحدد في PRESENCE_ADMIN_EMAIL
@@ -3426,6 +3427,62 @@
                     <th>Status</th>
                   </tr></thead>
                   <tbody id="fcGapBodyB"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- DOH PLANNER (Admin Panel) — Single SKUs placed yesterday, with CR/DR/NDR
+             measured on a lagged window, and DOH computed two ways:
+             (Placed Yesterday × CR) and (Avg last 3 days Confirmed). -->
+        <div id="viewDohPlanner" class="view-section hidden">
+          <section class="mb-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>DOH Planner — Single SKUs</h2>
+                  <p id="dohSubtitle">Single SKUs (bundles debundled) placed yesterday, with stock and Days-on-Hand worked out two ways.</p>
+                </div>
+                <div class="table-controls">
+                  <button id="dohReloadBtn" class="btn btn-outline small" type="button" title="Recalculate from the data currently loaded in the dashboard.">Recalculate</button>
+                  <button id="dohDownloadBtn" class="btn btn-outline small" type="button" title="Download the table below (current search / sort) as CSV.">Download CSV</button>
+                </div>
+              </div>
+              <div class="table-controls" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:15px;margin-left:0;justify-content:flex-start;width:100%;align-items:center;">
+                <input id="dohSearchInput" type="search" placeholder="Search SKU or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;" title="CR% / DR% / NDR% ignore the most recent N days (they haven't settled yet)."><span>Cutoff (days)</span>
+                  <input id="dohCutoffDays" type="number" min="0" max="60" step="1" value="5" style="width:60px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" />
+                </label>
+                <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;" title="How many days back from the cutoff day are used to measure CR% / DR% / NDR%."><span>Window (days)</span>
+                  <input id="dohWindowDays" type="number" min="1" max="90" step="1" value="10" style="width:60px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" />
+                </label>
+                <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;" title="If the measured CR% is at or below this value, the CR% used for the forecast is replaced by the value on the right."><span>If CR ≤</span>
+                  <input id="dohCrFloorBelow" type="number" min="0" max="100" step="1" value="30" style="width:56px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" /><span>% → use</span>
+                  <input id="dohCrFloorTo" type="number" min="0" max="100" step="1" value="60" style="width:56px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:#fff;" /><span>%</span>
+                </label>
+                <label class="text-dim" style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;" title="Untick to also list Singles that had no placed pieces yesterday but still sold in the last 3 days.">
+                  <input id="dohOnlyPlacedYday" type="checkbox" checked /> Only placed yesterday
+                </label>
+              </div>
+              <div id="dohStatus" class="fc-data-status"></div>
+              <div class="table-responsive">
+                <table class="data-table" id="dohTable">
+                  <thead><tr>
+                    <th data-dkey="sku" title="Single SKU ID (bundles are broken down into their Singles).">SKU</th>
+                    <th data-dkey="name">Name</th>
+                    <th data-dkey="category">Category</th>
+                    <th class="num" data-dkey="stock" title="Current stock of the Single (Stock column of the debundle sheet).">Stock</th>
+                    <th class="num" data-dkey="placedYday" title="Placed pieces yesterday, bundles debundled to this Single (× pieces per bundle).">Placed Yesterday</th>
+                    <th class="num" data-dkey="avg3" title="Confirmed pieces over the last 3 full days (yesterday and the 2 days before), divided by 3 — debundled.">Avg 3D Confirmed</th>
+                    <th class="num" data-dkey="cr" title="Confirmed ÷ Placed over the window (after the cutoff), debundled.">CR%</th>
+                    <th class="num" data-dkey="dr" title="Delivered ÷ Confirmed over the same window.">DR%</th>
+                    <th class="num" data-dkey="ndr" title="CR% × DR% (= Delivered ÷ Placed) over the same window.">NDR%</th>
+                    <th class="num" data-dkey="crUsed" title="CR% actually used in the forecast. If the measured CR% is at/below the floor trigger (30%), it is replaced by 60%.">CR% Used</th>
+                    <th class="num" data-dkey="expConf" title="Placed Yesterday × CR% Used = expected confirmed pieces per day.">Placed × CR</th>
+                    <th class="num text-green" data-dkey="dohPlaced" title="Stock ÷ (Placed Yesterday × CR% Used).">DOH (Placed × CR)</th>
+                    <th class="num text-blue" data-dkey="dohAvg3" title="Stock ÷ Avg 3D Confirmed.">DOH (Avg 3D)</th>
+                  </tr></thead>
+                  <tbody id="dohBody"></tbody>
                 </table>
               </div>
             </div>

@@ -1,22 +1,20 @@
 /**
  * ============================================================================
  *  MAIL RELAY — tiny Apps Script that only sends the Decline Watch email.
- *  Deploy it from a NORMAL Gmail account (not a taager.com one), so the
- *  message is signed by gmail.com and isn't rejected by taager.com's DMARC.
+ *  Deploy it from your taager.com account. It sends through the Gmail API as
+ *  that account (From = your taager.com address).
  *
- *  SETUP (2 minutes)
- *  1. Signed in to that Gmail account: script.google.com > New project, paste
- *     this whole file.
- *  2. Run testRelay once from the editor and accept the permissions (it
- *     sends a small test email to the first allowed recipient).
- *  3. Deploy > New deployment > Web app: Execute as = Me,
- *     Who has access = Anyone. Copy the Web app URL.
- *  4. Paste that URL into DECLINE_MAIL_RELAY_URL in the dashboard's Code.gs,
- *     redeploy Code.gs as a NEW version.
+ *  SETUP
+ *  1. Paste this whole file (replace everything), then Save.
+ *  2. Services (+ in the left bar) > "Gmail API" > Add (keep the name "Gmail").
+ *  3. Run testRelay once from the editor and accept the permissions (it sends
+ *     a small test email to the first allowed recipient = you).
+ *  4. Deploy > Manage deployments > Edit (pencil) > Version: New version >
+ *     Deploy.  (The URL stays the same. WITHOUT a new version the old code
+ *     keeps running.)
  *
  *  SAFETY: it only accepts requests carrying RELAY_SECRET, and only sends to
  *  addresses in ALLOWED_RECIPIENTS, so it can't be used to mail anyone else.
- *  The first emails may land in Spam — mark "Not spam" once.
  * ============================================================================
  */
 var RELAY_SECRET = "METUY8tMu1u7vH1pG7tto-3fBTQVZj-Y"; // same value as DECLINE_MAIL_RELAY_SECRET in Code.gs
@@ -61,7 +59,7 @@ function doPost(e) {
     var html = String(p.html);
     var plain = html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<br\s*\/?>|<\/p>|<\/tr>|<\/li>|<\/div>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&middot;/g, "-").replace(/&minus;/g, "-").replace(/&amp;/g, "&").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim().slice(0, 6000);
     var subject = String(p.subject || "Decline Watch").slice(0, 200);
-    MailApp.sendEmail({ to: to.join(","), subject: subject, htmlBody: html, body: plain, name: RELAY_SENDER_NAME, replyTo: "youssef.hanafy@taager.com" });
+    sendViaGmailApi_(to, subject, plain, html);
     return out_({ success: true });
   } catch (err) {
     return out_({ success: false, message: String(err && err.message ? err.message : err) });
@@ -71,7 +69,40 @@ function doPost(e) {
 function doGet() { return out_({ success: true, message: "Mail relay is up." }); }
 
 function testRelay() {
-  MailApp.sendEmail({ to: ALLOWED_RECIPIENTS[0], subject: "Mail relay test", htmlBody: "<p>Mail relay works &#10003;</p>", name: RELAY_SENDER_NAME });
+  sendViaGmailApi_([ALLOWED_RECIPIENTS[0]], "Mail relay test", "Mail relay works", "<p>Mail relay works &#10003;</p>");
 }
 
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+
+// Sends through the Gmail API as the account that owns this script (From = that
+// account's taager.com address). REQUIRES the Gmail API advanced service:
+//   Apps Script editor -> Services (+) -> "Gmail API" -> Add.
+function sendViaGmailApi_(toList, subject, plain, html) {
+  var me = Session.getEffectiveUser().getEmail();
+  var b64 = function (t) { return Utilities.base64Encode(Utilities.newBlob(t).getBytes()); };
+  var chunk = function (t) { return t.replace(/(.{76})/g, "$1\r\n"); };
+  var boundary = "mr_" + Utilities.getUuid().replace(/-/g, "");
+  var mime = [
+    "From: " + RELAY_SENDER_NAME + " <" + me + ">",
+    "To: " + toList.join(", "),
+    "Reply-To: " + me,
+    "Subject: =?UTF-8?B?" + b64(subject) + "?=",
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/alternative; boundary=\"" + boundary + "\"",
+    "",
+    "--" + boundary,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    chunk(b64(plain)),
+    "--" + boundary,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    chunk(b64(html)),
+    "--" + boundary + "--",
+    ""
+  ].join("\r\n");
+  Gmail.Users.Messages.send({ raw: Utilities.base64EncodeWebSafe(mime) }, "me");
+}
