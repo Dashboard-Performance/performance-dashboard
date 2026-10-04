@@ -1111,7 +1111,7 @@ var DECLINE_DIGEST_RECIPIENTS = ["youssef.hanafy@taager.com"].concat(DECLINE_TEA
 // "Mail Relay" script (backend/MailRelay.gs) deployed from a normal Gmail
 // account — this avoids the taager.com DMARC rejection (550 5.7.26) when the
 // company domain has no DKIM set up. Leave "" to send directly with MailApp.
-var DECLINE_MAIL_RELAY_URL = "https://script.google.com/macros/s/AKfycbxB7ozNPLztohCN6mhAUxjnqK8dIwyOaydox67vg7hLOSi7CBkVEffKml9pPgPRAJ81hg/exec";
+var DECLINE_MAIL_RELAY_URL = "https://script.google.com/macros/s/AKfycbxqje_Zf7gNPivcDkmNfjwt2CtApUFD8L2IeQJdxqcyeoyXbpPRHc8DWlhC6aaHWCtP/exec"; // Mail Relay deployed under the taager.com account
 var DECLINE_MAIL_RELAY_SECRET = "METUY8tMu1u7vH1pG7tto-3fBTQVZj-Y"; // must match RELAY_SECRET in MailRelay.gs
 var DECLINE_DIGEST_MAX_ROWS = 20;
 var DECLINE_DIGEST_MIN_GAP_MS = 20 * 1000; // basic flood guard between sends
