@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.18";
+const APP_VERSION = "1.3.19";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14827,7 +14827,16 @@ function prepareMpDeclineWatchData() {
   renderMpDeclineWatch();
 }
 
+const DW_OWNER_EMAIL = "youssef.hanafy@taager.com";
+function dwApplySendVisibility() {
+  let email = "";
+  try { const u = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null; email = String((u && u.email) || "").trim().toLowerCase(); } catch (e) {}
+  const show = email === DW_OWNER_EMAIL;
+  ["dwSendBtn", "dwSendStatus"].forEach(id => { const el = $(id); if (el) el.style.display = show ? "" : "none"; });
+}
+
 function renderMpDeclineWatch() {
+  dwApplySendVisibility();
   const acm = $("dwAcmFilter") ? $("dwAcmFilter").value : "All";
   const term = $("dwSearch") ? $("dwSearch").value.trim().toLowerCase() : "";
   // فلتر الـ ACM اللي فوق في الهيدر (acmSelect) بيفلتر الصفحة دي كمان، كل Account Manager يشوف الميرشنتس بتوعه بس.
@@ -14944,7 +14953,7 @@ function dwFeedbackCell(x) {
   const val = draft !== undefined ? draft : (saved ? saved.feedback : "");
   const meta = saved ? `Saved by ${escapeHtml(saved.by || "")}${saved.at ? " · " + escapeHtml(saved.at) : ""}` : "";
   return `<div style="display:flex;gap:6px;align-items:flex-start">
-    <textarea class="dw-fb-input" rows="2" placeholder="Write feedback…" style="flex:1;min-width:190px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit;resize:vertical">${escapeHtml(val)}</textarea>
+    <textarea class="dw-fb-input" rows="2" placeholder="Reason of decline + Action (if Demand drop, what is the real reason?)…" style="flex:1;min-width:190px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit;resize:vertical">${escapeHtml(val)}</textarea>
     <button class="btn btn-outline small dw-fb-save" type="button">Save</button></div>
     <div class="dw-fb-status text-dim" style="font-size:11px;margin-top:3px;min-height:14px">${meta}</div>`;
 }

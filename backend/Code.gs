@@ -1092,6 +1092,9 @@ var DECLINE_DIGEST_MIN_GAP_MS = 20 * 1000; // basic flood guard between sends
 
 function handleSendDeclineDigest(payload) {
   try {
+    if (String(payload.requestedBy || "").trim().toLowerCase() !== "youssef.hanafy@taager.com") {
+      return jsonResponse({ success: false, message: "Not allowed." });
+    }
     var props = PropertiesService.getScriptProperties();
     var last = Number(props.getProperty("DECLINE_DIGEST_LAST_SENT") || 0);
     if (Date.now() - last < DECLINE_DIGEST_MIN_GAP_MS) {
@@ -1110,8 +1113,8 @@ function handleSendDeclineDigest(payload) {
   }
 }
 
-function sendDeclineMail_(subject, html) {
-  var to = DECLINE_DIGEST_RECIPIENTS.join(",");
+function sendDeclineMail_(subject, html, recipients) {
+  var to = (recipients && recipients.length ? recipients : DECLINE_DIGEST_RECIPIENTS).join(",");
   if (DECLINE_MAIL_RELAY_URL && DECLINE_MAIL_RELAY_URL.indexOf("http") === 0) {
     var resp = UrlFetchApp.fetch(DECLINE_MAIL_RELAY_URL, {
       method: "post", contentType: "application/json", muteHttpExceptions: true, followRedirects: true,
@@ -1443,4 +1446,43 @@ function buildDeclineDigestHtml_(rows, meta) {
 
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ============================================================================
+//  ONE-TIME INTRO / KICKOFF EMAIL (first email each recipient list receives)
+//  1) Put the real addresses in DECLINE_INTRO_RECIPIENTS (one list at a time).
+//  2) Run sendDeclineIntroEmail() from the editor. Leave the default to send
+//     only to yourself as a test.
+// ============================================================================
+var DECLINE_INTRO_RECIPIENTS = ["youssef.hanafy@taager.com"];
+
+function buildDeclineIntroHtml_() {
+  var url = DD_DASHBOARD_URL + "?view=decline";
+  var f = "font-family:Segoe UI,Arial,sans-serif;";
+  return '<div style="' + f + 'max-width:640px;margin:0 auto;color:#1D2939;">' +
+    '<div style="background:#0B1F3A;color:#fff;padding:18px 22px;border-radius:10px 10px 0 0;">' +
+      '<div style="font-size:12px;letter-spacing:.08em;opacity:.7;">MARKETPLACE</div>' +
+      '<div style="font-size:20px;font-weight:700;margin-top:2px;">Daily Decline Matches — what is changing</div></div>' +
+    '<div style="border:1px solid #E4E7EC;border-top:0;padding:22px;border-radius:0 0 10px 10px;font-size:14px;line-height:1.6;">' +
+    '<p style="margin:0 0 12px;">Hi team,</p>' +
+    '<p style="margin:0 0 12px;">Starting now, an <b>automatic email will be sent every day at 12:00 (Cairo time)</b> listing the Top 20 Merchant × SKU matches whose Placed dropped yesterday compared with their previous 4-day average, with the lost pieces, lost GMV and the likely cause (stock, locked quantity or demand).</p>' +
+    '<p style="margin:0 0 6px;"><b>What we need from each ACM, every day:</b></p>' +
+    '<ol style="margin:0 0 14px;padding-left:20px;">' +
+      '<li><b>Reason of decline</b> for each of your matches in the list. If the system shows <i>Demand drop</i>, please tell us what the actual reason is (e.g. price change, product quality, merchant issue, competitor, seasonality).</li>' +
+      '<li><b>Action</b> that will be taken (who does what, and by when).</li></ol>' +
+    '<p style="margin:0 0 6px;"><b>How to submit:</b></p>' +
+    '<ol style="margin:0 0 16px;padding-left:20px;">' +
+      '<li>Click the button below to open <b>Marketplace → Decline Matches</b> in the dashboard.</li>' +
+      '<li>Choose your name in the ACM filter at the top, so you only see your merchants.</li>' +
+      '<li>Write the reason + action in the <b>Feedback</b> box of each row and press Save. Feedback is stored per day.</li></ol>' +
+    '<p style="margin:0 0 18px;"><a href="' + url + '" style="background:#1570EF;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block;">Open Decline Matches</a></p>' +
+    '<p style="margin:0 0 4px;">Quick guide to the cause labels: <b>Out of stock / Low stock</b> = Supply issue, <b>Locked Qty</b> = Marketplace issue, <b>Demand drop</b> = needs your input.</p>' +
+    '<p style="margin:14px 0 0;color:#667085;font-size:12px;">This is the only kickoff message — from tomorrow you will receive the regular daily digest at 12:00. Thank you for your support.</p>' +
+    '</div></div>';
+}
+
+function sendDeclineIntroEmail() {
+  sendDeclineMail_("Marketplace Decline Matches — daily email at 12:00 & feedback needed", buildDeclineIntroHtml_(), DECLINE_INTRO_RECIPIENTS);
+  Logger.log("Intro sent to " + DECLINE_INTRO_RECIPIENTS.join(", "));
 }
