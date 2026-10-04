@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.27";
+const APP_VERSION = "1.3.29";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -745,13 +745,13 @@ if (navAdminToggle) {
 // Worker مباشرة (Main/Confirmed by Day/Incentive Merchants): stable ولا
 // لسه بيتأكد، آخر وقت اتقرا فيه، وعدد الصفوف — من غير ما يحتاج يفتح لينك
 // الـ Worker يدوي.
-const SYNC_STATUS_MANAGER_EMAIL = "youssef.hanafy@taager.com";
+const SYNC_STATUS_MANAGER_EMAILS = ["youssef.hanafy@taager.com", "somaya.youssef@taager.com"]; // owners (full access)
 
 function revealSyncStatusNavIfManager() {
   if (!navSyncStatus) return;
   const user = getLoggedInUser();
   const email = user && user.email ? String(user.email).trim().toLowerCase() : "";
-  if (email === SYNC_STATUS_MANAGER_EMAIL.toLowerCase()) {
+  if (SYNC_STATUS_MANAGER_EMAILS.indexOf(email) !== -1) {
     navSyncStatus.classList.remove("hidden");
   } else {
     navSyncStatus.classList.add("hidden");
@@ -882,10 +882,63 @@ async function loadAndRenderSyncStatus() {
   results.forEach(r => syncStatusBody.appendChild(renderSyncStatusRow(r)));
 }
 
+
+// ===== v1.3.28: Release Upload / Download (GitHub via the Worker) =====
+(function releaseSetup() {
+  const infoEl = $("releaseInfo"), statusEl = $("releaseStatus");
+  const dlBtn = $("releaseDownloadBtn"), upBtn = $("releaseUploadBtn"), fileIn = $("releaseFileInput");
+  if (!dlBtn || !upBtn || !fileIn) return;
+  const userEmail = () => { const u = getLoggedInUser(); return u && u.email ? u.email : ""; };
+  const say = (t, bad) => { statusEl.textContent = t; statusEl.style.color = bad ? "#ff6b6b" : "#4cd68a"; };
+  async function loadInfo() {
+    try {
+      const j = await (await fetch(`${SYNC_CDN_URL}?action=releaseInfo`, { cache: "no-store" })).json();
+      if (!j.success) { infoEl.textContent = j.message || "Not available."; dlBtn.disabled = true; return; }
+      if (!j.latest) { infoEl.textContent = "No version uploaded yet."; dlBtn.disabled = true; return; }
+      dlBtn.disabled = false;
+      infoEl.textContent = `Latest: v${j.latest.version} — ${(j.latest.size / 1048576).toFixed(2)} MB — uploaded ${new Date(j.latest.uploadedAt).toLocaleString()}`;
+    } catch (e) { infoEl.textContent = "Couldn't reach the worker."; }
+  }
+  window.loadReleaseInfo = loadInfo;
+  dlBtn.addEventListener("click", async () => {
+    say("Downloading from GitHub…");
+    try {
+      const r = await fetch(`${SYNC_CDN_URL}?action=releaseDownload`, { cache: "no-store" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || ("HTTP " + r.status));
+      const m = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "");
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = m ? m[1] : "Performance dashboard.zip";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      say("Downloaded ✓");
+    } catch (e) { say("Download failed: " + (e.message || e), true); }
+  });
+  upBtn.addEventListener("click", () => fileIn.click());
+  fileIn.addEventListener("change", async () => {
+    const f = fileIn.files && fileIn.files[0]; fileIn.value = "";
+    if (!f) return;
+    if (!/\.zip$/i.test(f.name)) { say("Please choose a .zip file.", true); return; }
+    const secret = prompt("Upload password (RELEASE_SECRET):");
+    if (!secret) return;
+    say("Uploading to GitHub…"); upBtn.disabled = true;
+    try {
+      const r = await fetch(`${SYNC_CDN_URL}?action=releaseUpload&email=${encodeURIComponent(userEmail())}&filename=${encodeURIComponent(f.name)}`, {
+        method: "POST", headers: { "X-Release-Secret": secret, "Content-Type": "application/zip" }, body: f,
+      });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.message || "failed");
+      say(`Uploaded v${j.latest.version} to GitHub ✓`);
+      loadInfo();
+    } catch (e) { say("Upload failed: " + (e.message || e), true); }
+    finally { upBtn.disabled = false; }
+  });
+})();
 if (navSyncStatus) {
   navSyncStatus.addEventListener("click", () => {
     if (syncStatusModal) syncStatusModal.classList.remove("hidden");
     loadAndRenderSyncStatus();
+    if (window.loadReleaseInfo) window.loadReleaseInfo();
   });
 }
 if (syncStatusRefresh) syncStatusRefresh.addEventListener("click", () => loadAndRenderSyncStatus());
@@ -14838,11 +14891,11 @@ function prepareMpDeclineWatchData() {
   renderMpDeclineWatch();
 }
 
-const DW_OWNER_EMAIL = "youssef.hanafy@taager.com";
+const DW_OWNER_EMAILS = ["youssef.hanafy@taager.com", "somaya.youssef@taager.com"]; // owners
 function dwApplySendVisibility() {
   let email = "";
   try { const u = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null; email = String((u && u.email) || "").trim().toLowerCase(); } catch (e) {}
-  const show = email === DW_OWNER_EMAIL;
+  const show = DW_OWNER_EMAILS.indexOf(email) !== -1;
   ["dwSendBtn", "dwSendStatus"].forEach(id => { const el = $(id); if (el) el.style.display = show ? "" : "none"; });
 }
 

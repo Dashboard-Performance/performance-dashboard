@@ -84,6 +84,8 @@ const CACHE_KEY_MAIN_META = "main_sheet_meta_v1";
 // وbackend/Code.gs — بوابة بسيطة (مش أمان حقيقي، بس كافية هنا لأن أقصى ضرر
 // ممكن يحصل هو حد يعمل refresh قبل معاده بشوية) لأكشن forceRefresh تحت.
 const MANAGER_EMAIL = "youssef.hanafy@taager.com";
+const OWNER_EMAILS = ["youssef.hanafy@taager.com", "somaya.youssef@taager.com"];
+function isOwnerEmail(e) { return OWNER_EMAILS.indexOf(String(e || "").trim().toLowerCase()) !== -1; }
 // v1.1.33: لو refreshMainCache فشلت جوه scheduled() (مثلاً الشيت كبير جدًا
 // وتعدى حد الـ KV، أو gviz رجع رد غريب)، الفشل كان بيتسجل بس في console.error
 // (مش شايفينه إلا لو شغّلت wrangler tail لحظتها). دلوقتي بنسجله هنا كمان عشان
@@ -122,8 +124,9 @@ const ALLOWED_EMAIL_DOMAIN = "taager.com";
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret",
+    "Access-Control-Expose-Headers": "Content-Disposition",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
   };
@@ -457,7 +460,7 @@ async function handleGetMain(env) {
 async function handleForceRefresh(request, env, ctx) {
   const url = new URL(request.url);
   const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
-  if (email !== MANAGER_EMAIL.toLowerCase()) {
+  if (!isOwnerEmail(email)) {
     return jsonResponse({ success: false, message: "Not authorized." }, 403);
   }
   try {
@@ -555,7 +558,7 @@ async function handleHeartbeat(request, env) {
 async function handleGetOnlineUsers(request, env) {
   const url = new URL(request.url);
   const requesterEmail = String(url.searchParams.get("requesterEmail") || "").trim().toLowerCase();
-  if (requesterEmail !== MANAGER_EMAIL.toLowerCase()) {
+  if (!isOwnerEmail(requesterEmail)) {
     return jsonResponse({ success: false, message: "Not authorized." });
   }
   const map = pruneStalePresence(await getPresenceMap(env));
@@ -567,6 +570,99 @@ async function handleGetOnlineUsers(request, env) {
   });
   online.sort((a, b) => b.lastSeen - a.lastSeen);
   return jsonResponse({ success: true, now: Date.now(), users: online });
+}
+
+
+// ===== v1.3.28: Release Upload / Download (GitHub) =====
+// الـ GitHub token بيتخزن هنا بس (Worker secret) — مش في كود الداشبورد خالص.
+// Worker settings → Variables:
+//   GITHUB_TOKEN   (Secret)  fine-grained PAT: Contents = Read and write على الريبو ده بس
+//   RELEASE_SECRET (Secret)  كلمة سر بتكتبها وانت بترفع نسخة جديدة
+//   GITHUB_REPO    (Text)    owner/repo  (مثال: Dashboard-Performance/performance-dashboard)
+//   GITHUB_BRANCH  (Text)    اختياري، الافتراضي main
+// الملفات بتتحفظ في الريبو تحت releases/ (كل نسخة + latest.json).
+const RELEASE_DIR = "releases";
+
+function ghHeaders(env, extra) {
+  return Object.assign({
+    Authorization: "Bearer " + env.GITHUB_TOKEN,
+    "User-Agent": "performance-dashboard-worker",
+    "X-GitHub-Api-Version": "2022-11-28",
+  }, extra || {});
+}
+function ghUrl(env, path) {
+  return "https://api.github.com/repos/" + env.GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/");
+}
+function ghBranch(env) { return env.GITHUB_BRANCH || "main"; }
+function releaseConfigured(env) { return !!(env.GITHUB_TOKEN && env.GITHUB_REPO); }
+
+async function ghGetFile(env, path) {
+  return fetch(ghUrl(env, path) + "?ref=" + encodeURIComponent(ghBranch(env)), { headers: ghHeaders(env, { Accept: "application/vnd.github+json" }) });
+}
+async function ghPutFile(env, path, bytesB64, message) {
+  let sha;
+  const ex = await ghGetFile(env, path);
+  if (ex.ok) { sha = (await ex.json()).sha; }
+  const body = { message, content: bytesB64, branch: ghBranch(env) };
+  if (sha) body.sha = sha;
+  const r = await fetch(ghUrl(env, path), { method: "PUT", headers: ghHeaders(env, { "Content-Type": "application/json" }), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("GitHub " + r.status + ": " + (await r.text()).slice(0, 300));
+  return r.json();
+}
+function bytesToB64(bytes) {
+  let bin = ""; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+async function readLatestMeta(env) {
+  const r = await fetch(ghUrl(env, RELEASE_DIR + "/latest.json") + "?ref=" + encodeURIComponent(ghBranch(env)), { headers: ghHeaders(env, { Accept: "application/vnd.github.raw+json" }) });
+  if (!r.ok) return null;
+  try { return JSON.parse(await r.text()); } catch (_e) { return null; }
+}
+
+async function handleReleaseInfo(env) {
+  if (!releaseConfigured(env)) return jsonResponse({ success: false, message: "GitHub is not configured on the worker (GITHUB_TOKEN / GITHUB_REPO)." }, 501);
+  const meta = await readLatestMeta(env);
+  if (!meta) return jsonResponse({ success: true, latest: null });
+  return jsonResponse({ success: true, latest: meta });
+}
+
+async function handleReleaseDownload(env) {
+  if (!releaseConfigured(env)) return jsonResponse({ success: false, message: "GitHub is not configured on the worker." }, 501);
+  const meta = await readLatestMeta(env);
+  if (!meta || !meta.path) return jsonResponse({ success: false, message: "No release uploaded yet." }, 404);
+  const r = await fetch(ghUrl(env, meta.path) + "?ref=" + encodeURIComponent(ghBranch(env)), { headers: ghHeaders(env, { Accept: "application/vnd.github.raw+json" }) });
+  if (!r.ok) return jsonResponse({ success: false, message: "GitHub " + r.status }, 502);
+  const h = corsHeaders();
+  h["Content-Type"] = "application/zip";
+  h["Content-Disposition"] = 'attachment; filename="' + meta.filename.replace(/"/g, "") + '"';
+  return new Response(r.body, { status: 200, headers: h });
+}
+
+async function handleReleaseUpload(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!releaseConfigured(env) || !env.RELEASE_SECRET) return jsonResponse({ success: false, message: "Upload is not configured on the worker (GITHUB_TOKEN / GITHUB_REPO / RELEASE_SECRET)." }, 501);
+  const url = new URL(request.url);
+  const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  if ((request.headers.get("X-Release-Secret") || "") !== env.RELEASE_SECRET) return jsonResponse({ success: false, message: "Wrong upload password." }, 403);
+  const rawName = String(url.searchParams.get("filename") || "").trim();
+  if (!/\.zip$/i.test(rawName)) return jsonResponse({ success: false, message: "Only .zip files are accepted." }, 400);
+  const vm = rawName.match(/v?(\d+\.\d+\.\d+)/i);
+  const version = vm ? vm[1] : "unknown";
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!bytes.length || bytes.length > 25 * 1024 * 1024) return jsonResponse({ success: false, message: "Empty or too large (max 25MB)." }, 400);
+  if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) return jsonResponse({ success: false, message: "Not a valid zip file." }, 400);
+  const filename = "Performance dashboard v" + version + ".zip";
+  const path = RELEASE_DIR + "/" + filename;
+  try {
+    await ghPutFile(env, path, bytesToB64(bytes), "Upload dashboard v" + version + " (via Worker Sync Status)");
+    const meta = { version, filename, path, size: bytes.length, uploadedAt: new Date().toISOString(), uploadedBy: email };
+    await ghPutFile(env, RELEASE_DIR + "/latest.json", btoa(JSON.stringify(meta, null, 2)), "Set latest release to v" + version);
+    return jsonResponse({ success: true, latest: meta });
+  } catch (err) {
+    return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
+  }
 }
 
 export default {
@@ -584,6 +680,9 @@ export default {
     if (action === "getMainMeta") return handleGetMainMeta(env);
     if (action === "forceRefresh") return handleForceRefresh(request, env, ctx);
     if (action === "heartbeat") return handleHeartbeat(request, env);
+    if (action === "releaseInfo") return handleReleaseInfo(env);
+    if (action === "releaseDownload") return handleReleaseDownload(env);
+    if (action === "releaseUpload") return handleReleaseUpload(request, env);
     if (action === "getOnlineUsers") return handleGetOnlineUsers(request, env);
 
     return jsonResponse(

@@ -1118,7 +1118,7 @@ var DECLINE_DIGEST_MIN_GAP_MS = 20 * 1000; // basic flood guard between sends
 
 function handleSendDeclineDigest(payload) {
   try {
-    if (String(payload.requestedBy || "").trim().toLowerCase() !== "youssef.hanafy@taager.com") {
+    if (["youssef.hanafy@taager.com", "somaya.youssef@taager.com"].indexOf(String(payload.requestedBy || "").trim().toLowerCase()) === -1) {
       return jsonResponse({ success: false, message: "Not allowed." });
     }
     var props = PropertiesService.getScriptProperties();

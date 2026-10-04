@@ -44,6 +44,7 @@
     // panel itself is never built for them, and the backend refuses to hand
     // the list back to any other email regardless.
     PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
+    OWNER_EMAILS: ["youssef.hanafy@taager.com", "somaya.youssef@taager.com"],
     // v1.1.40: heartbeat/getOnlineUsers نقلوا بالكامل للـ Cloudflare Worker
     // (مش Apps Script) — بيانات "مين أونلاين" مؤقتة بطبيعتها ومحتاجاش تتخزن
     // في شيت جوجل، فده أخف على السيرفرين. نفس رابط SYNC_CDN_URL في js/app.js
@@ -500,7 +501,7 @@
     setTimeout(() => sendHeartbeat(user), 4000);
     setInterval(() => { if (isTabVisible()) sendHeartbeat(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
 
-    if (String(user.email || "").trim().toLowerCase() === CONFIG.PRESENCE_ADMIN_EMAIL.toLowerCase()) {
+    if (CONFIG.OWNER_EMAILS.indexOf(String(user.email || "").trim().toLowerCase()) !== -1) {
       injectPresenceStyles();
       buildPresenceWidget(user);
     }

@@ -3526,6 +3526,16 @@
       <h3>⚙️ Worker Sync Status</h3>
       <p class="text-dim" style="margin:-8px 0 14px;font-size:13px;">Live sheet-read status straight from the Cloudflare Worker (Main / Confirmed by Day / Incentive Merchants / General Sync), plus the "Analyst / Single" daily Google Sheet tab.</p>
       <div id="syncStatusBody" style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;"></div>
+      <div id="releaseBox" style="margin-top:14px;padding:12px;border:1px solid var(--border,#2a3350);border-radius:10px;">
+        <div style="font-weight:600;margin-bottom:4px;">📦 Dashboard Release (GitHub)</div>
+        <div id="releaseInfo" class="text-dim" style="font-size:13px;margin-bottom:8px;">Loading…</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="releaseDownloadBtn" class="btn btn-outline">⬇️ Download latest</button>
+          <button id="releaseUploadBtn" class="btn btn-outline">⬆️ Upload new version</button>
+          <input type="file" id="releaseFileInput" accept=".zip" style="display:none">
+        </div>
+        <div id="releaseStatus" style="font-size:13px;margin-top:8px;"></div>
+      </div>
       <div class="modal-actions">
         <button id="syncStatusForceRefresh" class="btn btn-outline" title="Pulls a fresh snapshot right now instead of waiting for the automatic cron (every 5 minutes)">⚡ Force Refresh Now</button>
         <button id="syncStatusForceRefreshAnalystSingle" class="btn btn-outline" title="Recomputes and re-publishes the 'Analyst / Single' daily Google Sheet tab right now, instead of waiting for the next automatic sync">🔁 Force Refresh Analyst/Single Daily</button>
