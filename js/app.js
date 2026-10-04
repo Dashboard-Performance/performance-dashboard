@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.29";
+const APP_VERSION = "1.3.30";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -928,7 +928,8 @@ async function loadAndRenderSyncStatus() {
       });
       const j = await r.json();
       if (!j.success) throw new Error(j.message || "failed");
-      say(`Uploaded v${j.latest.version} to GitHub ✓`);
+      if (j.publishError) say(`Saved v${j.latest.version} to GitHub, but the site was NOT updated: ${j.publishError}`, true);
+      else say(`Uploaded v${j.latest.version} ✓ — site updated (${j.published.files} files, commit ${j.published.commit}). Vercel will redeploy in ~1 minute; then hard-refresh.`);
       loadInfo();
     } catch (e) { say("Upload failed: " + (e.message || e), true); }
     finally { upBtn.disabled = false; }

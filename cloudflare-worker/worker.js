@@ -639,6 +639,84 @@ async function handleReleaseDownload(env) {
   return new Response(r.body, { status: 200, headers: h });
 }
 
+
+// ----- v1.3.29: publish the uploaded zip as the live site (single atomic commit) -----
+// الزيب بيتفك جوه الـ Worker، وكل ملفات الموقع بتتكتب في الريبو في commit واحد
+// → Vercel (الموصّل بالريبو) بينشر لوحده. backend/ و cloudflare-worker/ و releases/
+// مش بيتنشروا كموقع (فيهم أسرار الباك اند) + .vercelignore بيمنع Vercel يقدّمهم.
+const SITE_SKIP_PREFIXES = ["backend/", "cloudflare-worker/", "releases/", "__MACOSX/", ".git/"];
+
+async function inflateRaw(u8) {
+  const ds = new DecompressionStream("deflate-raw");
+  const stream = new Blob([u8]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function unzipEntries(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Bad zip (no central directory).");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const out = [];
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("Bad zip entry.");
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + elen + clen;
+    if (name.endsWith("/")) continue;
+    const lnlen = dv.getUint16(lho + 26, true), lelen = dv.getUint16(lho + 28, true);
+    const start = lho + 30 + lnlen + lelen;
+    const raw = u8.subarray(start, start + csize);
+    let data;
+    if (method === 0) data = raw;
+    else if (method === 8) data = await inflateRaw(raw);
+    else throw new Error("Unsupported zip compression for " + name);
+    out.push({ name, data });
+  }
+  return out;
+}
+async function ghApi(env, method, path, body) {
+  const r = await fetch("https://api.github.com/repos/" + env.GITHUB_REPO + path, {
+    method, headers: ghHeaders(env, { Accept: "application/vnd.github+json", "Content-Type": "application/json" }),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error("GitHub " + method + " " + path.split("?")[0] + " → " + r.status + ": " + (await r.text()).slice(0, 200));
+  return r.json();
+}
+async function publishSiteFromZip(env, zipBytes, version) {
+  let files = await unzipEntries(zipBytes);
+  files = files.filter((f) => !/(^|\/)\.DS_Store$/.test(f.name));
+  if (!files.some((f) => f.name === "index.html")) {
+    const first = files.length ? files[0].name.split("/")[0] + "/" : "";
+    if (first && files.every((f) => f.name.startsWith(first))) files = files.map((f) => ({ name: f.name.slice(first.length), data: f.data }));
+  }
+  if (!files.some((f) => f.name === "index.html") || !files.some((f) => f.name === "js/app.js"))
+    throw new Error("Zip must contain index.html and js/app.js (site NOT updated).");
+  files = files.filter((f) => !SITE_SKIP_PREFIXES.some((pre) => f.name.startsWith(pre)) && !/\.zip$/i.test(f.name));
+  const branch = ghBranch(env);
+  const ref = await ghApi(env, "GET", "/git/ref/heads/" + encodeURIComponent(branch));
+  const parent = ref.object.sha;
+  const parentCommit = await ghApi(env, "GET", "/git/commits/" + parent);
+  const tree = [];
+  for (const f of files) {
+    const blob = await ghApi(env, "POST", "/git/blobs", { content: bytesToB64(f.data), encoding: "base64" });
+    tree.push({ path: f.name, mode: "100644", type: "blob", sha: blob.sha });
+  }
+  const ig = await ghApi(env, "POST", "/git/blobs", { content: "releases/\nbackend/\ncloudflare-worker/\n*.zip\n", encoding: "utf-8" });
+  tree.push({ path: ".vercelignore", mode: "100644", type: "blob", sha: ig.sha });
+  const newTree = await ghApi(env, "POST", "/git/trees", { base_tree: parentCommit.tree.sha, tree });
+  const commit = await ghApi(env, "POST", "/git/commits", { message: "Deploy dashboard v" + version + " (via Worker Sync Status upload)", tree: newTree.sha, parents: [parent] });
+  await ghApi(env, "PATCH", "/git/refs/heads/" + encodeURIComponent(branch), { sha: commit.sha });
+  return { files: files.length, commit: commit.sha.slice(0, 7) };
+}
+
 async function handleReleaseUpload(request, env) {
   if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
   if (!releaseConfigured(env) || !env.RELEASE_SECRET) return jsonResponse({ success: false, message: "Upload is not configured on the worker (GITHUB_TOKEN / GITHUB_REPO / RELEASE_SECRET)." }, 501);
@@ -659,7 +737,10 @@ async function handleReleaseUpload(request, env) {
     await ghPutFile(env, path, bytesToB64(bytes), "Upload dashboard v" + version + " (via Worker Sync Status)");
     const meta = { version, filename, path, size: bytes.length, uploadedAt: new Date().toISOString(), uploadedBy: email };
     await ghPutFile(env, RELEASE_DIR + "/latest.json", btoa(JSON.stringify(meta, null, 2)), "Set latest release to v" + version);
-    return jsonResponse({ success: true, latest: meta });
+    let published = null, publishError = null;
+    try { published = await publishSiteFromZip(env, bytes, version); }
+    catch (e) { publishError = (e && e.message) || String(e); }
+    return jsonResponse({ success: true, latest: meta, published, publishError });
   } catch (err) {
     return jsonResponse({ success: false, message: (err && err.message) || String(err) }, 502);
   }
