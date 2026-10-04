@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.19";
+const APP_VERSION = "1.3.20";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14691,7 +14691,7 @@ function prepareMpNewMatchesData() {
 // DECLINE MATCHES (تحت Marketplace، بعد New Matches) — أكتر 20 ماتش
 // (Merchant × SKU) وقّعوا الـ Placed امبارح (DAY1) مقارنةً بمتوسط الـ 4
 // أيام اللي قبله (DAY2..DAY5)، من شيت MERCHANT_SKU_DAILY_GID (461854229).
-//   Drop        = متوسط DAY2..DAY5 − DAY1 (بس لو موجب = نزول فعلي)، ولازم يعدّي STDEV أيام الماتش (حارس ضوضاء) وأقل حد DW_MIN_DROP_PCS
+//   Drop        = متوسط DAY2..DAY5 − DAY1 (بس لو موجب = نزول فعلي)، وأقل حد DW_MIN_DROP_PCS
 //   Contr%      = Drop الماتش ÷ إجمالي Drop كل الماتشات النازلة
 //   Impact/SKU  = Drop الماتش ÷ متوسط الـ 4 أيام للـ SKU كله (كل التجار)،
 //                 + حصته من إجمالي نزول الـ SKU (KEY DRIVER لو 50%+)
@@ -14773,7 +14773,7 @@ function dwComputeAll() {
   });
   const totalDrop = rows.reduce((a, x) => a + x.drop, 0);
 
-  const out = rows.filter(x => x.drop >= DW_MIN_DROP_PCS && x.drop > x.sd).map(x => {
+  const out = rows.filter(x => x.drop >= DW_MIN_DROP_PCS).map(x => {
     const r = x.r, key = r.tagerId + "||" + r.skuId;
     const inv = state.inventoryMap[r.skuId] || {};
     const stock = Math.round(inv.stock || 0);

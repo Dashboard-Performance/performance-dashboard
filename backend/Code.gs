@@ -1234,8 +1234,7 @@ function setupDeclineFeedbackSheet() { getDeclineFeedbackSheet_(); }
 // ============================================================================
 //  REAL NUMBERS, computed here from the Google Sheet (no dashboard needed).
 //  Same logic as the dashboard's Decline Matches page:
-//   Drop = avg(DAY2..DAY5) - DAY1 (Placed), listed only if Drop >= 3 pcs and
-//   Drop > STDEV of those 4 days; ranked by Drop; Contr% vs total drop;
+//   Drop = avg(DAY2..DAY5) - DAY1 (Placed), listed only if Drop >= 3 pcs; ranked by Drop; Contr% vs total drop;
 //   Impact on SKU = Drop / SKU's 4-day avg across all merchants;
 //   Stock from the Inventory tab; Locked = active lock remaining pieces.
 // ============================================================================
@@ -1313,7 +1312,7 @@ function computeDeclineDigest_() {
     skuBase[sku] = (skuBase[sku] || 0) + base;
     if (drop > 0) { skuDrop[sku] = (skuDrop[sku] || 0) + drop; totalDrop += drop; lostGmv += drop * aspOf(tager, sku, n(r[12])); }
     var sd = Math.sqrt(v.reduce(function (a, x) { return a + (x - base) * (x - base); }, 0) / 3);
-    if (drop >= DD_MIN_DROP && drop > sd) cand.push({ sku: sku, tager: tager, name: s(r[1]), mname: s(r[3]), acm: s(r[4]), base: base, y: y, drop: drop, asp: aspOf(tager, sku, n(r[12])) });
+    if (drop >= DD_MIN_DROP) cand.push({ sku: sku, tager: tager, name: s(r[1]), mname: s(r[3]), acm: s(r[4]), base: base, y: y, drop: drop, asp: aspOf(tager, sku, n(r[12])) });
   });
 
   cand.sort(function (a, b) { return b.drop - a.drop; });
