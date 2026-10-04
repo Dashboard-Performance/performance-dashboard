@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.20";
+const APP_VERSION = "1.3.22";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -9434,6 +9434,9 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
   (skuByMonthInbound.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
   (skuByMonthNeed.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
   (skuByMonthBegInv.get(begInvKey) || []).forEach(sku => skuSet.add(sku));
+  // v1.3.22: كل الـ SKUs اللي في شيت Products Info (الدولة المختارة) بتظهر في الجدول
+  // حتى لو مالهاش أي حركة في الشهر ده (بتظهر بأرقام صفر).
+  productInfo.forEach((_v, sku) => skuSet.add(sku));
 
   const salesMonthKeys = stMonthKeysBetween(startKey, endKey);
   const rows = [];
@@ -14809,7 +14812,7 @@ function dwComputeAll() {
     });
   }
   const monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-  dwState.mtd = { days: mtdDays, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
+  dwState.mtd = { days: mtdDays, placed: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
   dwState.lostGmvTotal = lostGmvTotal;
   dwState.all = out; dwState.totalDrop = totalDrop; dwState.dateLabel = dwYesterdayLabel();
 }
@@ -14865,8 +14868,8 @@ function renderMpDeclineWatch() {
   else {
     const gap = m.avgActual - m.target;
     const gEl = $("dwTargetGap");
-    if (gEl) { gEl.textContent = (gap >= 0 ? "+" : "−") + fmtInt.format(Math.abs(Math.round(gap))) + " (" + (gap >= 0 ? "+" : "−") + Math.abs((gap / m.target) * 100).toFixed(1) + "%)"; gEl.style.color = gap >= 0 ? "#067647" : "#B42318"; }
-    set("dwTargetSub", "Actual " + fmtInt.format(Math.round(m.avgActual)) + "/day vs Target " + fmtInt.format(m.target) + "/day");
+    if (gEl) { gEl.textContent = fmtInt.format(Math.round(m.avgActual)) + " / day"; gEl.style.color = gap >= 0 ? "#067647" : "#B42318"; }
+    set("dwTargetSub", (gap >= 0 ? "+" : "−") + fmtInt.format(Math.abs(Math.round(gap))) + " (" + (gap >= 0 ? "+" : "−") + Math.abs((gap / m.target) * 100).toFixed(1) + "%) vs Target " + fmtInt.format(m.target) + " · " + fmtInt.format(Math.round(m.placed || 0)) + " pcs over " + m.days + " full day" + (m.days > 1 ? "s" : ""));
   }
   set("dwRowCount", `${top.length} Matches · ${dwState.dateLabel}`);
 
@@ -14920,7 +14923,7 @@ async function sendDeclineDigestEmail() {
           dashboardUrl: location.href.split("#")[0],
           lostGmv: dwState.lostGmvTotal || 0, lostGmvTop: dwState.view.reduce((a, x) => a + x.lostGmv, 0),
           mtdLost: dwState.mtd ? dwState.mtd.lost : 0, mtdDays: dwState.mtd ? dwState.mtd.days : 0,
-          avgActual: dwState.mtd ? dwState.mtd.avgActual : 0, avgTarget: dwState.mtd ? dwState.mtd.target : 0
+          avgActual: dwState.mtd ? dwState.mtd.avgActual : 0, mtdPlaced: dwState.mtd ? (dwState.mtd.placed || 0) : 0, avgTarget: dwState.mtd ? dwState.mtd.target : 0
         },
         rows: dwState.view.map(x => ({
           skuId: x.skuId, skuName: x.skuName, merchantId: x.merchantId, merchantName: x.merchantName, acm: x.acm,
