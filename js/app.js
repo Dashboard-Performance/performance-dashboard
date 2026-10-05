@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.34";
+const APP_VERSION = "1.3.35";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -7241,7 +7241,7 @@ function computeCommercialDebundlized(opts) {
   const skuList = new Map(); // PRODUCT_ID -> { name, stock, category }
   (state.debundleMap || []).forEach(r => {
     if (!r.productId) return;
-    if (inPlanOnly) { const tInfo = planTargets[r.productId]; if (!(tInfo && tInfo.adjustedTarget > 0)) return; }
+    if (inPlanOnly && !fcIsInPlan(r.productId)) return; // أي تارجت من الأربعة > 0 = في البلان (مش Confirmed بس)
     if (!skuList.has(r.productId)) {
       skuList.set(r.productId, { name: r.productName || r.singleName || r.productId, stock: r.stock || 0 });
     }
@@ -7392,7 +7392,7 @@ function computeCommercialDebundlized(opts) {
     // بالظبط (No Achievement/Critical/Needs Improvement/Fair/Good/Excellent/
     // Overachiever/Upside) — لو الـ SKU مش في البلان أصلاً (hasTarget=false)
     // بيبقى "Not in Plan" بدل ما يتحط في باكت وهمي مالوش تارجت يتقاس عليه.
-    const finalStatus = hasTarget ? getMpSalesPlanFinalStatus(mtdAchPct) : { text: "Not in Plan", cls: "gray" };
+    const finalStatus = hasTarget ? getMpSalesPlanFinalStatus(mtdAchPct) : (fcIsInPlan(productId) ? { text: "No Confirmed Target", cls: "gray" } : { text: "Not in Plan", cls: "gray" });
 
     // Stock: من عمود H في شيت الديبندلايز (1409034448) — لنفس صف الـ SKU ده
     // بالظبط (عمود A)، من غير أي تجميع مع SKUs تانية.
