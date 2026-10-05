@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.31";
+const APP_VERSION = "1.3.32";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -15014,14 +15014,25 @@ dwState.fb = {}; dwState.drafts = {};
 function dwDayKey() { return new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }); }
 function dwFbKey(x) { return x.merchantId + "||" + x.skuId; }
 
+// Admin بس هو اللي يقدر يعدّل Feedback اتبعت قبل كده. أي دور تاني: بعد أول
+// Save الصف بيتقفل (والسيرفر برضو بيرفض أي Save تاني — Code.gs).
+function dwIsAdmin() {
+  const u = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
+  return !!u && String(u.role || "").trim() === "Admin";
+}
+
 function dwFeedbackCell(x) {
   const k = dwFbKey(x), saved = dwState.fb[k];
   const draft = dwState.drafts[k];
   const val = draft !== undefined ? draft : (saved ? saved.feedback : "");
-  const meta = saved ? `Saved by ${escapeHtml(saved.by || "")}${saved.at ? " · " + escapeHtml(saved.at) : ""}` : "";
+  const locked = !!saved && !dwIsAdmin();
+  const meta = saved ? `${locked ? "🔒 Locked · " : ""}Saved by ${escapeHtml(saved.by || "")}${saved.at ? " · " + escapeHtml(saved.at) : ""}` : "";
+  const lockAttr = locked ? ' readonly disabled title="Feedback already submitted — locked"' : "";
+  const lockStyle = locked ? ";opacity:.75;cursor:not-allowed;resize:none" : "";
+  const saveBtn = locked ? "" : `<button class="btn btn-outline small dw-fb-save" type="button">${saved ? "Update" : "Save"}</button>`;
   return `<div style="display:flex;gap:6px;align-items:flex-start">
-    <textarea class="dw-fb-input" rows="2" placeholder="Reason of decline + Action (if Demand drop, what is the real reason?)…" style="flex:1;min-width:190px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit;resize:vertical">${escapeHtml(val)}</textarea>
-    <button class="btn btn-outline small dw-fb-save" type="button">Save</button></div>
+    <textarea class="dw-fb-input" rows="2"${lockAttr} placeholder="Reason of decline + Action (if Demand drop, what is the real reason?)…" style="flex:1;min-width:190px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit;resize:vertical${lockStyle}">${escapeHtml(val)}</textarea>
+    ${saveBtn}</div>
     <div class="dw-fb-status text-dim" style="font-size:11px;margin-top:3px;min-height:14px">${meta}</div>`;
 }
 
@@ -15051,7 +15062,9 @@ async function dwSaveFeedback(tr) {
   const key = tr.dataset.fbk;
   const x = dwState.all.find(r => dwFbKey(r) === key);
   if (!x) return;
+  if (dwState.fb[key] && !dwIsAdmin()) { setSt("🔒 Already submitted — locked", "#B42318"); return; }
   btn.disabled = true; setSt("Saving…", "");
+  const cellOf = () => tr.querySelector("td:last-child");
   try {
     const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -15063,10 +15076,20 @@ async function dwSaveFeedback(tr) {
       })
     });
     const data = await resp.json();
+    if (data && data.locked) {
+      // السيرفر قال إن الـ Match ده اتبعتله Feedback قبل كده -> نقفله عندنا ونعرض اللي اتحفظ
+      dwState.fb[key] = data.existing || { feedback: "", by: "", at: "" };
+      delete dwState.drafts[key];
+      const c = cellOf(); if (c) c.innerHTML = dwFeedbackCell(x);
+      const st2 = tr.querySelector(".dw-fb-status");
+      if (st2) { st2.textContent = "🔒 Already submitted — locked"; st2.style.color = "#B42318"; }
+      return;
+    }
     if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
     dwState.fb[key] = { feedback: text, by: user.name || "", at: data.at || "" };
     delete dwState.drafts[key];
-    setSt("Saved ✓ " + (data.at || ""), "#067647");
+    // أعد رسم الخلية: لو مش Admin الصف بيتقفل فورًا، ولو Admin الزرار بيبقى Update
+    const c = cellOf(); if (c) c.innerHTML = dwFeedbackCell(x);
   } catch (err) {
     setSt("Failed: " + (err && err.message ? err.message : err), "#B42318");
   } finally { btn.disabled = false; }
