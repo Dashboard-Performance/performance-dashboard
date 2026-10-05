@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.32";
+const APP_VERSION = "1.3.33";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1674,7 +1674,7 @@ async function backupSnapshotToDrive(snapshot) {
 // اتفحصت خصوصي (كانت المرشحة الوحيدة للاستبعاد) وطلعت آمنة تتنادى مباشرة
 // (تفاصيل التعليق فوق عنصرها تحت)، فمفيش أي سكشن مستبعد حاليًا.
 const COMPUTED_SNAPSHOT_REGISTRY = [
-  { section: "commercialPlan", table: "main", getRows: () => computeCommercialDebundlized().rows },
+  { section: "commercialPlan", table: "main", getRows: () => computeCommercialDebundlized({ inPlanOnly: true }).rows },
   { section: "purchasePlan", table: "main", getRows: () => computePurchasePlanData() },
   { section: "salesPlanAcm", table: "main", getRows: () => state.mpSalesPlanDataPrepared || [] },
   { section: "performanceMerchant", table: "overall", getRows: () => state.merchantTableData || [] },
@@ -7225,7 +7225,15 @@ function cdzBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays,
   return { hasTarget, dailyTarget, mtdTarget, mtdActual, runRate, achievedPct };
 }
 
-function computeCommercialDebundlized() {
+// opts.inPlanOnly = true -> بس الـ SKUs اللي في شيت البلان (Single SKU Targets)
+// وعندها Confirmed Daily Target > 0 (نفس تعريف hasTarget تحت)، فمفيش أي صف
+// "Not in Plan". صفحة Commercial Plan بتستخدمه كده. Purchase Plan وغيره
+// بينادوا الدالة من غير opts فبيفضل سلوكهم زي ما هو (كل شيت الديبندلايز).
+// إجمالي Delivered GMV / CM3 (overall*) مش بيتأثر: بيتحسب على كل صفوف الـ Main
+// قبل أي فلترة على القايمة.
+function computeCommercialDebundlized(opts) {
+  const inPlanOnly = !!(opts && opts.inPlanOnly);
+  const planTargets = state.singleSkuTargets || {};
   // من غير أي تجميع/توزيع بندل خالص: كل SKU (PRODUCT_ID، عمود A في شيت
   // الديبندلايز) بيتقرا لوحده منفصل تمامًا، وديماند بتاعه بييجي من صفوف شيت
   // الـ Main اللي فيها r.sku == نفس الـ PRODUCT_ID ده بالظبط (من غير ضرب في
@@ -7233,6 +7241,7 @@ function computeCommercialDebundlized() {
   const skuList = new Map(); // PRODUCT_ID -> { name, stock, category }
   (state.debundleMap || []).forEach(r => {
     if (!r.productId) return;
+    if (inPlanOnly) { const tInfo = planTargets[r.productId]; if (!(tInfo && tInfo.adjustedTarget > 0)) return; }
     if (!skuList.has(r.productId)) {
       skuList.set(r.productId, { name: r.productName || r.singleName || r.productId, stock: r.stock || 0 });
     }
@@ -7571,7 +7580,7 @@ function renderCdzAchievementBuckets() {
 }
 
 function prepareCommercialDebundlizedData() {
-  const computed = computeCommercialDebundlized();
+  const computed = computeCommercialDebundlized({ inPlanOnly: true });
   state.cdzDataPrepared = computed.rows;
   state.cdzDaysUntilYesterday = computed.daysUntilYesterday;
 
