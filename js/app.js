@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.33";
+const APP_VERSION = "1.3.34";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -7640,8 +7640,12 @@ function applyCdzFilterAndSort() {
 function cdzMetricCellsHtml(m, isMoney) {
   const fmtV = (v) => isMoney ? fmtMoneyCompactCell(v) : fmtIntCell(Math.round(v));
   const targetCell = m.hasTarget ? fmtV(m.mtdTarget) : `<span class="badge-outline dim">Not in Plan</span>`;
-  const achColor = m.hasTarget ? (m.achievedPct >= 100 ? 'green' : (m.achievedPct >= 85 ? 'orange' : 'red')) : 'dim';
-  const achCell = m.hasTarget ? `<span class="badge-outline ${achColor}">${fmtPctCell(m.achievedPct)}</span>` : "—";
+  // achievedPct بيبقى null لما MTD Target = 0 (مثلًا Delivered GMV في أول أيام
+  // الشهر: الأيام الناضجة = أيام الشهر − CM3_LAG_DAYS = صفر) — من غير الحماية دي
+  // fmtPctCell(null) كانت بتعمل TypeError وجدول الصفحة كله بيفضل فاضي.
+  const hasAch = !!m.hasTarget && m.achievedPct !== null && m.achievedPct !== undefined && isFinite(m.achievedPct);
+  const achColor = hasAch ? (m.achievedPct >= 100 ? 'green' : (m.achievedPct >= 85 ? 'orange' : 'red')) : 'dim';
+  const achCell = hasAch ? `<span class="badge-outline ${achColor}">${fmtPctCell(m.achievedPct)}</span>` : "—";
   return `
       <td class="num text-dim">${targetCell}</td>
       <td class="num font-bold">${fmtV(m.mtdActual)}</td>
