@@ -1717,6 +1717,12 @@
                   <p>Matches with Placed Pieces Ach% under 70% (same data and filters as Sales Plan-ACM). New Target = what is still missing from the monthly target, spread over the remaining days. Saved to the "Sales Plan Feedback" sheet.</p>
                 </div>
                 <div class="table-controls">
+                  <select id="spfAcmFilter" class="date-filter-input" aria-label="Account Manager filter"><option value="All">All Account Managers</option></select>
+                </div>
+                <div class="table-controls">
+                  <input id="spfMerchantFilter" type="search" placeholder="Merchant ID..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="numeric" data-lpignore="true" data-1p-ignore="true" data-form-type="other" style="max-width:150px" />
+                </div>
+                <div class="table-controls">
                   <input id="spfSearch" type="search" placeholder="Search Product, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
@@ -1730,6 +1736,7 @@
                       <th>Merchant Name</th>
                       <th>Category</th>
                       <th>ACM (Owner)</th>
+                      <th class="num" onclick="spfSort('oldDailyTarget')" style="cursor:pointer" title="Current daily Placed target of this match (before the new target). Click to sort.">Daily Target</th>
                       <th class="num" onclick="spfSort('mtdTarget')" style="cursor:pointer" title="Placed pieces: Daily Target x days until yesterday. Click to sort.">Placed - MTD Target</th>
                       <th class="num" onclick="spfSort('mtdActual')" style="cursor:pointer" title="Placed pieces actual until yesterday. Click to sort.">Placed - Actual</th>
                       <th class="num" onclick="spfSort('runRate')" style="cursor:pointer" title="Projected month-end Placed. Click to sort.">Placed - Run Rate</th>
@@ -1738,7 +1745,10 @@
                       <th class="num" onclick="spfSort('gap')" style="cursor:pointer" title="MTD Target - Actual (pieces still missing). Click to sort.">Gap Plan</th>
                       <th class="num" onclick="spfSort('newDailyTarget')" style="cursor:pointer" title="(Monthly target - Actual MTD) / remaining days. Click to sort.">New Target Placed Daily</th>
                       <th>Feedback</th>
-                      <th>New Merchant ID</th>
+                      <th title="New daily Placed target for the EXISTING merchant (0 when the merchant will stop).">Adjusted Target (Existing Merchant)</th>
+                      <th title="How many new merchants will be added (opens that many Merchant ID + Target fields).">No. of New Merchants</th>
+                      <th title="Each added merchant: Merchant ID + its daily Placed target.">New Merchant ID &amp; Target</th>
+                      <th title="Why was the target not achieved?">Comment (Reason)</th>
                       <th>Save</th>
                     </tr>
                   </thead>

@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.36";
+const APP_VERSION = "1.3.40";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -2370,13 +2370,23 @@ function parseAcmSalesPlanSheet(payload) {
     // بأداءه الفعلي في MAIN_GID وبـ CR%/DR%/ASP بتاعه في MERCHANT_SKU_DAILY_GID.
     if (!productId || !tagerId) continue;
 
+    const originalTarget = cellNumber(c[5]);      // F — Target Placed Daily (الأصلي)
+    const gCell = c[6];
+    const hasNewTarget = !!gCell && gCell.v !== null && gCell.v !== undefined && String(gCell.v).trim() !== "" && Number.isFinite(cellNumber(gCell));
+    const newTargetDaily = hasNewTarget ? cellNumber(gCell) : 0;
     plan.push({
       productId: productId,
       productName: cellText(c[1]),               // SKU Name
       category: cellText(c[2]) || "Uncategorized", // Category
       tagerId: tagerId,
       tagerName: cellText(c[4]),                  // Merchant Name
-      dailyPlacedTarget: cellNumber(c[5])         // After Adjust — Daily Placed Target
+      // التارجت الفعّال: عمود G ("New Target Daily" — اللي بيكتبه Sales Plan - Feedback:
+      // Adjusted Target للماتش الحالي / تارجت الماتش الجديد) لو متكتب (حتى لو 0 =
+      // الـ Merchant هيقف)، وإلا عمود F الأصلي. F بيفضل زي ما هو في الشيت.
+      dailyPlacedTarget: (hasNewTarget ? newTargetDaily : originalTarget),
+      originalDailyTarget: originalTarget,        // F — التارجت الأصلي
+      newTargetDaily: hasNewTarget ? newTargetDaily : null, // G
+      matchFlag: cellText(c[7]).trim()            // H — "Existing match" / "New match"
     });
   }
   return plan;
@@ -15175,12 +15185,22 @@ function prepareSpFeedbackData() {
   });
   spfState.rows = rows;
   spfState.remaining = remaining;
+  spfFillAcmFilter();
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("spfCount", fmtInt.format(rows.length));
   set("spfGap", fmtInt.format(Math.round(rows.reduce((a, x) => a + x.gap, 0))));
   set("spfDays", fmtInt.format(remaining));
   spfApplyFilterAndSort(true);
   spfLoadFeedback();
+}
+
+// بيملّي فلتر الـ Account Manager من الـ ACMs اللي فعلاً في الصفوف (ويحافظ على الاختيار الحالي).
+function spfFillAcmFilter() {
+  const sel = $("spfAcmFilter"); if (!sel) return;
+  const cur = sel.value || "All";
+  const acms = [...new Set(spfState.rows.map(r => r.acm).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '<option value="All">All Account Managers</option>' + acms.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+  sel.value = acms.includes(cur) ? cur : "All";
 }
 
 function spfSort(key) {
@@ -15191,7 +15211,11 @@ function spfSort(key) {
 
 function spfApplyFilterAndSort(resetPage) {
   const q = (($("spfSearch") && $("spfSearch").value) || "").trim().toLowerCase();
+  const acmSel = ($("spfAcmFilter") && $("spfAcmFilter").value) || "All";
+  const mid = (($("spfMerchantFilter") && $("spfMerchantFilter").value) || "").trim().toLowerCase();
   let data = spfState.rows.slice();
+  if (acmSel !== "All") data = data.filter(r => r.acm === acmSel);
+  if (mid) data = data.filter(r => String(r.tagerId).toLowerCase().includes(mid));
   if (q) data = data.filter(r => [r.productId, r.productName, r.tagerId, r.merchantName, r.category, r.acm].some(v => String(v || "").toLowerCase().includes(q)));
   const k = spfState.sortKey, dir = spfState.sortDir === "asc" ? 1 : -1;
   data.sort((a, b) => ((a[k] ?? -Infinity) - (b[k] ?? -Infinity)) * dir);
@@ -15200,12 +15224,24 @@ function spfApplyFilterAndSort(resetPage) {
   spfRender();
 }
 
+const SPF_MAX_NEW = 5;
+
+// الـ Draft بتاع الصف: اللي الـ AM كتبه لسه ما اتحفظش، وإلا آخر Feedback اتحفظ.
 function spfDraftFor(r) {
   const k = spfKey(r), saved = spfState.fb[k], d = spfState.drafts[k] || {};
-  return {
-    feedback: d.feedback !== undefined ? d.feedback : (saved ? saved.feedback : ""),
-    newMerchantId: d.newMerchantId !== undefined ? d.newMerchantId : (saved ? saved.newMerchantId : "")
-  };
+  const pick = (f, sv, def) => d[f] !== undefined ? d[f] : (saved && saved[sv] !== undefined ? saved[sv] : def);
+  const feedback = pick("feedback", "feedback", "");
+  const needs = !!SPF_NEEDS_MERCHANT[feedback];
+  let merchants = d.merchants !== undefined ? d.merchants : (saved && Array.isArray(saved.merchants) ? saved.merchants : []);
+  let count = d.count !== undefined ? d.count : (saved && saved.merchants ? saved.merchants.length : 0);
+  if (needs && !count) count = 1;
+  if (!needs) { count = 0; merchants = []; }
+  merchants = Array.from({ length: count }, (_, i) => merchants[i] || { id: "", target: "" });
+  let adj = d.adj !== undefined ? d.adj : (saved && saved.adjTarget !== undefined && saved.adjTarget !== null ? saved.adjTarget : "");
+  if (feedback === "Merchant will stop - add new merchant") adj = 0; // الـ Merchant هيقف
+  if (feedback === "Merchant will scale on new target" && (adj === "" || adj === undefined) && r.newDailyTarget !== null) adj = r.newDailyTarget;
+  const comment = pick("comment", "comment", "");
+  return { feedback, needs, count, merchants, adj, comment };
 }
 
 function spfStatusText(r) {
@@ -15216,12 +15252,17 @@ function spfStatusText(r) {
 }
 
 function spfRowHtml(r) {
-  const k = spfKey(r), d = spfDraftFor(r), needsM = !!SPF_NEEDS_MERCHANT[d.feedback];
-  const saved = spfState.fb[k];
-  const ach = r.achPct;
-  const achCls = ach < 50 ? "red" : "orange";
-  const opts = '<option value="">— Select —</option>' + SPF_OPTIONS.map(o => `<option value="${escapeHtml(o)}"${o === d.feedback ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
+  const k = spfKey(r), d = spfDraftFor(r), saved = spfState.fb[k];
+  const achCls = r.achPct < 50 ? "red" : "orange";
   const inp = "font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit";
+  const opts = '<option value="">— Select —</option>' + SPF_OPTIONS.map(o => `<option value="${escapeHtml(o)}"${o === d.feedback ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
+  const stop = d.feedback === "Merchant will stop - add new merchant";
+  const countOpts = Array.from({ length: SPF_MAX_NEW }, (_, i) => `<option value="${i + 1}"${d.count === i + 1 ? " selected" : ""}>${i + 1}</option>`).join("");
+  const pairs = d.needs ? d.merchants.map((m, i) => `<div class="spf-m-row" data-i="${i}" style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+      <span class="text-dim" style="font-size:11px;min-width:16px">#${i + 1}</span>
+      <input class="spf-m-id" type="text" inputmode="numeric" autocomplete="off" placeholder="Merchant ID" value="${escapeHtml(m.id)}" style="${inp};width:110px" />
+      <input class="spf-m-target" type="number" min="0" step="1" placeholder="Daily target" value="${escapeHtml(m.target)}" style="${inp};width:100px" /></div>`).join("")
+    : '<span class="text-dim" style="font-size:11px">Not needed for this option</span>';
   return `<tr data-spk="${escapeHtml(k)}">
     <td class="font-mono text-dim">${escapeHtml(r.productId)}</td>
     <td class="font-bold truncate-cell" style="max-width:220px" title="${escapeHtml(r.productName)}">${escapeHtml(r.productName)}</td>
@@ -15229,6 +15270,7 @@ function spfRowHtml(r) {
     <td class="truncate-cell" style="max-width:170px" title="${escapeHtml(r.merchantName)}">${escapeHtml(r.merchantName)}</td>
     <td class="text-dim">${escapeHtml(r.category)}</td>
     <td>${escapeHtml(r.acm)}</td>
+    <td class="num font-bold">${r.oldDailyTarget % 1 ? r.oldDailyTarget.toFixed(1) : fmtIntCell(r.oldDailyTarget)}</td>
     <td class="num text-dim">${fmtIntCell(Math.round(r.mtdTarget))}</td>
     <td class="num font-bold">${fmtIntCell(Math.round(r.mtdActual))}</td>
     <td class="num">${fmtIntCell(Math.round(r.runRate))}</td>
@@ -15236,8 +15278,11 @@ function spfRowHtml(r) {
     <td class="num">${r.avgDaily.toFixed(1)}</td>
     <td class="num text-red font-bold">${fmtIntCell(Math.round(r.gap))}</td>
     <td class="num font-bold text-purple" title="Old daily target ${r.oldDailyTarget.toFixed(1)} · gap spread over ${r.remainingDays} remaining days">${r.newDailyTarget === null ? "—" : fmtIntCell(r.newDailyTarget)}</td>
-    <td style="min-width:250px"><select class="spf-fb-select" style="${inp};width:100%">${opts}</select></td>
-    <td style="min-width:130px"><input class="spf-fb-merchant" type="text" inputmode="numeric" autocomplete="off" placeholder="${needsM ? "New Merchant ID" : "Not needed"}" value="${escapeHtml(d.newMerchantId)}"${needsM ? "" : " disabled"} style="${inp};width:100%${needsM ? "" : ";opacity:.5"}" /></td>
+    <td style="min-width:240px"><select class="spf-fb-select" style="${inp};width:100%">${opts}</select></td>
+    <td style="min-width:110px"><input class="spf-adj" type="number" min="0" step="1" placeholder="Adjusted target" value="${escapeHtml(d.adj)}"${stop ? " disabled" : ""} title="New daily Placed target for the EXISTING merchant" style="${inp};width:100%${stop ? ";opacity:.5" : ""}" /></td>
+    <td style="min-width:80px"><select class="spf-count" style="${inp}"${d.needs ? "" : " disabled"}${d.needs ? "" : ' title="Only for the add-new-merchant options"'}>${d.needs ? countOpts : '<option value="">—</option>'}</select></td>
+    <td style="min-width:250px" class="spf-m-cell">${pairs}</td>
+    <td style="min-width:230px"><textarea class="spf-comment" rows="2" placeholder="Why was the target not achieved?" style="${inp};width:100%;resize:vertical">${escapeHtml(d.comment)}</textarea></td>
     <td style="min-width:150px"><button class="btn btn-outline small spf-fb-save" type="button">${saved ? "Update" : "Save"}</button>
       <div class="spf-fb-status text-dim" style="font-size:11px;margin-top:3px;min-height:14px">${spfStatusText(r)}</div></td>
   </tr>`;
@@ -15250,7 +15295,7 @@ function spfRender() {
   if (spfState.page > totalPages - 1) spfState.page = totalPages - 1;
   const start = spfState.page * SPF_PAGE_SIZE;
   const page = data.slice(start, start + SPF_PAGE_SIZE);
-  body.innerHTML = page.length ? page.map(spfRowHtml).join("") : '<tr><td colspan="16" class="text-dim" style="text-align:center;padding:18px">No matches under 70% Placed Ach%.</td></tr>';
+  body.innerHTML = page.length ? page.map(spfRowHtml).join("") : '<tr><td colspan="20" class="text-dim" style="text-align:center;padding:18px">No matches under 70% Placed Ach%.</td></tr>';
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("spfRowCount", `${data.length} Matches`);
   set("spfPageInd", `Page ${spfState.page + 1} of ${totalPages}`);
@@ -15272,15 +15317,34 @@ async function spfLoadFeedback() {
   } catch (e) { console.warn("spfLoadFeedback", e); }
 }
 
+// بيقرا الحالة الحالية للصف من الـ DOM ويرجّع Draft + أخطاء التحقق.
+function spfReadRow(tr, r) {
+  const feedback = tr.querySelector(".spf-fb-select").value;
+  const needs = !!SPF_NEEDS_MERCHANT[feedback];
+  const adjRaw = (tr.querySelector(".spf-adj").value || "").trim();
+  const comment = (tr.querySelector(".spf-comment").value || "").trim();
+  const merchants = needs ? [...tr.querySelectorAll(".spf-m-row")].map(el => ({
+    id: (el.querySelector(".spf-m-id").value || "").trim(),
+    target: (el.querySelector(".spf-m-target").value || "").trim()
+  })) : [];
+  let err = "";
+  if (!feedback) err = "Pick a feedback option first";
+  else if (adjRaw === "" || !(Number(adjRaw) >= 0)) err = "Adjusted target (existing merchant) is required";
+  else if (needs && merchants.some(m => !m.id)) err = "Fill every new Merchant ID";
+  else if (needs && merchants.some(m => !(Number(m.target) > 0))) err = "Fill a target (> 0) for every new merchant";
+  else if (needs && new Set(merchants.map(m => m.id)).size !== merchants.length) err = "Duplicate new Merchant IDs";
+  else if (needs && merchants.some(m => m.id === r.tagerId)) err = "New merchant can't be the same as the current merchant";
+  else if (!comment) err = "Comment (why the target wasn't achieved) is required";
+  return { feedback, needs, adj: adjRaw, merchants, comment, err };
+}
+
 async function spfSave(tr) {
   const key = tr.dataset.spk;
   const r = spfState.rows.find(x => spfKey(x) === key); if (!r) return;
   const st = tr.querySelector(".spf-fb-status"), btn = tr.querySelector(".spf-fb-save");
   const setSt = (m, c) => { if (st) { st.textContent = m; st.style.color = c || ""; } };
-  const feedback = tr.querySelector(".spf-fb-select").value;
-  const newMerchantId = (tr.querySelector(".spf-fb-merchant").value || "").trim();
-  if (!feedback) { setSt("Pick a feedback option first", "#B42318"); return; }
-  if (SPF_NEEDS_MERCHANT[feedback] && !newMerchantId) { setSt("New Merchant ID is required", "#B42318"); return; }
+  const v = spfReadRow(tr, r);
+  if (v.err) { setSt(v.err, "#B42318"); return; }
   const user = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
   if (!user) { setSt("Please log in first", "#B42318"); return; }
   if (!MATCHES_FEEDBACK_API_URL) { setSt("Backend is not configured", "#B42318"); return; }
@@ -15289,7 +15353,8 @@ async function spfSave(tr) {
     const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
-        action: "save_sales_plan_feedback", feedback, newMerchantId,
+        action: "save_sales_plan_feedback", feedback: v.feedback, comment: v.comment,
+        adjustedTarget: Number(v.adj), newMerchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target), name: ((state.merchantInfoMap || new Map()).get(m.id) || {}).merchantName || "" })),
         userName: user.name || "", userEmail: user.email || "",
         row: {
           productId: r.productId, productName: r.productName, merchantId: r.tagerId, merchantName: r.merchantName,
@@ -15301,13 +15366,35 @@ async function spfSave(tr) {
     });
     const data = await resp.json();
     if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
-    spfState.fb[key] = { date: data.date || spfTodayKey(), feedback, newMerchantId: SPF_NEEDS_MERCHANT[feedback] ? newMerchantId : "", newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || "" };
+    spfState.fb[key] = {
+      date: data.date || spfTodayKey(), feedback: v.feedback, comment: v.comment, adjTarget: Number(v.adj),
+      merchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target) })),
+      newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || ""
+    };
     delete spfState.drafts[key];
     spfRender();
+    // الـ Plan sheet (Sales_Plan-ACM) اتعدّل؟ لو فشل بنقول بوضوح (الـ Feedback نفسه اتحفظ).
+    const ps = data.planSync, tr2 = document.querySelector(`#spfTableBody tr[data-spk="${CSS.escape(key)}"]`);
+    const st2 = tr2 && tr2.querySelector(".spf-fb-status");
+    if (st2 && ps) {
+      if (ps.ok) { st2.textContent = `Saved ✓ · plan sheet: ${ps.updated || 0} updated, ${ps.added || 0} added${ps.removed ? ", " + ps.removed + " removed" : ""}`; st2.style.color = "#067647"; }
+      else { st2.textContent = "Saved, but the plan sheet was NOT updated: " + (ps.error || "unknown"); st2.style.color = "#B42318"; }
+    }
   } catch (err) {
     setSt("Failed: " + (err && err.message ? err.message : err), "#B42318");
     btn.disabled = false;
   }
+}
+
+// بيحفظ اللي اتكتب في الـ DOM كـ Draft (عشان إعادة رسم الصف/الصفحة ما تمسحوش).
+function spfStoreDraft(tr) {
+  const k = tr.dataset.spk, r = spfState.rows.find(x => spfKey(x) === k); if (!r) return;
+  const v = spfReadRow(tr, r);
+  spfState.drafts[k] = { feedback: v.feedback, adj: v.adj, comment: v.comment, merchants: v.merchants, count: v.needs ? v.merchants.length : 0 };
+}
+function spfRerenderRow(tr) {
+  const k = tr.dataset.spk, r = spfState.rows.find(x => spfKey(x) === k); if (!r) return;
+  tr.outerHTML = spfRowHtml(r);
 }
 
 if ($("spfTableBody")) {
@@ -15316,22 +15403,35 @@ if ($("spfTableBody")) {
     spfSave(b.closest("tr"));
   });
   $("spfTableBody").addEventListener("change", (e) => {
-    const sel = e.target.closest(".spf-fb-select"); if (!sel) return;
-    const tr = sel.closest("tr"), k = tr.dataset.spk;
-    const d = spfState.drafts[k] = spfState.drafts[k] || {};
-    d.feedback = sel.value;
-    const mi = tr.querySelector(".spf-fb-merchant"), needs = !!SPF_NEEDS_MERCHANT[sel.value];
-    mi.disabled = !needs; mi.style.opacity = needs ? "" : ".5";
-    mi.placeholder = needs ? "New Merchant ID" : "Not needed";
-    if (!needs) { mi.value = ""; d.newMerchantId = ""; }
+    const tr = e.target.closest("tr"); if (!tr || !tr.dataset.spk) return;
+    if (e.target.closest(".spf-fb-select")) {
+      // تغيير الـ Feedback: أصفّر الـ Adjusted Target التلقائي وأعيد رسم الصف بالحقول المناسبة.
+      const k = tr.dataset.spk, old = spfState.drafts[k] || {};
+      spfStoreDraft(tr);
+      const d = spfState.drafts[k], fb = d.feedback;
+      if (fb === "Merchant will scale on new target") d.adj = ""; // يتملّى بالـ New Target المحسوب
+      else if (fb === "Merchant will stop - add new merchant") d.adj = 0;
+      else if (old.feedback === "Merchant will stop - add new merchant" || old.feedback === "Merchant will scale on new target") d.adj = "";
+      if (!SPF_NEEDS_MERCHANT[fb]) { d.merchants = []; d.count = 0; }
+      else if (!d.count) d.count = 1;
+      spfRerenderRow(tr);
+    } else if (e.target.closest(".spf-count")) {
+      // تغيير العدد: أفتح/أقفل حقول Merchant ID + Target بنفس العدد (من غير ما أمسح اللي اتكتب).
+      const k = tr.dataset.spk, n = Math.max(1, Math.min(SPF_MAX_NEW, Number(e.target.value) || 1));
+      spfStoreDraft(tr);
+      const d = spfState.drafts[k];
+      d.count = n; d.merchants = Array.from({ length: n }, (_, i) => d.merchants[i] || { id: "", target: "" });
+      spfRerenderRow(tr);
+    }
   });
   $("spfTableBody").addEventListener("input", (e) => {
-    const mi = e.target.closest(".spf-fb-merchant"); if (!mi) return;
-    const k = mi.closest("tr").dataset.spk;
-    (spfState.drafts[k] = spfState.drafts[k] || {}).newMerchantId = mi.value;
+    const tr = e.target.closest("tr"); if (!tr || !tr.dataset.spk) return;
+    if (e.target.closest(".spf-m-id, .spf-m-target, .spf-adj, .spf-comment")) spfStoreDraft(tr);
   });
 }
 if ($("spfSearch")) $("spfSearch").addEventListener("input", () => spfApplyFilterAndSort(true));
+if ($("spfAcmFilter")) $("spfAcmFilter").addEventListener("change", () => spfApplyFilterAndSort(true));
+if ($("spfMerchantFilter")) $("spfMerchantFilter").addEventListener("input", () => spfApplyFilterAndSort(true));
 if ($("spfPrev")) $("spfPrev").addEventListener("click", () => { if (spfState.page > 0) { spfState.page--; spfRender(); } });
 if ($("spfNext")) $("spfNext").addEventListener("click", () => { spfState.page++; spfRender(); });
 
