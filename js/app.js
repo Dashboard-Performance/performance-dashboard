@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.42";
+const APP_VERSION = "1.3.43";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5261,6 +5261,7 @@ function populateFilters(rows) {
     const now = new Date(); const currentMonthStr = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
     for(let i=0; i < monthSelect.options.length; i++) { if(monthSelect.options[i].value === currentMonthStr) { monthSelect.value = currentMonthStr; break; } }
   }
+  histAddMonthOptions(); histInit();
   const sortedAcms = Array.from(acms).sort();
   const acmSelect = $("acmSelect");
   if(acmSelect) {
@@ -6240,6 +6241,80 @@ function cm3PeriodSortKey(dateObj, mode) {
   return (dateObj.getFullYear() * 12 + dateObj.getMonth()) * 10 + p;
 }
 
+// =====================================================================
+// HISTORY MONTHS — Main فيه سبتمبر/أكتوبر بس؛ باقي الشهور (يناير → أغسطس)
+// في تاب الـ history (FORECAST_HISTORY_GID). بنضيف الشهور دي في فلتر الشهر،
+// وCM3 Analyst + Poor Matches بيقروها on-demand (شهر بشهر) ويتكاشوا.
+// =====================================================================
+const hist = { months: [], rows: new Map(), loading: new Set(), inited: false, timer: null };
+function histMonthRange(label) {
+  const parts = String(label).split(" "); const start = new Date(`${parts[0]} 1, ${parts[1]}`);
+  return { start, end: new Date(start.getFullYear(), start.getMonth() + 1, 0) };
+}
+function histBadge() {
+  let el = document.getElementById("histLoadingBadge");
+  if (!hist.loading.size) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "histLoadingBadge"; el.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:9999;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:8px 12px;font-size:12px;"; document.body.appendChild(el); }
+  el.textContent = `Loading history months… (${hist.loading.size} left)`;
+}
+function histAddMonthOptions() {
+  const sel = document.getElementById("monthSelect"); if (!sel || !hist.months.length) return;
+  const cur = sel.value; const have = new Set(Array.from(sel.options).map(o => o.value).filter(Boolean));
+  hist.months.forEach(m => have.add(m));
+  const all = Array.from(have).sort((a, b) => new Date(b) - new Date(a));
+  sel.innerHTML = '<option value="">All Months</option>' + all.map(m => `<option value="${m}">${m}</option>`).join("");
+  sel.value = cur;
+}
+async function histInit() {
+  if (hist.inited) return; hist.inited = true;
+  try {
+    const p = await fcLoadGvizQuery(FORECAST_HISTORY_GID, "select min(A), max(A)", 60000);
+    const c = (p.table.rows[0] || {}).c || [];
+    const g = (x) => { const m = /Date\((\d+),(\d+),(\d+)/.exec(x && x.v); return m ? new Date(+m[1], +m[2], +m[3]) : null; };
+    const mn = g(c[0]), mx = g(c[1]); if (!mn || !mx) return;
+    const mainMonths = new Set((state.allParsedRows || []).map(r => r.monthYear));
+    const out = [];
+    for (let d = new Date(mn.getFullYear(), mn.getMonth(), 1); d <= mx; d.setMonth(d.getMonth() + 1)) {
+      const lab = d.toLocaleString("en-US", { month: "long", year: "numeric" }); if (!mainMonths.has(lab)) out.push(lab);
+    }
+    hist.months = out; histAddMonthOptions();
+  } catch (e) { hist.inited = false; }
+}
+function histLoadMonth(label) {
+  if (hist.rows.has(label) || hist.loading.has(label)) return;
+  hist.loading.add(label); histBadge();
+  const { start, end } = histMonthRange(label);
+  fcLoadGvizQuery(FORECAST_HISTORY_GID, `select * where A >= date '${cm3Ymd(start)}' and A <= date '${cm3Ymd(end)}'`, 180000)
+    .then(payload => {
+      const infoMap = state.merchantInfoMap || new Map();
+      hist.rows.set(label, parseMainSheet(payload).map(r => { const i = infoMap.get(r.merchantId); return Object.assign({}, r, { acmName: (i && i.acmName) || r.acmName || "Unassigned" }); }));
+    })
+    .catch(() => { hist.rows.set(label, []); })
+    .finally(() => {
+      hist.loading.delete(label); histBadge();
+      clearTimeout(hist.timer);
+      hist.timer = setTimeout(() => {
+        const act = (id) => { const v = document.getElementById(id); return v && v.classList.contains("active-view"); };
+        if (act("viewCm3Analyst")) { renderCm3TargetView(); renderCm3AnalystView(); }
+        if (act("viewPoorMatches")) preparePoorMatchesData();
+      }, 500);
+    });
+}
+// صفوف الـ history المطلوبة للشهر المختار (أو الرينج لو فيه تاريخ مختار) —
+// اللي لسه ماتحملتش بتتحمل في الخلفية والصفحة بتتحدث لوحدها بعدها.
+function histRowsFor(selectedMonth, sectionKey) {
+  let labels = hist.months;
+  const range = getActiveDateRangeFilter(sectionKey);
+  if (range) labels = labels.filter(l => { const m = histMonthRange(l); return m.start.getTime() <= range.endTs && m.end.getTime() + 86399999 >= range.startTs; });
+  else if (selectedMonth) labels = labels.filter(l => l === selectedMonth);
+  let out = [];
+  labels.forEach(l => { if (hist.rows.has(l)) out = out.concat(hist.rows.get(l)); else histLoadMonth(l); });
+  return out;
+}
+function histAllRows(selectedMonth, sectionKey) { return (state.allParsedRows || []).concat(histRowsFor(selectedMonth, sectionKey)); }
+// الـ CM3 cutoff دايماً من أحدث تاريخ في Main (مش من الشهر المختار).
+function cm3GlobalCutoff(rows) { return getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows); }
+
 // ---- CM3 lookback: أول فترة في الشهر المختار لازم تتقارن بآخر فترة في الشهر
 // اللي قبله (الموجود في تاب الـ history مش في Main)، وإلا كل الماتشات بتبقى
 // "New Match" والباقي أصفار.
@@ -6262,7 +6337,7 @@ const cm3Ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,
 function cm3GetLookbackRows(rows, periodMode, selectedAcm) {
   const win = cm3LookbackWindow(rows, periodMode); if (!win) return [];
   const s0 = win.start.getTime(), e0 = win.end.getTime() + 86399999;
-  const fromMain = (state.allParsedRows || []).filter(r => r.timestamp >= s0 && r.timestamp <= e0);
+  const fromMain = (state.allParsedRows || []).concat(...Array.from(hist.rows.values())).filter(r => r.timestamp >= s0 && r.timestamp <= e0);
   const have = new Set(fromMain.map(r => cm3Ymd(new Date(r.timestamp))));
   let missing = false;
   for (let d = new Date(win.start); d <= win.end; d.setDate(d.getDate() + 1)) { if (!have.has(cm3Ymd(d))) { missing = true; break; } }
@@ -6406,7 +6481,7 @@ function computeCm3Analysis(periodMode, scope, sectionKey) {
   // خالص، فاختيار "All Months" أو شهر معين ماكانش بيفرق مع السكشن ده.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = (state.allParsedRows || []).filter(r => (rowMatchesPeriod(r, selectedMonth, sectionKey)) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = histAllRows(selectedMonth, sectionKey).filter(r => (rowMatchesPeriod(r, selectedMonth, sectionKey)) && (selectedAcm === "All" || r.acmName === selectedAcm));
   const lookbackRows = cm3GetLookbackRows(rows, periodMode, selectedAcm);
   const built = cm3BuildCombos(rows, periodMode, sectionKey, lookbackRows); if (!built) return null;
   const { qualifying, allPeriodsSorted, displayPeriods, latestDate } = built;
@@ -6774,7 +6849,7 @@ function renderCm3AnalystHeaders() {
 //    البسط والمقام في النسبتين دول يفضلوا من نفس الفترة المقطوعة بالظبط.
 function prepareCm3AnalystData(rows, sectionKey) {
   const map = new Map(); let totalGmv = 0; let totalCm3 = 0; let totalCm3Gmv = 0;
-  const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
+  const cm3Cutoff = cm3GlobalCutoff(rows);
 
   const keyFor = (r) => {
     if (analystState.scope === "merchant") return r.merchantId;
@@ -6908,7 +6983,7 @@ function renderPaginatedCm3AnalystTable() {
 function renderCm3AnalystView() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const filteredRows = state.allParsedRows.filter(r => (rowMatchesPeriod(r, selectedMonth, "cm3Analyst")) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const filteredRows = histAllRows(selectedMonth, "cm3Analyst").filter(r => (rowMatchesPeriod(r, selectedMonth, "cm3Analyst")) && (selectedAcm === "All" || r.acmName === selectedAcm));
   prepareCm3AnalystData(filteredRows, "cm3Analyst");
   analystWireControlsOnce();
 }
@@ -9074,12 +9149,12 @@ function buildPpmByMatchNoCutoff(rows) {
 function computePoorMatches() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rowsFiltered = (state.allParsedRows || []).filter(r =>
+  const rowsFiltered = histAllRows(selectedMonth, "poorMatches").filter(r =>
     (rowMatchesPeriod(r, selectedMonth, "poorMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm)
   );
   if (!rowsFiltered.length) return [];
 
-  const cutoffTs = getCm3LagCutoffTimestamp(rowsFiltered); // نفس كات أوف الـ 4 أيام، مطبق هنا على Placed/Confirmed/Delivered/CM3/NDR
+  const cutoffTs = cm3GlobalCutoff(rowsFiltered); // نفس كات أوف الـ 4 أيام، مطبق هنا على Placed/Confirmed/Delivered/CM3/NDR
   const eligibleRows = rowsFiltered.filter(r => isCm3RowEligible(r, cutoffTs, "poorMatches")); // بس الصفوف اللي قبل/يوم الكات أوف
   const matches = buildPoorMatchesFromRows(eligibleRows);
 
@@ -9098,15 +9173,19 @@ function computePoorMatches() {
 // نفس ماتشات Good/Bad عليها — عشان المقارنة تبقى بين نفس عدد الأيام في
 // الشهرين، مش شهر كامل قدام كام يوم بس.
 // -------------------------------------------------------------------------
+function prevMonthLabelFor(d) { return d.toLocaleString("en-US", { month: "long", year: "numeric" }); }
 function computePoorMatchesPreviousPeriod() {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const currentRows = (state.allParsedRows || []).filter(r =>
+  const currentRows = histAllRows(selectedMonth, "poorMatches").filter(r =>
     (rowMatchesPeriod(r, selectedMonth, "poorMatches")) && (selectedAcm === "All" || r.acmName === selectedAcm)
   );
   if (!currentRows.length) return null;
 
-  const cutoffTs = getCm3LagCutoffTimestamp(currentRows);
+  // الـ cutoff العام من Main، بس مايعدّيش آخر يوم فعلي في الفترة المختارة (شهر قديم = كله).
+  let latestCur = 0; currentRows.forEach(r => { if (r.timestamp > latestCur) latestCur = r.timestamp; });
+  const globalCut = cm3GlobalCutoff(currentRows);
+  const cutoffTs = Math.min(globalCut || latestCur, latestCur);
   if (!cutoffTs) return null;
   const cutoffDate = new Date(cutoffTs); // آخر يوم داخل في حساب الفترة الحالية (زي يوم 5 في المثال)
   const cutoffDay = cutoffDate.getDate();
@@ -9119,7 +9198,7 @@ function computePoorMatchesPreviousPeriod() {
   // فلتر الـ ACM (لو محدد) بيتاخد في الاعتبار في فترة المقارنة كمان، عشان
   // المقارنة تفضل عادلة (نفس الـ ACM في الفترتين). فلتر الشهر مش بيتاخد
   // بالطبع، لأننا أصلاً بنركز على الشهر اللي فات مقصود.
-  const prevRows = (state.allParsedRows || []).filter(r => {
+  const prevRows = histAllRows(prevMonthLabelFor(prevMonthRef), "").filter(r => {
     if (!(selectedAcm === "All" || r.acmName === selectedAcm)) return false;
     return r.timestamp >= prevMonthStart && r.timestamp <= prevMonthEnd;
   });
