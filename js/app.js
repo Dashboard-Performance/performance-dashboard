@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.43";
+const APP_VERSION = "1.3.44";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -15299,8 +15299,10 @@ const SPF_PAGE_SIZE = 25;
 const SPF_OPTIONS = [
   "Merchant will scale on new target",
   "Reduce merchant target - add new merchant",
-  "Merchant will stop - add new merchant"
+  "Merchant will stop - add new merchant",
+  "Stock issue"
 ];
+const SPF_STOCK = "Stock issue"; // مشكلة ستوك: مفيش تغيير في التارجت ولا في شيت الخطة
 const SPF_NEEDS_MERCHANT = { "Reduce merchant target - add new merchant": true, "Merchant will stop - add new merchant": true };
 const spfState = { rows: [], filtered: [], page: 0, sortKey: "gap", sortDir: "desc", fb: {}, drafts: {}, loadedMonth: "" };
 
@@ -15386,6 +15388,7 @@ function spfDraftFor(r) {
   merchants = Array.from({ length: count }, (_, i) => merchants[i] || { id: "", target: "" });
   let adj = d.adj !== undefined ? d.adj : (saved && saved.adjTarget !== undefined && saved.adjTarget !== null ? saved.adjTarget : "");
   if (feedback === "Merchant will stop - add new merchant") adj = 0; // الـ Merchant هيقف
+  if (feedback === SPF_STOCK) adj = ""; // مفيش تعديل تارجت
   if (feedback === "Merchant will scale on new target" && (adj === "" || adj === undefined) && r.newDailyTarget !== null) adj = r.newDailyTarget;
   const comment = pick("comment", "comment", "");
   return { feedback, needs, count, merchants, adj, comment };
@@ -15403,7 +15406,7 @@ function spfRowHtml(r) {
   const achCls = r.achPct < 50 ? "red" : "orange";
   const inp = "font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit";
   const opts = '<option value="">— Select —</option>' + SPF_OPTIONS.map(o => `<option value="${escapeHtml(o)}"${o === d.feedback ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
-  const stop = d.feedback === "Merchant will stop - add new merchant";
+  const stop = d.feedback === "Merchant will stop - add new merchant" || d.feedback === SPF_STOCK;
   const countOpts = Array.from({ length: SPF_MAX_NEW }, (_, i) => `<option value="${i + 1}"${d.count === i + 1 ? " selected" : ""}>${i + 1}</option>`).join("");
   const pairs = d.needs ? d.merchants.map((m, i) => `<div class="spf-m-row" data-i="${i}" style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
       <span class="text-dim" style="font-size:11px;min-width:16px">#${i + 1}</span>
@@ -15476,7 +15479,7 @@ function spfReadRow(tr, r) {
   })) : [];
   let err = "";
   if (!feedback) err = "Pick a feedback option first";
-  else if (adjRaw === "" || !(Number(adjRaw) >= 0)) err = "Adjusted target (existing merchant) is required";
+  else if (feedback !== SPF_STOCK && (adjRaw === "" || !(Number(adjRaw) >= 0))) err = "Adjusted target (existing merchant) is required";
   else if (needs && merchants.some(m => !m.id)) err = "Fill every new Merchant ID";
   else if (needs && merchants.some(m => !(Number(m.target) > 0))) err = "Fill a target (> 0) for every new merchant";
   else if (needs && new Set(merchants.map(m => m.id)).size !== merchants.length) err = "Duplicate new Merchant IDs";
@@ -15501,7 +15504,7 @@ async function spfSave(tr) {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "save_sales_plan_feedback", feedback: v.feedback, comment: v.comment,
-        adjustedTarget: Number(v.adj), newMerchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target), name: ((state.merchantInfoMap || new Map()).get(m.id) || {}).merchantName || "" })),
+        adjustedTarget: v.feedback === SPF_STOCK ? Number(r.oldDailyTarget || 0) : Number(v.adj), newMerchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target), name: ((state.merchantInfoMap || new Map()).get(m.id) || {}).merchantName || "" })),
         userName: user.name || "", userEmail: user.email || "",
         row: {
           productId: r.productId, productName: r.productName, merchantId: r.tagerId, merchantName: r.merchantName,
@@ -15514,7 +15517,7 @@ async function spfSave(tr) {
     const data = await resp.json();
     if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
     spfState.fb[key] = {
-      date: data.date || spfTodayKey(), feedback: v.feedback, comment: v.comment, adjTarget: Number(v.adj),
+      date: data.date || spfTodayKey(), feedback: v.feedback, comment: v.comment, adjTarget: v.feedback === SPF_STOCK ? Number(r.oldDailyTarget || 0) : Number(v.adj),
       merchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target) })),
       newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || ""
     };
@@ -15558,7 +15561,8 @@ if ($("spfTableBody")) {
       const d = spfState.drafts[k], fb = d.feedback;
       if (fb === "Merchant will scale on new target") d.adj = ""; // يتملّى بالـ New Target المحسوب
       else if (fb === "Merchant will stop - add new merchant") d.adj = 0;
-      else if (old.feedback === "Merchant will stop - add new merchant" || old.feedback === "Merchant will scale on new target") d.adj = "";
+      else if (fb === SPF_STOCK) d.adj = "";
+      else if (old.feedback === "Merchant will stop - add new merchant" || old.feedback === "Merchant will scale on new target" || old.feedback === SPF_STOCK) d.adj = "";
       if (!SPF_NEEDS_MERCHANT[fb]) { d.merchants = []; d.count = 0; }
       else if (!d.count) d.count = 1;
       spfRerenderRow(tr);
