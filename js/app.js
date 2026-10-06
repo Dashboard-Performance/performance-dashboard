@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.41";
+const APP_VERSION = "1.3.42";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5469,7 +5469,9 @@ function prepareInventoryTableData(rows) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0,0,0,0); const todayMs = today.getTime();
   const ydayMs = todayMs - 86400000; const d3Ms = todayMs - (3 * 86400000); const d5Ms = todayMs - (5 * 86400000); const d15Ms = todayMs - (15 * 86400000);
-  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
+  // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
+  // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
+  const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   const { getStockDoh } = buildDebundledStockDohIndex(state.allParsedRows || rows);
   const map = new Map();
   for (let sku in state.inventoryMap) {
@@ -5571,7 +5573,9 @@ function renderPaginatedInventoryTable() {
 
 function prepareAcmTableData(rows) {
   const map = new Map();
-  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
+  // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
+  // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
+  const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
     if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, actualRetention: 0 }); }
@@ -5758,7 +5762,9 @@ function prepareMerchantTableData(rows) {
   // (Total CM3 / CM3 DeliveredGmv للنسبة، Confirmed GMV، عدد SKUs المميزة) —
   // لسه بتتجمع من MAIN_GID زي ما كانت بالظبط.
   const cm3Map = new Map();
-  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
+  // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
+  // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
+  const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   rows.forEach(r => {
     if (!r.merchantId || r.merchantId === "Unassigned") return;
     if (!cm3Map.has(r.merchantId)) { cm3Map.set(r.merchantId, { name: r.merchantName, acm: r.acmName, cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, skus: new Set() }); }
@@ -6295,7 +6301,9 @@ function cm3BuildCombos(rows, periodMode, sectionKey, lookbackRows) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return null;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
-  const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
+  // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
+  // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
+  const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   const comboMap = new Map();
   const mainPeriods = new Set();
   rows.concat(lookbackRows).forEach(r => {
