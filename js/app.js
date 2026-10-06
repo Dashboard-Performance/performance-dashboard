@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.40";
+const APP_VERSION = "1.3.41";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -6234,13 +6234,71 @@ function cm3PeriodSortKey(dateObj, mode) {
   return (dateObj.getFullYear() * 12 + dateObj.getMonth()) * 10 + p;
 }
 
-function cm3BuildCombos(rows, periodMode, sectionKey) {
+// ---- CM3 lookback: أول فترة في الشهر المختار لازم تتقارن بآخر فترة في الشهر
+// اللي قبله (الموجود في تاب الـ history مش في Main)، وإلا كل الماتشات بتبقى
+// "New Match" والباقي أصفار.
+const cm3LookbackCache = new Map(); const cm3LookbackLoading = new Set();
+function cm3LookbackWindow(rows, periodMode) {
+  let minTs = 0; rows.forEach(r => { if (r.timestamp && (!minTs || r.timestamp < minTs)) minTs = r.timestamp; });
+  if (!minTs) return null;
+  const e = new Date(minTs); e.setHours(0, 0, 0, 0);
+  const day = e.getDate();
+  if (periodMode === "weekly" && !(day === 1 || (day > 1 && day <= 26 && (day - 1) % 5 === 0))) return null;
+  if (periodMode === "monthly" && day !== 1) return null;
+  const prevDay = new Date(e); prevDay.setDate(prevDay.getDate() - 1);
+  let start;
+  if (periodMode === "daily") start = new Date(prevDay);
+  else if (periodMode === "monthly") start = new Date(prevDay.getFullYear(), prevDay.getMonth(), 1);
+  else { const p = Math.min(6, Math.ceil(prevDay.getDate() / 5)); start = new Date(prevDay.getFullYear(), prevDay.getMonth(), p === 1 ? 1 : (p - 1) * 5 + 1); }
+  return { start, end: prevDay };
+}
+const cm3Ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function cm3GetLookbackRows(rows, periodMode, selectedAcm) {
+  const win = cm3LookbackWindow(rows, periodMode); if (!win) return [];
+  const s0 = win.start.getTime(), e0 = win.end.getTime() + 86399999;
+  const fromMain = (state.allParsedRows || []).filter(r => r.timestamp >= s0 && r.timestamp <= e0);
+  const have = new Set(fromMain.map(r => cm3Ymd(new Date(r.timestamp))));
+  let missing = false;
+  for (let d = new Date(win.start); d <= win.end; d.setDate(d.getDate() + 1)) { if (!have.has(cm3Ymd(d))) { missing = true; break; } }
+  let extra = [];
+  if (missing) {
+    const key = cm3Ymd(win.start) + "|" + cm3Ymd(win.end);
+    if (cm3LookbackCache.has(key)) extra = cm3LookbackCache.get(key);
+    else if (!cm3LookbackLoading.has(key)) {
+      cm3LookbackLoading.add(key);
+      fcLoadGvizQuery(FORECAST_HISTORY_GID, `select * where A >= date '${cm3Ymd(win.start)}' and A <= date '${cm3Ymd(win.end)}'`, 120000)
+        .then(payload => {
+          const infoMap = state.merchantInfoMap || new Map();
+          const parsed = parseMainSheet(payload).map(r => { const i = infoMap.get(r.merchantId); return Object.assign({}, r, { acmName: (i && i.acmName) || r.acmName || "Unassigned" }); });
+          cm3LookbackCache.set(key, parsed);
+        })
+        .catch(() => { cm3LookbackCache.set(key, []); })
+        .finally(() => {
+          cm3LookbackLoading.delete(key);
+          const v = document.getElementById("viewCm3Analyst");
+          if (v && v.classList.contains("active-view") && typeof renderCm3TargetView === "function") renderCm3TargetView();
+        });
+    }
+  }
+  const seen = new Set(); const out = [];
+  fromMain.concat(extra).forEach(r => {
+    if (!r.merchantId || !r.sku) return;
+    if (selectedAcm && selectedAcm !== "All" && r.acmName !== selectedAcm) return;
+    const k = `${cm3Ymd(new Date(r.timestamp))}|${r.merchantId}|${r.sku}`;
+    if (seen.has(k)) return; seen.add(k); out.push(r);
+  });
+  return out;
+}
+
+function cm3BuildCombos(rows, periodMode, sectionKey, lookbackRows) {
+  lookbackRows = lookbackRows || [];
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return null;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows); // بيانات المصدر هنا Main، فالـ CM3 لازم يرجع 4 أيام
   const comboMap = new Map();
-  rows.forEach(r => {
+  const mainPeriods = new Set();
+  rows.concat(lookbackRows).forEach(r => {
     if (!r.timestamp || !r.merchantId || !r.sku) return;
     const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0);
     const period = cm3PeriodLabel(rd, periodMode); const periodSort = cm3PeriodSortKey(rd, periodMode);
@@ -6258,7 +6316,8 @@ function cm3BuildCombos(rows, periodMode, sectionKey) {
   // فلتر الشهر اللي فوق الداشبورد (monthSelect) قبل ما البيانات توصل للدالة
   // دي أصلاً — مش بتحديد ثابت هنا على "آخر شهر في الداتا" زي ما كان قبل كده
   // (ده اللي كان بيخلي اختيار "All Months" مايفرقش حاجة مع Weekly/Daily).
-  const displayPeriods = allPeriodsSorted;
+  rows.forEach(r => { if (r.timestamp) { const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0); mainPeriods.add(cm3PeriodLabel(rd, periodMode)); } });
+  const displayPeriods = lookbackRows.length ? allPeriodsSorted.filter(p => mainPeriods.has(p)) : allPeriodsSorted;
   return { qualifying, allPeriodsSorted, displayPeriods, latestDate };
 }
 
@@ -6340,7 +6399,8 @@ function computeCm3Analysis(periodMode, scope, sectionKey) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   const rows = (state.allParsedRows || []).filter(r => (rowMatchesPeriod(r, selectedMonth, sectionKey)) && (selectedAcm === "All" || r.acmName === selectedAcm));
-  const built = cm3BuildCombos(rows, periodMode, sectionKey); if (!built) return null;
+  const lookbackRows = cm3GetLookbackRows(rows, periodMode, selectedAcm);
+  const built = cm3BuildCombos(rows, periodMode, sectionKey, lookbackRows); if (!built) return null;
   const { qualifying, allPeriodsSorted, displayPeriods, latestDate } = built;
   const matchMatrix = cm3BuildEntityMatrix(qualifying, "match");
   const matchLevelRows = cm3ComputeTransitionRows(matchMatrix, allPeriodsSorted, displayPeriods);
