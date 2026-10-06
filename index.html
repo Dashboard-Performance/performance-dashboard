@@ -28,6 +28,7 @@
             <a class="nav-item-sub" id="navAcmPerf">Performance ACM</a>
             <a class="nav-item-sub" id="navMerchantPerf">Performance Merchant's</a>
             <a class="nav-item-sub" id="navMpSalesPlan">Sales Plan-ACM</a>
+            <a class="nav-item-sub" id="navSpFeedback">Sales Plan - Feedback</a>
           </div>
         </div>
         <div class="nav-dropdown-wrapper">
@@ -1677,6 +1678,79 @@
                   <button id="prevPageMpSalesPlan" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorMpSalesPlan">Page 1 of 1</span>
                   <button id="nextPageMpSalesPlan" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- SALES PLAN - FEEDBACK (under Account Manager) -->
+        <div id="viewSpFeedback" class="view-section hidden">
+          <section class="mb-4">
+            <div class="metrics-grid">
+              <div class="metric-card hover-glow">
+                <div class="metric-title text-red">Matches Below 70% <span class="icon-trend"></span></div>
+                <div class="metric-value text-red" id="spfCount">0</div>
+                <div class="metric-sub text-dim">Placed Pieces Ach% under 70%</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Total Gap Plan <span class="icon-box"></span></div>
+                <div class="metric-value" id="spfGap">0</div>
+                <div class="metric-sub text-dim">Pieces missed MTD vs Placed target</div>
+              </div>
+              <div class="metric-card hover-glow">
+                <div class="metric-title">Remaining Days <span class="icon-calendar"></span></div>
+                <div class="metric-value" id="spfDays">0</div>
+                <div class="metric-sub text-dim">The gap is spread over these days</div>
+              </div>
+              <div class="metric-card hover-glow highlight-card">
+                <div class="metric-title text-green">Feedback Sent <span class="icon-check"></span></div>
+                <div class="metric-value text-green" id="spfDone">0</div>
+                <div class="metric-sub text-dim">Of the matches below, this month</div>
+              </div>
+            </div>
+          </section>
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-purple">
+                  <h2>Sales Plan - Feedback</h2>
+                  <p>Matches with Placed Pieces Ach% under 70% (same data and filters as Sales Plan-ACM). New Target = what is still missing from the monthly target, spread over the remaining days. Saved to the "Sales Plan Feedback" sheet.</p>
+                </div>
+                <div class="table-controls">
+                  <input id="spfSearch" type="search" placeholder="Search Product, Merchant, Category or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="spfTable" style="white-space:nowrap">
+                  <thead>
+                    <tr>
+                      <th>Product ID</th>
+                      <th>Product Name</th>
+                      <th>Merchant ID</th>
+                      <th>Merchant Name</th>
+                      <th>Category</th>
+                      <th>ACM (Owner)</th>
+                      <th class="num" onclick="spfSort('mtdTarget')" style="cursor:pointer" title="Placed pieces: Daily Target x days until yesterday. Click to sort.">Placed - MTD Target</th>
+                      <th class="num" onclick="spfSort('mtdActual')" style="cursor:pointer" title="Placed pieces actual until yesterday. Click to sort.">Placed - Actual</th>
+                      <th class="num" onclick="spfSort('runRate')" style="cursor:pointer" title="Projected month-end Placed. Click to sort.">Placed - Run Rate</th>
+                      <th class="num" onclick="spfSort('achPct')" style="cursor:pointer" title="Actual / MTD Target. Click to sort.">Placed - Ach%</th>
+                      <th class="num" onclick="spfSort('avgDaily')" style="cursor:pointer" title="Placed Actual / days until yesterday. Click to sort.">Avg Placed Daily</th>
+                      <th class="num" onclick="spfSort('gap')" style="cursor:pointer" title="MTD Target - Actual (pieces still missing). Click to sort.">Gap Plan</th>
+                      <th class="num" onclick="spfSort('newDailyTarget')" style="cursor:pointer" title="(Monthly target - Actual MTD) / remaining days. Click to sort.">New Target Placed Daily</th>
+                      <th>Feedback</th>
+                      <th>New Merchant ID</th>
+                      <th>Save</th>
+                    </tr>
+                  </thead>
+                  <tbody id="spfTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="spfRowCount">0 Matches</span>
+                <div class="pager">
+                  <button id="spfPrev" class="btn btn-outline small">Prev</button>
+                  <span id="spfPageInd">Page 1 of 1</span>
+                  <button id="spfNext" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.35";
+const APP_VERSION = "1.3.36";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -685,6 +685,7 @@ const navAllocationLocking = $("navAllocationLocking");
 const navHealthyLocking = $("navHealthyLocking");
 const navHealthyUnlocking = $("navHealthyUnlocking");
 const navMpSalesPlan = $("navMpSalesPlan");
+const navSpFeedback = $("navSpFeedback");
 const navMpMatches = $("navMpMatches");
 const navMpNewMatches = $("navMpNewMatches");
 const navMpDeclineWatch = $("navMpDeclineWatch");
@@ -1028,6 +1029,7 @@ function switchView(viewName) {
   if(navHealthyLocking) navHealthyLocking.classList.remove("active");
   if(navHealthyUnlocking) navHealthyUnlocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
+  if(navSpFeedback) navSpFeedback.classList.remove("active");
   if(navMpMatches) navMpMatches.classList.remove("active");
   if(navMpNewMatches) navMpNewMatches.classList.remove("active");
   if(navMpDeclineWatch) navMpDeclineWatch.classList.remove("active");
@@ -1062,6 +1064,7 @@ function switchView(viewName) {
   else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
   else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); prepareHealthyUnlockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
+  else if (viewName === "spFeedback") { activeSection = $("viewSpFeedback"); if(navSpFeedback) navSpFeedback.classList.add("active"); prepareSpFeedbackData(); }
   else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
   else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); prepareMpNewMatchesData(); }
   else if (viewName === "mpDeclineWatch") { activeSection = $("viewMpDeclineWatch"); if(navMpDeclineWatch) navMpDeclineWatch.classList.add("active"); prepareMpDeclineWatchData(); }
@@ -1123,6 +1126,7 @@ if(navAllocationLocking) navAllocationLocking.addEventListener("click", () => sw
 if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
 if(navHealthyUnlocking) navHealthyUnlocking.addEventListener("click", () => switchView("healthyUnlocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
+if(navSpFeedback) navSpFeedback.addEventListener("click", () => switchView("spFeedback"));
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
 if(navMpDeclineWatch) navMpDeclineWatch.addEventListener("click", () => switchView("mpDeclineWatch"));
@@ -5323,6 +5327,7 @@ async function updateDashboard(rows) {
   if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) prepareMpDeclineWatchData();
+  if ($("viewSpFeedback") && $("viewSpFeedback").classList.contains("active-view")) prepareSpFeedbackData();
   if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
   // الأقسام دي مكنتش بترندر تلقائي مع باقي الفلاتر (كانت بس بترندر أول ما
   // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
@@ -7049,6 +7054,7 @@ function prepareMpSalesPlanData() {
     if($("mpSpCountUpside")) $("mpSpCountUpside").textContent = fmtInt.format(countUpside);
 
     state.mpSalesPlanDataPrepared = mergedData;
+    state.mpSpTiming = { elapsedDays, daysUntilYesterday, currentMonthDays };
     applyMpSalesPlanFilterAndSort();
 }
 
@@ -15122,6 +15128,213 @@ if ($("acmSelect")) $("acmSelect").addEventListener("change", () => {
   if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) renderMpDeclineWatch();
 });
 
+
+// =========================================================================
+// Sales Plan - Feedback (Account Manager > Sales Plan - Feedback)
+// نفس داتا Sales Plan-ACM بالظبط (state.mpSalesPlanDataPrepared: شيت الـ
+// Plan + الأداء الفعلي من الـ Main + CR/DR/ASP) وبنفس فلاتر الشهر/ACM — بس
+// الماتشات اللي Placed Ach% بتاعها أقل من 70%. الـ New Target بيوزّع اللي
+// لسه ناقص من التارجت الشهري على باقي أيام الشهر (من غير ما يغيّر أي حاجة
+// في صفحة Sales Plan-ACM نفسها).
+// =========================================================================
+const SPF_THRESHOLD = 70;
+const SPF_PAGE_SIZE = 25;
+const SPF_OPTIONS = [
+  "Merchant will scale on new target",
+  "Reduce merchant target - add new merchant",
+  "Merchant will stop - add new merchant"
+];
+const SPF_NEEDS_MERCHANT = { "Reduce merchant target - add new merchant": true, "Merchant will stop - add new merchant": true };
+const spfState = { rows: [], filtered: [], page: 0, sortKey: "gap", sortDir: "desc", fb: {}, drafts: {}, loadedMonth: "" };
+
+function spfKey(r) { return r.tagerId + "||" + r.productId; }
+function spfMonthKey() { return new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }).slice(0, 7); }
+function spfTodayKey() { return new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }); }
+
+function prepareSpFeedbackData() {
+  // بنتأكد إن Sales Plan-ACM اتحسب بآخر فلاتر (شهر/ACM) قبل ما ناخد منه.
+  prepareMpSalesPlanData();
+  const t = state.mpSpTiming || { elapsedDays: 1, daysUntilYesterday: 1, currentMonthDays: 30 };
+  const remaining = Math.max(0, t.currentMonthDays - t.daysUntilYesterday); // النهارده لحد آخر الشهر
+  const rows = [];
+  (state.mpSalesPlanDataPrepared || []).forEach(r => {
+    const m = r.metrics.placed;
+    if (!(m.mtdTarget > 0)) return;
+    if (!(m.achievedPct < SPF_THRESHOLD)) return;
+    const gap = Math.max(0, m.mtdTarget - m.mtdActual);
+    const avgDaily = t.daysUntilYesterday > 0 ? m.mtdActual / t.daysUntilYesterday : 0;
+    // اللي لسه ناقص من التارجت الشهري كله ÷ الأيام اللي فاضلة (بيشمل الجاب).
+    const stillNeeded = Math.max(0, m.monthlyTarget - m.mtdActual);
+    const newDailyTarget = remaining > 0 ? Math.ceil(stillNeeded / remaining) : null;
+    rows.push({
+      productId: r.productId, productName: r.productName, tagerId: r.tagerId, merchantName: r.merchantName,
+      category: r.category, acm: r.acm,
+      mtdTarget: m.mtdTarget, mtdActual: m.mtdActual, runRate: m.runRate, achPct: m.achievedPct,
+      avgDaily, gap, oldDailyTarget: m.dailyTarget, newDailyTarget, remainingDays: remaining
+    });
+  });
+  spfState.rows = rows;
+  spfState.remaining = remaining;
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("spfCount", fmtInt.format(rows.length));
+  set("spfGap", fmtInt.format(Math.round(rows.reduce((a, x) => a + x.gap, 0))));
+  set("spfDays", fmtInt.format(remaining));
+  spfApplyFilterAndSort(true);
+  spfLoadFeedback();
+}
+
+function spfSort(key) {
+  if (spfState.sortKey === key) spfState.sortDir = spfState.sortDir === "asc" ? "desc" : "asc";
+  else { spfState.sortKey = key; spfState.sortDir = "desc"; }
+  spfApplyFilterAndSort(true);
+}
+
+function spfApplyFilterAndSort(resetPage) {
+  const q = (($("spfSearch") && $("spfSearch").value) || "").trim().toLowerCase();
+  let data = spfState.rows.slice();
+  if (q) data = data.filter(r => [r.productId, r.productName, r.tagerId, r.merchantName, r.category, r.acm].some(v => String(v || "").toLowerCase().includes(q)));
+  const k = spfState.sortKey, dir = spfState.sortDir === "asc" ? 1 : -1;
+  data.sort((a, b) => ((a[k] ?? -Infinity) - (b[k] ?? -Infinity)) * dir);
+  spfState.filtered = data;
+  if (resetPage) spfState.page = 0;
+  spfRender();
+}
+
+function spfDraftFor(r) {
+  const k = spfKey(r), saved = spfState.fb[k], d = spfState.drafts[k] || {};
+  return {
+    feedback: d.feedback !== undefined ? d.feedback : (saved ? saved.feedback : ""),
+    newMerchantId: d.newMerchantId !== undefined ? d.newMerchantId : (saved ? saved.newMerchantId : "")
+  };
+}
+
+function spfStatusText(r) {
+  const saved = spfState.fb[spfKey(r)];
+  if (!saved) return "";
+  const today = spfTodayKey();
+  return `Saved by ${escapeHtml(saved.by || "")}${saved.at ? " · " + escapeHtml(saved.at) : ""}${saved.date && saved.date !== today ? " (earlier day)" : ""}`;
+}
+
+function spfRowHtml(r) {
+  const k = spfKey(r), d = spfDraftFor(r), needsM = !!SPF_NEEDS_MERCHANT[d.feedback];
+  const saved = spfState.fb[k];
+  const ach = r.achPct;
+  const achCls = ach < 50 ? "red" : "orange";
+  const opts = '<option value="">— Select —</option>' + SPF_OPTIONS.map(o => `<option value="${escapeHtml(o)}"${o === d.feedback ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
+  const inp = "font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit";
+  return `<tr data-spk="${escapeHtml(k)}">
+    <td class="font-mono text-dim">${escapeHtml(r.productId)}</td>
+    <td class="font-bold truncate-cell" style="max-width:220px" title="${escapeHtml(r.productName)}">${escapeHtml(r.productName)}</td>
+    <td class="font-mono">${escapeHtml(r.tagerId)}</td>
+    <td class="truncate-cell" style="max-width:170px" title="${escapeHtml(r.merchantName)}">${escapeHtml(r.merchantName)}</td>
+    <td class="text-dim">${escapeHtml(r.category)}</td>
+    <td>${escapeHtml(r.acm)}</td>
+    <td class="num text-dim">${fmtIntCell(Math.round(r.mtdTarget))}</td>
+    <td class="num font-bold">${fmtIntCell(Math.round(r.mtdActual))}</td>
+    <td class="num">${fmtIntCell(Math.round(r.runRate))}</td>
+    <td class="num"><span class="badge-outline ${achCls}">${r.achPct.toFixed(1)}%</span></td>
+    <td class="num">${r.avgDaily.toFixed(1)}</td>
+    <td class="num text-red font-bold">${fmtIntCell(Math.round(r.gap))}</td>
+    <td class="num font-bold text-purple" title="Old daily target ${r.oldDailyTarget.toFixed(1)} · gap spread over ${r.remainingDays} remaining days">${r.newDailyTarget === null ? "—" : fmtIntCell(r.newDailyTarget)}</td>
+    <td style="min-width:250px"><select class="spf-fb-select" style="${inp};width:100%">${opts}</select></td>
+    <td style="min-width:130px"><input class="spf-fb-merchant" type="text" inputmode="numeric" autocomplete="off" placeholder="${needsM ? "New Merchant ID" : "Not needed"}" value="${escapeHtml(d.newMerchantId)}"${needsM ? "" : " disabled"} style="${inp};width:100%${needsM ? "" : ";opacity:.5"}" /></td>
+    <td style="min-width:150px"><button class="btn btn-outline small spf-fb-save" type="button">${saved ? "Update" : "Save"}</button>
+      <div class="spf-fb-status text-dim" style="font-size:11px;margin-top:3px;min-height:14px">${spfStatusText(r)}</div></td>
+  </tr>`;
+}
+
+function spfRender() {
+  const body = $("spfTableBody"); if (!body) return;
+  const data = spfState.filtered;
+  const totalPages = Math.max(1, Math.ceil(data.length / SPF_PAGE_SIZE));
+  if (spfState.page > totalPages - 1) spfState.page = totalPages - 1;
+  const start = spfState.page * SPF_PAGE_SIZE;
+  const page = data.slice(start, start + SPF_PAGE_SIZE);
+  body.innerHTML = page.length ? page.map(spfRowHtml).join("") : '<tr><td colspan="16" class="text-dim" style="text-align:center;padding:18px">No matches under 70% Placed Ach%.</td></tr>';
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("spfRowCount", `${data.length} Matches`);
+  set("spfPageInd", `Page ${spfState.page + 1} of ${totalPages}`);
+  if ($("spfPrev")) $("spfPrev").disabled = spfState.page === 0;
+  if ($("spfNext")) $("spfNext").disabled = spfState.page >= totalPages - 1;
+  set("spfDone", fmtInt.format(spfState.rows.filter(r => spfState.fb[spfKey(r)]).length));
+}
+
+async function spfLoadFeedback() {
+  if (!MATCHES_FEEDBACK_API_URL) return;
+  const month = spfMonthKey();
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "get_sales_plan_feedback", month })
+    });
+    const data = await resp.json();
+    if (data && data.success && data.items) { spfState.fb = data.items; spfRender(); }
+  } catch (e) { console.warn("spfLoadFeedback", e); }
+}
+
+async function spfSave(tr) {
+  const key = tr.dataset.spk;
+  const r = spfState.rows.find(x => spfKey(x) === key); if (!r) return;
+  const st = tr.querySelector(".spf-fb-status"), btn = tr.querySelector(".spf-fb-save");
+  const setSt = (m, c) => { if (st) { st.textContent = m; st.style.color = c || ""; } };
+  const feedback = tr.querySelector(".spf-fb-select").value;
+  const newMerchantId = (tr.querySelector(".spf-fb-merchant").value || "").trim();
+  if (!feedback) { setSt("Pick a feedback option first", "#B42318"); return; }
+  if (SPF_NEEDS_MERCHANT[feedback] && !newMerchantId) { setSt("New Merchant ID is required", "#B42318"); return; }
+  const user = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null;
+  if (!user) { setSt("Please log in first", "#B42318"); return; }
+  if (!MATCHES_FEEDBACK_API_URL) { setSt("Backend is not configured", "#B42318"); return; }
+  btn.disabled = true; setSt("Saving…", "");
+  try {
+    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "save_sales_plan_feedback", feedback, newMerchantId,
+        userName: user.name || "", userEmail: user.email || "",
+        row: {
+          productId: r.productId, productName: r.productName, merchantId: r.tagerId, merchantName: r.merchantName,
+          category: r.category, acm: r.acm, mtdTarget: r.mtdTarget, mtdActual: r.mtdActual, runRate: r.runRate,
+          achPct: r.achPct, avgDaily: r.avgDaily, gap: r.gap, remainingDays: r.remainingDays,
+          oldDailyTarget: r.oldDailyTarget, newDailyTarget: r.newDailyTarget === null ? 0 : r.newDailyTarget
+        }
+      })
+    });
+    const data = await resp.json();
+    if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
+    spfState.fb[key] = { date: data.date || spfTodayKey(), feedback, newMerchantId: SPF_NEEDS_MERCHANT[feedback] ? newMerchantId : "", newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || "" };
+    delete spfState.drafts[key];
+    spfRender();
+  } catch (err) {
+    setSt("Failed: " + (err && err.message ? err.message : err), "#B42318");
+    btn.disabled = false;
+  }
+}
+
+if ($("spfTableBody")) {
+  $("spfTableBody").addEventListener("click", (e) => {
+    const b = e.target.closest(".spf-fb-save"); if (!b) return;
+    spfSave(b.closest("tr"));
+  });
+  $("spfTableBody").addEventListener("change", (e) => {
+    const sel = e.target.closest(".spf-fb-select"); if (!sel) return;
+    const tr = sel.closest("tr"), k = tr.dataset.spk;
+    const d = spfState.drafts[k] = spfState.drafts[k] || {};
+    d.feedback = sel.value;
+    const mi = tr.querySelector(".spf-fb-merchant"), needs = !!SPF_NEEDS_MERCHANT[sel.value];
+    mi.disabled = !needs; mi.style.opacity = needs ? "" : ".5";
+    mi.placeholder = needs ? "New Merchant ID" : "Not needed";
+    if (!needs) { mi.value = ""; d.newMerchantId = ""; }
+  });
+  $("spfTableBody").addEventListener("input", (e) => {
+    const mi = e.target.closest(".spf-fb-merchant"); if (!mi) return;
+    const k = mi.closest("tr").dataset.spk;
+    (spfState.drafts[k] = spfState.drafts[k] || {}).newMerchantId = mi.value;
+  });
+}
+if ($("spfSearch")) $("spfSearch").addEventListener("input", () => spfApplyFilterAndSort(true));
+if ($("spfPrev")) $("spfPrev").addEventListener("click", () => { if (spfState.page > 0) { spfState.page--; spfRender(); } });
+if ($("spfNext")) $("spfNext").addEventListener("click", () => { spfState.page++; spfRender(); });
+
 // Deep link من الإيميل: ?view=decline يفتح Marketplace > Decline Matches بعد تسجيل الدخول
 (function dwDeepLink() {
   let want = false;
@@ -18101,6 +18314,7 @@ const SECTION_DATE_FILTER_REFRESH = {
   commercialDebundlized: () => prepareCommercialDebundlizedData(),
   targetsCommercial: () => renderTargetsCommercialView(),
   mpSalesPlan: () => prepareMpSalesPlanData(),
+  spFeedback: () => prepareSpFeedbackData(),
   cm3AnalystProducts: () => prepareCm3AnalystProductsData(),
   weeklyInvPurchase: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); },
   weeklyInvSale: () => { renderWeeklyInventoryTable(); renderPurchaseCohortChart(); },
