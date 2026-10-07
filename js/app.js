@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.50";
+const APP_VERSION = "1.3.51";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -1811,8 +1811,16 @@ function gzipSnapshotInWorker(savedAt, data) {
   });
 }
 
+const DRIVE_BACKUP_MIN_INTERVAL_MS = 60 * 60 * 1000; // v1.3.51: نسخة Drive احتياطية مرة في الساعة كحد أقصى لكل متصفح
 async function backupSnapshotToDrive(snapshot) {
   if (!DRIVE_BACKUP_WEBHOOK_URL) return; // disabled
+  // كل متصفح مفتوح كان بيرفع ~7MB (5 طلبات POST) على Apps Script مع كل تغيير في الداتا — ده كان بيزاحم
+  // getLastSync ويسبب 404s وبطء. دلوقتي مرة في الساعة بس (النسخة الاحتياطية مش محتاجة أكتر).
+  try {
+    const lastTs = Number(localStorage.getItem("drive_backup_last_ts") || 0);
+    if (lastTs && Date.now() - lastTs < DRIVE_BACKUP_MIN_INTERVAL_MS) return;
+    localStorage.setItem("drive_backup_last_ts", String(Date.now()));
+  } catch (e) { /* localStorage مش متاح — نكمل عادي */ }
   try {
     const savedAt = Date.now();
     let gz = null;
@@ -18065,6 +18073,8 @@ async function fetchOneLastSyncSource(baseUrl, sourceLabel) {
       const text = await ungzipFromBase64(json.gzBase64);
       const parsed = JSON.parse(text);
       sheets = parsed.sheets;
+      // v1.3.51: الباك اند بيبعت الشيتات المتطابقة مرة واحدة + {__alias: gid} — بنفكها هنا.
+      if (sheets) Object.keys(sheets).forEach((g) => { const sh = sheets[g]; if (sh && sh.__alias && sheets[sh.__alias]) sheets[g] = sheets[sh.__alias]; });
     } else {
       sheets = json.sheets;
     }
@@ -18108,7 +18118,7 @@ async function fetchAllSheetsViaBackend() {
   // فرصة أكبر بكتير للفشل العابر إنه يعدي لوحده قبل ما نظهر أي حاجة لليوزر.
   // كمان بطلنا نطبع console.warn لكل محاولة وسيطة — لو المحاولة اللي بعدها
   // نجحت، مفيش أي داعي أصلاً نسجل حاجة في الكونسول (نجحت بصمت زي ما المفروض).
-  const MAX_ATTEMPTS = 5;
+  const MAX_ATTEMPTS = 3; // v1.3.51: كانت 5 — كل محاولة ممكن تاخد دقيقة لو Apps Script بطيء، فالشاشة كانت بتفضل معلقة
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -18520,12 +18530,16 @@ async function loadData(isManualRefresh = false) {
   const cache = await loadDataFromCache();
   let paintedFromCache = false;
 
-  if (cache && !isManualRefresh) {
-    applySnapshotToState(cache.data);
-    await renderCurrentState();
+  // v1.3.51: حتى في الرفرش اليدوي لو فيه كاش بنعرضه فورًا بدل شاشة "Syncing" اللي بتحجب كل حاجة
+  // لحد ما كل المصادر تخلص (ممكن أكتر من دقيقة لو Apps Script بطيء).
+  if (cache) {
+    if (!isManualRefresh || !(state.allParsedRows && state.allParsedRows.length)) {
+      applySnapshotToState(cache.data);
+      await renderCurrentState();
+    }
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
-    setSyncStatus(`Cached — ${formatCacheTimestamp(cache.savedAt)}`);
+    setSyncStatus(isManualRefresh ? "Refreshing… (showing current data)" : `Cached — ${formatCacheTimestamp(cache.savedAt)}`);
     paintedFromCache = true;
   } else {
     if (loadingEl) loadingEl.classList.remove("hidden");
@@ -18972,7 +18986,7 @@ function downloadTableAsCsv(tableEl, fileName) {
 // v1.1.47: من 90 ثانية لـ 30 ثانية — طلب خفيف جدًا (getLastSyncMeta بس،
 // من غير أي تحميل داتا)، مفيش أي داعي نستنى دقيقة ونص عشان نكتشف إن فيه
 // نسخة جديدة اتسحبت.
-const LAST_SYNC_META_POLL_MS = 30 * 1000;
+const LAST_SYNC_META_POLL_MS = 60 * 1000; // v1.3.51: كانت 30 ثانية — كل تاب مفتوح كان بيضرب Apps Script كل نص دقيقة
 let lastSyncMetaBaseline = null;
 let lastSyncMetaCheckInFlight = false;
 
