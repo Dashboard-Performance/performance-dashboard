@@ -403,7 +403,7 @@ async function loadMetabaseSheetOnce(gid) {
     // An HTTP error (Metabase answered) is a real error, not a CORS problem -> no proxy.
     if (!SYNC_CDN_URL || directErr.httpStatus) throw directErr;
     console.warn("[Metabase] direct fetch failed for " + src.label + " (" + (directErr && directErr.message) + ") — trying Worker proxy.");
-    text = await metabaseFetchText(SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid), gid);
+    text = await metabaseFetchText(SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + "&url=" + encodeURIComponent(src.url), gid);
   }
   if (src.format === "csv") return metabaseCsvToGviz(text, gid);
   let parsed;
