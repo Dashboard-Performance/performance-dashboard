@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.44";
+const APP_VERSION = "1.3.47";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -85,7 +85,7 @@ const MERCHANT_SEG_HISTORY_GIDS = ["693757028"];
 // المستخدم لسه يقدر يغيّر لأي شهر من فلتر التاريخ فوق الجدول عادي. خليها "" لو
 // يومًا عايزها ترجع تفتح على الشهر الحالي تلقائيًا زي الأول. الصيغة لازم تطابق
 // شكل الشهر المعروض بالظبط: "Month YYYY" (زي "September 2026").
-const INCENTIVE_DEFAULT_MONTH = "September 2026";
+const INCENTIVE_DEFAULT_MONTH = ""; // فاضية = الشهر الحالي تلقائيًا (من تاب Merchant Segmentation 620123165)
 
 // شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
 // في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
@@ -18404,6 +18404,21 @@ function applySnapshotToState(snapshot) {
   }
   state._stSourceFingerprint = newStFingerprint;
 }
+// لو المزامنة فشلت (شبكة/تاب كان في الخلفية/Apps Script مشغول)، منستناش الـ 30 دقيقة:
+// بنعيد المحاولة تلقائي بفواصل متزايدة (15ث، 45ث، 2د، 5د، 10د) لحد ما تنجح.
+let syncRetryAttempt = 0; let syncRetryTimer = null;
+function scheduleSyncRetry(errMsg) {
+  const el = $("sidebarUpdated"); if (el && errMsg) el.title = "Last error: " + errMsg;
+  clearTimeout(syncRetryTimer);
+  const delays = [15000, 45000, 120000, 300000, 600000];
+  const d = delays[Math.min(syncRetryAttempt, delays.length - 1)]; syncRetryAttempt++;
+  const fire = () => { if (!isTabVisible()) { syncRetryTimer = setTimeout(fire, 30000); return; } loadData(false); };
+  syncRetryTimer = setTimeout(fire, d);
+}
+function clearSyncRetry() {
+  syncRetryAttempt = 0; clearTimeout(syncRetryTimer);
+  const el = $("sidebarUpdated"); if (el) el.title = "";
+}
 async function renderCurrentState() {
   populateFilters(state.allParsedRows);
   await applyFilters();
@@ -18488,11 +18503,13 @@ async function loadData(isManualRefresh = false) {
     } else {
       setSyncStatus(`Up to date — ${formatCacheTimestamp(syncTs)}`);
     }
+    clearSyncRetry();
   } catch (error) {
     console.error("System Sync Error:", error);
+    scheduleSyncRetry(error && error.message ? error.message : String(error));
     if (paintedFromCache) {
       // Already showing cached data — just report the failed sync quietly.
-      setSyncStatus(`Sync failed — showing cache from ${formatCacheTimestamp(cache.savedAt)}`);
+      setSyncStatus(`Sync failed — retrying… (cache from ${formatCacheTimestamp(cache.savedAt)})`);
       return;
     }
     if (cache) {
@@ -18502,14 +18519,14 @@ async function loadData(isManualRefresh = false) {
       await renderCurrentState();
       if (loadingEl) loadingEl.classList.add("hidden");
       if (errorEl) errorEl.classList.add("hidden");
-      setSyncStatus(`Sync failed — showing cache from ${formatCacheTimestamp(cache.savedAt)}`);
+      setSyncStatus(`Sync failed — retrying… (cache from ${formatCacheTimestamp(cache.savedAt)})`);
       return;
     }
     // No cache at all and the fetch failed — nothing to fall back to.
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.remove("hidden");
     if (errorMsg) errorMsg.textContent = error.message;
-    setSyncStatus("Sync failed");
+    setSyncStatus("Sync failed — retrying…");
   }
 }
 
@@ -18989,7 +19006,7 @@ function scheduleAutoRefresh() {
 // لو حصل تغيير حقيقي وهو بعيد عن التاب، بيشوفه على طول أول ما يرجعله.
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") { lastSyncMetaPollTick(); mainMetaPollTick(); }
+    if (document.visibilityState === "visible") { if (syncRetryAttempt > 0) { clearTimeout(syncRetryTimer); loadData(false); } lastSyncMetaPollTick(); mainMetaPollTick(); }
   });
 }
 
