@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.48";
+const APP_VERSION = "1.3.49";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -395,16 +395,11 @@ async function metabaseFetchText(url, gid) {
 async function loadMetabaseSheetOnce(gid) {
   const src = METABASE_SOURCES[gid];
   if (!src) throw new Error("No Metabase source configured for GID " + gid);
-  let text;
-  try {
-    text = await metabaseFetchText(src.url, gid);
-  } catch (directErr) {
-    // CORS / network failure on the direct call -> try the Worker proxy (allow-listed on the worker side).
-    // An HTTP error (Metabase answered) is a real error, not a CORS problem -> no proxy.
-    if (!SYNC_CDN_URL || directErr.httpStatus) throw directErr;
-    console.warn("[Metabase] direct fetch failed for " + src.label + " (" + (directErr && directErr.message) + ") — trying Worker proxy.");
-    text = await metabaseFetchText(SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + "&url=" + encodeURIComponent(src.url), gid);
-  }
+  // metabase.taager.com sends no CORS headers, so a direct browser call is always blocked from the
+  // dashboard origin -> every Metabase read goes through the Worker proxy (allow-listed on the worker side).
+  if (!SYNC_CDN_URL) throw new Error("Worker URL (SYNC_CDN_URL) is not configured — cannot reach Metabase.");
+  const text = await metabaseFetchText(
+    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + "&url=" + encodeURIComponent(src.url), gid);
   if (src.format === "csv") return metabaseCsvToGviz(text, gid);
   let parsed;
   try { parsed = JSON.parse(text); }
@@ -19007,17 +19002,7 @@ let mainMetaBaseline = null;
 let mainMetaCheckInFlight = false;
 
 async function fetchMainMeta() {
-  return null; // v1.3.48: Main بقى من Metabase — مفيش Worker meta. التحديث بيجي من الرفرش التلقائي (كل نص ساعة) + getLastSyncMeta + الرفرش اليدوي.
-  // eslint-disable-next-line no-unreachable
-  if (!SYNC_CDN_URL) return null;
-  try {
-    const res = await fetch(`${SYNC_CDN_URL}?action=getMainMeta`, { method: "GET", cache: "no-store" });
-    const json = await res.json();
-    if (!json || !json.success) return null;
-    return { stable: !!json.stable, fetchedAt: json.fetchedAt || null };
-  } catch (e) {
-    return null;
-  }
+  return null; // v1.3.48: Main بقى من Metabase — مفيش Worker meta ولا طلبات. التحديث من الرفرش التلقائي + getLastSyncMeta + الرفرش اليدوي.
 }
 
 async function mainMetaPollTick() {
