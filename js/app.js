@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.49";
+const APP_VERSION = "1.3.50";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -282,7 +282,7 @@ const METABASE_SOURCES = {
 };
 const METABASE_TIMEOUT_MS = 180000;
 const METABASE_CACHE_TTL_MS = 60 * 1000;
-const METABASE_CONCURRENCY = 4;
+const METABASE_CONCURRENCY = 6;
 const metabaseMemCache = new Map();   // gid -> { at, payload }
 const metabaseInFlight = new Map();   // gid -> Promise (dedupe parallel callers)
 
@@ -18188,6 +18188,12 @@ async function fetchAllSheetsSnapshot() {
   let sheets;
   const staleGids = []; // GIDs that failed every attempt and fell back to old data
 
+  // v1.3.50: Metabase بيبدأ تحميله فورًا وبالتوازي مع Apps Script (كان بيستنى Apps Script يخلص
+  // الأول = الوقتين بيتجمعوا). loadAllMetabaseSources مبترميش أخطاء، فمفيش unhandled rejection.
+  const mbSheets = {};
+  const mbStale = [];
+  const mbPromise = loadAllMetabaseSources(mbSheets, mbStale);
+
   if (DATA_API_URL) {
     // Preferred path: ONE request, read server-side via SpreadsheetApp —
     // no gviz, no rate limiting.
@@ -18273,7 +18279,9 @@ async function fetchAllSheetsSnapshot() {
   // بنمسح أي نسخة Apps Script قديمة عمدًا (زي ما كان بيحصل مع الـ Worker) عشان
   // الداشبورد يرمي "No data streams detected." بدل ما يعرض داتا قديمة/جزئية.
   delete sheets[MAIN_GID];
-  await loadAllMetabaseSources(sheets, staleGids);
+  await mbPromise;
+  Object.assign(sheets, mbSheets);
+  mbStale.forEach(g => staleGids.push(g));
 
   const mainPayload = sheets[MAIN_GID];
   const targetsPayload = sheets[TARGETS_GID];
