@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.51";
+const APP_VERSION = "1.3.53";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14905,9 +14905,9 @@ document.addEventListener("DOMContentLoaded", () => {
       state.stFilters = { begInv: null, startSale: null, endSale: null, lastInboundStatus: "" };
       if ($("stLastInboundStatusSelect")) $("stLastInboundStatusSelect").value = "";
 
-      stRunHeavyWorkWithProgress(() => {
-        prepareSellthroughData();
-      });
+      const runHeavy = () => stRunHeavyWorkWithProgress(() => { prepareSellthroughData(); });
+      if (country === "IRQ" && !irqDataLoaded) ensureIrqDataLoaded().then(runHeavy, runHeavy);
+      else runHeavy();
 
       // نفس مدة أنيميشن الـ progress bar فوق (55% -> setTimeout 20ms -> 100%)
       // + هامش أمان بسيط قبل ما نفك القفل، عشان اليوزر مايقدرش يضغط تاني وهي
@@ -18144,6 +18144,67 @@ async function fetchAllSheetsViaBackend() {
   throw lastErr;
 }
 
+// -------------------------------------------------------------------------
+// v1.3.53 — شيتات العراق (5 شيتات ~25% من حجم ردّ Apps Script) اتفصلت عن الرد الأساسي:
+// بتتحمّل في الخلفية مباشرة بعد ما الداتا الأساسية تظهر، ومفيش حاجة في الشاشة الأساسية بتستناها.
+// لو اليوزر فتح تبديل IRQ قبل ما تخلص، التبديل بيستنى تحميلها الأول ثم بيكمل.
+// -------------------------------------------------------------------------
+let irqDataLoaded = false;
+let irqLoadPromise = null;
+
+async function fetchIrqSheetsOnce() {
+  if (!DATA_API_URL) return {};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${DATA_API_URL}?action=getLastSync&group=irq`, { method: "GET", signal: controller.signal, cache: "no-store" });
+    let json;
+    try { json = await res.json(); }
+    catch (parseErr) { throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message) + " [irq]"); }
+    if (!json.success) throw new Error((json.message || "getLastSync irq failed") + " [irq]");
+    if (json.gzBase64) {
+      const parsed = JSON.parse(await ungzipFromBase64(json.gzBase64));
+      return parsed.sheets || {};
+    }
+    return json.sheets || {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function applyIrqSheetsToState(sheets) {
+  if (!sheets) return;
+  if (sheets[IRQ_INBOUND_GID]) state.inboundRowsIrq = parseIrqInboundSheet(sheets[IRQ_INBOUND_GID]);
+  if (sheets[IRQ_BEGIN_INV_GID]) state.metabaseBeginningInventoryIrq = parseIrqBeginningInventorySheet(sheets[IRQ_BEGIN_INV_GID]);
+  if (sheets[IRQ_SELLTHROUGH_NEEDED_GID]) state.metabaseSellthroughNeededIrq = parseSellthroughNeededSheet(sheets[IRQ_SELLTHROUGH_NEEDED_GID]);
+  if (sheets[IRQ_COGS_GID]) state.cogsMapIrq = parseCogsSheet(sheets[IRQ_COGS_GID]);
+  if (sheets[IRQ_INVENTORY_GID]) state.irqInventoryMap = parseIrqInventorySheet(sheets[IRQ_INVENTORY_GID]);
+  // نفس منطق applySnapshotToState: لو مصادر الـ Sellthrough اتغيّرت نبطّل الجدول المحسوب.
+  const fp = computeSellthroughSourceFingerprint();
+  if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== fp) state.sellthroughPrepared = false;
+  state._stSourceFingerprint = fp;
+}
+
+function ensureIrqDataLoaded() {
+  if (irqLoadPromise) return irqLoadPromise;
+  irqLoadPromise = (async () => {
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const sheets = await fetchIrqSheetsOnce();
+        applyIrqSheetsToState(sheets);
+        irqDataLoaded = true;
+        return;
+      } catch (e) {
+        lastErr = e;
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+    }
+    console.warn("[IRQ] background load failed (non-fatal):", lastErr && lastErr.message);
+  })().finally(() => { irqLoadPromise = null; });
+  return irqLoadPromise;
+}
+
 // Human-readable names for the sync-status banner when a specific sheet
 // fails to refresh (so "didn't update" is visible instead of silent).
 const GID_LABELS = {
@@ -18557,6 +18618,7 @@ async function loadData(isManualRefresh = false) {
     applySnapshotToState(snapshot);
     await renderCurrentState();
     saveDataToCache(snapshot);
+    ensureIrqDataLoaded(); // v1.3.53: شيتات العراق في الخلفية (مش بتحجب أي حاجة)
     // فire-and-forget بالنسبة لباقي loadData() (متستناش قبل ما تكمل)، لكن
     // اتعمل sequence هنا (backup الأول وبعدين publish) بدل ما الاتنين يطلقوا
     // POSTs على نفس Apps Script deployment في نفس اللحظة بالظبط — ده كان بيرفع
@@ -19074,18 +19136,15 @@ async function lastSyncMetaPollTick() {
 // ساعة قبل كده). بيتظبط على أقرب :00 أو :30 جاية عشان كل اليوزرز يترفرشوا
 // مع بعض في نفس اللحظة (زي منطق "كل اليوزرز يشوفوا نفس التحديث" القديم).
 // -------------------------------------------------------------------------
-const AUTO_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // نص ساعة
+const AUTO_REFRESH_INTERVAL_MS = 20 * 60 * 1000; // v1.3.52: كل 20 دقيقة (كانت 30)
 function scheduleAutoRefresh() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setSeconds(0, 0);
-  const currentMinutes = next.getMinutes();
-  next.setMinutes(currentMinutes < 30 ? 30 : 0);
-  if (currentMinutes >= 30) next.setHours(next.getHours() + 1);
-  const delay = next.getTime() - now.getTime();
+  // بيتظبط على أقرب مضاعف لـ 20 دقيقة على الساعة (:00 / :20 / :40) عشان كل التابات المفتوحة
+  // (عند كل اليوزرز) تترفرش في نفس اللحظة تقريبًا.
+  const now = Date.now();
+  const delay = AUTO_REFRESH_INTERVAL_MS - (now % AUTO_REFRESH_INTERVAL_MS);
   setTimeout(() => {
     if (isTabVisible()) loadData(false);
-    setInterval(() => { if (isTabVisible()) loadData(false); }, AUTO_REFRESH_INTERVAL_MS); // كل نص ساعة ثابتة من بعدها
+    setInterval(() => { if (isTabVisible()) loadData(false); }, AUTO_REFRESH_INTERVAL_MS);
   }, delay);
 }
 
