@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.47";
+const APP_VERSION = "1.3.48";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -25,7 +25,6 @@ function hideLoadingShowError(msg) {
 const SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 const MAIN_GID = "2099497960";
 const TARGETS_GID = "115442405";
-const SEGMENTATION_GID = "891214324";
 const TARGETS_ACM_GID = "2042936628";
 const INVENTORY_GID = "1780730573";
 const PRODUCTS_GID = "1779314157";
@@ -72,16 +71,9 @@ const PRICE_HISTORY_GID = "1968659230";
 // (Performance Merchant's) اللي فاضلة زي ما هي.
 const MERCHANT_SEGMENTATION_GID = "620123165";
 
-// تابات شهور سابقة بنفس أعمدة Merchant Segmentation بالظبط (snapshot أرشيفي لكل
-// شهر — التاب الأساسي فوق بيتكتب فوقه كل شهر، فالشهور القديمة بتتحفظ هنا). دي
-// مصدر إضافي لـ "Incentive Merchants" بس عشان فلتر الشهر يقدر يقرا شهور فاتت —
-// مش بتأثر على جدول Merchant Segmentation & Projections (اللي فاضل على التاب
-// الأساسي لوحده). أضف الـ GID بتاع أي شهر جديد هنا.
-// 693757028 = September 2026.
-const MERCHANT_SEG_HISTORY_GIDS = ["693757028"];
 
 // الشهر اللي لوحة Incentive Merchants بتفتح عليه افتراضيًا (من غير ما المستخدم
-// يعمل فلتر) — بطلب صريح: أول ما تفتح تعرض شهر 9 (داتا تاب الأرشيف 693757028).
+// يعمل فلتر) — بطلب صريح: أول ما تفتح تعرض شهر معين.
 // المستخدم لسه يقدر يغيّر لأي شهر من فلتر التاريخ فوق الجدول عادي. خليها "" لو
 // يومًا عايزها ترجع تفتح على الشهر الحالي تلقائيًا زي الأول. الصيغة لازم تطابق
 // شكل الشهر المعروض بالظبط: "Month YYYY" (زي "September 2026").
@@ -260,6 +252,221 @@ const PUBLISH_COMPUTED_API_URL = MATCHES_FEEDBACK_API_URL;
 // كهامش أمان لحد ما أول Sync مركزي يحصل ويبقى القراية بعد كده مجرد فتح ملف
 // جاهز من Drive (سريع جدًا).
 const DATA_API_TIMEOUT_MS = 90000;
+
+// =========================================================================
+// v1.3.48 — METABASE API SOURCES
+// -------------------------------------------------------------------------
+// الـ GIDs دي بقت بتتقرا من Metabase مباشرة (Public API links) بدل Google
+// Sheets (gviz). الـ key هو نفس الـ GID القديم عشان كل الكود اللي بيستخدمه
+// (sheets[GID] / parse*Sheet) يفضل شغال من غير أي تغيير — الـ adapter تحت
+// بيحوّل رد Metabase (CSV أو JSON) لنفس شكل gviz بالظبط: { table: { cols,
+// rows: [{ c: [{v}|null, ...] }] } } — الأعمدة بتتقرا بالترتيب (positional) زي
+// الأول، فترتيب الأعمدة في سؤال Metabase لازم يفضل زي الشيت القديم.
+//   • لو الـ fetch المباشر فشل (CORS/شبكة) بنجرب البروكسي بتاع الـ Worker
+//     (?action=metabase&gid=...) لو SYNC_CDN_URL متظبط.
+//   • كاش في الميموري 60 ثانية عشان أكتر من loadData متتالية ما تضربش Metabase.
+// لإضافة/تغيير مصدر: عدّل الـ url هنا (وفي METABASE_URLS_ALLOWLIST بتاع الـ Worker).
+// =========================================================================
+const METABASE_SOURCES = {
+  [MAIN_GID]:                 { label: "Main",                     format: "csv",  url: "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv" },
+  [PRODUCTS_GID]:             { label: "Products",                 format: "json", url: "https://metabase.taager.com/public/question/7d6164a3-d064-445f-98cf-b55623a25957.json" },
+  [NEW_SEGMENTATION_GID]:     { label: "New Segmentation",         format: "json", url: "https://metabase.taager.com/public/question/261252c6-61b8-4b74-a3d5-e3a4dd1ff2f4.json" },
+  [PRODUCTS_INFO_GID]:        { label: "Products Info",            format: "json", url: "https://metabase.taager.com/public/question/e36159b1-ba09-4374-a982-636bd91de1df.json" },
+  [BEGIN_INV_GID]:            { label: "Beginning Inventory",      format: "json", url: "https://metabase.taager.com/public/question/d94cd9a2-79e9-4354-8b61-ba306e19a8a1.json" },
+  [SELLTHROUGH_NEEDED_GID]:   { label: "Sell-through Needed",      format: "json", url: "https://metabase.taager.com/public/question/c56380be-b777-4785-ba01-8dac06da65b9.json" },
+  [PRODUCTS_DEBUNDLE_MAP_GID]:{ label: "Products Debundle Map",    format: "json", url: "https://metabase.taager.com/public/question/022be39b-ece7-4252-ba69-62f034369919.json" },
+  [AVAILABILITY_LOCKING_GID]: { label: "Availability Locking",     format: "json", url: "https://metabase.taager.com/public/question/6048f9a4-87b4-4a88-88d9-c2ac5e81e492.json" },
+  [MERCHANT_SKU_DAILY_GID]:   { label: "Merchant SKU Daily",       format: "json", url: "https://metabase.taager.com/public/question/fae5e3b3-770d-4263-84cd-5ec7bcb3235b.json" },
+  [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json", url: "https://metabase.taager.com/api/public/card/5761d362-9da0-4f6a-9c83-2d569d8c5f38/query/json" },
+  [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json", url: "https://metabase.taager.com/public/question/f5b9a1ab-01b3-46b4-a8b8-cf55354fcca3.json" }
+};
+const METABASE_TIMEOUT_MS = 180000;
+const METABASE_CACHE_TTL_MS = 60 * 1000;
+const METABASE_CONCURRENCY = 4;
+const metabaseMemCache = new Map();   // gid -> { at, payload }
+const metabaseInFlight = new Map();   // gid -> Promise (dedupe parallel callers)
+
+// RFC-4180 CSV parser (quotes, escaped quotes, CRLF, BOM). Returns array of string arrays.
+function metabaseParseCsv(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = [];
+  let row = [], field = "", i = 0, inQuotes = false;
+  const n = text.length;
+  while (i < n) {
+    const ch = text.charCodeAt(i);
+    if (inQuotes) {
+      if (ch === 34) { // "
+        if (text.charCodeAt(i + 1) === 34) { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      // fast-forward to the next quote
+      let j = text.indexOf('"', i);
+      if (j === -1) j = n;
+      field += text.slice(i, j); i = j; continue;
+    }
+    if (ch === 34) { inQuotes = true; i++; continue; }
+    if (ch === 44) { row.push(field); field = ""; i++; continue; }        // ,
+    if (ch === 10 || ch === 13) {                                          // \n or \r
+      row.push(field); field = "";
+      rows.push(row); row = [];
+      if (ch === 13 && text.charCodeAt(i + 1) === 10) i++;
+      i++; continue;
+    }
+    field += text[i]; i++;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Date-time strings at exactly midnight ("2026-09-30T00:00:00Z") -> "2026-09-30".
+const METABASE_MIDNIGHT_RE = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?$/;
+function metabaseCell(val) {
+  if (val === null || val === undefined || val === "") return null;
+  if (typeof val === "number") return { v: val };
+  if (typeof val === "boolean") return { v: val, f: val ? "TRUE" : "FALSE" };
+  if (typeof val === "object") return { v: JSON.stringify(val) };
+  const str = String(val);
+  const m = METABASE_MIDNIGHT_RE.exec(str);
+  return { v: m ? m[1] : str };
+}
+
+function metabaseHeaderCols(labels) {
+  return labels.map((label, i) => ({ id: "C" + i, label: String(label == null ? "" : label), type: "string" }));
+}
+
+// Metabase JSON (array of row objects) -> gviz-shaped payload.
+function metabaseJsonToGviz(arr, gid) {
+  if (!Array.isArray(arr)) {
+    const msg = arr && (arr.error || arr.message || arr.cause);
+    throw new Error("Metabase returned a non-array response" + (msg ? ": " + msg : "") + " (gid " + gid + ")");
+  }
+  if (arr.length === 0) return { table: { cols: [], rows: [] } };
+  // column order = key order of the first row (Metabase keeps the query's column order)
+  const keys = Object.keys(arr[0]);
+  const rows = new Array(arr.length);
+  for (let r = 0; r < arr.length; r++) {
+    const obj = arr[r];
+    const c = new Array(keys.length);
+    for (let k = 0; k < keys.length; k++) c[k] = metabaseCell(obj[keys[k]]);
+    rows[r] = { c };
+  }
+  return { table: { cols: metabaseHeaderCols(keys), rows } };
+}
+
+// Metabase CSV -> gviz-shaped payload. Header row -> cols labels (data rows only in rows),
+// exactly like gviz does when the sheet has a header row.
+function metabaseCsvToGviz(text, gid) {
+  const head = text.slice(0, 200).trim();
+  if (head.charAt(0) === "{" || head.charAt(0) === "<") {
+    throw new Error("Metabase returned a non-CSV response (gid " + gid + "): " + head.slice(0, 120));
+  }
+  const grid = metabaseParseCsv(text);
+  if (grid.length === 0) return { table: { cols: [], rows: [] } };
+  const labels = grid[0];
+  const rows = [];
+  for (let r = 1; r < grid.length; r++) {
+    const line = grid[r];
+    if (line.length === 1 && line[0] === "") continue; // blank line
+    const c = new Array(line.length);
+    for (let k = 0; k < line.length; k++) c[k] = metabaseCell(line[k]);
+    rows.push({ c });
+  }
+  return { table: { cols: metabaseHeaderCols(labels), rows } };
+}
+
+async function metabaseFetchText(url, gid) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), METABASE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: "GET", cache: "no-store", signal: controller.signal });
+    if (!res.ok) {
+      let body = "";
+      try { body = (await res.text()).replace(/\s+/g, " ").slice(0, 300); } catch (e) {}
+      const err = new Error("HTTP " + res.status + " from " + (url.indexOf(SYNC_CDN_URL || "\u0000") === 0 ? "worker proxy" : "Metabase") + " (gid " + gid + ")" + (body ? " — " + body : ""));
+      err.httpStatus = res.status;
+      throw err;
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadMetabaseSheetOnce(gid) {
+  const src = METABASE_SOURCES[gid];
+  if (!src) throw new Error("No Metabase source configured for GID " + gid);
+  let text;
+  try {
+    text = await metabaseFetchText(src.url, gid);
+  } catch (directErr) {
+    // CORS / network failure on the direct call -> try the Worker proxy (allow-listed on the worker side).
+    // An HTTP error (Metabase answered) is a real error, not a CORS problem -> no proxy.
+    if (!SYNC_CDN_URL || directErr.httpStatus) throw directErr;
+    console.warn("[Metabase] direct fetch failed for " + src.label + " (" + (directErr && directErr.message) + ") — trying Worker proxy.");
+    text = await metabaseFetchText(SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid), gid);
+  }
+  if (src.format === "csv") return metabaseCsvToGviz(text, gid);
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (e) { throw new Error("Metabase returned invalid JSON for " + src.label + " (gid " + gid + "): " + text.slice(0, 120)); }
+  return metabaseJsonToGviz(parsed, gid);
+}
+
+function loadMetabaseSheet(gid) {
+  const cached = metabaseMemCache.get(gid);
+  if (cached && (Date.now() - cached.at) < METABASE_CACHE_TTL_MS) return Promise.resolve(cached.payload);
+  if (metabaseInFlight.has(gid)) return metabaseInFlight.get(gid);
+  const p = loadMetabaseSheetOnce(gid).then((payload) => {
+    metabaseMemCache.set(gid, { at: Date.now(), payload });
+    return payload;
+  }).finally(() => { metabaseInFlight.delete(gid); });
+  metabaseInFlight.set(gid, p);
+  return p;
+}
+
+// Loads every Metabase source into `sheets` (mutates it). Failures never throw here:
+// a failed source keeps whatever `sheets` already had (nothing, normally) and is
+// reported in `staleGids` so the sync banner can say which sheet didn't refresh.
+async function loadAllMetabaseSources(sheets, staleGids) {
+  const gids = Object.keys(METABASE_SOURCES);
+  let next = 0;
+  const worker = async () => {
+    while (next < gids.length) {
+      const gid = gids[next++];
+      try {
+        sheets[gid] = await loadMetabaseSheet(gid);
+      } catch (err) {
+        console.warn("[Metabase] could not load " + METABASE_SOURCES[gid].label + " (gid " + gid + "):", err);
+        if (gid !== MAIN_GID) staleGids.push(gid);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(METABASE_CONCURRENCY, gids.length) }, worker));
+}
+
+// Console helper — run  __metabaseDebug()  to see rows/columns per source (verifies column order).
+if (typeof window !== "undefined") {
+  window.__metabaseDebug = async function () {
+    const out = [];
+    for (const gid of Object.keys(METABASE_SOURCES)) {
+      const src = METABASE_SOURCES[gid];
+      try {
+        const t0 = performance.now();
+        const payload = await loadMetabaseSheet(gid);
+        out.push({ source: src.label, gid, format: src.format, rows: payload.table.rows.length, cols: payload.table.cols.length, ms: Math.round(performance.now() - t0), columns: payload.table.cols.map(c => c.label).join(" | "), firstRow: (payload.table.rows[0] ? payload.table.rows[0].c.map(x => x ? x.v : null) : []) });
+      } catch (e) {
+        out.push({ source: src.label, gid, format: src.format, error: (e && e.message) || String(e) });
+      }
+    }
+    console.table(out.map(o => ({ source: o.source, gid: o.gid, format: o.format, rows: o.rows, cols: o.cols, ms: o.ms, error: o.error })));
+    const report = out.map(o => o.error
+      ? "## " + o.source + " (" + o.gid + ") ERROR: " + o.error
+      : "## " + o.source + " (" + o.gid + ") " + o.rows + " rows x " + o.cols + " cols\n" + o.columns.split(" | ").map((n, i) => i + ": " + n).join("\n")
+    ).join("\n\n");
+    console.log("=== COPY EVERYTHING BELOW THIS LINE ===\n" + report);
+    return out;
+  };
+}
 // -------------------------------------------------------------------------
 // SEGMENTATION PANEL (Admin Panel) — نفس الحسبة اللي في شيت EGY بالظبط
 // (Target/Actual/Achievement% لشهر يوليو)، بس بتتقرأ لايف من شيت
@@ -766,8 +973,6 @@ revealSyncStatusNavIfManager();
 const SYNC_STATUS_TARGETS = [
   // getMainMeta بدل getMain — نسخة خفيفة (metadata بس، من غير الجدول
   // الضخم كامل) عشان مودال التشخيص ميحملش عشرات الـ MB كل مرة يتفتح.
-  { key: "main", label: "Main (2099497960)", action: "getMainMeta", lightweight: true, base: "worker" },
-  { key: "confirmedByDay", label: "Confirmed by Day", action: "getConfirmedByDay", base: "worker" },
   { key: "incentiveMerchants", label: "Incentive Merchants", action: "getIncentiveMerchants", base: "worker" },
   // v1.1.46: الـ 21 شيت الباقيين (Inventory وغيره) بقوا كلهم بيتقروا من
   // Apps Script بس (مش متقسمين مع الـ Worker زي الأول) — الـ Worker كان
@@ -1363,6 +1568,8 @@ function loadSheetViaJsonp(gid) {
 // recurring "Timeout on GID: ..." error, because most timeouts are
 // transient (one bad round-trip), not permanent failures.
 function loadSheetWithRetry(gid, attemptsLeft = SHEET_LOAD_MAX_ATTEMPTS, attemptNumber = 1) {
+  // v1.3.48: GIDs that moved to Metabase never go through gviz.
+  if (METABASE_SOURCES[gid]) return loadMetabaseSheet(gid);
   return limitSheetLoad(() => loadSheetViaJsonp(gid)).catch((err) => {
     if (attemptsLeft <= 1) throw err;
     const delay = SHEET_LOAD_RETRY_BASE_MS * attemptNumber;
@@ -1946,18 +2153,6 @@ function parseTargetsSheet(payload) {
   return targets;
 }
 
-function parseSegmentationSheet(payload) {
-  const rawRows = payload?.table?.rows ?? [];
-  const segMap = {};
-  for (const r of rawRows) {
-    const c = r.c || [];
-    if (!c || c.length === 0) continue;
-    const merchantId = cellText(c[2]);
-    const segmentation = cellText(c[12]);
-    if (merchantId && segmentation) { segMap[merchantId] = segmentation; }
-  }
-  return segMap;
-}
 
 function parseAcmTargetsSheet(payload) {
   const acmTargetsMap = {};
@@ -2017,6 +2212,10 @@ function parseInventorySheet(payload) {
 function parseProductsSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const map = {};
+  // v1.3.48: سؤال Metabase مفيهوش عمود EXPIRY_END_DATE (اللي كان في الشيت القديم) فـ IS_LOCKED
+  // بقى في العمود 16 بدل 17 — بنقراه بالاسم من الهيدر، وبنرجع للعمود 17 لو الهيدر مش موجود.
+  const colLabels = (payload?.table?.cols ?? []).map(col => String((col && col.label) || "").trim().toUpperCase());
+  const lockedIdx = colLabels.indexOf("IS_LOCKED") >= 0 ? colLabels.indexOf("IS_LOCKED") : 17;
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
@@ -2025,7 +2224,7 @@ function parseProductsSheet(payload) {
       map[skuId] = {
         price: cellNumber(c[4]), profit: cellNumber(c[6]),
         websiteStatus: cellText(c[3]) || "-",
-        isLocked: cellText(c[17]) || "-",
+        isLocked: cellText(c[lockedIdx]) || "-",
         subCategory: cellText(c[14]) || "", // مستخدم في Poor Matches (بنشمارك NDR على مستوى الساب كاتيجوري)
         category: cellText(c[13]) || "" // fallback لو الـ SKU مش موجود في inventoryMap (مستخدم في Availability Locking)
       };
@@ -4832,6 +5031,56 @@ function parseMerchantSegmentationSheet(payload) {
 // بيرجع Map(SKU_ID -> مجموع TOTAL_COUNT) بس للصفوف اللي Condition بتاعتها
 // "Damaged BOX" (مقارنة case-insensitive، ومن غير مسافات زيادة) — دي اللي
 // بنعتبرها "Repack" في Purchase Plan.
+// =========================================================================
+// v1.3.48 — أعمدة كانت formulas جوه الشيت القديم ومش موجودة في Metabase:
+//   • Main!AF (ACM): بيتبني من أي مصدر فيه ACM لكل Merchant — Merchant Segmentation
+//     (آخر شهر للتاجر) الأول، وبعدين Merchant SKU Daily (TAGER_ID -> ACM) للي ناقص.
+//   • Products Debundle Map!H (STOCK لكل SINGLE_ID): مجموع TOTAL_COUNT من شيت
+//     WareHouse (WAREHOUSE_REPACK_GID) للصفوف اللي Condition بتاعتها "Good item".
+// =========================================================================
+function buildMerchantAcmMap(segRows, dailyRows) {
+  const map = new Map(), ts = new Map();
+  (segRows || []).forEach(r => {
+    const id = String(r.merchantId || "").trim(), acm = String(r.acmName || "").trim();
+    if (!id || !acm || acm === "-") return;
+    const t = Date.parse(r.monthYear) || 0;
+    if (!map.has(id) || t >= (ts.get(id) || 0)) { map.set(id, acm); ts.set(id, t); }
+  });
+  (dailyRows || []).forEach(r => {
+    const id = String(r.tagerId || "").trim(), acm = String(r.acm || "").trim();
+    if (id && acm && acm !== "-" && !map.has(id)) map.set(id, acm);
+  });
+  return map;
+}
+function applyMerchantAcmToMainRows(rows, acmMap) {
+  let mapped = 0, missing = 0;
+  const missingIds = new Set();
+  rows.forEach(r => {
+    if (r.acmName && r.acmName !== "Unassigned") return; // الشيت/المصدر فيه ACM جاهز
+    const acm = acmMap.get(String(r.merchantId || "").trim());
+    if (acm) { r.acmName = acm; mapped++; } else { missing++; missingIds.add(r.merchantId); }
+  });
+  console.info("[ACM] Main rows mapped to ACM: " + mapped + " · still Unassigned: " + missing + " rows (" + missingIds.size + " merchants)");
+}
+// SKU_ID -> مجموع TOTAL_COUNT لصفوف Condition = "Good item" (شيت WareHouse: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE, Condition, TOTAL_COUNT)
+function parseWarehouseGoodStock(payload) {
+  const map = new Map();
+  for (const r of (payload?.table?.rows ?? [])) {
+    const c = r.c || [];
+    const sku = cellText(c[1]).trim();
+    if (!sku || sku === "SKU_ID") continue;
+    if (cellText(c[4]).trim().toLowerCase() !== "good item") continue;
+    map.set(sku, (map.get(sku) || 0) + cellNumber(c[5]));
+  }
+  return map;
+}
+function applyGoodStockToDebundle(rows, warehousePayload) {
+  if (!warehousePayload) { console.warn("[Stock] WareHouse sheet not available — Debundle STOCK left at 0."); return rows; }
+  const good = parseWarehouseGoodStock(warehousePayload);
+  rows.forEach(r => { r.stock = good.get(r.singleId) || 0; });
+  return rows;
+}
+
 function parseWarehouseRepackSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const map = new Map();
@@ -5847,8 +6096,8 @@ function prepareIncentiveMerchantsData() {
   const now = new Date();
   const currentMonthStr = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  // مصدر الأكتشوال لهذه اللوحة = التاب الأساسي (الشهر الحالي) + أرشيف الشهور
-  // السابقة (MERCHANT_SEG_HISTORY_GIDS). ده بيخلي فلتر الشهر يقرا شهور فاتت
+  // مصدر الأكتشوال لهذه اللوحة = التاب الأساسي (الشهر الحالي).
+  // (أرشيف الشهور السابقة اتشال — v1.3.48). ده بيخلي فلتر الشهر يقرا شهور فاتت
   // كمان — من غير ما يمس جدول Merchant Segmentation & Projections (اللي لسه
   // بيستخدم merchantSegSourceRows لوحده). دمج آمن: لو شهر اتكرر في الاتنين
   // بنمنع التكرار بمفتاح (merchantId + monthYear).
@@ -12163,10 +12412,8 @@ const FC_GAP_DEMAND_MONTHS = 3;       // how many recent active months feed the 
 // from the dashboard's data sheet), read live by gid:
 //   • Bundle-Single (in-plan singles) → excluded from Group B (stock).
 //   • Purchase Plan (SKUs already carrying a Repack line) → excluded from Group A.
-const FC_PLAN_SHEET_ID = "13laMNJ4ZuV9ToKtWEOVULbeuvDRHT8UOYTCXnK2u7S4";
-const FC_PLAN_BUNDLE_GID = "801350150";     // Bundle-Single → Group B exclusion (PLAN col S)
-const FC_PLAN_PURCHASE_GID = "2107930739";  // Purchase Plan → Group A (Repack) exclusion
-const FC_PLAN_ADJUST_GID = "1593693420";    // Adjust Confirmed tab → a single counts as "in plan" only if Adjust Confirmed > 0
+// v1.3.48: شيت Commercial Plan التاني (Bundle-Single / Purchase Plan / Adjust Confirmed) اتشال —
+// الاستثناءات بترجع تلقائيًا لـ fcIsInPlan().
 const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "",
   stockExcl: null, repackExcl: null, adjustMap: null, exclLoaded: false, exclError: null };
 
@@ -12196,22 +12443,6 @@ function fcLoadGvizBySheet(sheetName, tq, timeoutMs) {
   });
 }
 
-// Generic gviz reader for ANY spreadsheet by id + gid (used for the Commercial
-// Plan exclusion tabs, which live in a different workbook).
-function fcLoadGvizGid(spreadsheetId, gid, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const cb = "fcGvizCb_" + Math.random().toString(36).slice(2);
-    let done = false;
-    const cleanup = () => { try { delete window[cb]; } catch (e) {} const s = document.getElementById(cb); if (s) s.remove(); };
-    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); reject(new Error("timeout")); } }, timeoutMs || 60000);
-    window[cb] = (resp) => { if (done) return; done = true; clearTimeout(timer); cleanup(); (resp && resp.table) ? resolve(resp) : reject(new Error("no table")); };
-    const script = document.createElement("script");
-    script.id = cb;
-    script.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); reject(new Error("load error")); } };
-    script.src = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${gid}&headers=1&tqx=out:json;responseHandler:${cb}`;
-    document.head.appendChild(script);
-  });
-}
 
 // Load the two exclusion lists from the Commercial Plan workbook, once.
 //   • stockExcl  = SINGLE_IDs that are In Plan / PLAN=1 / Adjusted Single Pcs>0
@@ -12220,64 +12451,9 @@ function fcLoadGvizGid(spreadsheetId, gid, timeoutMs) {
 //                  a Repack line there) → excluded from Group A (repack).
 // Best-effort: if the workbook isn't reachable, we fall back to fcIsInPlan.
 async function fcLoadPlanExclusions() {
-  if (fcGapState.exclLoaded) return;
-  const cellV = (c) => (c && c.v !== undefined && c.v !== null) ? c.v : null;
-  const num = (c) => { const n = Number(cellV(c)); return Number.isFinite(n) ? n : 0; };
-  const truthy = (c) => { const v = cellV(c); if (v === null) return false; const s = String(v).trim().toLowerCase(); return v === true || s === "1" || s === "yes" || s === "true" || (Number(v) > 0); };
-  const findCol = (cols, ...names) => { const low = cols.map(c => (c.label || "").trim().toLowerCase()); for (const n of names) { const i = low.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
-  try {
-    const [bundleResp, purchaseResp, adjustResp] = await Promise.all([
-      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_BUNDLE_GID, 90000).catch(() => null),
-      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_PURCHASE_GID, 90000).catch(() => null),
-      fcLoadGvizGid(FC_PLAN_SHEET_ID, FC_PLAN_ADJUST_GID, 90000).catch(() => null)
-    ]);
-    if (adjustResp) {
-      // Adjust Confirmed tab: Product ID + Adjust Confirmed. A single is only
-      // truly "in the plan" if its Adjust Confirmed > 0 — PLAN=1 with Adjust 0
-      // means the SKU itself has a problem, so it should NOT be treated as planned.
-      const cols = adjustResp.table.cols || [];
-      const iPid = findCol(cols, "product id", "product_id") >= 0 ? findCol(cols, "product id", "product_id") : 0;
-      const iAdj = findCol(cols, "adjust confirmed") >= 0 ? findCol(cols, "adjust confirmed") : 19;
-      const m = new Map();
-      (adjustResp.table.rows || []).forEach(r => {
-        const c = r.c || [];
-        const pid = cellV(c[iPid]); if (!pid) return;
-        m.set(String(pid).trim(), num(c[iAdj]));
-      });
-      fcGapState.adjustMap = m;
-    }
-    if (bundleResp) {
-      const cols = bundleResp.table.cols || [];
-      const iSingle = findCol(cols, "single_id") >= 0 ? findCol(cols, "single_id") : 3;
-      // PLAN is column S (index 18) in the Bundle-Single tab. Per the rule: a
-      // single with PLAN = 1 is "in the plan" → excluded from Group B (stock).
-      const iPlan = findCol(cols, "plan") >= 0 ? findCol(cols, "plan") : 18;
-      const set = new Set();
-      (bundleResp.table.rows || []).forEach(r => {
-        const c = r.c || [];
-        const sid = cellV(c[iSingle]); if (!sid) return;
-        if (truthy(c[iPlan])) set.add(String(sid).trim());
-      });
-      fcGapState.stockExcl = set;
-    }
-    if (purchaseResp) {
-      const cols = purchaseResp.table.cols || [];
-      const iSku = findCol(cols, "sku id", "sku_id") >= 0 ? findCol(cols, "sku id", "sku_id") : 0;
-      const set = new Set();
-      (purchaseResp.table.rows || []).forEach(r => {
-        const c = r.c || [];
-        const sku = cellV(c[iSku]); if (!sku) return;
-        const s = String(sku).trim();
-        if (s && s.toUpperCase() !== "SKU ID" && s.toUpperCase() !== "SKU_ID") set.add(s);
-      });
-      fcGapState.repackExcl = set;
-    }
-    fcGapState.exclError = (!bundleResp || !purchaseResp || !adjustResp) ? "partial" : null;
-  } catch (e) {
-    fcGapState.exclError = e && e.message ? e.message : String(e);
-  } finally {
-    fcGapState.exclLoaded = true;
-  }
+  // v1.3.48: workbook Commercial Plan اتشال — مفيش قوائم استثناء خارجية. الـ null
+  // sets بتخلي fcGapState يرجع لـ fcIsInPlan() (راجع fcComputeGap تحت).
+  fcGapState.exclLoaded = true;
 }
 
 // Read the curated "Gap Plan" tab → Group A universe. The tab's fixed layout
@@ -17793,7 +17969,6 @@ function computeSegmentationPerformance() {
 const ALL_SHEET_GIDS = [
   MAIN_GID,
   TARGETS_GID && TARGETS_GID !== " " ? TARGETS_GID : null,
-  SEGMENTATION_GID,
   TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? TARGETS_ACM_GID : null,
   INVENTORY_GID, PRODUCTS_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID,
   NEW_SEGMENTATION_GID, INBOUND_GID,
@@ -17967,7 +18142,7 @@ async function fetchAllSheetsViaBackend() {
 // Human-readable names for the sync-status banner when a specific sheet
 // fails to refresh (so "didn't update" is visible instead of silent).
 const GID_LABELS = {
-  [MAIN_GID]: "Main", [TARGETS_GID]: "Targets", [SEGMENTATION_GID]: "Segmentation",
+  [MAIN_GID]: "Main", [TARGETS_GID]: "Targets",
   [TARGETS_ACM_GID]: "Targets ACM", [INVENTORY_GID]: "Inventory", [PRODUCTS_GID]: "Products",
   [CAT_TARGETS_GID]: "Category Targets", [ACM_SALES_PLAN_GID]: "Sales Plan-ACM",
   [NEW_SEGMENTATION_GID]: "New Segmentation",
@@ -17977,7 +18152,6 @@ const GID_LABELS = {
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
-  "693757028": "Merchant Segmentation (September 2026)",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
   [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)",
@@ -17988,26 +18162,7 @@ const GID_LABELS = {
   [IRQ_INVENTORY_GID]: "IRQ Inventory (inv-IRQ)"
 };
 
-// بيجيب تاب "Confirmed by Day" مباشرة من الـ Cloudflare Worker
-// (action=getConfirmedByDay) — الـ Worker نفسه بيقرأه لايف من Google
-// Sheets (gviz) على مستواه هو ويكاشيه في KV، فمفيش أي اعتماد على Apps
-// Script/Code.gs ولا على أي Deploy خالص. بيرجع نفس شكل { table: { cols,
-// rows } } اللي parseConfirmedByDaySheet() متعودة عليه.
-async function fetchConfirmedByDayViaWorker() {
-  if (!SYNC_CDN_URL) throw new Error("SYNC_CDN_URL not configured");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
-  try {
-    const url = `${SYNC_CDN_URL}?action=getConfirmedByDay`;
-    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
-    const json = await res.json();
-    if (!json || !json.success) throw new Error((json && json.message) || "Worker getConfirmedByDay failed");
-    if (!json.table) throw new Error("Worker getConfirmedByDay returned no table data");
-    return json.table;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// v1.3.48: fetchConfirmedByDayViaWorker اتشالت — Confirmed by Day بيتقرا من Metabase.
 
 // بيجيب شيت "Incentive Merchants" (Incentives Tracker) مباشرة من الـ
 // Cloudflare Worker (action=getIncentiveMerchants) — نفس فكرة
@@ -18028,30 +18183,7 @@ async function fetchIncentiveMerchantsViaWorker() {
   }
 }
 
-// بيجيب شيت الـ Main مباشرة من الـ Cloudflare Worker (action=getMain) —
-// الفرق عن fetchConfirmedByDayViaWorker/fetchIncentiveMerchantsViaWorker
-// فوق إن الـ Worker هنا بيعمل "stability check" مستقل بتاعه هو (يقارن
-// بصمة الشيت بين تشغيلتين متتاليتين للـ Cron، كل 5 دقايق — راجع الشرح فوق
-// MAIN_GID في cloudflare-worker/worker.js)، بطلب صريح: لو حد بيعدّل/بيلصق
-// داتا في شيت الـ Main، الـ Worker مايرجعش لقطة نص-متغيرة — بيفضل يرجّع آخر
-// نسخة "مستقرة" معروفة لحد ما التعديل يخلص ويستقر الشيت فعليًا. مستقل
-// تمامًا عن نسخة Apps Script المجمّعة (getLastSync)، اللي كمان عندها
-// stability check لوحدها لكن بفاصل 6 ثواني بس جوه نفس التنفيذة.
-async function fetchMainSheetViaWorker() {
-  if (!SYNC_CDN_URL) throw new Error("SYNC_CDN_URL not configured");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
-  try {
-    const url = `${SYNC_CDN_URL}?action=getMain`;
-    const res = await fetch(url, { method: "GET", signal: controller.signal, cache: "no-store" });
-    const json = await res.json();
-    if (!json || !json.success) throw new Error((json && json.message) || "Worker getMain failed");
-    if (!json.table) throw new Error("Worker getMain returned no table data");
-    return json.table;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// v1.3.48: fetchMainSheetViaWorker اتشالت — Main بيتقرا من Metabase (CSV).
 
 // Fetches all sheets and returns a plain snapshot object — does NOT touch
 // global state, so it is safe to call in the background while old data is
@@ -18075,7 +18207,7 @@ async function fetchAllSheetsSnapshot() {
     // still stale.
     const track = (gid) => () => { staleGids.push(gid); return null; };
     const [
-      mainPayload, targetsPayload, segPayload, acmTargetsPayload,
+      mainPayload, targetsPayload, acmTargetsPayload,
       invPayload, prodPayload, catTargetsPayload, planPayload,
       newSegPayload, inboundPayload,
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
@@ -18085,7 +18217,6 @@ async function fetchAllSheetsSnapshot() {
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
-      SEGMENTATION_GID ? loadSheetWithRetry(SEGMENTATION_GID).catch(track(SEGMENTATION_GID)) : Promise.resolve(null),
       TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? loadSheetWithRetry(TARGETS_ACM_GID).catch(track(TARGETS_ACM_GID)) : Promise.resolve(null),
       INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(track(INVENTORY_GID)) : Promise.resolve(null),
       PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(track(PRODUCTS_GID)) : Promise.resolve(null),
@@ -18107,7 +18238,7 @@ async function fetchAllSheetsSnapshot() {
       WAREHOUSE_REPACK_GID ? loadSheetWithRetry(WAREHOUSE_REPACK_GID).catch(track(WAREHOUSE_REPACK_GID)) : Promise.resolve(null)
     ]);
     sheets = {
-      [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload, [SEGMENTATION_GID]: segPayload,
+      [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload,
       [TARGETS_ACM_GID]: acmTargetsPayload, [INVENTORY_GID]: invPayload, [PRODUCTS_GID]: prodPayload,
       [CAT_TARGETS_GID]: catTargetsPayload, [ACM_SALES_PLAN_GID]: planPayload,
       [NEW_SEGMENTATION_GID]: newSegPayload,
@@ -18123,29 +18254,8 @@ async function fetchAllSheetsSnapshot() {
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
 
-  // ---------------------------------------------------------------------
-  // Workaround (شيله لو يوم من الأيام الباك اند اتظبط وبقى راجع
-  // 964398740 جوه getLastSync عادي): تاب "Confirmed by Day" لسه مش موجود
-  // في LAST_SYNC_GIDS بتاعة النسخة المنشورة فعليًا على السيرفر (مشكلة
-  // Deploy عند العميل)، فبنجيبه من مصدر منفصل تمامًا عن الباك اند —
-  // Cloudflare Worker نفسه (action=getConfirmedByDay) بقى بيقرأ الشيت ده
-  // مباشرة من Google Sheets (gviz) على مستواه هو، ويكاشيه في KV ويحدّثه
-  // كل 5 دقايق بنفس الـ Cron بتاع getLastSync — فمفيش أي اعتماد على
-  // Apps Script/Code.gs ولا على أي Deploy خالص لباك اند التاب ده. لو
-  // SYNC_CDN_URL (رابط الـ Worker) مش متظبط لأي سبب، بيرجع تلقائيًا لنفس
-  // مسار gviz المباشر من المتصفح (loadSheetWithRetry) كـ fallback.
-  if (CONFIRMED_BY_DAY_GID && !sheets[CONFIRMED_BY_DAY_GID]) {
-    try {
-      sheets[CONFIRMED_BY_DAY_GID] = await fetchConfirmedByDayViaWorker();
-    } catch (err) {
-      console.warn("[Confirmed by Day] Cloudflare Worker fetch failed, falling back to direct gviz:", err);
-      try {
-        sheets[CONFIRMED_BY_DAY_GID] = await loadSheetWithRetry(CONFIRMED_BY_DAY_GID);
-      } catch (err2) {
-        console.warn("[Confirmed by Day] direct gviz fallback also failed:", err2);
-      }
-    }
-  }
+  // v1.3.48: Confirmed by Day اتنقل لـ Metabase (METABASE_SOURCES) — بيتحمل في
+  // loadAllMetabaseSources تحت مع باقي مصادر Metabase.
 
   // نفس الـ Workaround فوق بالظبط، بس لشيت "Incentive Merchants"
   // (Incentives Tracker) — بيتقرا من الـ Cloudflare Worker مباشرة، مستقل
@@ -18163,49 +18273,15 @@ async function fetchAllSheetsSnapshot() {
     }
   }
 
-  // تابات الشهور السابقة لـ Merchant Segmentation (أرشيف) — مصدر إضافي لفلتر
-  // Incentive Merchants عشان يقدر يقرا شهور فاتت. أي تاب يفشل بيتتخطى بهدوء
-  // (الفلتر هيكمل على الشهور المتاحة، والبانر بيوضح الناقص).
-  if (Array.isArray(MERCHANT_SEG_HISTORY_GIDS)) {
-    for (const hgid of MERCHANT_SEG_HISTORY_GIDS) {
-      if (!hgid || sheets[hgid]) continue;
-      try {
-        sheets[hgid] = await loadSheetWithRetry(hgid);
-      } catch (err) {
-        // متشيلش الخطأ بصمت: لو التاب ده فشل، الداشبورد بيرجع لآخر نسخة
-        // متخزنة منه (ممكن تبقى أرقام قديمة). نعلّمه كـ stale عشان يظهر تحذير
-        // "didn't refresh" بدل ما المستخدم يفتكر الأرقام القديمة لايف.
-        console.warn("[Merchant Seg History] could not load GID " + hgid + ":", err);
-        staleGids.push(hgid);
-      }
-    }
-  }
-
-  // شيت الـ Main — بقى بيتقرا حصريًا برا Apps Script خالص (نفس باترن
-  // Incentive Merchants/Confirmed by Day فوق): أولًا نمسح أي قيمة جاية من
-  // Apps Script عشان منسبهاش fallback ضمني، وبعدين نجرب الـ Worker (فيه
-  // الـ stability check المستقل بتاعه، راجع تعليق fetchMainSheetViaWorker)،
-  // ولو فشل نجرب قراءة gviz مباشرة من المتصفح. لو الاتنين فشلوا، sheets[MAIN_GID]
-  // بيفضل undefined عمدًا — يعني الداشبورد هيرمي "No data streams detected."
-  // بدل ما يستخدم نسخة قديمة/جزئية من Apps Script.
-  if (MAIN_GID) {
-    delete sheets[MAIN_GID];
-    try {
-      const mainTable = await fetchMainSheetViaWorker();
-      if (mainTable) sheets[MAIN_GID] = mainTable;
-    } catch (err) {
-      console.warn("[Main Sheet] Cloudflare Worker fetch failed, falling back to direct gviz:", err);
-      try {
-        sheets[MAIN_GID] = await loadSheetWithRetry(MAIN_GID);
-      } catch (err2) {
-        console.warn("[Main Sheet] direct gviz fallback also failed:", err2);
-      }
-    }
-  }
+  // v1.3.48: كل مصادر Metabase (Main + 10 شيتات تانية) بتتحمل هنا — بتغطي أي نسخة
+  // قديمة جاية من Apps Script لنفس الـ GIDs. Main بالذات: لو Metabase فشل
+  // بنمسح أي نسخة Apps Script قديمة عمدًا (زي ما كان بيحصل مع الـ Worker) عشان
+  // الداشبورد يرمي "No data streams detected." بدل ما يعرض داتا قديمة/جزئية.
+  delete sheets[MAIN_GID];
+  await loadAllMetabaseSources(sheets, staleGids);
 
   const mainPayload = sheets[MAIN_GID];
   const targetsPayload = sheets[TARGETS_GID];
-  const segPayload = sheets[SEGMENTATION_GID];
   const acmTargetsPayload = sheets[TARGETS_ACM_GID];
   const invPayload = sheets[INVENTORY_GID];
   const prodPayload = sheets[PRODUCTS_GID];
@@ -18239,6 +18315,11 @@ async function fetchAllSheetsSnapshot() {
   const allParsedRows = parseMainSheet(mainPayload);
   if (allParsedRows.length === 0) { throw new Error("No data streams detected."); }
 
+  // v1.3.48: ACM مش موجود في Main بتاع Metabase — بنبنيه من Merchant Segmentation / Merchant SKU Daily.
+  const merchantSegRowsNow = merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows;
+  const merchantSkuDailyRowsNow = merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows;
+  applyMerchantAcmToMainRows(allParsedRows, buildMerchantAcmMap(merchantSegRowsNow, merchantSkuDailyRowsNow));
+
   // شيت CAT_TARGETS_GID بيتقرا مرة واحدة بس (parseCommercialTargetsSheet)،
   // و categoryTargets (المستخدم في CM3 Analyst) بقى مشتق من نفس النتيجة.
   const commercialTargetsResult = catTargetsPayload ? parseCommercialTargetsSheet(catTargetsPayload) : state.commercialTargets;
@@ -18246,7 +18327,7 @@ async function fetchAllSheetsSnapshot() {
   return {
     allParsedRows,
     merchantTargets: targetsPayload ? parseTargetsSheet(targetsPayload) : state.merchantTargets,
-    merchantSegmentsMap: segPayload ? parseSegmentationSheet(segPayload) : state.merchantSegmentsMap,
+    merchantSegmentsMap: state.merchantSegmentsMap,
     acmTargets: acmTargetsPayload ? parseAcmTargetsSheet(acmTargetsPayload) : state.acmTargets,
     inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
@@ -18266,16 +18347,14 @@ async function fetchAllSheetsSnapshot() {
     metabaseSellthroughNeededIrq: irqSellthroughNeededPayload ? parseSellthroughNeededSheet(irqSellthroughNeededPayload) : state.metabaseSellthroughNeededIrq,
     cogsMapIrq: irqCogsPayload ? parseCogsSheet(irqCogsPayload) : state.cogsMapIrq,
     irqInventoryMap: irqInventoryPayload ? parseIrqInventorySheet(irqInventoryPayload) : state.irqInventoryMap,
-    debundleMap: debundleMapPayload ? parseDebundleMapSheet(debundleMapPayload) : state.debundleMap, // <-- Commercial Debundlized
+    debundleMap: debundleMapPayload ? applyGoodStockToDebundle(parseDebundleMapSheet(debundleMapPayload), warehouseRepackPayload) : state.debundleMap, // <-- Commercial Debundlized
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
     cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
-    merchantSkuDailyRows: merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows, // <-- Recommended Tracker (Day0..Day5)
-    merchantSegSourceRows: merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
-    merchantSegHistoryRows: (Array.isArray(MERCHANT_SEG_HISTORY_GIDS) && MERCHANT_SEG_HISTORY_GIDS.some(g => sheets[g]))
-      ? MERCHANT_SEG_HISTORY_GIDS.reduce((acc, g) => sheets[g] ? acc.concat(parseMerchantSegmentationSheet(sheets[g])) : acc, [])
-      : state.merchantSegHistoryRows, // <-- أرشيف شهور Merchant Segmentation (مصدر Incentive Merchants للشهور الفاتت فقط)
+    merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
+    merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
+    merchantSegHistoryRows: [], // v1.3.48: أرشيف شهور Merchant Segmentation اتشال
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
     confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
@@ -18928,6 +19007,8 @@ let mainMetaBaseline = null;
 let mainMetaCheckInFlight = false;
 
 async function fetchMainMeta() {
+  return null; // v1.3.48: Main بقى من Metabase — مفيش Worker meta. التحديث بيجي من الرفرش التلقائي (كل نص ساعة) + getLastSyncMeta + الرفرش اليدوي.
+  // eslint-disable-next-line no-unreachable
   if (!SYNC_CDN_URL) return null;
   try {
     const res = await fetch(`${SYNC_CDN_URL}?action=getMainMeta`, { method: "GET", cache: "no-store" });
