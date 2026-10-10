@@ -34,7 +34,7 @@
     ALLOWED_DOMAIN: "taager.com",
 
     // Roles offered in the Sign Up form — edit freely
-    ROLES: ["Admin", "Account Manager", "Commercial", "Marketplace", "Viewer"],
+    ROLES: ["Admin", "Account Manager", "Commercial", "Marketplace", "Merchant"],
 
     // localStorage key used to keep the user logged in
     STORAGE_KEY: "taagerDashboardSession",
@@ -127,6 +127,17 @@
   function isTaagerEmail(email) {
     const re = new RegExp("^[^\\s@]+@" + CONFIG.ALLOWED_DOMAIN.replace(".", "\\.") + "$", "i");
     return re.test(String(email || "").trim());
+  }
+
+  // @taager.com, or an email an admin added in Control > Users & Roles (checked against the Worker's access config).
+  function emailAllowed(email) {
+    if (isTaagerEmail(email)) return Promise.resolve(true);
+    const em = String(email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return Promise.resolve(false);
+    return fetch(CONFIG.WORKER_URL + "?action=getAccess", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((cfg) => !!(cfg && cfg.users && cfg.users[em]))
+      .catch(() => false);
   }
 
   // بطلب صريح: مفيش أي timeout هنا زمان — لو نفس الـ Apps Script deployment
@@ -263,7 +274,7 @@
     overlay.id = "authOverlay";
     overlay.innerHTML = `
       <div class="auth-card">
-        <span class="auth-brand">Performance Analytics</span>
+        <span class="auth-brand">Center Control</span>
         <div class="auth-tabs">
           <button type="button" class="auth-tab active" data-tab="login">Login</button>
           <button type="button" class="auth-tab" data-tab="signup">Sign Up</button>
@@ -299,7 +310,7 @@
           <button type="submit" class="auth-submit" id="authSignupSubmit">Create Account</button>
         </form>
 
-        <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} accounts</div>
+        <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} and invited accounts</div>
       </div>
     `;
     document.body.appendChild(overlay);
@@ -350,10 +361,6 @@
       const email = overlay.querySelector("#authLoginEmail").value.trim();
       const password = overlay.querySelector("#authLoginPassword").value;
 
-      if (!isTaagerEmail(email)) {
-        errorEl.textContent = `Please use your @${CONFIG.ALLOWED_DOMAIN} email.`;
-        return;
-      }
       if (!password) {
         errorEl.textContent = "Please enter your password.";
         return;
@@ -362,7 +369,11 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "Signing in...";
 
-      callApi({ action: "login", email: email, password: password })
+      emailAllowed(email)
+        .then((ok) => {
+          if (!ok) throw new Error(`Please use your @${CONFIG.ALLOWED_DOMAIN} email, or the email you were invited with.`);
+          return callApi({ action: "login", email: email, password: password });
+        })
         .then((res) => {
           if (!res || !res.success) {
             errorEl.textContent = (res && res.message) || "Invalid email or password.";
@@ -402,10 +413,6 @@
         errorEl.textContent = "Please enter your full name.";
         return;
       }
-      if (!isTaagerEmail(email)) {
-        errorEl.textContent = `Sign up is only allowed with an @${CONFIG.ALLOWED_DOMAIN} email.`;
-        return;
-      }
       if (password.length < 6) {
         errorEl.textContent = "Password must be at least 6 characters.";
         return;
@@ -418,7 +425,11 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "Creating account...";
 
-      callApi({ action: "signup", name: name, email: email, password: password, role: role })
+      emailAllowed(email)
+        .then((ok) => {
+          if (!ok) throw new Error(`Sign up is only allowed with an @${CONFIG.ALLOWED_DOMAIN} email, or the email you were invited with.`);
+          return callApi({ action: "signup", name: name, email: email, password: password, role: role });
+        })
         .then((res) => {
           if (!res || !res.success) {
             errorEl.textContent = (res && res.message) || "Could not create the account.";

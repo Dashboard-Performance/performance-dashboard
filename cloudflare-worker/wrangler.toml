@@ -31,3 +31,10 @@ APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMz
 # بيستخدمه عشان يقرا تاب "Confirmed by Day" (action=getConfirmedByDay)
 # مباشرة من Google Sheets (gviz)، من غير ما يعدي على Apps Script خالص.
 SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA"
+
+# v1.14.0 — Invite emails (Control > Users & Roles). Sent through Resend from a
+# no-reply address. Setup: 1) verify your sending domain in Resend,
+# 2) Worker secret RESEND_API_KEY, 3) set MAIL_FROM below, e.g.
+#    MAIL_FROM = "Taager Dashboard <no-reply@yourdomain.com>"
+# MAIL_FROM = ""
+# DASHBOARD_URL = "https://your-dashboard-link/"   # the link inside invite emails

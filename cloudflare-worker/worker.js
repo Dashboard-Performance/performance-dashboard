@@ -121,11 +121,229 @@ const PRESENCE_ONLINE_WINDOW_MS = 90 * 1000;
 const PRESENCE_STALE_MS = 15 * 60 * 1000;
 const ALLOWED_EMAIL_DOMAIN = "taager.com";
 
+// Metabase public-link CORS proxy: pure streaming passthrough (no body parsing -> negligible CPU).
+// Only metabase.taager.com public question/card endpoints are allowed.
+async function handleMetabaseProxy(url) {
+  const target = url.searchParams.get("url") || "";
+  let t;
+  try { t = new URL(target); } catch (e) { return jsonResponse({ success: false, message: "bad url" }, 400); }
+  const okPath = /^\/(public\/question\/|api\/public\/card\/)[0-9a-f-]{36}(\.json|\/query\/(json|csv))?$/i.test(t.pathname);
+  if (t.protocol !== "https:" || t.hostname !== "metabase.taager.com" || !okPath) {
+    return jsonResponse({ success: false, message: "url not allowed" }, 403);
+  }
+  const r = await fetch(t.toString(), { redirect: "follow" });
+  const h = corsHeaders();
+  h["Content-Type"] = r.headers.get("Content-Type") || "application/octet-stream";
+  h["Cache-Control"] = "no-store";
+  return new Response(r.body, { status: r.status, headers: h });
+}
+
+// ---------------------------------------------------------------------------
+// v1.4.0 — Roles/Access + Targets uploaded from the dashboard (stored in KV).
+// Reads are public (same as the dashboard data); writes need X-Admin-Key ==
+// env.ADMIN_KEY (wrangler secret put ADMIN_KEY). Values are passed through as
+// raw text (no JSON parse) to stay within the free-plan CPU budget.
+// ---------------------------------------------------------------------------
+const TOWER_TARGET_TYPES = ["merchants", "acm", "category", "salesplan", "singlesku", "meta"];
+const TOWER_MAX_BYTES = 20 * 1024 * 1024;
+function towerAdminOk(request, env) {
+  const key = request.headers.get("X-Admin-Key") || "";
+  return !!env.ADMIN_KEY && key.length > 0 && key === env.ADMIN_KEY;
+}
+async function towerReadKv(env, key, emptyJson) {
+  const txt = await env.SYNC_CACHE.get(key);
+  return new Response(txt || emptyJson, { status: 200, headers: corsHeaders() });
+}
+async function towerWriteKv(request, env, key) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!env.ADMIN_KEY) return jsonResponse({ success: false, message: "ADMIN_KEY secret is not set on the Worker." }, 500);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  const text = await request.text();
+  if (!text || text.length > TOWER_MAX_BYTES) return jsonResponse({ success: false, message: "Empty or too large body." }, 400);
+  const c0 = text.trimStart().charAt(0);
+  if (c0 !== "{" && c0 !== "[") return jsonResponse({ success: false, message: "Body must be JSON." }, 400);
+  await env.SYNC_CACHE.put(key, text);
+  return jsonResponse({ success: true, bytes: text.length });
+}
+function handleGetAccess(env) { return towerReadKv(env, "access:config", "null"); }
+function handlePutAccess(request, env) { return towerWriteKv(request, env, "access:config"); }
+function handleGetTargets(url, env) {
+  const type = url.searchParams.get("type") || "";
+  if (TOWER_TARGET_TYPES.indexOf(type) < 0) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
+  return towerReadKv(env, "targets:" + type, "null");
+}
+function handlePutTargets(request, url, env) {
+  const type = url.searchParams.get("type") || "";
+  if (TOWER_TARGET_TYPES.indexOf(type) < 0) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
+  return towerWriteKv(request, env, "targets:" + type);
+}
+function handleCheckAdminKey(request, env) {
+  if (!env.ADMIN_KEY) return jsonResponse({ success: false, message: "ADMIN_KEY secret is not set on the Worker." }, 500);
+  return towerAdminOk(request, env) ? jsonResponse({ success: true }) : jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+}
+
+// ---------------------------------------------------------------------------
+// v1.6.0 — Alerts Centre: admin sends in-app notifications to roles / people.
+// KV key "alerts:log" = JSON array (newest first, max 300). Reads are filtered
+// by the caller's email/role; writes need X-Admin-Key.
+// ---------------------------------------------------------------------------
+const TOWER_ALERTS_KEY = "alerts:log";
+const TOWER_ALERTS_MAX = 300;
+async function towerLoadAlerts(env) {
+  const txt = await env.SYNC_CACHE.get(TOWER_ALERTS_KEY);
+  if (!txt) return [];
+  try { const a = JSON.parse(txt); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+async function handleGetAlerts(request, url, env) {
+  const all = await towerLoadAlerts(env);
+  if (url.searchParams.get("all") === "1") {
+    if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+    return jsonResponse({ success: true, alerts: all });
+  }
+  const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+  const role = (url.searchParams.get("role") || "").trim();
+  const mine = all.filter((a) => {
+    const au = a.audience || {};
+    if (au.all) return true;
+    if (email && Array.isArray(au.users) && au.users.indexOf(email) >= 0) return true;
+    if (role && Array.isArray(au.roles) && au.roles.indexOf(role) >= 0) return true;
+    return false;
+  }).slice(0, 50).map((a) => ({ id: a.id, at: a.at, title: a.title, body: a.body, severity: a.severity, about: a.about || null, link: a.link || "", by: a.by || "" }));
+  return jsonResponse({ success: true, alerts: mine });
+}
+async function handleSendAlert(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!env.ADMIN_KEY) return jsonResponse({ success: false, message: "ADMIN_KEY secret is not set on the Worker." }, 500);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const title = String(b.title || "").trim().slice(0, 160), body = String(b.body || "").trim().slice(0, 2000);
+  if (!title || !body) return jsonResponse({ success: false, message: "Title and message are required." }, 400);
+  const au = b.audience || {};
+  const audience = { all: !!au.all, roles: (Array.isArray(au.roles) ? au.roles : []).map(String).slice(0, 40), users: (Array.isArray(au.users) ? au.users : []).map((x) => String(x).toLowerCase()).slice(0, 500) };
+  if (!audience.all && !audience.roles.length && !audience.users.length) return jsonResponse({ success: false, message: "Pick at least one recipient." }, 400);
+  const sev = ["info", "warning", "critical"].indexOf(b.severity) >= 0 ? b.severity : "info";
+  const about = b.about && b.about.label ? { type: String(b.about.type || "General").slice(0, 30), label: String(b.about.label).slice(0, 160) } : null;
+  const alert = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), at: new Date().toISOString(), title, body, severity: sev, audience, about, link: String(b.link || "").slice(0, 60), by: String(b.by || "").slice(0, 120) };
+  const all = await towerLoadAlerts(env);
+  all.unshift(alert);
+  await env.SYNC_CACHE.put(TOWER_ALERTS_KEY, JSON.stringify(all.slice(0, TOWER_ALERTS_MAX)));
+  return jsonResponse({ success: true, id: alert.id });
+}
+// ---------------------------------------------------------------------------
+// v1.14.0 — Invite emails: when an admin adds a user in Control > Users & Roles,
+// the dashboard asks the Worker to email them. Sent through Resend from a
+// dedicated no-reply address (secret RESEND_API_KEY + var MAIL_FROM), so the
+// mail never comes from a personal mailbox. Needs X-Admin-Key.
+// ---------------------------------------------------------------------------
+function inviteEsc(t) { return String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+async function handleSendInvites(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!env.ADMIN_KEY) return jsonResponse({ success: false, message: "ADMIN_KEY secret is not set on the Worker." }, 500);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  if (!env.RESEND_API_KEY || !env.MAIL_FROM) return jsonResponse({ success: false, message: "Email is not set up: add RESEND_API_KEY (secret) and MAIL_FROM (variable) to the Worker." }, 500);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const list = (Array.isArray(b.invites) ? b.invites : []).slice(0, 20);
+  // The link in the email is the Worker variable DASHBOARD_URL (set once, e.g. https://control.taager.app/). If it is not set, fall back to the https address the admin opened the dashboard from.
+  const httpsOnly = (u) => (/^https:\/\/[^\s"<>]+$/.test(String(u || "")) ? String(u) : "");
+  const link = httpsOnly(env.DASHBOARD_URL) || httpsOnly(b.url);
+  if (!list.length) return jsonResponse({ success: false, message: "No invites to send." }, 400);
+  if (!link) return jsonResponse({ success: false, message: "No public dashboard link: add the Worker variable DASHBOARD_URL (https://...) or open the dashboard from its https address." }, 400);
+  const results = [];
+  for (const it of list) {
+    const email = String(it.email || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { results.push({ email, ok: false, error: "Bad email" }); continue; }
+    const role = inviteEsc(String(it.role || "Viewer").slice(0, 60));
+    const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
+      '<h2 style="margin:0 0 12px">You have been invited to the Taager Performance Dashboard</h2>' +
+      '<p style="line-height:1.6">You now have access with the role <b>' + role + '</b>. Sign in with this email address (' + inviteEsc(email) + ') to get started.</p>' +
+      '<p style="margin:24px 0"><a href="' + inviteEsc(link) + '" style="background:#0f9d7a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Open the dashboard</a></p>' +
+      '<p style="color:#667;font-size:12px">This is an automated message, please do not reply.</p></div>';
+    try {
+      const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: "You've been invited to the Taager Performance Dashboard", html }) });
+      if (r.ok) results.push({ email, ok: true }); else results.push({ email, ok: false, error: "Mail service " + r.status });
+    } catch (e) { results.push({ email, ok: false, error: "Mail service unreachable" }); }
+  }
+  return jsonResponse({ success: results.every((x) => x.ok), results });
+}
+// ---------------------------------------------------------------------------
+// v1.14.0 — Access requests: someone signs in but is not listed in People ->
+// the dashboard posts requestAccess (public, no key) and shows "waiting for
+// admin approval". KV "access:pending" = {email:{name,at}}. The admin lists
+// them (getPending) and clears them (resolvePending) with X-Admin-Key.
+// ---------------------------------------------------------------------------
+async function towerLoadPending(env) {
+  const txt = await env.SYNC_CACHE.get("access:pending");
+  try { const o = JSON.parse(txt || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; }
+}
+async function handleRequestAccess(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const email = String(b.email || "").trim().toLowerCase().slice(0, 120);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return jsonResponse({ success: false, message: "Bad email." }, 400);
+  const p = await towerLoadPending(env);
+  if (!p[email]) {
+    if (Object.keys(p).length >= 200) return jsonResponse({ success: false, message: "Too many pending requests." }, 429);
+    p[email] = { name: String(b.name || "").trim().slice(0, 80), at: new Date().toISOString(), invitedBy: String(b.invitedBy || "").trim().toLowerCase().slice(0, 120), role: String(b.role || "").slice(0, 60) };
+    await env.SYNC_CACHE.put("access:pending", JSON.stringify(p));
+  }
+  return jsonResponse({ success: true });
+}
+async function handleGetPending(request, env) {
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  const p = await towerLoadPending(env);
+  return jsonResponse({ success: true, pending: Object.keys(p).map((e) => ({ email: e, name: p[e].name || "", at: p[e].at || "", invitedBy: p[e].invitedBy || "", role: p[e].role || "" })) });
+}
+async function handleResolvePending(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const p = await towerLoadPending(env);
+  (Array.isArray(b.emails) ? b.emails : []).forEach((e) => { delete p[String(e).toLowerCase()]; });
+  await env.SYNC_CACHE.put("access:pending", JSON.stringify(p));
+  return jsonResponse({ success: true });
+}
+async function handleDeleteAlert(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const all = await towerLoadAlerts(env);
+  await env.SYNC_CACHE.put(TOWER_ALERTS_KEY, JSON.stringify(all.filter((a) => a.id !== b.id)));
+  return jsonResponse({ success: true });
+}
+
+// ---------------------------------------------------------------------------
+// v1.7.0 — Settings (metric cutoffs, alert thresholds/rules) + Activity Log.
+// "settings:config" is public-read / admin-write. "activity:log" is admin-only
+// (newest first, max 500).
+// ---------------------------------------------------------------------------
+function handleGetSettings(env) { return towerReadKv(env, "settings:config", "null"); }
+function handlePutSettings(request, env) { return towerWriteKv(request, env, "settings:config"); }
+async function handleGetActivity(request, env) {
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  const txt = await env.SYNC_CACHE.get("activity:log");
+  let list = []; try { list = txt ? JSON.parse(txt) : []; } catch (e) {}
+  return jsonResponse({ success: true, list: Array.isArray(list) ? list : [] });
+}
+async function handleLogActivity(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const entry = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: new Date().toISOString(), type: String(b.type || "other").slice(0, 30), text: String(b.text || "").slice(0, 200), detail: String(b.detail || "").slice(0, 300), actor: String(b.actor || "").slice(0, 120), role: String(b.role || "").slice(0, 60) };
+  if (!entry.text) return jsonResponse({ success: false, message: "text required." }, 400);
+  const txt = await env.SYNC_CACHE.get("activity:log");
+  let list = []; try { list = txt ? JSON.parse(txt) : []; } catch (e) {}
+  if (!Array.isArray(list)) list = [];
+  list.unshift(entry);
+  await env.SYNC_CACHE.put("activity:log", JSON.stringify(list.slice(0, 500)));
+  return jsonResponse({ success: true });
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret",
+    "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret, X-Admin-Key",
     "Access-Control-Expose-Headers": "Content-Disposition",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -464,11 +682,9 @@ async function handleForceRefresh(request, env, ctx) {
     return jsonResponse({ success: false, message: "Not authorized." }, 403);
   }
   try {
-    const [main, confirmedByDay, incentiveMerchants] = await Promise.all([
-      refreshMainCache(env),
-      refreshConfirmedByDayCache(env),
-      refreshIncentiveMerchantsCache(env),
-    ]);
+    // v1.3.48: Main/Confirmed by Day بقوا من Metabase — بس Incentive Merchants لسه على الـ Worker.
+    const main = {}, confirmedByDay = {};
+    const incentiveMerchants = await refreshIncentiveMerchantsCache(env);
 
     return jsonResponse({
       success: true,
@@ -746,6 +962,204 @@ async function handleReleaseUpload(request, env) {
   }
 }
 
+
+// ===========================================================================
+// v1.10.0 — حاجات اتنقلت من backend/Code.gs (Apps Script) للـ Worker عشان السرعة:
+//   (1) Computed Snapshots (publish/get/list) — بقت متخزنة في KV بدل Drive.
+//   (2) getLastSync / getLastSyncMeta — Read-through cache: الـ cron بيسحب النسخة
+//       الجاهزة من Apps Script (اللي بيقرا الشيتات) ويخزنها هنا، واليوزرز بيقروا
+//       من الـ edge مباشرة. (قراءة الشيتات نفسها لسه في Apps Script — بتحتاج صلاحيات Google.)
+//   (3) Feedback (match / decline / sales-plan): الحفظ بيرجّع نجاح فورًا ويتكتب في
+//       الشيت في الخلفية مع إعادة محاولة أوتوماتيك — مفيش Error بسبب بطء/تقطيع Apps Script.
+// ===========================================================================
+const COMPUTED_DEFAULT_KEYS = ["Admin-Panal-Center"];
+function computedKeys(env) {
+  const raw = (env && env.COMPUTED_API_KEYS) ? String(env.COMPUTED_API_KEYS) : "";
+  const list = raw.split(",").map(x => x.trim()).filter(Boolean);
+  return list.length ? list : COMPUTED_DEFAULT_KEYS;
+}
+function sanitizeComputedName(name) { return String(name || "").trim().replace(/[^A-Za-z0-9_-]/g, ""); }
+
+async function handlePublishComputed(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let payload;
+  try { payload = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Invalid request body." }, 400); }
+  const sections = payload && payload.sections;
+  if (!Array.isArray(sections) || !sections.length) return jsonResponse({ success: false, message: "No sections provided." }, 400);
+  const publishedAt = new Date().toISOString();
+  const results = [];
+  for (const s of sections) {
+    const section = sanitizeComputedName(s && s.section), table = sanitizeComputedName(s && s.table);
+    if (!section || !table) { results.push({ section: s && s.section, table: s && s.table, ok: false, error: "Invalid section/table name." }); continue; }
+    const rows = Array.isArray(s.rows) ? s.rows : [];
+    const body = JSON.stringify({ section, table, updatedAt: publishedAt, rowCount: rows.length, rows });
+    if (body.length > 24 * 1024 * 1024) { results.push({ section, table, ok: false, error: "Too large for KV (>24MB)." }); continue; }
+    try {
+      await env.SYNC_CACHE.put("computed:" + section + "__" + table, body, { metadata: { section, table, updatedAt: publishedAt, rowCount: rows.length } });
+      results.push({ section, table, ok: true });
+    } catch (e) { results.push({ section, table, ok: false, error: (e && e.message) || String(e) }); }
+  }
+  return jsonResponse({ success: true, publishedAt, results });
+}
+function computedKeyCheck(url, env) {
+  const key = url.searchParams.get("key") || "";
+  return computedKeys(env).indexOf(key) === -1 ? jsonResponse({ success: false, message: "Missing or invalid API key." }, 403) : null;
+}
+async function handleGetComputed(url, env) {
+  const bad = computedKeyCheck(url, env); if (bad) return bad;
+  const section = sanitizeComputedName(url.searchParams.get("section")), table = sanitizeComputedName(url.searchParams.get("table"));
+  if (!section || !table) return jsonResponse({ success: false, message: "section and table query params are required." }, 400);
+  const txt = await env.SYNC_CACHE.get("computed:" + section + "__" + table);
+  if (!txt) return jsonResponse({ success: false, message: "No data published yet for section='" + section + "', table='" + table + "'." }, 404);
+  // الرد = نفس شكل Apps Script القديم: { success:true, ...الملف }
+  return new Response('{"success":true,' + txt.trimStart().slice(1), { status: 200, headers: corsHeaders() });
+}
+async function handleListComputed(url, env) {
+  const bad = computedKeyCheck(url, env); if (bad) return bad;
+  const available = []; let cursor;
+  do {
+    const page = await env.SYNC_CACHE.list({ prefix: "computed:", cursor });
+    page.keys.forEach(k => { const m = k.metadata || {}; available.push({ section: m.section || "", table: m.table || "", updatedAt: m.updatedAt, rowCount: m.rowCount }); });
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return jsonResponse({ success: true, available });
+}
+
+// ---- getLastSync read-through cache --------------------------------------
+const LASTSYNC_KEYS = { general: "lastsync:general_v1", irq: "lastsync:irq_v1", meta: "lastsync:meta_v1" };
+async function appsScriptGet(env, qs) {
+  const r = await fetch(env.APPS_SCRIPT_URL + "?" + qs, { redirect: "follow" });
+  return await r.text();
+}
+async function refreshLastSyncCache(env) {
+  const metaTxt = await appsScriptGet(env, "action=getLastSyncMeta");
+  let meta; try { meta = JSON.parse(metaTxt); } catch (e) { throw new Error("getLastSyncMeta: non-JSON response"); }
+  if (!meta || meta.success === false) throw new Error("getLastSyncMeta failed");
+  const prevTxt = await env.SYNC_CACHE.get(LASTSYNC_KEYS.meta);
+  let prev = null; try { prev = prevTxt ? JSON.parse(prevTxt) : null; } catch (e) {}
+  if (prev && prev.fetchedAt && prev.fetchedAt === meta.fetchedAt) return { changed: false }; // نفس النسخة — مفيش كتابة KV
+  const [g, irq] = await Promise.all([appsScriptGet(env, "action=getLastSync"), appsScriptGet(env, "action=getLastSync&group=irq")]);
+  const gOk = g.charAt(0) === "{" && g.indexOf('"success":true') > -1, iOk = irq.charAt(0) === "{" && irq.indexOf('"success":true') > -1;
+  if (!gOk) throw new Error("getLastSync: bad response");
+  await env.SYNC_CACHE.put(LASTSYNC_KEYS.general, g);
+  if (iOk) await env.SYNC_CACHE.put(LASTSYNC_KEYS.irq, irq);
+  await env.SYNC_CACHE.put(LASTSYNC_KEYS.meta, metaTxt);
+  return { changed: true };
+}
+async function handleGetLastSync(url, env, ctx) {
+  const group = url.searchParams.get("group") === "irq" ? "irq" : "general";
+  const txt = await env.SYNC_CACHE.get(LASTSYNC_KEYS[group]);
+  if (txt) return new Response(txt, { status: 200, headers: corsHeaders() });
+  // لسه الكاش فاضي (أول تشغيل) — نمرر لـ Apps Script مباشرة ونملأ الكاش في الخلفية.
+  const live = await appsScriptGet(env, "action=getLastSync" + (group === "irq" ? "&group=irq" : ""));
+  if (ctx) ctx.waitUntil(refreshLastSyncCache(env).catch(() => {}));
+  return new Response(live, { status: 200, headers: corsHeaders() });
+}
+async function handleGetLastSyncMeta(env) {
+  const txt = await env.SYNC_CACHE.get(LASTSYNC_KEYS.meta);
+  if (txt) return new Response(txt, { status: 200, headers: corsHeaders() });
+  return new Response(await appsScriptGet(env, "action=getLastSyncMeta"), { status: 200, headers: corsHeaders() });
+}
+
+// ---- Feedback: instant ack + background apply to the Google Sheet ----------
+const FB_SAVE_ACTIONS = ["save_match_feedback", "save_decline_feedback", "save_sales_plan_feedback"];
+const FB_GET_ACTIONS = ["get_decline_feedback", "get_sales_plan_feedback"];
+const FB_MAX_TRIES = 15;
+const FB_TRANSIENT = /lock|busy|try again|timed? ?out|too many|temporar|exceeded|server error|invalid response/i;
+async function callAppsScriptPost(env, payload) {
+  const r = await fetch(env.APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow" });
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch (e) { return { success: false, error: "Server returned an invalid response", transient: true }; }
+}
+async function handleFeedback(request, env, ctx) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let payload;
+  try { payload = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, error: "Invalid request body." }, 400); }
+  const action = payload && payload.action;
+  if (FB_GET_ACTIONS.indexOf(action) > -1) return handleFeedbackGet(payload, env, ctx);
+  if (FB_SAVE_ACTIONS.indexOf(action) < 0) return jsonResponse({ success: false, error: "Unknown feedback action." }, 400);
+  // فحوصات خفيفة بس (الباك اند بيعمل الفحص الكامل وقت الكتابة في الشيت)
+  if (!String(payload.userName || "").trim() && action !== "save_match_feedback") return jsonResponse({ success: false, error: "Missing logged-in user name." }, 400);
+  if (action === "save_match_feedback" && (!String(payload.feedback || "").trim() || !payload.merchantId || !payload.productId)) return jsonResponse({ success: false, error: "Missing feedback details." }, 400);
+  if (action === "save_decline_feedback" && (!String(payload.feedback || "").trim() || !payload.row || !payload.row.skuId || !payload.row.merchantId || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.declineDay || "")))) return jsonResponse({ success: false, error: "Missing match details." }, 400);
+  if (action === "save_sales_plan_feedback" && (!payload.row || !payload.row.productId || !payload.row.merchantId || !String(payload.comment || "").trim())) return jsonResponse({ success: false, error: "Missing match details or comment." }, 400);
+  const id = Date.now().toString().padStart(14, "0") + "-" + crypto.randomUUID().slice(0, 8);
+  const item = { id, payload, tries: 0, at: new Date().toISOString() };
+  await env.SYNC_CACHE.put("fbq:" + id, JSON.stringify(item), { expirationTtl: 7 * 86400 });
+  ctx.waitUntil(flushFeedbackQueue(env));
+  return jsonResponse({ success: true, queued: true, id, at: item.at.substring(0, 16).replace("T", " "), date: String(item.at).substring(0, 10) });
+}
+async function processFeedbackItem(env, key, item) {
+  let res;
+  try { res = await callAppsScriptPost(env, item.payload); } catch (e) { res = { success: false, error: (e && e.message) || "network error", transient: true }; }
+  const p = item.payload;
+  const sameUserLocked = res && res.locked && res.existing && String(res.existing.by || "") === String(p.userName || "") && String(res.existing.feedback || "") === String(p.feedback || "").substring(0, 2000);
+  if (res && (res.success === true || sameUserLocked)) { await env.SYNC_CACHE.delete(key); return "ok"; }
+  const err = String((res && (res.error || res.message)) || "unknown error");
+  const transient = !!(res && res.transient) || FB_TRANSIENT.test(err);
+  item.tries = (item.tries || 0) + 1;
+  if (!transient || item.tries >= FB_MAX_TRIES) {
+    // فشل نهائي: نحفظه في قايمة الفاشل (للمراجعة عن طريق getFeedbackStatus) ونشيله من الطابور
+    await env.SYNC_CACHE.put("fbfail:" + item.id, JSON.stringify({ id: item.id, action: p.action, error: err, at: new Date().toISOString(), user: p.userName || p.userEmail || "", payload: p }), { expirationTtl: 30 * 86400 });
+    await env.SYNC_CACHE.delete(key); return "failed";
+  }
+  item.next = Date.now() + Math.min(60000 * item.tries, 300000); // 1m,2m,3m... بحد أقصى 5 دقايق
+  await env.SYNC_CACHE.put(key, JSON.stringify(item), { expirationTtl: 7 * 86400 });
+  return "retry";
+}
+async function flushFeedbackQueue(env) {
+  const lock = await env.SYNC_CACHE.get("fb:flush");
+  if (lock && Date.now() - Number(lock) < 45000) return { skipped: true };
+  await env.SYNC_CACHE.put("fb:flush", String(Date.now()), { expirationTtl: 60 });
+  const page = await env.SYNC_CACHE.list({ prefix: "fbq:", limit: 50 });
+  let ok = 0, retry = 0, failed = 0;
+  for (const k of page.keys) { // ids مرتبة بالوقت => ترتيب الحفظ محفوظ
+    const txt = await env.SYNC_CACHE.get(k.name); if (!txt) continue;
+    let item; try { item = JSON.parse(txt); } catch (e) { await env.SYNC_CACHE.delete(k.name); continue; }
+    if (item.next && item.next > Date.now()) continue;
+    const r = await processFeedbackItem(env, k.name, item);
+    if (r === "ok") ok++; else if (r === "retry") retry++; else failed++;
+  }
+  await env.SYNC_CACHE.delete("fb:flush").catch(() => {});
+  return { ok, retry, failed };
+}
+async function pendingFeedback(env) {
+  const out = []; const page = await env.SYNC_CACHE.list({ prefix: "fbq:", limit: 200 });
+  for (const k of page.keys) { const t = await env.SYNC_CACHE.get(k.name); if (t) { try { out.push(JSON.parse(t)); } catch (e) {} } }
+  return out;
+}
+async function handleFeedbackGet(payload, env, ctx) {
+  // كاش قصير (25 ثانية) على الـ edge لقراءة الشيت، وبعدين نضيف فوقه اللي لسه في الطابور
+  const cacheKey = new Request("https://fbcache.invalid/" + encodeURIComponent(JSON.stringify(payload)));
+  let base = null;
+  try { const hit = await caches.default.match(cacheKey); if (hit) base = await hit.json(); } catch (e) {}
+  if (!base) {
+    try { base = await callAppsScriptPost(env, payload); } catch (e) { base = null; }
+    if (base && base.success) { try { ctx.waitUntil(caches.default.put(cacheKey, new Response(JSON.stringify(base), { headers: { "Cache-Control": "max-age=25", "Content-Type": "application/json" } }))); } catch (e) {} }
+  }
+  if (!base || !base.success) base = { success: true, items: {}, stale: true };
+  const items = base.items || {};
+  const pend = await pendingFeedback(env);
+  pend.forEach(q => {
+    const p = q.payload, at = String(q.at).substring(0, 16).replace("T", " ");
+    if (payload.action === "get_decline_feedback" && p.action === "save_decline_feedback" && String(p.declineDay) === String(payload.declineDay)) {
+      items[String(p.row.merchantId).trim() + "||" + String(p.row.skuId).trim()] = { feedback: String(p.feedback || ""), by: p.userName || "", at };
+    } else if (payload.action === "get_sales_plan_feedback" && p.action === "save_sales_plan_feedback") {
+      const d = String(q.at).substring(0, 10);
+      if (payload.month && d.substring(0, 7) !== String(payload.month)) return;
+      const r = p.row || {}, k = String(r.merchantId).trim() + "||" + String(r.productId).trim();
+      items[k] = { date: d, feedback: String(p.feedback || ""), adjTarget: Number(p.adjustedTarget), merchants: (p.newMerchants || []).map(m => ({ id: m.id, target: Number(m.target) })), comment: String(p.comment || ""), newTarget: Number(r.newDailyTarget) || 0, by: p.userName || "", at };
+    }
+  });
+  return jsonResponse({ success: true, items, pending: pend.length });
+}
+async function handleFeedbackStatus(env) {
+  const pend = await env.SYNC_CACHE.list({ prefix: "fbq:" }), fail = await env.SYNC_CACHE.list({ prefix: "fbfail:" });
+  const failed = [];
+  for (const k of fail.keys.slice(0, 50)) { const t = await env.SYNC_CACHE.get(k.name); if (t) { try { const f = JSON.parse(t); delete f.payload; failed.push(f); } catch (e) {} } }
+  return jsonResponse({ success: true, pending: pend.keys.length, failedCount: fail.keys.length, failed });
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -755,6 +1169,23 @@ export default {
     const url = new URL(request.url);
     const action = url.searchParams.get("action");
 
+    if (action === "metabase") return handleMetabaseProxy(url);
+    if (action === "getAccess") return handleGetAccess(env);
+    if (action === "putAccess") return handlePutAccess(request, env);
+    if (action === "getTargets") return handleGetTargets(url, env);
+    if (action === "putTargets") return handlePutTargets(request, url, env);
+    if (action === "getAlerts") return handleGetAlerts(request, url, env);
+    if (action === "sendAlert") return handleSendAlert(request, env);
+    if (action === "deleteAlert") return handleDeleteAlert(request, env);
+    if (action === "sendInvites") return handleSendInvites(request, env);
+    if (action === "requestAccess") return handleRequestAccess(request, env);
+    if (action === "getPending") return handleGetPending(request, env);
+    if (action === "resolvePending") return handleResolvePending(request, env);
+    if (action === "getSettings") return handleGetSettings(env);
+    if (action === "putSettings") return handlePutSettings(request, env);
+    if (action === "getActivity") return handleGetActivity(request, env);
+    if (action === "logActivity") return handleLogActivity(request, env);
+    if (action === "checkAdminKey") return handleCheckAdminKey(request, env);
     if (action === "getConfirmedByDay") return handleGetConfirmedByDay(env);
     if (action === "getIncentiveMerchants") return handleGetIncentiveMerchants(env);
     if (action === "getMain") return handleGetMain(env);
@@ -765,6 +1196,13 @@ export default {
     if (action === "releaseDownload") return handleReleaseDownload(env);
     if (action === "releaseUpload") return handleReleaseUpload(request, env);
     if (action === "getOnlineUsers") return handleGetOnlineUsers(request, env);
+    if (action === "publishComputed") return handlePublishComputed(request, env);
+    if (action === "getComputed") return handleGetComputed(url, env);
+    if (action === "listComputed") return handleListComputed(url, env);
+    if (action === "getLastSync") return handleGetLastSync(url, env, ctx);
+    if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
+    if (action === "fb") return handleFeedback(request, env, ctx);
+    if (action === "getFeedbackStatus") return handleFeedbackStatus(env);
 
     return jsonResponse(
       {
@@ -784,16 +1222,9 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       Promise.all([
-        refreshConfirmedByDayCache(env).then(
-          () => env.SYNC_CACHE.delete(CACHE_KEY_CONFIRMED_BY_DAY_ERROR).catch(() => {}),
-          (err) => {
-            console.error("[scheduled refresh confirmedByDay] failed (will retry next cron tick):", err && err.message);
-            return env.SYNC_CACHE.put(
-              CACHE_KEY_CONFIRMED_BY_DAY_ERROR,
-              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
-            ).catch(() => {});
-          }
-        ),
+        refreshLastSyncCache(env).catch((err) => console.error("[scheduled refreshLastSyncCache] failed (retry next tick):", err && err.message)),
+        flushFeedbackQueue(env).catch((err) => console.error("[scheduled flushFeedbackQueue] failed:", err && err.message)),
+        // v1.3.48: Confirmed by Day اتنقل لـ Metabase — مفيش refresh من Google Sheets.
         refreshIncentiveMerchantsCache(env).then(
           () => env.SYNC_CACHE.delete(CACHE_KEY_INCENTIVE_MERCHANTS_ERROR).catch(() => {}),
           (err) => {
@@ -804,16 +1235,7 @@ export default {
             ).catch(() => {});
           }
         ),
-        refreshMainCache(env).then(
-          () => env.SYNC_CACHE.delete(CACHE_KEY_MAIN_ERROR).catch(() => {}),
-          (err) => {
-            console.error("[scheduled refresh main] failed (will retry next cron tick):", err && err.message);
-            return env.SYNC_CACHE.put(
-              CACHE_KEY_MAIN_ERROR,
-              JSON.stringify({ message: (err && err.message) || String(err), at: new Date().toISOString() })
-            ).catch(() => {});
-          }
-        ),
+        // v1.3.48: Main اتنقل لـ Metabase (CSV) — مفيش refresh من Google Sheets.
       ])
     );
   },

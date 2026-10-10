@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.3.53";
+const APP_VERSION = "1.15.4";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -85,6 +85,9 @@ const INCENTIVE_DEFAULT_MONTH = ""; // فاضية = الشهر الحالي تل
 // "Damaged BOX" — دول اللي بنعتبرهم "Repack" (قطع تالفة قابلة لإعادة التجهيز)
 // — ومجموع TOTAL_COUNT بتاعتهم لكل SKU_ID هو عمود "Repack" في Purchase Plan.
 const WAREHOUSE_REPACK_GID = "897709273";
+// شيت Repack (Targets > Supply Conversion): LAST_UPDATED_AT | SKU_ID | PRODUCT_NAME | GOOD_OUTPUT_QTY | STATUS
+// — بيتحسب منه الـ Repack Qty لكل SKU في الشهر الحالي (STATUS = APPLIED) زي شيت الـ Inventory Aging بالظبط.
+const SUPPLY_REPACK_GID = "757777690";
 
 // -------------------------------------------------------------------------
 // WEEKLY INVENTORY & INBOUND PANEL (Admin Panel, تحت Sellthrough Rate Panel)
@@ -242,10 +245,39 @@ const MATCHES_FEEDBACK_API_URL = "https://script.google.com/macros/s/AKfycbwJw0d
 // المستخدم فوق (MATCHES_FEEDBACK_API_URL/CONFIG.API_URL)، بيستخدم هنا عشان
 // الداشبورد "ينشر" آخر نسخة من الأرقام المحسوبة (مش الداتا الخام) لكل
 // سكشن/تيبول مسجل في COMPUTED_SNAPSHOT_REGISTRY تحت، عشان أي حد برة يقدر
-// يسحبها لايف عن طريق GET (backend/Code.gs: action=getComputed&section=..
+// يسحبها لايف عن طريق GET (الـ Worker: ?action=getComputed&section=..
 // &table=..&key=..). راجع publishComputedSnapshots() تحت لتفاصيل الميكانيزم.
 // -------------------------------------------------------------------------
-const PUBLISH_COMPUTED_API_URL = MATCHES_FEEDBACK_API_URL;
+const PUBLISH_COMPUTED_API_URL = SYNC_CDN_URL + "?action=publishComputed"; // v1.10.0: بقى على الـ Worker (KV) بدل Drive
+// الفيدباك (save/get) بيروح على الـ Worker: بيرد فورًا ويكتب في الشيت في الخلفية مع إعادة محاولة تلقائية.
+const FEEDBACK_API_URL = SYNC_CDN_URL + "?action=fb";
+// ---------------------------------------------------------------------
+// fbFetch — نفس fetch بس بيعيد المحاولة أوتوماتيك (لحد 3 مرات، بتأخير 1.2s ثم 2.4s)
+// لما Apps Script يرجّع رد مش JSON (صفحة خطأ/تايم أوت/كولد ستارت) أو يفشل الاتصال أو
+// يرجّع "lock/busy/try again". بيتطبق بس على الأكشنز اللي إعادة تنفيذها آمنة (save =
+// upsert لنفس اليوم/الماتش، get = قراءة). أي أكشن تاني (زي إرسال إيميل) بيتنفذ مرة واحدة.
+// بيرجّع كائن فيه json() جاهز عشان باقي الكود يفضل شغال زي ما هو.
+// ---------------------------------------------------------------------
+const FB_RETRY_SAFE = new Set(["save_match_feedback", "save_sales_plan_feedback", "save_decline_feedback", "get_decline_feedback", "get_sales_plan_feedback", "get_match_feedback"]);
+async function fbFetch(url, init) {
+  let action = ""; try { action = JSON.parse((init && init.body) || "{}").action || ""; } catch (e) {}
+  const attempts = FB_RETRY_SAFE.has(action) ? 3 : 1;
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await fetch(url, init);
+      const txt = await resp.text();
+      let data; try { data = JSON.parse(txt); } catch (e) { throw new Error("Server returned an invalid response"); }
+      if (data && data.success === false && /lock|busy|try again|timed? ?out|too many|temporar/i.test(String(data.error || data.message || "")) && i < attempts - 1) throw new Error(String(data.error || data.message));
+      return { ok: resp.ok, status: resp.status, json: async () => data, text: async () => txt };
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+  throw lastErr || new Error("Network error");
+}
+
 // لو الـ Drive cache (last_sync.json) لسه معمولش أول مرة (الـ trigger لسه ما
 // اشتغلش)، getLastSync بيرجع لمسار fallback: يسحب الـ 22 شيت لايف (fetchAll
 // متوازي) وده ممكن ياخد وقت أطول من الطبيعي — بديت 60s وزودتها لـ 90s
@@ -540,6 +572,7 @@ const state = {
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
   merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
   merchantSegHistoryRows: [], // أرشيف شهور سابقة (MERCHANT_SEG_HISTORY_GIDS) — مصدر Incentive Merchants للشهور الفاتت فقط
+  supplyRepackRows: [], // شيت SUPPLY_REPACK_GID — [{ts, sku, qty, status}]
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
   purchasePlanData: [], purchasePlanFiltered: [], purchasePlanSearch: "", purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
@@ -582,7 +615,7 @@ const state = {
   sellthroughCountry: "EGY", // "EGY" | "IRQ" — الافتراضي دايمًا EGY
   sellthroughDataPrepared: [],
   filteredSellthroughData: [],
-  sellthroughSortKey: "stRate",
+  sellthroughSortKey: "totPur",
   sellthroughSortDir: "desc",
   sellthroughPage: 0,
   // فلاتر شهور لوحة الـ Sellthrough: begInv (شهر المخزون الافتتاحي/المشتريات),
@@ -898,7 +931,6 @@ const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
 const navForecastModel = $("navForecastModel");
-const navGapPlanRecommends = $("navGapPlanRecommends");
 const navDohPlanner = $("navDohPlanner");
 const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
@@ -975,7 +1007,7 @@ const SYNC_STATUS_TARGETS = [
   // حقيقي، فكان بيفشل كل 5 دقايق ("General Sync — Worker" فاضل عالق دايمًا
   // في المودال). Apps Script مش عليه نفس القيد، فبقى المصدر الوحيد — وده
   // كمان معناه إن الـ 21 شيت دول بيتحدثوا فعليًا مع بعض في نفس الوقت.
-  { key: "generalAppsScript", label: "General Sync — Apps Script (21 sheets, incl. Beginning Inventory)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
+  { key: "generalAppsScript", label: "General Sync — Apps Script (17 Google Sheets)", action: "getLastSyncMeta", metaOnly: true, base: "appsScript" },
   // v1.1.57: تاب "Analyst / Single" (Google Sheet حقيقي) — بيتحدث تلقائي
   // مع كل publishComputedSnapshots() (راجع تعليقها)، وليه زرار Force Refresh
   // منفصل تحت (مش نفس زرار الـ Worker) لأن آلية تحديثه مختلفة تمامًا
@@ -1237,7 +1269,6 @@ function switchView(viewName) {
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
   if(navForecastModel) navForecastModel.classList.remove("active");
-  if(navGapPlanRecommends) navGapPlanRecommends.classList.remove("active");
   if(navDohPlanner) navDohPlanner.classList.remove("active");
   if(navIncMerchants) navIncMerchants.classList.remove("active");
 
@@ -1253,7 +1284,6 @@ function switchView(viewName) {
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
   else if (viewName === "ppmAnalystSingle") { activeSection = $("viewPpmAnalystSingle"); if(navPpmAnalystSingle) navPpmAnalystSingle.classList.add("active"); preparePpmAnalystSingleData(); }
-  else if (viewName === "productsAnalyst") { activeSection = $("viewProductsAnalyst"); if(navProductsAnalyst) navProductsAnalyst.classList.add("active"); prepareProductsAnalystData(); }
   else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); prepareProductsMatchesAnalystData(); }
   // CM3 Target اتدمجت جوه صفحة CM3 Analyst نفسها (بطلب صريح) — بدل ما تبقى
   // صفحة لوحدها، دلوقتي هي أول سكشن في viewCm3Analyst، فبنرندر الاتنين مع بعض.
@@ -1284,11 +1314,6 @@ function switchView(viewName) {
       if(navForecastModel) navForecastModel.classList.add("active");
       prepareForecastModelView(false);
   }
-  else if (viewName === "gapPlanRecommends") {
-      activeSection = $("viewGapPlanRecommends");
-      if(navGapPlanRecommends) navGapPlanRecommends.classList.add("active");
-      prepareGapPlanRecommends();
-  }
   else if (viewName === "dohPlanner") {
       activeSection = $("viewDohPlanner");
       if(navDohPlanner) navDohPlanner.classList.add("active");
@@ -1317,7 +1342,6 @@ if(navPurchasePlan) navPurchasePlan.addEventListener("click", () => switchView("
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
 if(navPpmAnalystSingle) navPpmAnalystSingle.addEventListener("click", () => switchView("ppmAnalystSingle"));
-if(navProductsAnalyst) navProductsAnalyst.addEventListener("click", () => switchView("productsAnalyst"));
 if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.addEventListener("click", () => switchView("productsMatchesAnalyst"));
 if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3Analyst"));
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
@@ -1334,8 +1358,7 @@ if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => re
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
 if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
-if(navGapPlanRecommends) navGapPlanRecommends.addEventListener("click", () => requestAdminAccess("gapPlanRecommends"));
-if(navDohPlanner) navDohPlanner.addEventListener("click", () => requestAdminAccess("dohPlanner"));
+if(navDohPlanner) navDohPlanner.addEventListener("click", () => switchView("dohPlanner"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
 // -------------------------------------------------------------------------
@@ -1405,6 +1428,16 @@ function fmtSegAch(ach) {
   if (ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
   return `<span class="font-bold ${segAchColor(ach.ratio)}">${fmtPctCell(ach.ratio * 100)}</span>`;
 }
+function segAchPill(ach) {
+  if (!ach || ach.kind === "dash" || ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
+  const c = ach.ratio >= 1 ? "good" : (ach.ratio >= 0.8 ? "warn" : "bad");
+  return `<span class="seg-pill seg-pill-${c}">${fmtPctCell(ach.ratio * 100)}</span>`;
+}
+function segBar(ach) {
+  if (!ach || ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return "";
+  const c = ach.ratio >= 1 ? "good" : (ach.ratio >= 0.8 ? "warn" : "bad");
+  return `<div class="seg-bar"><i class="seg-bar-${c}" style="width:${Math.max(0, Math.min(100, ach.ratio * 100)).toFixed(1)}%"></i></div>`;
+}
 function renderSegmentationPanel() {
   const grid = $("segSectionsGrid");
   const totalWrap = $("segTotalSectionWrap");
@@ -1420,6 +1453,8 @@ function renderSegmentationPanel() {
   const rows = computeSegmentationPerformance();
 
   // كروت الـ KPI الإجمالية (Total merchants / confirmed orders / GMV / delivered GMV)
+  const segMonthLabel = SEG_PANEL_MONTH.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const segSub = $("segSubtitle"); if (segSub) segSub.textContent = "Target vs Actual and Achievement % per merchant segment — " + segMonthLabel;
   const kpiIds = ["r113", "r114", "r115", "r118"];
   const kpiGrid = $("segKpiGrid");
   if (kpiGrid) {
@@ -1427,10 +1462,11 @@ function renderSegmentationPanel() {
       const r = rows.find(x => x.id === id);
       if (!r) return "";
       return `
-        <div class="metric-card hover-glow">
-          <div class="metric-title">${r.label} <span class="text-dim" style="font-weight:400;font-size:11px;">July</span></div>
+        <div class="metric-card hover-glow seg-kpi">
+          <div class="metric-title">${r.label} <span class="text-dim" style="font-weight:400;font-size:11px;">${segMonthLabel}</span></div>
           <div class="metric-value">${fmtSegValue(r.unit, r.actual)}</div>
-          <div class="metric-sub text-dim">Target: ${fmtSegValue(r.unit, r.target)} · ${fmtSegAch(r.ach)}</div>
+          ${segBar(r.ach)}
+          <div class="metric-sub text-dim seg-kpi-sub"><span>Target ${fmtSegValue(r.unit, r.target)}</span>${segAchPill(r.ach)}</div>
         </div>`;
     }).join("");
   }
@@ -1444,14 +1480,15 @@ function renderSegmentationPanel() {
           <td class="${labelClass}" style="${indent}">${r.label}</td>
           <td class="num text-dim">${fmtSegValue(r.unit, r.target)}</td>
           <td class="num font-bold">${fmtSegValue(r.unit, r.actual)}</td>
-          <td class="num">${fmtSegAch(r.ach)}</td>
+          <td class="num">${segAchPill(r.ach)}</td>
         </tr>`;
     }).join("");
   }
 
+  const segAccents = { "HVM (Champions)": "#f59e0b", "Loyal MVM": "#3b82f6", "Potential Loyal MVM": "#6366f1", "LVM": "#f43f5e" };
   function sectionCard(sectionName, list) {
     return `
-      <div class="panel table-panel hover-glow seg-section-card">
+      <div class="panel table-panel hover-glow seg-section-card" style="--seg-accent:${segAccents[sectionName] || "#8b5cf6"}">
         <div class="panel-head-modern">
           <div class="panel-title-wrapper border-purple"><h3>${sectionName}</h3></div>
         </div>
@@ -1480,7 +1517,7 @@ function renderSegmentationPanel() {
       <div class="table-responsive">
         <table class="data-table">
           <thead>
-            <tr><th>Metric</th><th class="num">July TARGET</th><th class="num">Actuals</th><th class="num">Achievement%</th></tr>
+            <tr><th>Metric</th><th class="num">Target</th><th class="num">Actual</th><th class="num">Achievement%</th></tr>
           </thead>
           <tbody>${rowsHtml(totalRows)}</tbody>
         </table>
@@ -1850,7 +1887,6 @@ async function backupSnapshotToDrive(snapshot) {
       // avoids firing 5+ simultaneous large POSTs at once.
       await fetch(DRIVE_BACKUP_WEBHOOK_URL, {
         method: "POST",
-        mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
         body: JSON.stringify({ action: "backup_chunk", uploadId, chunkIndex: i, totalChunks, chunkData })
       });
@@ -1909,7 +1945,6 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   { section: "cm3AnalystProducts", table: "main", getRows: () => { prepareCm3AnalystProductsData(); return cm3apDataAll || []; } },
   { section: "ppmAnalystProducts", table: "main", getRows: () => { preparePpmAnalystProductsData(); return ppmAnalystState.data || []; } },
   { section: "ppmAnalystSingle", table: "main", getRows: () => { preparePpmAnalystSingleData(); return ppmAnalystSingleState.data || []; } },
-  { section: "productsAnalyst", table: "main", getRows: () => { prepareProductsAnalystData(); return prodAnState.data || []; } },
   { section: "productsMatchesAnalyst", table: "main", getRows: () => { prepareProductsMatchesAnalystData(); return pmaState.data || []; } },
   // Inventory — prepareInventoryTableData(rows) بتتنادى من غير أي شرط أصلاً
   // جوه updateDashboard، فـ state.inventoryTableData دايمًا محدثة.
@@ -1991,18 +2026,17 @@ async function publishComputedSnapshots() {
   let sentCount = 0;
   for (const s of sections) {
     try {
-      await fetch(PUBLISH_COMPUTED_API_URL, {
+      const pubRes = await fetch(PUBLISH_COMPUTED_API_URL, {
         method: "POST",
-        mode: "no-cors", // Apps Script doesn't return CORS headers; we don't need to read the response anyway.
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
-        body: JSON.stringify({ action: "publish_computed_batch", sections: [s] })
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // بدون preflight — الـ Worker بيرجّع CORS headers فنقدر نقرا الرد
+        body: JSON.stringify({ sections: [s] })
       });
-      sentCount++;
+      if (pubRes.ok) sentCount++; else console.warn(`[Computed API publish] ${s.section}/${s.table} rejected (HTTP ${pubRes.status})`);
     } catch (e) {
       console.warn(`[Computed API publish] request failed for ${s.section}/${s.table} (non-fatal):`, e.message);
     }
   }
-  console.log(`[Computed API publish] sent ${sentCount}/${sections.length} section(s)/table(s) request(s). (mode:"no-cors" means this confirms the requests went OUT, not that the server accepted every one — check Apps Script Executions or listComputed to verify.)`);
+  console.log(`[Computed API publish] sent ${sentCount}/${sections.length} section(s)/table(s) request(s). (accepted by the Worker; verify with ?action=listComputed&key=...)`);
 
   // v1.1.57: نفس دورة الـ publish العادية دي (بتحصل كل ما الداتا تتغير فعلاً
   // — مش كل loadData) هي اللي بتحدّث تاب "Analyst / Single" (Google Sheet)
@@ -3349,7 +3383,7 @@ async function syncNewLockedMatchesToSheet(missingMatches) {
   toSend.forEach(m => state.addedNewLockedMatchKeys.add(m.merchantId + "||" + m.productId));
 
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(MATCHES_FEEDBACK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي submitMatchFeedback بالظبط — نتفادى CORS preflight مع Apps Script
       body: JSON.stringify({
@@ -3397,7 +3431,7 @@ async function submitMatchFeedback(merchantId, productId, text, rowEl) {
   setStatus("بيتبعت...", "");
 
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(FEEDBACK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي auth.js بالظبط — عشان نتفادى CORS preflight مع Apps Script
       body: JSON.stringify({
@@ -3718,6 +3752,12 @@ function preparePpmAnalystProductsData() {
     }
   });
 
+  // ALL SKUs — كل SKU معروف (Products + Inventory + أي SKU ظهر في الـ Main)
+  // لازم يظهر في الجدول حتى لو مالوش نشاط الشهر ده (بأصفار).
+  Object.keys(state.productsMap || {}).forEach(k => getBucket(k));
+  Object.keys(state.inventoryMap || {}).forEach(k => getBucket(k));
+  mainRowsAll.forEach(r => { if (r.sku) getBucket(r.sku); });
+
   // AVG LAST 3D / AVG LAST 7D / AVG 15D — بطلب صريح لازم يكونوا على أساس
   // الـ Confirmed Pcs (مش Placed ولا Delivered)، متوسط يومي لكل SKU زي ما هو
   // (بدون أي تجميع بندلات — الجدول ده مستوى SKU مباشر زي باقي أعمدته)، على
@@ -4026,6 +4066,30 @@ function preparePpmAnalystSingleData() {
     });
   });
 
+  // ===== أعمدة مدموجة من Single / Analyst (اتشال): Last Inbound، Demand 2D،
+  // AVG Confirmed Daily (2D/5D/15D)، Demand Confirmed (3M)، AVG Daily (3M)، PPM/Piece =====
+  const last3TotalDays = [0, 1, 2].reduce((t, back) => { const d = new Date(now.getFullYear(), now.getMonth() - back, 1); return t + new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); }, 0);
+  const last3Set = new Set([0, 1, 2].map(back => new Date(now.getFullYear(), now.getMonth() - back, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })));
+  const demandBySingle = new Map();
+  (state.metabaseSellthroughNeeded || []).forEach(row => {
+    const sku = row.PRODUCT_ID; const mk = stMonthKeyFromValue(row.MONTH);
+    if (!sku || !mk || !last3Set.has(mk)) return;
+    demandBySingle.set(sku, (demandBySingle.get(sku) || 0) + (row.CNF_QTY || 0));
+  });
+  const lastInboundTsBySku = new Map();
+  (state.inboundRows || []).forEach(r => { if (r.sku && r.rcvTs && r.rcvTs > (lastInboundTsBySku.get(r.sku) || 0)) lastInboundTsBySku.set(r.sku, r.rcvTs); });
+  const confNd = (days) => {
+    const st = todayMs - days * 86400000; const map = new Map();
+    mainRowsAll.forEach(r => {
+      if (!r.sku) return;
+      const dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); const t = dd.getTime();
+      if (t < st || t >= todayMs) return;
+      mappingsFor(r.sku).forEach(mp => map.set(mp.singleId, (map.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1)));
+    });
+    return map;
+  };
+  const conf2dMap = confNd(2), conf5dMap = confNd(5), conf15dMap = confNd(15);
+
   let grandDeliveredGmv = 0, grandPpm = 0;
   bySingle.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; });
   const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
@@ -4086,6 +4150,15 @@ function preparePpmAnalystSingleData() {
       skuId: singleId, skuName: singlesList.get(singleId) || inv.skuName || prod.name || singleId,
       category: inv.category || prod.category || "Uncategorized",
       activeDays,
+      lastInboundTs: lastInboundTsBySku.get(singleId) || 0,
+      lastInboundDate: lastInboundTsBySku.get(singleId) ? new Date(lastInboundTsBySku.get(singleId)).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "-",
+      demandConfirmedLast2d: Math.round(conf2dMap.get(singleId) || 0),
+      avgConfirmedDailyLast2d: (conf2dMap.get(singleId) || 0) / 2,
+      avgConfirmedDailyLast5d: (conf5dMap.get(singleId) || 0) / 5,
+      avgConfirmedDailyLast15d: (conf15dMap.get(singleId) || 0) / 15,
+      demandConfirmed3m: Math.round(demandBySingle.get(singleId) || 0),
+      avgConfirmedDaily: last3TotalDays > 0 ? (demandBySingle.get(singleId) || 0) / last3TotalDays : 0,
+      ppmPerPiece: b.deliveredPieces > 0 ? b.ppm / b.deliveredPieces : 0,
       placedPieces: Math.round(b.placedPieces || 0), confirmedPieces: Math.round(b.confirmedPieces || 0), deliveredPieces: Math.round(b.deliveredPieces || 0),
       avgLast3d, avgLast7d,
       crPct, drPct, ndrPct,
@@ -4154,12 +4227,19 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="font-mono text-dim">${m.skuId}</td>
       <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
       <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="text-dim">${m.lastInboundDate || "-"}</td>
       <td class="num text-dim">${fmtIntCell(m.activeDays)}</td>
       <td class="num font-bold">${fmtIntCell(m.placedPieces)}</td>
       <td class="num text-blue">${fmtIntCell(m.confirmedPieces)}</td>
       <td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td>
       <td class="num text-orange font-bold">${m.avgLast3d.toFixed(1)}</td>
       <td class="num text-purple font-bold">${m.avgLast7d.toFixed(1)}</td>
+      <td class="num text-dim">${fmtIntCell(m.demandConfirmedLast2d)}</td>
+      <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast2d))}</td>
+      <td class="num font-bold text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast5d))}</td>
+      <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast15d))}</td>
+      <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
+      <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
@@ -4177,6 +4257,7 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="num">${fmtPctCell(m.ppmPct)}</td>
       <td class="num font-bold text-purple">${fmtMoneyCompactCell(m.ppmSuggestPpmSku)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
+      <td class="num">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
       <td class="num">${fmtPctCell(m.cm3Pct)}</td>
@@ -5084,6 +5165,24 @@ function applyGoodStockToDebundle(rows, warehousePayload) {
   return rows;
 }
 
+function parseSupplyRepackSheet(payload) {
+  const rawRows = payload?.table?.rows ?? [];
+  const out = [];
+  for (const r of rawRows) {
+    const c = r.c || [];
+    const sku = cellText(c[1]).trim();
+    if (!sku || sku === "SKU_ID") continue;
+    let ts = NaN;
+    const cell = c[0];
+    const m = cell && typeof cell.v === "string" && cell.v.match(/^Date\((\d+),(\d+),(\d+)/);
+    if (m) ts = new Date(+m[1], +m[2], +m[3]).getTime();
+    else if (cell && typeof cell.v === "number") ts = (cell.v - 25569) * 864e5;
+    else ts = new Date(cellText(cell)).getTime();
+    out.push({ ts: isNaN(ts) ? 0 : ts, sku, qty: cellNumber(c[3]), status: cellText(c[4]).trim().toUpperCase() });
+  }
+  return out;
+}
+
 function parseWarehouseRepackSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const map = new Map();
@@ -5539,39 +5638,13 @@ async function applyFilters() {
 // في اللحظة اللي بيجيب فيها snapshot جديد ويبني كل الجداول من الأول.
 async function updateDashboard(rows) {
   const metrics = computeMetrics(rows);
-  const leaderboard = computeLeaderboard(rows);
-  if($("placedOrdersVal")) $("placedOrdersVal").textContent = fmtInt.format(metrics.placedOrders);
-  if($("confirmedOrdersVal")) $("confirmedOrdersVal").textContent = fmtInt.format(metrics.confirmedOrders);
   if($("deliveredGmvVal")) $("deliveredGmvVal").textContent = fmtMoneyCompact(metrics.deliveredGmv);
-  if($("placedOrdersRunRate")) $("placedOrdersRunRate").textContent = `Run Rate: ${fmtInt.format(Math.round(metrics.placedRunRate))} by EOM`;
-  if($("confirmedOrdersRunRate")) $("confirmedOrdersRunRate").textContent = `Run Rate: ${fmtInt.format(Math.round(metrics.confirmedRunRate))} by EOM`;
   if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: ${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
-  if($("confirmedGmvVal")) $("confirmedGmvVal").textContent = fmtMoneyCompact(metrics.confirmedGmv);
   if($("crVal")) $("crVal").textContent = fmtPct(metrics.cr);
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
-  if($("ndrVal")) $("ndrVal").textContent = fmtPct(metrics.ndr);
-  if($("activeSkusVal")) $("activeSkusVal").textContent = fmtInt.format(metrics.activeSkus);
-  if($("activeMerchantsVal")) $("activeMerchantsVal").textContent = fmtInt.format(metrics.activeMerchants);
-  const lbContainer = $("leaderboardList");
-  if(lbContainer) {
-    lbContainer.innerHTML = "";
-    leaderboard.forEach((item, index) => {
-      const li = document.createElement("li"); li.className = "leaderboard-item";
-      // v1.1.56: الترتيب بقى على item.points (Wilson lower bound) مش raw
-      // NDR% — بنعرض الـ NDR% الحقيقي زي الأول (مش نغير الرقم المعروض)،
-      // بس الـ title بيوضح رقم الـ Points اللي فعليًا حدد الترتيب، عشان لو
-      // ACM عنده NDR% أعلى من واحد فوقه في الليست يبان ليه (orders قليلة).
-      li.title = `Ranked by confidence-adjusted points: ${item.points.toFixed(1)} (raw NDR ${item.ndr.toFixed(1)}% on ${fmtInt.format(item.orders)} orders — low order counts get pulled down so a lucky small sample can't outrank real volume).`;
-      li.innerHTML = `
-        <div class="lb-rank ${index === 0 ? 'gold' : ''}">${index + 1}</div>
-        <div class="lb-name">${item.name}</div>
-        <div class="lb-stats"><div class="lb-ndr">${fmtPctCell(item.ndr)}</div><div class="lb-orders">${fmtIntCell(item.orders)} orders</div></div>
-      `;
-      lbContainer.appendChild(li);
-    });
-  }
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
-  renderPipelineChart(rows); renderCategoryChart(rows);
+  renderOverviewHero(rows, metrics); renderPipelineChart(rows); renderCategoryChart(rows);
+  if (!state._ovStTrendDone && $("ovStTrendChart")) { state._ovStTrendDone = true; setTimeout(() => renderSellthroughTrendChart(OV_ST_TREND_CFG), 60); }
   await yieldToMainThread();
   prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
   renderOverallAcmTargetsSummary();
@@ -5582,7 +5655,6 @@ async function updateDashboard(rows) {
   if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
   if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
   if ($("viewPpmAnalystSingle") && $("viewPpmAnalystSingle").classList.contains("active-view")) preparePpmAnalystSingleData();
-  if ($("viewProductsAnalyst") && $("viewProductsAnalyst").classList.contains("active-view")) prepareProductsAnalystData();
   if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
   // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
   if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) { renderCm3TargetView(); renderCm3AnalystView(); }
@@ -5825,14 +5897,20 @@ function renderPaginatedInventoryTable() {
 }
 
 function prepareAcmTableData(rows) {
+  window.__acmRows = rows;
   const map = new Map();
+  // Metric cutoffs (Settings): CR بيحسب على الأوردرات الأقدم من D-cr، و DR على الأقدم من D-dr.
+  let __cut = { cr: 0, dr: 0 }; try { __cut = window.TowerCore.getSettings().cutoffs; } catch (e) {}
+  const __now = Date.now(), __crLim = __now - (__cut.cr || 0) * 86400000, __drLim = __now - (__cut.dr || 0) * 86400000;
   // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
   // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
   const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
-    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, actualRetention: 0 }); }
-    const entry = map.get(r.acmName); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders; entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
+    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, actualRetention: 0, crP: 0, crC: 0, drC: 0, drD: 0 }); }
+    const entry = map.get(r.acmName); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
+    if (r.timestamp <= __crLim) { entry.crP += r.placedOrders; entry.crC += r.confirmedOrders; }
+    if (r.timestamp <= __drLim) { entry.drC += r.confirmedOrders; entry.drD += r.deliveredOrders; } entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
     // cm3DeliveredGmv: نفس الـ deliveredGmv بس بكات أوف الـ CM3 بالظبط — ده اللي بيتحسب بيه cm3Pct
     // عشان مايبقاش عندنا CM3 واقفة عند يوم و GMV ماشية لحد آخر يوم موجود في الداتا (بيبوظ النسبة).
     // deliveredGmv العادي فاضل من غير لاج زي ما هو، مستخدم لأهداف الـ GMV والـ Run Rate بتاعت الـ ACM.
@@ -5848,7 +5926,7 @@ function prepareAcmTableData(rows) {
   const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
   if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
   state.acmTableData = Array.from(map.values()).map(m => {
-    const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = (dr * cr) * 100; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) * 100 : 0;
+    const cr = m.crP ? (m.crC / m.crP) : (m.placed ? (m.confirmed / m.placed) : 0); const dr = m.drC ? (m.drD / m.drC) : (m.confirmed ? (m.delivered / m.confirmed) : 0); const ndr = (dr * cr) * 100; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) * 100 : 0;
     const targetData = normalizedTargets[normalizeName(m.name)] || { targetGmv: 0, targetNdr: 0, targetCm3: 0, targetRetention: 0 };
     const targetGmv = targetData.targetGmv; const targetNdr = targetData.targetNdr; const targetCm3 = targetData.targetCm3; const targetRetention = targetData.targetRetention;
     const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
@@ -5915,6 +5993,7 @@ function renderPaginatedAcmTable() {
 
 function renderTrendTables(allRows, selectedAcm) {
   const wowTbody = $("wowTableBody"); const avgTbody = $("avgDailyTableBody");
+  if (!wowTbody && !avgTbody) return; // v1.5.0: WoW/MoM اتشالوا من صفحة Performance ACM
   if(wowTbody) wowTbody.innerHTML = ""; if(avgTbody) avgTbody.innerHTML = "";
   if (!allRows || allRows.length === 0) return;
   let latestTs = 0; for (const r of allRows) { if (r.timestamp > latestTs) latestTs = r.timestamp; } if(latestTs === 0) return;
@@ -6409,6 +6488,78 @@ function renderPaginatedSegTable() {
   document.querySelectorAll("#segTable thead th").forEach((th) => { if(th.dataset.skey) th.classList.toggle("sorted", th.dataset.skey === state.sortKeySeg); });
 }
 
+
+// =========================================================================
+// OVER VIEW — Hero (NDR ring + CR × DR + 4 tiles), Pieces funnel, Avg Placed Pcs.
+// كله من نفس الـ rows المفلترة اللي بيشتغل عليها باقي الأوفرفيو (شهر/ACM)، من غير
+// أي مصدر داتا جديد: placedPieces/confirmedPieces/deliveredPieces/deliveredGmv/
+// placedGmv/placedOrders — كلها أعمدة موجودة في MAIN_GID أصلاً.
+// =========================================================================
+function ovSparkSvg(values, color, w, h) {
+  w = w || 150; h = h || 30;
+  if (!values || values.length < 2) return "";
+  const max = Math.max(...values), min = Math.min(...values), span = (max - min) || 1;
+  const pts = values.map((v, i) => [(i * (w - 2) / (values.length - 1)) + 1, h - 3 - ((v - min) / span) * (h - 6)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${line}L${w - 1} ${h}L1 ${h}Z" fill="${color}" opacity=".14"/><path d="${line}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function ovRingSvg(pct) {
+  const S = 200, r = 82, cx = S / 2, cy = S / 2, c = 2 * Math.PI * r, arc = 0.75, len = c * arc;
+  const v = Math.max(0, Math.min(100, pct || 0)) / 100;
+  const rot = `rotate(135 ${cx} ${cy})`;
+  return `<svg viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" role="img" aria-label="Net delivery rate ${pct.toFixed(1)}%">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line-light)" stroke-width="14" stroke-linecap="round" stroke-dasharray="${len} ${c}" transform="${rot}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" stroke-dasharray="${Math.max(2, len * v)} ${c}" transform="${rot}"/>
+    <text x="${cx}" y="${cy + 6}" text-anchor="middle" style="font-size:38px;font-weight:800;fill:var(--text);letter-spacing:-1px">${pct.toFixed(1)}%</text>
+    <text x="${cx}" y="${cy + 30}" text-anchor="middle" style="font-size:12px;fill:var(--text-dim)">Net delivery rate</text></svg>`;
+}
+function renderOverviewHero(rows, metrics) {
+  if (!$("ovRing")) return;
+  $("ovRing").innerHTML = ovRingSvg(metrics.ndr || 0);
+  // Daily series (sorted by date) + totals
+  const byDate = {}; let latestTs = 0;
+  const T = { placedPcs: 0, confirmedPcs: 0, deliveredPcs: 0, placedGmv: 0, placedOrders: 0, deliveredGmv: 0 };
+  rows.forEach(r => {
+    T.placedPcs += r.placedPieces || 0; T.confirmedPcs += r.confirmedPieces || 0; T.deliveredPcs += r.deliveredPieces || 0;
+    T.placedGmv += r.placedGmv || 0; T.placedOrders += r.placedOrders || 0; T.deliveredGmv += r.deliveredGmv || 0;
+    if (r.timestamp > latestTs) latestTs = r.timestamp;
+    if (!r.date) return;
+    const d = byDate[r.date] || (byDate[r.date] = { ts: r.timestamp, pp: 0, cp: 0, dp: 0, gmv: 0, pg: 0, po: 0 });
+    d.pp += r.placedPieces || 0; d.cp += r.confirmedPieces || 0; d.dp += r.deliveredPieces || 0; d.gmv += r.deliveredGmv || 0; d.pg += r.placedGmv || 0; d.po += r.placedOrders || 0;
+  });
+  const days = Object.keys(byDate).sort((a, b) => byDate[a].ts - byDate[b].ts).map(k => byDate[k]);
+  // نفس معادلة الـ Run Rate بتاعة computeMetrics: (المجموع ÷ الأيام اللي فاتت) × أيام الشهر
+  let factor = 1;
+  if (latestTs) { const ld = new Date(latestTs); ld.setHours(0, 0, 0, 0); factor = new Date(ld.getFullYear(), ld.getMonth() + 1, 0).getDate() / (ld.getDate() || 1); }
+  const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  set("ovPlacedPcs", fmtInt.format(Math.round(T.placedPcs)));
+  set("ovConfirmedPcs", fmtInt.format(Math.round(T.confirmedPcs)));
+  set("ovDeliveredPcs", fmtInt.format(Math.round(T.deliveredPcs)));
+  set("ovPlacedPcsRun", `Run Rate: ${fmtInt.format(Math.round(T.placedPcs * factor))} by EOM`);
+  set("ovConfirmedPcsRun", `Run Rate: ${fmtInt.format(Math.round(T.confirmedPcs * factor))} by EOM`);
+  set("ovDeliveredPcsRun", `Run Rate: ${fmtInt.format(Math.round(T.deliveredPcs * factor))} by EOM`);
+  const sp = (id, key, color) => { const e = $(id); if (e) e.innerHTML = ovSparkSvg(days.map(d => d[key]), color, 150, 30); };
+  sp("ovSparkPlaced", "pp", "#60a5fa"); sp("ovSparkConfirmed", "cp", "#a78bfa"); sp("ovSparkDelivered", "dp", "#2dd4a8"); sp("ovSparkGmv", "gmv", "#34d399");
+
+  // Pieces funnel
+  const fun = $("ovFunnel");
+  if (fun) {
+    const stages = [["Placed", T.placedPcs, "#60a5fa", ""], ["Confirmed", T.confirmedPcs, "#a78bfa", T.placedPcs ? `${(T.confirmedPcs / T.placedPcs * 100).toFixed(1)}% of placed` : ""], ["Delivered", T.deliveredPcs, "#2dd4a8", T.confirmedPcs ? `${(T.deliveredPcs / T.confirmedPcs * 100).toFixed(1)}% of confirmed` : ""]];
+    fun.innerHTML = stages.map(s => `<div class="ov-fun-row"><div class="ov-fun-top"><span>${s[0]}</span><b>${fmtInt.format(Math.round(s[1]))}</b></div><div class="ov-fun-bar"><i style="width:${T.placedPcs ? Math.max(0.5, Math.min(100, s[1] / T.placedPcs * 100)).toFixed(2) : 0}%;background:${s[2]}"></i></div><small>${s[3] || "Start of funnel"}</small></div>`).join("");
+  }
+
+  // Avg Placed Pcs = Placed pieces ÷ days with placed activity — always up to yesterday (today's partial day is excluded)
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const upToYest = days.filter(d => d.ts < todayStart.getTime());
+  const act = upToYest.filter(d => d.pp > 0), avgSum = act.reduce((a, d) => a + d.pp, 0), avgPcs = act.length ? avgSum / act.length : 0;
+  set("ovAovVal", fmtInt.format(Math.round(avgPcs)));
+  set("ovAovPcs", fmtInt.format(Math.round(avgSum))); set("ovAovDays", fmtInt.format(act.length));
+  set("ovAovLast", act.length ? fmtInt.format(Math.round(act[act.length - 1].pp)) : "—");
+  set("ovAovMax", act.length ? fmtInt.format(Math.round(Math.max(...act.map(d => d.pp)))) : "—");
+  set("ovAovMin", act.length ? fmtInt.format(Math.round(Math.min(...act.map(d => d.pp)))) : "—");
+  const as = $("ovAovSpark"); if (as) as.innerHTML = ovSparkSvg(upToYest.map(d => d.pp), "#fbbf24", 400, 70);
+}
+
 let pipelineControlsWired = false;
 function pipelineWireControlsOnce() {
   if (pipelineControlsWired) return; pipelineControlsWired = true;
@@ -6572,13 +6723,18 @@ function cm3GlobalCutoff(rows) { return getCm3LagCutoffTimestamp((state.allParse
 // "New Match" والباقي أصفار.
 const cm3LookbackCache = new Map(); const cm3LookbackLoading = new Set();
 function cm3LookbackWindow(rows, periodMode) {
+  // أول فترة معروضة بتتقارن دايمًا بالفترة اللي قبلها — أوتوماتيك، من غير ما
+  // المستخدم يختار الشهر اللي قبله في الفلتر، ومن غير شرط إن أول صف يكون
+  // أول يوم في الفترة (قبل كده لو أول صف مش على بداية الفترة كان الـ lookback
+  // بيتلغي والـ P01 بيطلع أصفار / New Match).
   let minTs = 0; rows.forEach(r => { if (r.timestamp && (!minTs || r.timestamp < minTs)) minTs = r.timestamp; });
   if (!minTs) return null;
   const e = new Date(minTs); e.setHours(0, 0, 0, 0);
-  const day = e.getDate();
-  if (periodMode === "weekly" && !(day === 1 || (day > 1 && day <= 26 && (day - 1) % 5 === 0))) return null;
-  if (periodMode === "monthly" && day !== 1) return null;
-  const prevDay = new Date(e); prevDay.setDate(prevDay.getDate() - 1);
+  let curStart;
+  if (periodMode === "daily") curStart = new Date(e);
+  else if (periodMode === "monthly") curStart = new Date(e.getFullYear(), e.getMonth(), 1);
+  else { const cp = Math.min(6, Math.ceil(e.getDate() / 5)); curStart = new Date(e.getFullYear(), e.getMonth(), cp === 1 ? 1 : (cp - 1) * 5 + 1); }
+  const prevDay = new Date(curStart); prevDay.setDate(prevDay.getDate() - 1);
   let start;
   if (periodMode === "daily") start = new Date(prevDay);
   else if (periodMode === "monthly") start = new Date(prevDay.getFullYear(), prevDay.getMonth(), 1);
@@ -8589,6 +8745,15 @@ function buildCm3AnalystProductsData(periodMode) {
     b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
     b.ppmPerPieceWeight += (r.deliveredPieces || 0);
 
+  });
+
+  // دلتا الـ CM3% — بتتبني من كل الصفوف لحد آخر يوم في الفترة المختارة (مش بس الشهر
+  // المختار)، عشان لو لسه في أول الشهر وفيه أسبوع واحد بس، المقارنة تبقى مع آخر
+  // أيام الشهر اللي قبله بدل ما تفضل فاضية.
+  let maxTs = 0; rows.forEach(r => { if (r.timestamp > maxTs) maxTs = r.timestamp; });
+  (state.allParsedRows || []).forEach(r => {
+    if (!r.sku || r.timestamp > maxTs) return;
+    const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0);
     const wPeriod = cm3apPeriodKeyForRow(rd, "weekly");
     const wSort = cm3apPeriodSort(rd, "weekly");
     if (!deltaSkuMap.has(r.sku)) deltaSkuMap.set(r.sku, new Map());
@@ -9222,12 +9387,15 @@ function prepareMpMatchesData() {
       map.set(key, {
         productId: r.sku, productName: (state.inventoryMap[r.sku] ? state.inventoryMap[r.sku].skuName : "Unknown") || "Unknown", merchantId: r.merchantId, merchantName: r.merchantName || r.merchantId, acm: r.acmName || "Unassigned",
         totalPlaced: 0, totalConfirmed: 0, totalDelivered: 0, placedGmv: 0, deliveredGmv: 0,
-        crConfirmed: 0, crPlaced: 0, drDelivered: 0, drConfirmed: 0, cm3: 0, cm3Gmv: 0
+        crConfirmed: 0, crPlaced: 0, drDelivered: 0, drConfirmed: 0, cm3: 0, cm3Gmv: 0,
+        placedOrders: 0, confirmedOrders: 0, deliveredOrders: 0, confirmedGmv: 0, ppm: 0, monthSet: new Set()
       });
     }
     const e = map.get(key);
     e.totalPlaced += r.placedPieces; e.totalConfirmed += r.confirmedPieces; e.totalDelivered += r.deliveredPieces;
     e.placedGmv += r.placedGmv; e.deliveredGmv += r.deliveredGmv;
+    e.placedOrders += r.placedOrders || 0; e.confirmedOrders += r.confirmedOrders || 0; e.deliveredOrders += r.deliveredOrders || 0; e.confirmedGmv += r.confirmedGmv || 0; e.ppm += r.ppm || 0;
+    if (r.monthYear && (r.placedPieces || r.confirmedPieces || r.deliveredPieces)) e.monthSet.add(r.monthYear);
     // CR% (Confirmed ÷ Placed): بس الصفوف اللي عدّى عليها كات أوف الـ CR (يومين).
     if (isRowEligibleForLag(r, crCutoff, "mpMatches")) {
       e.crConfirmed += r.confirmedPieces; e.crPlaced += r.placedPieces;
@@ -9264,7 +9432,12 @@ function prepareMpMatchesData() {
     const cm3Pct = e.cm3Gmv ? (e.cm3 / e.cm3Gmv) * 100 : 0;
     totalGmv += e.deliveredGmv; totalCm3 += e.cm3; totalCm3Gmv += e.cm3Gmv;
     const { stock, doh } = getStockDoh(e.productId);
-    return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, cm3PerPiece, cm3Pct, stock, doh };
+    const inv = state.inventoryMap[e.productId] || {};
+    const deliveredAsp = e.totalDelivered ? (e.deliveredGmv / e.totalDelivered) : 0;
+    const ppmPct = e.deliveredGmv ? (e.ppm / e.deliveredGmv) * 100 : 0;
+    return { ...e, crPct, drPct, ndrPct, contrPct, placedAsp, deliveredAsp, ppmPct, cm3PerPiece, cm3Pct, stock, doh,
+      category: String(inv.category || "-"), availability: String(inv.availability || "-"), isLocked: String(inv.isLocked || "-"),
+      inPlan: planKeys.has(e.merchantId + "||" + e.productId) ? "Yes" : "No", activeMonths: e.monthSet.size };
   });
 
   // CM3% الإجمالي: لازم ياخد نفس أساس الـ CM3 (كات أوف الـ4 أيام) في البسط
@@ -9548,11 +9721,16 @@ function stMonthLabel(d) {
   return d.toLocaleString("en-US", { month: "long", year: "numeric" });
 }
 // يحول أي قيمة تاريخ/نص جاية من Metabase أو الشيت لمفتاح شهر "July 2026".
+const _stMonthKeyCache = new Map();
 function stMonthKeyFromValue(v) {
   if (!v && v !== 0) return null;
+  // كاش للقيم النصية — new Date(string) بطيء جدًا لما يتنادى على مئات الآلاف من الصفوف.
+  const isStr = typeof v === "string";
+  if (isStr) { const hit = _stMonthKeyCache.get(v); if (hit !== undefined) return hit; }
   const d = new Date(v);
-  if (isNaN(d.getTime())) return null;
-  return stMonthLabel(new Date(d.getFullYear(), d.getMonth(), 1));
+  const out = isNaN(d.getTime()) ? null : stMonthLabel(new Date(d.getFullYear(), d.getMonth(), 1));
+  if (isStr) _stMonthKeyCache.set(v, out);
+  return out;
 }
 // كل الشهور بين شهرين (شامل الطرفين)، بأي ترتيب.
 function stMonthKeysBetween(startKey, endKey) {
@@ -9578,18 +9756,14 @@ function computeSellthroughMonthOptions() {
   const begInv = isIrq ? state.metabaseBeginningInventoryIrq : state.metabaseBeginningInventory;
   const inbound = isIrq ? state.inboundRowsIrq : state.inboundRows;
 
-  const map = new Map(); // label -> Date (لغرض الترتيب)
-  (need || []).forEach(row => {
-    const key = stMonthKeyFromValue(row.MONTH);
-    if (key) map.set(key, new Date(key));
-  });
-  (begInv || []).forEach(row => {
-    const key = stMonthKeyFromValue(row.MONTH);
-    if (key) map.set(key, new Date(key));
-  });
-  (inbound || []).forEach(row => {
-    if (row.receivingMonthKey) map.set(row.receivingMonthKey, new Date(row.receivingMonthKey));
-  });
+  // الأداء: قبل كده كان بيعمل new Date(key) لكل صف (100K+ صف) وده كان بياخد ~10 ثواني.
+  // دلوقتي بنجمع الـ keys المميزة الأول (Set) وبعدين نحوّل كل key مرة واحدة بس.
+  const keys = new Set(); const rawCache = new Map();
+  const keyOf = (v) => { let k = rawCache.get(v); if (k === undefined) { k = stMonthKeyFromValue(v) || ""; rawCache.set(v, k); } return k; };
+  (need || []).forEach(row => { const key = keyOf(row.MONTH); if (key) keys.add(key); });
+  (begInv || []).forEach(row => { const key = keyOf(row.MONTH); if (key) keys.add(key); });
+  (inbound || []).forEach(row => { if (row.receivingMonthKey) keys.add(row.receivingMonthKey); });
+  const map = new Map(); keys.forEach(key => map.set(key, new Date(key)));
   return Array.from(map.entries())
     .map(([key, date]) => ({ key, date }))
     .sort((a, b) => b.date - a.date); // الأحدث أولاً
@@ -10389,8 +10563,10 @@ function simulateSellthroughProgress() {
 // الشارت ده مستقل تمامًا عن فلاتر اللوحة فوق (Beginning Inventory/Start
 // Sale Month/End Sale Month) — بيعرض الترند الشهري لكل السنة الحالية دايمًا.
 // ---------------------------------------------------------------------
-let sellthroughTrendMetric = "delivered"; // "delivered" | "confirmed"
-let sellthroughTrendChartInst = null;
+// الشارت ده بيتعرض في مكانين: صفحة Sellthrough (SELLTHROUGH_TREND_CFG) وفي الـ Over View
+// (OV_ST_TREND_CFG) — نفس الداتا ونفس الشكل، كل واحد له Canvas وتوجل وحالة لوحده.
+const SELLTHROUGH_TREND_CFG = { canvas: "sellthroughTrendChart", subtitle: "sellthroughTrendSubtitle", toggle: "sellthroughTrendMetricToggle", metric: "delivered", inst: null, wired: false };
+const OV_ST_TREND_CFG = { canvas: "ovStTrendChart", subtitle: "ovStTrendSubtitle", toggle: "ovStTrendToggle", metric: "delivered", inst: null, wired: false };
 
 function buildSellthroughTrendData() {
   const idx = getSellthroughIndices();
@@ -10426,38 +10602,44 @@ function buildSellthroughTrendData() {
   });
 }
 
-let sellthroughTrendWired = false;
-function sellthroughTrendWireControlsOnce() {
-  if (sellthroughTrendWired) return; sellthroughTrendWired = true;
-  document.querySelectorAll("#sellthroughTrendMetricToggle .segmented-btn").forEach(btn => {
+function sellthroughTrendWireControlsOnce(cfg) {
+  if (cfg.wired) return; cfg.wired = true;
+  document.querySelectorAll("#" + cfg.toggle + " .segmented-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       if (btn.classList.contains("active")) return;
-      document.querySelectorAll("#sellthroughTrendMetricToggle .segmented-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll("#" + cfg.toggle + " .segmented-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      sellthroughTrendMetric = btn.dataset.metric;
-      renderSellthroughTrendChart();
+      cfg.metric = btn.dataset.metric;
+      renderSellthroughTrendChart(cfg);
     });
   });
 }
 
-function renderSellthroughTrendChart() {
-  sellthroughTrendWireControlsOnce();
-  const canvas = document.getElementById("sellthroughTrendChart");
+function renderSellthroughTrendChart(cfg) {
+  cfg = cfg || SELLTHROUGH_TREND_CFG;
+  sellthroughTrendWireControlsOnce(cfg);
+  const canvas = document.getElementById(cfg.canvas);
   if (!canvas || typeof Chart === "undefined") return;
   const data = buildSellthroughTrendData();
-  const isConfirmed = sellthroughTrendMetric === "confirmed";
+  const isConfirmed = cfg.metric === "confirmed";
   const piecesLabel = isConfirmed ? "Total Confirmed" : "Total Delivered";
-  if ($("sellthroughTrendSubtitle")) $("sellthroughTrendSubtitle").textContent = `Total Purchases vs ${piecesLabel} vs Sellthrough % — every month this year`;
+  if ($(cfg.subtitle)) $(cfg.subtitle).textContent = `Total Purchases vs ${piecesLabel} vs Sellthrough % — every month this year`;
 
-  if (sellthroughTrendChartInst) { sellthroughTrendChartInst.destroy(); sellthroughTrendChartInst = null; }
-  if (!data.length) return;
+  if (cfg.inst) { cfg.inst.destroy(); cfg.inst = null; }
+  let emptyEl = canvas.parentNode.querySelector(".chart-empty");
+  if (!data.length) {
+    if (!emptyEl) { emptyEl = document.createElement("div"); emptyEl.className = "chart-empty"; canvas.parentNode.appendChild(emptyEl); }
+    emptyEl.textContent = "No Sellthrough data yet for this year."; canvas.style.display = "none";
+    return;
+  }
+  if (emptyEl) emptyEl.remove(); canvas.style.display = "";
 
   const labels = data.map(d => { const dt = new Date(d.month); return isNaN(dt.getTime()) ? d.month : dt.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }); });
   const purchasesValues = data.map(d => d.totalPurchases);
   const piecesValues = data.map(d => isConfirmed ? d.totalConfirmed : d.totalDelivered);
   const stRateValues = data.map(d => isConfirmed ? d.stRateConfirmed : d.stRateDelivered);
 
-  sellthroughTrendChartInst = new Chart(canvas.getContext("2d"), {
+  cfg.inst = new Chart(canvas.getContext("2d"), {
     type: "line",
     data: {
       labels,
@@ -12392,455 +12574,12 @@ function fcLatestBacktest() {
   return bts.length ? bts[bts.length - 1] : null;
 }
 
-// =========================================================================
-// Gap Plan — Recommends Forecast
-// -------------------------------------------------------------------------
-// SKUs we will NOT buy again, but still have stock/repack to clear. Two
-// groups, exactly as the commercial plan defines them:
-//   • Group A (Repack): from the curated "Gap Plan" tab — repack pieces with
-//     no confirmed on the plan. Available = repack pieces.
-//   • Group B (Single stock): single SKUs holding good stock > 50 that are not
-//     being sold now (no recent confirmed demand) — i.e. not in the plan or
-//     coming in at 0. Available = single good stock on hand.
-// For each, the recommendation is a SELL-DOWN plan, not a buy: how much its own
-// history says it will still move per month, capped by what's on hand (no
-// re-buy), how long the stock lasts, and its real lifetime CR%/DR%/NDR%/ASP —
-// all computed live from the raw daily rows, because inactive SKUs read as zero
-// in the current-window summary tabs.
-const FC_GAP_STOCK_MIN = 50;          // Group B: single good stock must exceed this
-const FC_GAP_RECENT_DAYS = 45;        // "not being sold now" window for Group B
-const FC_GAP_RECENT_CONF_MAX = 2;     // confirmed pcs in that window under which a SKU counts as inactive
-const FC_GAP_DEMAND_MONTHS = 3;       // how many recent active months feed the demand rate
-// Exclusion lists live in the Commercial Plan spreadsheet (a DIFFERENT workbook
-// from the dashboard's data sheet), read live by gid:
-//   • Bundle-Single (in-plan singles) → excluded from Group B (stock).
-//   • Purchase Plan (SKUs already carrying a Repack line) → excluded from Group A.
-// v1.3.48: شيت Commercial Plan التاني (Bundle-Single / Purchase Plan / Adjust Confirmed) اتشال —
-// الاستثناءات بترجع تلقائيًا لـ fcIsInPlan().
-const fcGapState = { loading: false, error: null, gapTab: null, rows: null, sig: "",
-  stockExcl: null, repackExcl: null, adjustMap: null, exclLoaded: false, exclError: null };
-
-// gviz reader by SHEET NAME (not gid) — robust to gid changes and to the user
-// not knowing gids. Same JSONP transport as fcLoadGvizQuery.
-function fcLoadGvizBySheet(sheetName, tq, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const cb = "fcGapCb_" + Math.random().toString(36).slice(2);
-    let done = false;
-    const cleanup = () => { try { delete window[cb]; } catch (e) {} const s = document.getElementById(cb); if (s) s.remove(); };
-    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); reject(new Error("timeout")); } }, timeoutMs || 60000);
-    window[cb] = (resp) => {
-      if (done) return; done = true; clearTimeout(timer); cleanup();
-      try {
-        if (!resp || !resp.table) { reject(new Error("no table")); return; }
-        resolve(resp);
-      } catch (e) { reject(e); }
-    };
-    const script = document.createElement("script");
-    script.id = cb;
-    script.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); reject(new Error("load error")); } };
-    // headers=1 forces gviz to treat the first row as the header, so column
-    // labels come through reliably (without it, a mixed-type first row can be
-    // read as data and every label comes back blank).
-    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&headers=1&tq=${encodeURIComponent(tq || "select *")}&tqx=out:json;responseHandler:${cb}`;
-    document.head.appendChild(script);
-  });
-}
-
-
-// Load the two exclusion lists from the Commercial Plan workbook, once.
-//   • stockExcl  = SINGLE_IDs that are In Plan / PLAN=1 / Adjusted Single Pcs>0
-//                  in the Bundle-Single tab → excluded from Group B (stock).
-//   • repackExcl = every SKU ID present in the Purchase Plan tab (already carries
-//                  a Repack line there) → excluded from Group A (repack).
-// Best-effort: if the workbook isn't reachable, we fall back to fcIsInPlan.
-async function fcLoadPlanExclusions() {
-  // v1.3.48: workbook Commercial Plan اتشال — مفيش قوائم استثناء خارجية. الـ null
-  // sets بتخلي fcGapState يرجع لـ fcIsInPlan() (راجع fcComputeGap تحت).
-  fcGapState.exclLoaded = true;
-}
-
-// Read the curated "Gap Plan" tab → Group A universe. The tab's fixed layout
-// (matches the workbook): A SKU_ID, B PRODUCT_NAME, C Repack, D Sellable,
-// E Total, F Cartoon, G Cogs, H Value, I Confirmed on Plan. We match by header
-// label first, but fall back to these fixed column positions whenever a label
-// is missing — so a header that gviz fails to parse can't silently zero out
-// the Repack column.
-const FC_GAP_COLS = { sku: 0, name: 1, repack: 2, total: 4, cogs: 6, value: 7, conf: 8 };
-async function fcLoadGapPlanTab() {
-  const resp = await fcLoadGvizBySheet("Gap Plan", "select *", 90000);
-  const cols = (resp.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
-  const pick = (label, fallbackPos) => { const i = cols.indexOf(label); return i >= 0 ? i : fallbackPos; };
-  const iSku = pick("sku_id", FC_GAP_COLS.sku);
-  const iName = pick("product_name", FC_GAP_COLS.name);
-  const iRepack = pick("repack", FC_GAP_COLS.repack);
-  const iTotal = pick("total", FC_GAP_COLS.total);
-  const iCogs = pick("cogs", FC_GAP_COLS.cogs);
-  const iValue = pick("value", FC_GAP_COLS.value);
-  const iConf = pick("confirmed on plan", FC_GAP_COLS.conf);
-  const num = (c) => { const v = c && (c.v !== undefined ? c.v : null); const n = Number(v); return Number.isFinite(n) ? n : 0; };
-  const out = new Map();
-  (resp.table.rows || []).forEach(r => {
-    const c = r.c || [];
-    let sku = c[iSku] && (c[iSku].v !== undefined && c[iSku].v !== null ? c[iSku].v : null);
-    if (!sku) return;
-    sku = String(sku).trim();
-    if (!sku || sku.toUpperCase() === "SKU_ID") return; // skip a header row read as data
-    out.set(sku, {
-      sku,
-      name: c[iName] && c[iName].v != null ? c[iName].v : "",
-      repack: num(c[iRepack]),
-      total: num(c[iTotal]),
-      cogs: num(c[iCogs]),
-      value: num(c[iValue]),
-      confirmedOnPlan: num(c[iConf])
-    });
-  });
-  return out;
-}
-
-// Lifetime per-single aggregation from the raw daily rows, debundled the same
-// way the rest of the forecast page does. Returns per singleId:
-//   placed, confirmed, delivered, deliveredGmv, recentConf (last N days),
-//   monthly = Map(yyyy-mm -> delivered pcs).
-function fcBuildSingleLifetime() {
-  const all = (typeof state !== "undefined" && state.allParsedRows) || [];
-  const { productMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-  const mapFor = (sku) => { const m = productMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }]; };
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const recentStart = today.getTime() - FC_GAP_RECENT_DAYS * 86400000;
-  const agg = new Map();
-  for (const r of all) {
-    if (!r.sku) continue;
-    const d = new Date(r.timestamp);
-    const mk = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-    const rt = new Date(r.timestamp); rt.setHours(0, 0, 0, 0);
-    const isRecent = rt.getTime() >= recentStart;
-    mapFor(r.sku).forEach(mp => {
-      const q = mp.quantity || 1, w = mp.cogsWeight != null ? mp.cogsWeight : 1;
-      let e = agg.get(mp.singleId);
-      if (!e) { e = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map(), monthlyPlaced: new Map() }; agg.set(mp.singleId, e); }
-      e.placed += (r.placedPieces || 0) * q;
-      e.confirmed += (r.confirmedPieces || 0) * q;
-      e.delivered += (r.deliveredPieces || 0) * q;
-      e.deliveredGmv += (r.deliveredGmv || 0) * w;
-      if (isRecent) e.recentConf += (r.confirmedPieces || 0) * q;
-      if ((r.deliveredPieces || 0) > 0) e.monthly.set(mk, (e.monthly.get(mk) || 0) + (r.deliveredPieces || 0) * q);
-      if ((r.placedPieces || 0) > 0) e.monthlyPlaced.set(mk, (e.monthlyPlaced.get(mk) || 0) + (r.placedPieces || 0) * q);
-    });
-  }
-  return { agg, singlesList };
-}
-
-// Recency-weighted monthly demand from the last FC_GAP_DEMAND_MONTHS active
-// (delivered>0) calendar months, excluding the current partial month. Weights
-// 3/2/1 most-recent-first. Returns pcs/month.
-function fcMonthlyDemand(monthlyMap) {
-  const nowKey = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); })();
-  const keys = Array.from(monthlyMap.keys()).filter(k => k < nowKey).sort().reverse().slice(0, FC_GAP_DEMAND_MONTHS);
-  if (!keys.length) return 0;
-  let wsum = 0, w = 0;
-  keys.forEach((k, i) => { const wt = keys.length - i; wsum += (monthlyMap.get(k) || 0) * wt; w += wt; });
-  return w > 0 ? wsum / w : 0;
-}
-
-// Median of the SKU's OWN monthly PLACED pieces across its whole loaded history
-// (excluding the current partial month). Months with placed BELOW
-// FC_GAP_PLACED_MIN are dropped first — those tiny months just drag the median
-// down and don't reflect what the SKU can really push. This is the "how much
-// this SKU can push per month" number the Recommended column shows.
-const FC_GAP_PLACED_MIN = 5;   // ignore months whose placed is under this when taking the median
-function fcMedianMonthlyPlaced(monthlyPlacedMap) {
-  if (!monthlyPlacedMap || !monthlyPlacedMap.size) return 0;
-  const nowKey = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); })();
-  const vals = [];
-  monthlyPlacedMap.forEach((v, k) => { if (k < nowKey && v >= FC_GAP_PLACED_MIN) vals.push(v); });
-  return fcMedian(vals);
-}
-
 // A SKU is "in the plan" when it has a real target in the Single-SKU targets
 // sheet (any of the four daily targets is positive). Everything else is a gap.
 function fcIsInPlan(sku) {
   const t = (state.singleSkuTargets || {})[sku];
   if (!t) return false;
   return (t.adjustedTarget > 0) || (t.placedDailyTarget > 0) || (t.dlvPcsDailyTarget > 0) || (t.dlvGmvDailyTarget > 0);
-}
-
-// Peer-based demand for a SKU that has NO history of its own. We look at
-// siblings that DO sell — same sub-category first, then category — and take
-// the MEDIAN of their monthly demand (robust to the odd high-flyer), then
-// dampen it, because a revived dead SKU won't match a healthy sibling. Capped
-// later by available stock. Deliberately conservative: no single peer's number
-// is copied, and the median×damp keeps it to a sane level (never a peer's 100/day).
-const FC_GAP_PEER_MIN = 3;      // need at least this many selling siblings to trust a group
-const FC_GAP_PEER_DAMP = 0.5;   // take half the typical sibling — conservative for a dead SKU
-function fcMedian(arr) {
-  if (!arr || !arr.length) return 0;
-  const s = arr.slice().sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
-function fcBuildRecommends() {
-  const { agg, singlesList } = fcBuildSingleLifetime();
-  const { stockByProductId } = buildDebundledStockDohIndex(state.allParsedRows || [], 3);
-  // Repack = Damaged-BOX pieces from the WareHouse sheet (state.repackMap sums
-  // TOTAL_COUNT where Condition = "Damaged BOX"), keyed by the SKU_ID as stored —
-  // which can be a BUNDLE code. Debundle it to single level (a damaged bundle box
-  // = its component singles × quantity) so Group A is single-level like the plan,
-  // the forecast and the exclusions. Everything on this page is one Single-SKU.
-  const rawRepack = state.repackMap || new Map();
-  const { productMap, stockBySingle } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-  const mapFor = (sku) => { const m = productMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
-  const repackMap = new Map();
-  rawRepack.forEach((qty, sku) => {
-    if (!(qty > 0)) return;
-    mapFor(sku).forEach(mp => {
-      repackMap.set(mp.singleId, (repackMap.get(mp.singleId) || 0) + qty * (mp.quantity || 1));
-    });
-  });
-
-  const perf = (e) => {
-    const cr = e.placed > 0 ? (e.confirmed / e.placed) * 100 : 0;
-    const dr = e.confirmed > 0 ? (e.delivered / e.confirmed) * 100 : 0;
-    const ndr = (cr * dr) / 100;
-    const asp = e.delivered > 0 ? e.deliveredGmv / e.delivered : 0;
-    return { cr, dr, ndr, asp };
-  };
-  const nameOf = (sku) => (singlesList && singlesList.get(sku)) ||
-    ((state.productsMap && state.productsMap[sku] && state.productsMap[sku].name)) ||
-    ((state.inventoryMap && state.inventoryMap[sku] && state.inventoryMap[sku].skuName)) || sku;
-  const catOf = (sku) => {
-    const p = state.productsMap && state.productsMap[sku];
-    const inv = state.inventoryMap && state.inventoryMap[sku];
-    return {
-      sub: ((p && p.subCategory) || "").trim().toLowerCase(),
-      cat: ((p && p.category) || (inv && inv.category) || "").trim().toLowerCase()
-    };
-  };
-  const priceOf = (sku) => {
-    const p = state.productsMap && state.productsMap[sku];
-    return (p && p.price > 0) ? p.price : 0;
-  };
-
-  // Build peer demand pools from every single that DOES have real demand.
-  const bySub = new Map(), byCat = new Map();
-  agg.forEach((e, sku) => {
-    const d = fcMonthlyDemand(e.monthly);
-    if (!(d > 0)) return;
-    const { sub, cat } = catOf(sku);
-    if (sub) { if (!bySub.has(sub)) bySub.set(sub, []); bySub.get(sub).push(d); }
-    if (cat) { if (!byCat.has(cat)) byCat.set(cat, []); byCat.get(cat).push(d); }
-  });
-  const peerEstimate = (sku) => {
-    const { sub, cat } = catOf(sku);
-    let arr = sub && bySub.get(sub), basis = "sub-category";
-    if (!arr || arr.length < FC_GAP_PEER_MIN) { arr = cat && byCat.get(cat); basis = "category"; }
-    if (!arr || arr.length < FC_GAP_PEER_MIN) return { est: 0, basis: "none" };
-    return { est: fcMedian(arr) * FC_GAP_PEER_DAMP, basis };
-  };
-
-  const emptyE = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, recentConf: 0, monthly: new Map(), monthlyPlaced: new Map() };
-  const row = (group, sku, avail) => {
-    const e = agg.get(sku) || emptyE;
-    const p = perf(e);
-    // Monthly demand (delivered rate) — used for Months-to-clear context.
-    const ownDemand = fcMonthlyDemand(e.monthly);
-    let demand = ownDemand, estimated = false, basis = null;
-    if (ownDemand <= 0) {
-      const pe = peerEstimate(sku);
-      demand = pe.est; estimated = pe.est > 0; basis = pe.basis;
-    }
-    // Recommended next-month pcs = the MEDIAN of this SKU's own monthly PLACED
-    // across its history (what it can push per month). If it has no placed
-    // history, fall back to the peer estimate.
-    const ownPlaced = fcMedianMonthlyPlaced(e.monthlyPlaced);
-    const rec = ownPlaced > 0 ? ownPlaced : (estimated ? demand : peerEstimate(sku).est);
-    // Value: real ASP when we have it, else the selling price (so dead stock
-    // still shows the money tied up instead of zero).
-    const unit = p.asp > 0 ? p.asp : priceOf(sku);
-    return {
-      group, sku, name: nameOf(sku), avail, demand, rec,
-      months: demand > 0 ? avail / demand : null,
-      value: avail * unit,
-      cr: p.cr, dr: p.dr, ndr: p.ndr, asp: p.asp, unit,
-      hist: e.delivered > 0, estimated, basis,
-      dead: ownDemand <= 0 && !estimated
-    };
-  };
-
-  // Exclusion sets from the Commercial Plan workbook (best-effort; may be null).
-  const stockExcl = fcGapState.stockExcl;   // SINGLE_IDs with PLAN=1
-  const repackExcl = fcGapState.repackExcl; // SKUs already in the Purchase Plan (have a Repack line)
-  const adjustMap = fcGapState.adjustMap;   // SINGLE_ID → Adjust Confirmed
-  // "In plan" (→ excluded from Group B) is decided by Adjust Confirmed > 0 — the
-  // real confirmed target. A SKU with Adjust>0 is planned even if the PLAN column
-  // isn't flagged; a SKU with Adjust=0 is NOT really planned even if PLAN=1
-  // (the SKU has a problem), so it stays in the recommendations. PLAN=1 is only a
-  // fallback when the Adjust Confirmed tab is unreachable.
-  const excludedFromB = (sku) => {
-    if (adjustMap) return (adjustMap.get(sku) || 0) > 0;   // authoritative: in plan iff Adjust Confirmed > 0
-    if (stockExcl) return stockExcl.has(sku);              // fallback: PLAN=1
-    return fcIsInPlan(sku);                                 // last resort
-  };
-  const excludedFromA = (sku) => (repackExcl && repackExcl.has(sku)) || (!repackExcl && fcIsInPlan(sku));
-
-  const A = [], B = [];
-
-  // Group A — Repack (Damaged BOX) pieces on hand. Exclude SKUs already carrying
-  // a Repack line in the Purchase Plan (they're handled there).
-  repackMap.forEach((qty, sku) => {
-    if (!(qty > 0)) return;
-    if (excludedFromA(sku)) return;
-    A.push(row("Repack", sku, qty));
-  });
-
-  // Group B — good SINGLE stock over the threshold, for singles not in the plan.
-  // Iterate REAL singles only (from the debundle map) and use each single's own
-  // stock (col H) — never product/bundle stock — so no bundle/offer code appears.
-  // Repack (damaged) and good stock are separate pools, so a not-in-plan single
-  // can appear in both — different pieces to clear.
-  const seenB = new Set();
-  const addB = (sku, stock) => {
-    if (seenB.has(sku)) return;
-    if (!(stock > FC_GAP_STOCK_MIN)) return;
-    if (excludedFromB(sku)) return;
-    seenB.add(sku);
-    B.push(row("Single stock", sku, stock));
-  };
-  const stockForSingle = (sid) => {
-    if (stockBySingle && stockBySingle.has(sid)) return stockBySingle.get(sid) || 0;
-    const inv = state.inventoryMap && state.inventoryMap[sid];
-    return (inv && inv.stock) || 0;
-  };
-  if (singlesList && singlesList.forEach) {
-    singlesList.forEach((_name, sid) => addB(sid, stockForSingle(sid)));
-  }
-
-  const byValue = (a, b) => (b.value || 0) - (a.value || 0);
-  A.sort(byValue); B.sort(byValue);
-  return { A, B };
-}
-
-function fcRecCell(n, kind) {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
-  if (kind === "pct") return n.toFixed(1) + "%";
-  if (kind === "money") return fcCompact(n);
-  if (kind === "months") return n >= 999 ? "∞" : n.toFixed(1);
-  if (kind === "rate") return n >= 10 ? fmtInt.format(Math.round(n)) : n.toFixed(1);
-  return fmtInt.format(Math.round(n));
-}
-
-function fcRenderRecommends() {
-  const bodyA = $("fcGapBodyA"), bodyB = $("fcGapBodyB"), status = $("fcGapStatus");
-  if (!bodyA && !bodyB) return;
-  if (!(state.allParsedRows && state.allParsedRows.length)) { return; }
-
-  const { A, B } = fcBuildRecommends();
-  fcGapState.rows = { A, B };
-
-  const statusCell = (r) => {
-    if (r.estimated) return `<span class="badge-outline blue" title="No own sales history — estimated from ${r.basis} peers (median × 0.5).">Est. from ${r.basis}</span>`;
-    if (r.dead) return '<span class="badge-outline orange">No demand & no peers — manual review</span>';
-    return r.hist ? '<span class="badge-outline green">Sell-down (own history)</span>' : '<span class="badge-outline blue">No history</span>';
-  };
-  const rowHtml = (r) => `<tr>
-    <td class="mono">${r.sku}</td>
-    <td>${r.name || ""}</td>
-    <td class="num">${fcRecCell(r.avail)}</td>
-    <td class="num text-blue">${fcRecCell(r.demand)}${r.estimated ? ' <span class="text-dim" title="estimated from peers">*</span>' : ''}</td>
-    <td class="num font-bold">${fcRecCell(r.rec)}</td>
-    <td class="num">${fcRecCell(r.months, "months")}</td>
-    <td class="num">${fcRecCell(r.value, "money")}</td>
-    <td class="num">${fcRecCell(r.cr, "pct")}</td>
-    <td class="num">${fcRecCell(r.dr, "pct")}</td>
-    <td class="num">${fcRecCell(r.ndr, "pct")}</td>
-    <td class="num">${fcRecCell(r.asp > 0 ? r.asp : r.unit, "money")}</td>
-    <td>${statusCell(r)}</td>
-  </tr>`;
-
-  if (bodyA) bodyA.innerHTML = A.length ? A.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No repack (Damaged BOX) pieces on hand for out-of-plan SKUs.</td></tr>`;
-  if (bodyB) bodyB.innerHTML = B.length ? B.map(rowHtml).join("") : `<tr><td colspan="12" class="text-dim" style="padding:14px;">No single-stock gap SKUs over ${FC_GAP_STOCK_MIN} pcs.</td></tr>`;
-
-  const sumVal = (arr) => arr.reduce((s, r) => s + (r.value || 0), 0);
-  const repackSkus = (state.repackMap && state.repackMap.size) || 0;
-  const exclNote = fcGapState.exclLoaded
-    ? `PLAN=1: ${fcGapState.stockExcl ? fcGapState.stockExcl.size : 0} · Adjust>0 gate: ${fcGapState.adjustMap ? "on" : "off"} · purchase-plan (repack): ${fcGapState.repackExcl ? fcGapState.repackExcl.size : 0}${fcGapState.exclError ? " ⚠️ plan workbook partly unreachable — used fallback" : ""}`
-    : "exclusions not loaded (fallback)";
-  const note = `computed live — ${repackSkus} SKUs have Damaged-BOX repack · ${exclNote}`;
-  if (status) status.textContent = `Group A · Repack: ${A.length} SKUs (${fcCompact(sumVal(A))} EGP on hand) · Group B · Single stock: ${B.length} SKUs (${fcCompact(sumVal(B))} EGP on hand) · ${note}`;
-}
-
-// Real .xlsx export (SheetJS, loaded on demand from CDN) → one file with a
-// "Recommends Forecast" sheet plus split A/B sheets, all under the gap plan.
-function fcEnsureSheetJs() {
-  if (window.XLSX) return Promise.resolve(window.XLSX);
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    s.onload = () => resolve(window.XLSX);
-    s.onerror = () => reject(new Error("Could not load the Excel library."));
-    document.head.appendChild(s);
-  });
-}
-async function fcExportRecommends() {
-  const btn = $("fcGapExportBtn");
-  if (!fcGapState.rows) { try { fcRenderRecommends(); } catch (e) {} }
-  const data = fcGapState.rows || { A: [], B: [] };
-  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
-  try {
-    const XLSX = await fcEnsureSheetJs();
-    const srcOf = (r) => r.estimated ? ("Estimated (" + r.basis + " peers)") : (r.hist ? "Own history" : "None");
-    const statusOf = (r) => r.estimated ? ("Est. from " + r.basis) : (r.dead ? "No demand & no peers — manual review" : (r.hist ? "Sell-down (own history)" : "No history"));
-
-    // Per-pool sheets (A and B) keep their own rows.
-    const header = ["Group", "SKU", "Name", "Available (pcs)", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
-    const toAoA = (arr) => [header].concat(arr.map(r => [
-      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.demand || 0), srcOf(r), Math.round(r.rec || 0),
-      (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
-      Math.round(r.value || 0),
-      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round((r.asp > 0 ? r.asp : r.unit) || 0),
-      statusOf(r)
-    ]));
-
-    // Combined "Recommends Forecast" sheet: ONE row per SKU. If a SKU is in both
-    // pools, group = "Repack + Single stock" and Available = repack + good stock,
-    // with the split shown, and Recommend/Months/Value recomputed on the total.
-    const merged = new Map();
-    const collect = (r) => {
-      let m = merged.get(r.sku);
-      if (!m) { m = { sku: r.sku, name: r.name, demand: r.demand, rec: r.rec, cr: r.cr, dr: r.dr, ndr: r.ndr, asp: r.asp, unit: r.unit, hist: r.hist, estimated: r.estimated, basis: r.basis, dead: r.dead, repackPcs: 0, stockPcs: 0, groups: new Set() }; merged.set(r.sku, m); }
-      m.groups.add(r.group);
-      if (r.group === "Repack") m.repackPcs += (r.avail || 0); else m.stockPcs += (r.avail || 0);
-    };
-    data.A.forEach(collect); data.B.forEach(collect);
-    const mergedRows = Array.from(merged.values()).map(m => {
-      const avail = m.repackPcs + m.stockPcs;
-      const group = m.groups.size > 1 ? "Repack + Single stock" : Array.from(m.groups)[0];
-      const months = m.demand > 0 ? avail / m.demand : null;
-      const unit = m.asp > 0 ? m.asp : m.unit;
-      return { ...m, group, avail, months, value: avail * (unit || 0), unit };
-    }).sort((a, b) => (b.value || 0) - (a.value || 0));
-
-    const headerC = ["Group", "SKU", "Name", "Available (pcs)", "Repack pcs", "Good stock pcs", "Monthly demand", "Demand source", "Recommended next-mo pcs", "Months to clear", "Value on hand (EGP)", "CR%", "DR%", "NDR%", "ASP / price", "Status"];
-    const combinedAoA = [headerC].concat(mergedRows.map(r => [
-      r.group, r.sku, r.name || "", Math.round(r.avail || 0), Math.round(r.repackPcs || 0), Math.round(r.stockPcs || 0),
-      Math.round(r.demand || 0), srcOf(r), Math.round(r.rec || 0),
-      (r.months === null || !Number.isFinite(r.months)) ? "∞" : Number(r.months.toFixed(1)),
-      Math.round(r.value || 0),
-      Number((r.cr || 0).toFixed(1)), Number((r.dr || 0).toFixed(1)), Number((r.ndr || 0).toFixed(1)), Math.round((r.asp > 0 ? r.asp : r.unit) || 0),
-      statusOf(r)
-    ]));
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(combinedAoA), "Recommends Forecast");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.A)), "Gap A - Repack");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAoA(data.B)), "Gap B - Single stock");
-    XLSX.writeFile(wb, "Recommends Forecast - Gap Plan.xlsx");
-  } catch (e) {
-    alert("Export failed: " + (e && e.message ? e.message : e));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Download Excel"; }
-  }
 }
 
 function fcRenderAll() {
@@ -12857,34 +12596,6 @@ function fcRenderAll() {
   fcRenderCategoryTable();
   fcRenderAccuracyTrend();
   fcApplyFilters();
-}
-
-// Gap Plan — Recommends Forecast is its own view now (own nav item under
-// Forecast Model). It needs only the main data + repack/targets, not the
-// forecast engine, so it renders fast and independently.
-function prepareGapPlanRecommends() {
-  if (!fcGapState.wired) {
-    const btn = $("fcGapExportBtn");
-    if (btn) btn.addEventListener("click", fcExportRecommends);
-    fcGapState.wired = true;
-  }
-  const status = $("fcGapStatus");
-  if (!(state.allParsedRows && state.allParsedRows.length)) {
-    if (status) status.textContent = "Loading data… open again in a moment.";
-    return;
-  }
-  // Load the Commercial Plan exclusion lists once, then render. If they fail,
-  // we still render using the fcIsInPlan fallback.
-  if (!fcGapState.exclLoaded) {
-    if (status) status.textContent = "Loading plan exclusions…";
-    fcLoadPlanExclusions().finally(() => {
-      try { fcRenderRecommends(); }
-      catch (e) { if (status) status.textContent = "Couldn't build the recommendations: " + (e && e.message ? e.message : e); }
-    });
-    return;
-  }
-  try { fcRenderRecommends(); }
-  catch (e) { if (status) status.textContent = "Couldn't build the recommendations: " + (e && e.message ? e.message : e); }
 }
 
 // GMV target panel — turns the piece forecast into money and shows what the
@@ -14964,23 +14675,36 @@ function renderPaginatedMpMatchesTable() {
     tr.innerHTML = `
       <td class="font-mono text-dim">${m.productId}</td>
       <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
+      <td class="text-dim">${m.category}</td>
       <td class="font-mono text-dim">${m.merchantId}</td>
       <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
       <td class="text-dim truncate-cell" style="max-width:120px;" title="${m.acm}">${m.acm}</td>
+      <td class="center ${m.inPlan === "Yes" ? "text-green" : "text-dim"}">${m.inPlan}</td>
+      <td class="text-dim">${m.availability}</td>
+      <td class="text-dim">${m.isLocked}</td>
       <td class="num text-dim">${fmtIntCell(Math.round(m.stock))}</td>
       <td class="num text-dim">${fmtIntCell(Math.round(m.doh))}</td>
+      <td class="num text-dim">${fmtIntCell(m.activeMonths)}</td>
+      <td class="num text-dim">${fmtIntCell(m.placedOrders)}</td>
+      <td class="num text-dim">${fmtIntCell(m.confirmedOrders)}</td>
+      <td class="num text-dim">${fmtIntCell(m.deliveredOrders)}</td>
       <td class="num font-bold">${fmtIntCell(m.totalPlaced)}</td>
       <td class="num text-blue">${fmtIntCell(m.totalConfirmed)}</td>
       <td class="num text-green">${fmtIntCell(m.totalDelivered)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.placedGmv)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.confirmedGmv)}</td>
       <td class="num font-bold text-dim">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
       <td class="num">${fmtPctCell(m.contrPct)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.deliveredAsp)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
       <td class="num text-purple">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num ${m.ppm >= 0 ? "" : "text-red"}">${fmtMoneyCompactCell(m.ppm)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -15330,7 +15054,7 @@ async function sendDeclineDigestEmail() {
   if (btn) btn.disabled = true;
   setStatus("Sending...", "");
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(MATCHES_FEEDBACK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
@@ -15395,7 +15119,7 @@ async function dwLoadFeedback() {
   if (!MATCHES_FEEDBACK_API_URL) return;
   const day = dwDayKey();
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: "get_decline_feedback", declineDay: day })
     });
@@ -15421,7 +15145,7 @@ async function dwSaveFeedback(tr) {
   btn.disabled = true; setSt("Saving…", "");
   const cellOf = () => tr.querySelector("td:last-child");
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "save_decline_feedback", declineDay: dwDayKey(), feedback: text,
@@ -15474,7 +15198,7 @@ if ($("acmSelect")) $("acmSelect").addEventListener("change", () => {
 // في صفحة Sales Plan-ACM نفسها).
 // =========================================================================
 const SPF_THRESHOLD = 70;
-const SPF_PAGE_SIZE = 25;
+let SPF_PAGE_SIZE = 25;
 const SPF_OPTIONS = [
   "Merchant will scale on new target",
   "Reduce merchant target - add new merchant",
@@ -15637,7 +15361,7 @@ async function spfLoadFeedback() {
   if (!MATCHES_FEEDBACK_API_URL) return;
   const month = spfMonthKey();
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: "get_sales_plan_feedback", month })
     });
@@ -15679,7 +15403,7 @@ async function spfSave(tr) {
   if (!MATCHES_FEEDBACK_API_URL) { setSt("Backend is not configured", "#B42318"); return; }
   btn.disabled = true; setSt("Saving…", "");
   try {
-    const resp = await fetch(MATCHES_FEEDBACK_API_URL, {
+    const resp = await fbFetch(FEEDBACK_API_URL, {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "save_sales_plan_feedback", feedback: v.feedback, comment: v.comment,
@@ -15705,7 +15429,8 @@ async function spfSave(tr) {
     // الـ Plan sheet (Sales_Plan-ACM) اتعدّل؟ لو فشل بنقول بوضوح (الـ Feedback نفسه اتحفظ).
     const ps = data.planSync, tr2 = document.querySelector(`#spfTableBody tr[data-spk="${CSS.escape(key)}"]`);
     const st2 = tr2 && tr2.querySelector(".spf-fb-status");
-    if (st2 && ps) {
+    if (st2 && !ps && data.queued) { st2.textContent = "Saved ✓ — syncing to the sheet in the background…"; st2.style.color = "#067647"; }
+    else if (st2 && ps) {
       if (ps.ok) { st2.textContent = `Saved ✓ · plan sheet: ${ps.updated || 0} updated, ${ps.added || 0} added${ps.removed ? ", " + ps.removed + " removed" : ""}`; st2.style.color = "#067647"; }
       else { st2.textContent = "Saved, but the plan sheet was NOT updated: " + (ps.error || "unknown"); st2.style.color = "#B42318"; }
     }
@@ -17978,7 +17703,7 @@ const ALL_SHEET_GIDS = [
   PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
   PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
   PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID,
+  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, SUPPLY_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID,
   IRQ_SELLTHROUGH_NEEDED_GID, IRQ_INBOUND_GID, IRQ_BEGIN_INV_GID, IRQ_COGS_GID, IRQ_INVENTORY_GID
 ].filter(Boolean);
 
@@ -18088,7 +17813,10 @@ async function fetchAllSheetsViaBackendOnce() {
   // v1.1.46: مصدر واحد بس (Apps Script) — الـ Worker مبقاش عنده general
   // sheet sync خالص (راجع الكومنت فوق). مفيش داعي لـ Promise.allSettled
   // على مصدرين تاني.
-  const appsScript = await fetchOneLastSyncSource(DATA_API_URL, "apps-script");
+  // v1.10.0: القراءة من كاش الـ Worker (edge) — لو فشل لأي سبب نرجع على Apps Script مباشرة.
+  let appsScript;
+  try { appsScript = await fetchOneLastSyncSource(SYNC_CDN_URL, "worker-cache"); if (!appsScript || !appsScript.sheets) throw new Error("empty worker cache response"); }
+  catch (e) { console.warn("[getLastSync] worker cache failed, falling back to Apps Script:", e && e.message); appsScript = await fetchOneLastSyncSource(DATA_API_URL, "apps-script"); }
 
   const sheets = appsScript && appsScript.sheets;
   if (appsScript && appsScript.fetchedAt) {
@@ -18157,7 +17885,8 @@ async function fetchIrqSheetsOnce() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_API_TIMEOUT_MS);
   try {
-    const res = await fetch(`${DATA_API_URL}?action=getLastSync&group=irq`, { method: "GET", signal: controller.signal, cache: "no-store" });
+    let res = await fetch(`${SYNC_CDN_URL}?action=getLastSync&group=irq`, { method: "GET", signal: controller.signal, cache: "no-store" }).catch(() => null);
+    if (!res || !res.ok) res = await fetch(`${DATA_API_URL}?action=getLastSync&group=irq`, { method: "GET", signal: controller.signal, cache: "no-store" });
     let json;
     try { json = await res.json(); }
     catch (parseErr) { throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message) + " [irq]"); }
@@ -18181,7 +17910,7 @@ function applyIrqSheetsToState(sheets) {
   if (sheets[IRQ_INVENTORY_GID]) state.irqInventoryMap = parseIrqInventorySheet(sheets[IRQ_INVENTORY_GID]);
   // نفس منطق applySnapshotToState: لو مصادر الـ Sellthrough اتغيّرت نبطّل الجدول المحسوب.
   const fp = computeSellthroughSourceFingerprint();
-  if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== fp) state.sellthroughPrepared = false;
+  if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== fp) { state.sellthroughPrepared = false; state._ovStTrendDone = false; }
   state._stSourceFingerprint = fp;
 }
 
@@ -18220,6 +17949,7 @@ const GID_LABELS = {
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
+  [SUPPLY_REPACK_GID]: "Repack (Supply Conversion)",
   [INCENTIVE_MERCHANTS_GID]: "Incentive Merchants (Incentives Tracker)",
   [IRQ_SELLTHROUGH_NEEDED_GID]: "IRQ Sell-through Needed",
   [IRQ_INBOUND_GID]: "IRQ Inbound",
@@ -18264,6 +17994,8 @@ async function fetchAllSheetsSnapshot() {
   const mbSheets = {};
   const mbStale = [];
   const mbPromise = loadAllMetabaseSources(mbSheets, mbStale);
+  // v1.4.0: Targets المرفوعة من لوحة Control (Worker KV) — بتتحمل بالتوازي وبتغطي شيتات الـ Targets القديمة.
+  const twStarted = (window.TowerTargets && window.TowerTargets.start) ? window.TowerTargets.start() : null;
 
   if (DATA_API_URL) {
     // Preferred path: ONE request, read server-side via SpreadsheetApp —
@@ -18285,7 +18017,7 @@ async function fetchAllSheetsSnapshot() {
       prodInfoPayload, begInvPayload, sellthroughNeededPayload,
       debundleMapPayload, singleSkuTargetsPayload, cogsPayload, availabilityLockingPayload,
       productsMatchesPayload, merchantSkuDailyPayload, merchantSegPayload,
-      weeklyInventoryPayload, warehouseRepackPayload
+      weeklyInventoryPayload, warehouseRepackPayload, supplyRepackPayload
     ] = await Promise.all([
       loadSheetWithRetry(MAIN_GID),
       TARGETS_GID && TARGETS_GID !== " " ? loadSheetWithRetry(TARGETS_GID).catch(track(TARGETS_GID)) : Promise.resolve(null),
@@ -18307,7 +18039,8 @@ async function fetchAllSheetsSnapshot() {
       MERCHANT_SKU_DAILY_GID ? loadSheetWithRetry(MERCHANT_SKU_DAILY_GID).catch(track(MERCHANT_SKU_DAILY_GID)) : Promise.resolve(null),
       MERCHANT_SEGMENTATION_GID ? loadSheetWithRetry(MERCHANT_SEGMENTATION_GID).catch(track(MERCHANT_SEGMENTATION_GID)) : Promise.resolve(null),
       WEEKLY_INVENTORY_GID ? loadSheetWithRetry(WEEKLY_INVENTORY_GID).catch(track(WEEKLY_INVENTORY_GID)) : Promise.resolve(null),
-      WAREHOUSE_REPACK_GID ? loadSheetWithRetry(WAREHOUSE_REPACK_GID).catch(track(WAREHOUSE_REPACK_GID)) : Promise.resolve(null)
+      WAREHOUSE_REPACK_GID ? loadSheetWithRetry(WAREHOUSE_REPACK_GID).catch(track(WAREHOUSE_REPACK_GID)) : Promise.resolve(null),
+      SUPPLY_REPACK_GID ? loadSheetWithRetry(SUPPLY_REPACK_GID).catch(track(SUPPLY_REPACK_GID)) : Promise.resolve(null)
     ]);
     sheets = {
       [MAIN_GID]: mainPayload, [TARGETS_GID]: targetsPayload,
@@ -18321,7 +18054,8 @@ async function fetchAllSheetsSnapshot() {
       [PRODUCTS_MATCHES_GID]: productsMatchesPayload, [MERCHANT_SKU_DAILY_GID]: merchantSkuDailyPayload,
       [MERCHANT_SEGMENTATION_GID]: merchantSegPayload,
       [WEEKLY_INVENTORY_GID]: weeklyInventoryPayload,
-      [WAREHOUSE_REPACK_GID]: warehouseRepackPayload
+      [WAREHOUSE_REPACK_GID]: warehouseRepackPayload,
+      [SUPPLY_REPACK_GID]: supplyRepackPayload
     };
     if (newSegLoadError) sheets.__newSegLoadError = newSegLoadError;
   }
@@ -18353,6 +18087,7 @@ async function fetchAllSheetsSnapshot() {
   await mbPromise;
   Object.assign(sheets, mbSheets);
   mbStale.forEach(g => staleGids.push(g));
+  try { if (window.TowerTargets && twStarted) await window.TowerTargets.apply(sheets, twStarted); } catch (e) { console.warn("[Tower] targets apply failed:", e); }
 
   const mainPayload = sheets[MAIN_GID];
   const targetsPayload = sheets[TARGETS_GID];
@@ -18382,6 +18117,7 @@ async function fetchAllSheetsSnapshot() {
   const merchantSegPayload = sheets[MERCHANT_SEGMENTATION_GID];
   const weeklyInventoryPayload = sheets[WEEKLY_INVENTORY_GID];
   const warehouseRepackPayload = sheets[WAREHOUSE_REPACK_GID];
+  const supplyRepackPayload = sheets[SUPPLY_REPACK_GID];
   const confirmedByDayPayload = sheets[CONFIRMED_BY_DAY_GID];
   const incentiveMerchantsPayload = sheets[INCENTIVE_MERCHANTS_GID];
   if (sheets.__newSegLoadError) newSegLoadError = sheets.__newSegLoadError;
@@ -18430,6 +18166,7 @@ async function fetchAllSheetsSnapshot() {
     merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     merchantSegHistoryRows: [], // v1.3.48: أرشيف شهور Merchant Segmentation اتشال
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
+    supplyRepackRows: supplyRepackPayload ? parseSupplyRepackSheet(supplyRepackPayload) : state.supplyRepackRows,
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
     confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
     incentiveMerchantsRows: incentiveMerchantsPayload ? parseIncentiveMerchantsSheet(incentiveMerchantsPayload) : state.incentiveMerchantsRows, // <-- Incentives Tracker (Incentive Merchants)
@@ -18529,6 +18266,7 @@ function applySnapshotToState(snapshot) {
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
   state.merchantSegHistoryRows = snapshot.merchantSegHistoryRows || state.merchantSegHistoryRows || [];
+  state.supplyRepackRows = snapshot.supplyRepackRows || state.supplyRepackRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
   state.incentiveMerchantsRows = snapshot.incentiveMerchantsRows || state.incentiveMerchantsRows || []; // <-- Incentives Tracker (Incentive Merchants)
@@ -18553,7 +18291,7 @@ function applySnapshotToState(snapshot) {
   // عشان تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها.
   const newStFingerprint = computeSellthroughSourceFingerprint();
   if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== newStFingerprint) {
-    state.sellthroughPrepared = false;
+    state.sellthroughPrepared = false; state._ovStTrendDone = false;
   }
   state._stSourceFingerprint = newStFingerprint;
 }
@@ -18729,7 +18467,6 @@ const SECTION_DATE_FILTER_REFRESH = {
   ppmProducts: () => preparePpmAnalystProductsData(),
   ppmSingle: () => preparePpmAnalystSingleData(),
   cm3Analyst: () => { renderCm3TargetView(); renderCm3AnalystView(); },
-  productsAnalyst: () => prepareProductsAnalystData(),
   productsMatchesAnalyst: () => prepareProductsMatchesAnalystData(),
   poorMatches: () => preparePoorMatchesData(),
   availabilityLocking: () => prepareAvailabilityLockingData(),
@@ -18860,6 +18597,9 @@ confirmDownloadBtn.addEventListener("click", () => {
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     state.incentiveMerchantsPage = 0; state.incentiveMerchantsPageSize = 999999;
     PAGE_SIZE = 999999;
+    const originalSpfPage = (typeof spfState !== "undefined") ? spfState.page : 0;
+    SPF_PAGE_SIZE = 999999; if (typeof spfState !== "undefined") spfState.page = 0;
+    if (typeof spfRender === "function") spfRender();
 
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
@@ -18891,6 +18631,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         
         // Restore pagination
         PAGE_SIZE = 10;
+        SPF_PAGE_SIZE = 25; if (typeof spfState !== "undefined") spfState.page = originalSpfPage; if (typeof spfRender === "function") spfRender();
         state.page = originalPage.acm;
         state.pageMerchant = originalPage.merchant;
         state.pageSeg = originalPage.seg;
@@ -19066,7 +18807,7 @@ async function fetchOneLastSyncMeta(baseUrl) {
 }
 
 async function fetchLastSyncMeta() {
-  return fetchOneLastSyncMeta(DATA_API_URL);
+  return (await fetchOneLastSyncMeta(SYNC_CDN_URL)) || fetchOneLastSyncMeta(DATA_API_URL);
 }
 
 // -------------------------------------------------------------------------
@@ -19330,6 +19071,16 @@ function renderDohPlanner() {
     const flooredN = dohState.rows.filter(r => r.floored).length;
     st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown${dohState.maxDoh !== null ? ` (DOH Placed × CR < ${dohState.maxDoh})` : ""} · sorted by gap size (Placed × CR vs Avg 3D) · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong> · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
   }
+  if (m) {
+    const V = dohState.view, sum = (k) => V.reduce((s, r) => s + (Number.isFinite(r[k]) ? r[k] : 0), 0);
+    const setK = (id, val) => { const e = $(id); if (e) e.textContent = val; };
+    setK("dohKpiSkus", fmtInt.format(V.length));
+    setK("dohKpiSkusSub", "of " + fmtInt.format(dohState.rows.length) + " Singles");
+    setK("dohKpiStock", fmtInt.format(Math.round(sum("stock"))));
+    setK("dohKpiPlaced", fmtInt.format(Math.round(sum("placedYday"))));
+    setK("dohKpiExp", fmtInt.format(Math.round(sum("expConf"))));
+    setK("dohKpiLow", fmtInt.format(V.filter(r => r.dohPlaced !== null && r.dohPlaced < 7).length));
+  }
   if ($("dohSubtitle") && m) $("dohSubtitle").textContent = `Single SKUs (bundles debundled) placed yesterday — stock and DOH worked out two ways: Stock ÷ (Placed Yesterday × CR) and Stock ÷ Avg 3D Confirmed. CR/DR/NDR use a ${m.params.windowDays}-day window after a ${m.params.cutoffDays}-day cutoff.`;
 }
 
@@ -19345,7 +19096,7 @@ function dohRecalculate() {
     renderDohPlanner();
   } catch (e) {
     console.error("DOH Planner error:", e);
-    if (status) status.textContent = "Couldn't build the DOH Planner: " + (e && e.message ? e.message : e);
+    if (status) status.textContent = "Couldn't build the Planner DOH: " + (e && e.message ? e.message : e);
   }
 }
 

@@ -25,22 +25,19 @@
  *     (or use "Manage deployments" > Edit > New version) for changes to
  *     go live.
  *
- *  EXTERNAL "COMPUTED DATA" API (read the dashboard's live numbers from
- *  outside, per section/table) — see the big comment above COMPUTED_API_KEYS
- *  further down for how it works. Quick start:
- *  1. Change COMPUTED_API_KEYS below to your own secret key(s).
- *  2. Deploy a new version (step 6 above).
- *  3. Open the dashboard once (or wait for its next hourly auto-refresh) so
- *     it publishes its first snapshot.
- *  4. GET <Web app URL>?action=listComputed&key=YOUR_KEY to see what's
- *     available, then GET ...&action=getComputed&section=..&table=..&key=..
- *     to pull one table's live computed rows as JSON.
+ *  NOTE (v1.10.0): the "Computed Data" API (publish_computed_batch /
+ *  getComputed / listComputed) and the getLastSync read cache now live in the
+ *  Cloudflare Worker (cloudflare-worker/worker.js). Feedback saves are
+ *  accepted by the Worker instantly and applied here in the background
+ *  (save_match_feedback / save_decline_feedback / save_sales_plan_feedback).
  * ============================================================================
  */
 
 var SPREADSHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 var USERS_SHEET_GID = 1839838273;
 var ALLOWED_EMAIL_DOMAIN = "taager.com";
+// Cloudflare Worker endpoint that serves the access config (people added by an admin).
+var ACCESS_CONFIG_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev/?action=getAccess";
 
 // Recommended Tracker — Products/Matches sheet. Columns (1-based):
 // A Type | B PRODUCT_ID | C PRODUCT_NAME | D Merchant ID | E Merchant |
@@ -79,41 +76,9 @@ var BACKUP_KEEP_LAST_N = 30;
 var ANALYST_SINGLE_DAILY_SHEET_NAME = "Analyst / Single";
 var ANALYST_SINGLE_DAILY_PROP_KEY = "analystSingleDailyMeta";
 
-/**
- * ============================================================================
- *  COMPUTED DATA API — lets an outside consumer (a script, a BI tool, another
- *  team's app) pull the dashboard's already-computed numbers (exactly what a
- *  user sees in a given section/table — MTD targets, Achieved%, CR/DR%, etc.)
- *  over plain HTTP, without opening the dashboard in a browser.
- *
- *  WHY IT WORKS THIS WAY
- *  Every real computation (targets, lag cutoffs, debundling, run rates...)
- *  lives in js/app.js and runs client-side in the browser — reimplementing
- *  all of that a second time here in Apps Script would mean keeping two
- *  parallel copies of dozens of formulas in sync forever, which breaks
- *  quickly in practice. Instead: whenever the dashboard is open in a browser
- *  and finishes loading/refreshing its data (on page load, and every hourly
- *  auto-refresh, and on manual "Refresh"), it PUBLISHES its own already-
- *  computed tables here (see publishComputedSnapshots() in app.js). This
- *  endpoint just stores the latest one it received per (section, table) and
- *  serves it back on request — so the data is "live" as of the last time
- *  someone had the dashboard open, which in practice (a team dashboard that
- *  gets opened throughout the day, plus the hourly auto-refresh) stays fresh.
- *
- *  SETUP
- *  1. Change COMPUTED_API_KEYS below to your own secret key(s) — anyone with
- *     a key can read published data (not write it; only the dashboard itself
- *     can publish, since that goes through this same script, not a public key).
- *  2. Redeploy (Manage deployments > Edit > New version) so it's live.
- *
- *  CONSUME IT
- *    GET <deployment URL>?action=getComputed&section=commercialPlan&table=main&key=YOUR_KEY
- *    GET <deployment URL>?action=listComputed&key=YOUR_KEY   (see what's published)
- * ============================================================================
- */
+// Shared secret used by handleListUsers (Users & Roles page). The Computed Data
+// API that also used it moved to the Worker (env COMPUTED_API_KEYS there).
 var COMPUTED_API_KEYS = ["Admin-Panal-Center"]; // <-- replace before sharing this URL with anyone
-var COMPUTED_SNAPSHOTS_FOLDER_ID = ""; // leave "" to auto-create/reuse, like BACKUP_FOLDER_ID above
-var COMPUTED_SNAPSHOTS_FOLDER_NAME = "Performance Dashboard Computed Snapshots";
 
 function doPost(e) {
   var payload;
@@ -126,84 +91,31 @@ function doPost(e) {
   var action = payload.action;
   if (action === "signup") return handleSignup(payload);
   if (action === "login") return handleLogin(payload);
+  if (action === "list_users") return handleListUsers(payload);
   if (action === "backup_chunk") return handleBackupChunk(payload);
   if (action === "save_match_feedback") return handleSaveMatchFeedback(payload);
   if (action === "add_new_locked_matches") return handleAddNewLockedMatches(payload);
-  if (action === "publish_computed_batch") return handlePublishComputedBatch(payload);
   if (action === "publish_analyst_single_daily") return handlePublishAnalystSingleDaily(payload);
   if (action === "send_decline_digest") return handleSendDeclineDigest(payload);
   if (action === "save_decline_feedback") return handleSaveDeclineFeedback(payload);
   if (action === "get_decline_feedback") return handleGetDeclineFeedback(payload);
+  if (action === "save_sales_plan_feedback") return handleSaveSalesPlanFeedback(payload);
+  if (action === "get_sales_plan_feedback") return handleGetSalesPlanFeedback(payload);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
 
 /**
- * Called by js/app.js (publishComputedSnapshots) after every fresh data
- * load/refresh. payload.sections = [{ section, table, rows }, ...] — each
- * one overwrites whatever was previously published for that exact
- * (section, table) pair. No API key required here (this is the dashboard
- * itself publishing its own data, through the same trusted deployment) —
- * only reading it back (getComputed/listComputed) requires a key.
- */
-function handlePublishComputedBatch(payload) {
-  var sections = payload.sections;
-  if (!sections || !sections.length) return jsonResponse({ success: false, message: "No sections provided." });
-
-  // ملحوظة مهمة: عمدًا من غير LockService.getScriptLock() هنا (بعكس باقي
-  // الـ handlers التانية في الملف ده). getScriptLock() قفل عام على المشروع
-  // كله — أي حاجة تانية بتستخدمه (login/signup/heartbeat/feedback...) بتقف
-  // تستنى لحد ما يتفك. الداشبورد بيبعت 27 طلب نشر متتالي (واحد لكل سكشن)
-  // كل مرة يعمل ريفريش، وبعضهم بيكتب ملفات كبيرة على Drive (آلاف الصفوف) —
-  // لو استخدمنا نفس القفل العام هنا، أي طلب تسجيل دخول أو heartbeat بيوصل
-  // في نفس اللحظة كان بيستنى ورا الـ 27 طلب دول، وده اللي كان بيسبب
-  // الـ "blocked by CORS policy" اللي كان بيظهر فجأة (الطلب بيتأخر جدًا أو
-  // بيتقطع من جوجل، والرد اللي بيرجع في الحالة دي مالوش CORS headers خالص).
-  // هنا مش محتاجين قفل أصلاً: كل سكشن بيكتب في ملف خاص بيه بس (section__table.json)،
-  // فمفيش تعارض حقيقي بين الطلبات دي وبعضها.
-  try {
-    var folder = getOrCreateComputedSnapshotsFolder();
-    var publishedAt = new Date().toISOString();
-    var results = [];
-    sections.forEach(function (s) {
-      var section = sanitizeComputedName(s.section);
-      var table = sanitizeComputedName(s.table);
-      if (!section || !table) { results.push({ section: s.section, table: s.table, ok: false, error: "Invalid section/table name." }); return; }
-
-      var fileName = section + "__" + table + ".json";
-      var content = JSON.stringify({
-        section: section,
-        table: table,
-        updatedAt: publishedAt,
-        rowCount: Array.isArray(s.rows) ? s.rows.length : 0,
-        rows: s.rows || []
-      });
-
-      var existing = folder.getFilesByName(fileName);
-      if (existing.hasNext()) {
-        existing.next().setContent(content);
-      } else {
-        folder.createFile(fileName, content, MimeType.PLAIN_TEXT);
-      }
-      results.push({ section: section, table: table, ok: true });
-    });
-    return jsonResponse({ success: true, publishedAt: publishedAt, results: results });
-  } catch (err) {
-    return jsonResponse({ success: false, message: err.message || String(err) });
-  }
-}
-
-/**
  * Called by js/app.js (publishAnalystSingleDaily) — either automatically as
- * part of every publishComputedSnapshots() cycle, or manually via the
+ * part of every publish cycle (js/app.js publishComputedSnapshots), or manually via the
  * "Force Refresh Analyst/Single Daily" button in the Worker Sync Status
  * modal. payload.rows = the full rolling-30-day window (every day computed
  * independently — see the comment above buildPpmAnalystSingleDailyRows() in
- * js/app.js). Unlike handlePublishComputedBatch above, this writes straight
+ * js/app.js). This writes straight
  * into a real sheet tab (ANALYST_SINGLE_DAILY_SHEET_NAME) in the same
  * spreadsheet, completely replacing its previous contents every time — it's
  * a snapshot of "last 30 days as of now", not an append-only log.
  *
- * A short script lock IS used here (unlike handlePublishComputedBatch)
+ * A short script lock IS used here
  * because this writes to one shared sheet: if two people have the dashboard
  * open and their publishes land within the same second, writing at the same
  * time could interleave and corrupt the tab. If the lock can't be acquired
@@ -283,79 +195,6 @@ function handleGetAnalystSingleDailyMeta(e) {
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
-}
-
-function handleGetComputed(e) {
-  var keyCheck = requireComputedApiKey(e);
-  if (keyCheck) return keyCheck;
-
-  var section = sanitizeComputedName((e.parameter && e.parameter.section) || "");
-  var table = sanitizeComputedName((e.parameter && e.parameter.table) || "");
-  if (!section || !table) return jsonResponse({ success: false, message: "section and table query params are required." });
-
-  try {
-    var folder = getOrCreateComputedSnapshotsFolder();
-    var fileName = section + "__" + table + ".json";
-    var files = folder.getFilesByName(fileName);
-    if (!files.hasNext()) {
-      return jsonResponse({ success: false, message: "No data published yet for section='" + section + "', table='" + table + "'." });
-    }
-    var content = files.next().getBlob().getDataAsString();
-    var parsed = JSON.parse(content);
-    return jsonResponse({ success: true, section: parsed.section, table: parsed.table, updatedAt: parsed.updatedAt, rowCount: parsed.rowCount, rows: parsed.rows });
-  } catch (err) {
-    return jsonResponse({ success: false, message: err.message || String(err) });
-  }
-}
-
-function handleListComputed(e) {
-  var keyCheck = requireComputedApiKey(e);
-  if (keyCheck) return keyCheck;
-
-  try {
-    var folder = getOrCreateComputedSnapshotsFolder();
-    var files = folder.getFiles();
-    var list = [];
-    while (files.hasNext()) {
-      var f = files.next();
-      var name = f.getName();
-      if (!/\.json$/.test(name)) continue;
-      var parts = name.replace(/\.json$/, "").split("__");
-      var entry = { section: parts[0] || "", table: parts[1] || "" };
-      try {
-        var parsed = JSON.parse(f.getBlob().getDataAsString());
-        entry.updatedAt = parsed.updatedAt;
-        entry.rowCount = parsed.rowCount;
-      } catch (err) { /* skip metadata, keep the name-derived entry */ }
-      list.push(entry);
-    }
-    return jsonResponse({ success: true, available: list });
-  } catch (err) {
-    return jsonResponse({ success: false, message: err.message || String(err) });
-  }
-}
-
-function requireComputedApiKey(e) {
-  var key = (e.parameter && e.parameter.key) || "";
-  if (COMPUTED_API_KEYS.indexOf(key) === -1) {
-    return jsonResponse({ success: false, message: "Missing or invalid API key." });
-  }
-  return null;
-}
-
-function sanitizeComputedName(name) {
-  return String(name || "").trim().replace(/[^A-Za-z0-9_-]/g, "");
-}
-
-function getOrCreateComputedSnapshotsFolder() {
-  if (COMPUTED_SNAPSHOTS_FOLDER_ID) {
-    return DriveApp.getFolderById(COMPUTED_SNAPSHOTS_FOLDER_ID);
-  }
-  var existing = DriveApp.getFoldersByName(COMPUTED_SNAPSHOTS_FOLDER_NAME);
-  if (existing.hasNext()) return existing.next();
-  var created = DriveApp.createFolder(COMPUTED_SNAPSHOTS_FOLDER_NAME);
-  Logger.log("Created computed-snapshots folder. Paste this into COMPUTED_SNAPSHOTS_FOLDER_ID: " + created.getId());
-  return created;
 }
 
 /**
@@ -685,8 +524,8 @@ function pruneOldBackups(folder) {
  *  → Every 5 minutes → Save. من غير الخطوة دي، runScheduledSync() مش هيتنفذ
  *  لوحده أبدًا.
  *
- *  Call: GET <deployment URL>?action=getComputed&section=..&table=..&key=..
- *        GET <deployment URL>?action=listComputed&key=..
+ *  Call: GET <deployment URL>?action=getLastSync[&group=irq] | getLastSyncMeta
+ *  (v1.10.0: the Worker caches these two — Apps Script stays the producer.)
  * ============================================================================
  */
 function doGet(e) {
@@ -694,8 +533,6 @@ function doGet(e) {
   if (action === "getLastSync") return handleGetLastSync(e);
   if (action === "getLastSyncMeta") return handleGetLastSyncMeta(e);
   if (action === "getLastSyncDebug") return handleGetLastSyncDebug(e);
-  if (action === "getComputed") return handleGetComputed(e);
-  if (action === "listComputed") return handleListComputed(e);
   if (action === "getAnalystSingleDailyMeta") return handleGetAnalystSingleDailyMeta(e);
   return jsonResponse({ success: false, message: "Unknown action." });
 }
@@ -712,30 +549,23 @@ function doGet(e) {
 // واحدة كل 5 دقايق (fetchSheetsPayloadStable_ تحت)، يعني كل الشيتات دي
 // بتتحدث فعليًا مع بعض في نفس الوقت، مش مقسّمة بين مصدرين مختلفين بتوقيتات
 // مختلفة زي الأول.
+// v1.3.48: اتشال 9 GIDs اتنقلوا لـ Metabase API (بيتقروا من المتصفح مباشرة — METABASE_SOURCES في js/app.js)
+// + شيت Segmentation (891214324) اتلغى. الباقي (16 شيت) لسه بيتقرا من Google Sheets.
 var LAST_SYNC_GIDS = [
-  "22283311",    // BEGIN_INV_GID — أكبر شيت في القايمة
-  "548859670",   // SELLTHROUGH_NEEDED_GID
-  "1409034448",  // PRODUCTS_DEBUNDLE_MAP_GID
   "1620722565",  // SINGLE_SKU_TARGETS_GID
   "1724469150",  // COGS_GID
-  "2085802038",  // AVAILABILITY_LOCKING_GID
   String(PRODUCTS_MATCHES_GID), // 1298408207
-  "461854229",   // MERCHANT_SKU_DAILY_GID
-  "620123165",   // MERCHANT_SEGMENTATION_GID
   "1289659887",  // WEEKLY_INVENTORY_GID
   "897709273",   // WAREHOUSE_REPACK_GID
+  "757777690",   // SUPPLY_REPACK_GID (Targets > Supply Conversion)
   // v1.1.46: الـ 10 شيت دول كانوا بيتقروا من الـ Worker مباشرة
   // (GENERAL_MIRROR_GIDS في worker.js) — دلوقتي بقوا هنا زي كل شيت تاني.
   "115442405",   // TARGETS_GID
-  "891214324",   // SEGMENTATION_GID
   "2042936628",  // TARGETS_ACM_GID
   "1780730573",  // INVENTORY_GID
-  "1779314157",  // PRODUCTS_GID
   "1656655269",  // CAT_TARGETS_GID
   "892918900",   // ACM_SALES_PLAN_GID
-  "1304674893",  // NEW_SEGMENTATION_GID
   "565878313",   // INBOUND_GID
-  "531154071",   // PRODUCTS_INFO_GID
   // v1.1.58 — Sellthrough Rate Panel EGY/IRQ toggle (Products Info فوق بيتشارك
   // مع IRQ، نفس الشيت بيتفلتر بعمود COUNTRY في app.js).
   "997714491",   // IRQ_SELLTHROUGH_NEEDED_GID
@@ -747,6 +577,23 @@ var LAST_SYNC_GIDS = [
 
 var LAST_SYNC_FOLDER_NAME = "Performance Dashboard Last Sync";
 var LAST_SYNC_FILE_NAME = "last_sync.json.gz";
+// v1.3.53: شيتات العراق (5 شيتات ~25% من الحجم) في ملف منفصل — الداشبورد بيحمّلها في الخلفية
+// (getLastSync&group=irq) بعد ما الداتا الأساسية تظهر، فرد getLastSync الأساسي بقى أصغر وأسرع.
+var LAST_SYNC_IRQ_FILE_NAME = "last_sync_irq.json.gz";
+var IRQ_SYNC_GIDS_ = ["997714491", "879952880", "827189174", "775718300", "133618857"];
+function splitCoreAndIrqSheets_(sheets) {
+  var core = {}, irq = {};
+  Object.keys(sheets || {}).forEach(function (gid) {
+    if (IRQ_SYNC_GIDS_.indexOf(gid) !== -1) irq[gid] = sheets[gid]; else core[gid] = sheets[gid];
+  });
+  return { core: core, irq: irq };
+}
+function writeGzFile_(folder, fileName, obj) {
+  var gz = Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), "application/json"), fileName);
+  var old = folder.getFilesByName(fileName);
+  while (old.hasNext()) { old.next().setTrashed(true); }
+  folder.createFile(gz);
+}
 var LAST_SYNC_META_PROP_KEY = "last_sync_fetched_at_v1";
 
 // بصمة رخيصة لشيت (عدد الصفوف + طول أول/آخر صف + طول الأعمدة) — كافية
@@ -847,6 +694,27 @@ function fetchSheetsPayloadStable_(gids, previousSheets) {
   return { fetchedAt: second.fetchedAt, sheets: sheets, unstableGids: unstableGids };
 }
 
+// v1.3.51: الشيتات اللي محتواها متطابق بالظبط (زي Products & Matches و Inventory — نفس الـ 14,557 صف)
+// بتتبعت مرة واحدة والباقي بيتبعت كـ {__alias: gid}. بيقلل حجم رد getLastSync (ده اللي بيبطّأ ويفشل
+// عبر script.googleusercontent.com/macros/echo). الداشبورد بيفك الـ alias بعد الـ ungzip.
+function aliasDuplicateSheets_(sheets) {
+  var seen = {}, out = {};
+  Object.keys(sheets || {}).forEach(function (gid) {
+    var sh = sheets[gid];
+    if (!sh || !sh.table || !sh.table.rows || sh.table.rows.length < 500) { out[gid] = sh; return; }
+    var key = JSON.stringify(sh);
+    if (seen[key]) { out[gid] = { __alias: seen[key] }; } else { seen[key] = gid; out[gid] = sh; }
+  });
+  return out;
+}
+function expandSheetAliases_(sheets) {
+  Object.keys(sheets || {}).forEach(function (gid) {
+    var sh = sheets[gid];
+    if (sh && sh.__alias && sheets[sh.__alias]) sheets[gid] = sheets[sh.__alias];
+  });
+  return sheets;
+}
+
 // بتتنادى من الـ Time-driven trigger (راجع الكومنت فوق doGet للـ setup).
 function runScheduledSync() {
   var folder = getOrCreateLastSyncFolder_();
@@ -859,14 +727,12 @@ function runScheduledSync() {
     PropertiesService.getScriptProperties().deleteProperty("last_sync_unstable_gids_v1");
   }
 
-  var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
-  var gzBlob = Utilities.gzip(Utilities.newBlob(content, "application/json"), LAST_SYNC_FILE_NAME);
-
-  var existing = folder.getFilesByName(LAST_SYNC_FILE_NAME);
-  while (existing.hasNext()) { existing.next().setTrashed(true); }
+  var split = splitCoreAndIrqSheets_(payload.sheets);
+  // الـ IRQ الأول (لو الكتابة التانية فشلت، الأساسي يفضل على النسخة القديمة اللي فيها كل حاجة)
+  writeGzFile_(folder, LAST_SYNC_IRQ_FILE_NAME, { success: true, fetchedAt: payload.fetchedAt, sheets: split.irq });
+  writeGzFile_(folder, LAST_SYNC_FILE_NAME, { success: true, fetchedAt: payload.fetchedAt, sheets: aliasDuplicateSheets_(split.core) });
   var oldArchive = folder.getFilesByName("archive.gz");
   while (oldArchive.hasNext()) { oldArchive.next().setTrashed(true); }
-  folder.createFile(gzBlob);
 
   var props = PropertiesService.getScriptProperties();
   var contentHash = computeSyncContentHash_(payload.sheets, LAST_SYNC_GIDS);
@@ -884,6 +750,16 @@ function readLastSyncPayload_(folder) {
     if (!files.hasNext()) return null;
     var text = Utilities.ungzip(files.next().getBlob()).getDataAsString();
     var parsed = JSON.parse(text);
+    if (parsed && parsed.sheets) {
+      expandSheetAliases_(parsed.sheets);
+      try {
+        var irqFiles = folder.getFilesByName(LAST_SYNC_IRQ_FILE_NAME);
+        if (irqFiles.hasNext()) {
+          var irqParsed = JSON.parse(Utilities.ungzip(irqFiles.next().getBlob()).getDataAsString());
+          Object.keys((irqParsed && irqParsed.sheets) || {}).forEach(function (g) { parsed.sheets[g] = irqParsed.sheets[g]; });
+        }
+      } catch (e2) { /* previous IRQ غير متاح — مش مشكلة */ }
+    }
     return (parsed && parsed.sheets) ? parsed : null;
   } catch (err) {
     return null;
@@ -893,6 +769,12 @@ function readLastSyncPayload_(folder) {
 function handleGetLastSync(e) {
   try {
     var folder = getOrCreateLastSyncFolder_();
+    if (e && e.parameter && e.parameter.group === "irq") {
+      var irqFiles = folder.getFilesByName(LAST_SYNC_IRQ_FILE_NAME);
+      if (!irqFiles.hasNext()) return jsonResponse({ success: true, fetchedAt: null, sheets: {} }); // لسه أول مزامنة بعد الديبلوي — الداشبورد بيكمل بمن غيرها
+      var irqBlob = irqFiles.next().getBlob();
+      return jsonResponse({ success: true, fetchedAt: PropertiesService.getScriptProperties().getProperty(LAST_SYNC_META_PROP_KEY) || null, gzBase64: Utilities.base64Encode(irqBlob.getBytes()) });
+    }
     var files = folder.getFilesByName(LAST_SYNC_FILE_NAME);
     if (files.hasNext()) {
       var gzBlob = files.next().getBlob();
@@ -901,8 +783,8 @@ function handleGetLastSync(e) {
       return jsonResponse({ success: true, fetchedAt: fetchedAt, gzBase64: base64 });
     }
     // Fallback: لسه مفيش أي مزامنة مركزية اتسجلت — بنرجع لجلب لايف عادي.
-    var payload = fetchSheetsPayload_(LAST_SYNC_GIDS);
-    var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: payload.sheets });
+    var payload = fetchSheetsPayload_(LAST_SYNC_GIDS.filter(function (g) { return IRQ_SYNC_GIDS_.indexOf(g) === -1; }));
+    var content = JSON.stringify({ success: true, fetchedAt: payload.fetchedAt, sheets: aliasDuplicateSheets_(payload.sheets) });
     var gz = Utilities.gzip(Utilities.newBlob(content, "application/json"));
     return jsonResponse({ success: true, fetchedAt: payload.fetchedAt, gzBase64: Utilities.base64Encode(gz.getBytes()) });
   } catch (err) {
@@ -917,18 +799,15 @@ function handleGetLastSyncMeta(e) {
   return jsonResponse({ success: true, fetchedAt: fetchedAt, unstableGids: unstable ? unstable.split(",") : [] });
 }
 
-var LAST_SYNC_GID_LABELS_ = {
-  "22283311": "Beginning Inventory", "548859670": "Sell-through Needed",
-  "1409034448": "Products Debundle Map", "1620722565": "Single SKU Targets",
-  "1724469150": "COGS", "2085802038": "Availability Locking",
-  "1298408207": "Products & Matches", "461854229": "Merchant SKU Daily",
-  "620123165": "Merchant Segmentation", "1289659887": "Weekly Inventory",
+var LAST_SYNC_GID_LABELS_ = { "1620722565": "Single SKU Targets",
+  "1724469150": "COGS",
+  "1298408207": "Products & Matches", "1289659887": "Weekly Inventory",
   "897709273": "Warehouse Repack",
-  "115442405": "Targets", "891214324": "Segmentation",
-  "2042936628": "Targets ACM", "1780730573": "Inventory",
-  "1779314157": "Products", "1656655269": "Category Targets",
-  "892918900": "ACM Sales Plan", "1304674893": "New Segmentation",
-  "565878313": "Inbound", "531154071": "Products Info",
+  "757777690": "Repack (Supply Conversion)",
+  "115442405": "Targets",
+  "2042936628": "Targets ACM", "1780730573": "Inventory", "1656655269": "Category Targets",
+  "892918900": "ACM Sales Plan",
+  "565878313": "Inbound",
   "997714491": "IRQ Sell-through Needed", "879952880": "IRQ Inbound",
   "827189174": "IRQ Beginning Inventory", "775718300": "IRQ COGS",
   "133618857": "IRQ Inventory (inv-IRQ)"
@@ -995,7 +874,7 @@ function handleSignup(payload) {
   if (!isAllowedEmail(email)) {
     return jsonResponse({
       success: false,
-      message: "Sign up is only allowed with an @" + ALLOWED_EMAIL_DOMAIN + " email.",
+      message: "Sign up is only allowed with an @" + ALLOWED_EMAIL_DOMAIN + " email, or an email an admin invited.",
     });
   }
   if (password.length < 6) {
@@ -1052,6 +931,23 @@ function handleLogin(payload) {
   return jsonResponse({ success: false, message: "No account found with this email." });
 }
 
+// v1.4.0: قائمة اليوزرز المسجلين (name/email/role فقط — مفيش باسوردات أبدًا) لصفحة
+// Users & Roles. محمية بنفس مفتاح COMPUTED_API_KEYS.
+function handleListUsers(payload) {
+  var key = String(payload.key || "");
+  if (!key || COMPUTED_API_KEYS.indexOf(key) < 0) {
+    return jsonResponse({ success: false, message: "Wrong key." });
+  }
+  var data = getUsersSheet().getDataRange().getValues();
+  var users = [];
+  for (var i = 1; i < data.length; i++) {
+    var email = String(data[i][1] || "").trim().toLowerCase();
+    if (!email) continue;
+    users.push({ name: String(data[i][0] || ""), email: email, role: String(data[i][3] || "") });
+  }
+  return jsonResponse({ success: true, users: users });
+}
+
 function getUsersSheet() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheets = ss.getSheets();
@@ -1063,7 +959,13 @@ function getUsersSheet() {
 
 function isAllowedEmail(email) {
   var re = new RegExp("^[^\\s@]+@" + ALLOWED_EMAIL_DOMAIN.replace(".", "\\.") + "$", "i");
-  return re.test(email);
+  if (re.test(email)) return true;
+  // v1.15.1: anyone an admin added in Control > Users & Roles may sign up, whatever the email domain.
+  try {
+    var res = UrlFetchApp.fetch(ACCESS_CONFIG_URL, { muteHttpExceptions: true });
+    var cfg = JSON.parse(res.getContentText());
+    return !!(cfg && cfg.users && cfg.users[String(email).trim().toLowerCase()]);
+  } catch (e) { return false; }
 }
 
 
@@ -1182,8 +1084,11 @@ function testDeclineDigest() {
 
 // ============================================================================
 //  DECLINE MATCHES — FEEDBACK (tab "Decline Feedback" in the dashboard sheet)
-//  One row per (Decline Day, Merchant ID, SKU ID). Saving again the same day
-//  overwrites that row; a new day appends new rows with the new date.
+//  One row per (Decline Day, Merchant ID, SKU ID). A match that already has a
+//  row for that day is LOCKED for everyone except role "Admin": non-admin
+//  users get {success:false, locked:true} and the sheet is not touched.
+//  Admins updating a locked match overwrite that same row (never a new row);
+//  a new day appends new rows with the new date.
 // ============================================================================
 var DECLINE_FEEDBACK_SHEET = "Decline Feedback";
 var DECLINE_FEEDBACK_HEADERS = ["Feedback Date", "Decline Day", "SKU ID", "SKU Name", "Merchant ID", "Merchant Name", "ACM", "4D Avg", "Yesterday", "Drop", "Lost GMV", "Likely Cause", "Feedback", "Submitted By", "Submitted By Email"];
@@ -1207,6 +1112,27 @@ function ddSafeText_(v) {
   return /^[=+\-@]/.test(x) ? "'" + x : x;
 }
 
+// A "Decline Day" cell can come back from the sheet as a Date if Sheets ever
+// auto-converted it; normalise both shapes to "yyyy-MM-dd" so the row lookup
+// below always matches (otherwise every save would append a duplicate row).
+function ddNormDay_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, DD_TIMEZONE, "yyyy-MM-dd");
+  return String(v === null || v === undefined ? "" : v).trim();
+}
+
+// Role comes from the Users sheet (looked up by email), never from the request.
+function ddUserRole_(email) {
+  email = String(email || "").trim().toLowerCase();
+  if (!email) return "";
+  try {
+    var data = getUsersSheet().getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1] || "").trim().toLowerCase() === email) return String(data[i][3] || "").trim();
+    }
+  } catch (err) {}
+  return "";
+}
+
 function handleSaveDeclineFeedback(payload) {
   var feedback = String(payload.feedback || "").trim();
   var day = String(payload.declineDay || "").trim();
@@ -1217,6 +1143,7 @@ function handleSaveDeclineFeedback(payload) {
   if (!feedback) return jsonResponse({ success: false, error: "Feedback text is empty." });
   if (!userName) return jsonResponse({ success: false, error: "Missing logged-in user name." });
   if (feedback.length > 2000) feedback = feedback.substring(0, 2000);
+  var isAdmin = ddUserRole_(payload.userEmail) === "Admin";
 
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -1230,12 +1157,23 @@ function handleSaveDeclineFeedback(payload) {
     if (last >= 2) {
       var keys = sh.getRange(2, 2, last - 1, 4).getValues(); // B..E = day, sku, skuName, merchantId
       for (var i = 0; i < keys.length; i++) {
-        if (String(keys[i][0]) === day && String(keys[i][1]) === skuId && String(keys[i][3]) === merchantId) { target = i + 2; break; }
+        if (ddNormDay_(keys[i][0]) === day && String(keys[i][1]).trim() === skuId && String(keys[i][3]).trim() === merchantId) { target = i + 2; break; }
       }
     }
+    if (target !== -1 && !isAdmin) {
+      // Already submitted for this match/day -> locked. Do not write anything.
+      var ex = sh.getRange(target, 1, 1, DECLINE_FEEDBACK_HEADERS.length).getValues()[0];
+      return jsonResponse({
+        success: false, locked: true,
+        error: "Feedback for this match was already submitted and is locked.",
+        existing: { feedback: String(ex[12] || ""), by: String(ex[13] || ""), at: String(ex[0] || "") }
+      });
+    }
     if (target === -1) target = last + 1;
+    if (target > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 50);
+    sh.getRange(target, 1, 1, 5).setNumberFormat("@"); // keep Feedback Date / Day / SKU / Merchant as text so they never turn into Dates
     sh.getRange(target, 1, 1, vals.length).setValues([vals]);
-    return jsonResponse({ success: true, at: now });
+    return jsonResponse({ success: true, at: now, updated: target <= last });
   } finally {
     lock.releaseLock();
   }
@@ -1247,8 +1185,8 @@ function handleGetDeclineFeedback(payload) {
   var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(DECLINE_FEEDBACK_SHEET);
   if (sh && sh.getLastRow() >= 2) {
     sh.getRange(2, 1, sh.getLastRow() - 1, DECLINE_FEEDBACK_HEADERS.length).getValues().forEach(function (r) {
-      if (String(r[1]) !== day) return;
-      items[String(r[4]) + "||" + String(r[2])] = { feedback: String(r[12] || ""), by: String(r[13] || ""), at: String(r[0] || "") };
+      if (ddNormDay_(r[1]) !== day) return;
+      items[String(r[4]).trim() + "||" + String(r[2]).trim()] = { feedback: String(r[12] || ""), by: String(r[13] || ""), at: String(r[0] || "") };
     });
   }
   return jsonResponse({ success: true, items: items });
@@ -1258,16 +1196,273 @@ function handleGetDeclineFeedback(payload) {
 function setupDeclineFeedbackSheet() { getDeclineFeedbackSheet_(); }
 
 // ============================================================================
+//  SALES PLAN FEEDBACK  (dashboard page: Account Manager > Sales Plan - Feedback)
+//  Tab "Sales Plan Feedback". One row per (Feedback Date, Product ID, Merchant ID):
+//  saving again the SAME day edits that row; a new day appends a new row.
+//  Fixed columns A:E are kept as text so IDs/dates never turn into numbers/Dates.
+// ============================================================================
+var SP_FEEDBACK_SHEET = "Sales Plan Feedback";
+var SP_MAX_NEW_MERCHANTS = 5;
+var SP_FEEDBACK_HEADERS = ["Feedback Date", "Product ID", "Product Name", "Merchant ID", "Merchant Name", "Category", "ACM",
+  "Placed MTD Target", "Placed Actual", "Placed Run Rate", "Placed Ach %", "Avg Placed Daily", "Gap Plan", "Remaining Days",
+  "Old Target Placed Daily", "New Target Placed Daily", "Feedback", "New Merchant ID(s)", "Submitted By", "Submitted By Email", "Saved At",
+  "Adjusted Target (Existing Merchant)", "No. of New Merchants", "Comment (Reason)"];
+// Columns 25.. = New Merchant 1 ID, New Merchant 1 Target, New Merchant 2 ID, ... (up to SP_MAX_NEW_MERCHANTS)
+(function () {
+  for (var i = 1; i <= SP_MAX_NEW_MERCHANTS; i++) { SP_FEEDBACK_HEADERS.push("New Merchant " + i + " ID"); SP_FEEDBACK_HEADERS.push("New Merchant " + i + " Target"); }
+})();
+var SP_FEEDBACK_OPTIONS = [
+  "Merchant will scale on new target",
+  "Reduce merchant target - add new merchant",
+  "Merchant will stop - add new merchant",
+  "Stock issue"
+];
+var SP_STOCK_ISSUE = "Stock issue"; // no target change, plan sheet untouched
+var SP_NEEDS_NEW_MERCHANT = {
+  "Reduce merchant target - add new merchant": true,
+  "Merchant will stop - add new merchant": true
+};
+
+function getSalesPlanFeedbackSheet_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ss.getSheetByName(SP_FEEDBACK_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(SP_FEEDBACK_SHEET);
+    if (sh.getMaxColumns() < SP_FEEDBACK_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), SP_FEEDBACK_HEADERS.length - sh.getMaxColumns());
+    sh.getRange(1, 1, 1, SP_FEEDBACK_HEADERS.length).setValues([SP_FEEDBACK_HEADERS]).setFontWeight("bold");
+    sh.setFrozenRows(1);
+    sh.getRange("A:B").setNumberFormat("@");
+    sh.getRange("D:D").setNumberFormat("@");
+    sh.getRange("R:R").setNumberFormat("@");
+  } else if (sh.getLastColumn() < SP_FEEDBACK_HEADERS.length) {
+    // Tab created by an older version of the dashboard: add the new header cells.
+    if (sh.getMaxColumns() < SP_FEEDBACK_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), SP_FEEDBACK_HEADERS.length - sh.getMaxColumns());
+    sh.getRange(1, 1, 1, SP_FEEDBACK_HEADERS.length).setValues([SP_FEEDBACK_HEADERS]).setFontWeight("bold");
+  }
+  return sh;
+}
+
+// ---------------------------------------------------------------------------
+//  Plan sheet sync: tab "Sales_Plan-ACM" (gid 892918900) — the sheet the dashboard's
+//  Sales Plan-ACM page reads. Columns A:F (Product ID, Name, CAT, Merchant ID, Name,
+//  Target Placed Daily) are NEVER modified. We only:
+//   - add column G "New Target Daily" + column H "Match Flag" (headers if empty),
+//   - fill H = "Existing match" for the rows that were already there,
+//   - existing match  -> G = Adjusted Target (existing merchant),
+//   - new merchants   -> appended BELOW the existing data (A:E filled, F left empty,
+//                        G = its target, H = "New match"); a match that already exists
+//                        in the sheet is never duplicated (its G is just updated).
+//  Saving the same match again the same day re-syncs: new-match rows that this
+//  feedback added before and that are no longer in the list are removed.
+// ---------------------------------------------------------------------------
+var SP_PLAN_GID = 892918900;
+var SP_PLAN_NEW_TARGET_HEADER = "New Target Daily";
+var SP_PLAN_FLAG_HEADER = "Match Flag";
+var SP_FLAG_EXISTING = "Existing match";
+var SP_FLAG_NEW = "New match";
+var SP_PLAN_UPDATED_HEADER = "Last Target Update"; // column I: date+time of the last time G was set/changed for that row
+
+function spPlanSheet_() {
+  var sheets = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets();
+  for (var i = 0; i < sheets.length; i++) if (sheets[i].getSheetId() === SP_PLAN_GID) return sheets[i];
+  return null;
+}
+
+// opts: { productId, productName, category, merchantId, adjustedTarget, newMerchants:[{id,name,target}], prevNewIds:[...] }
+function spSyncPlanSheet_(opts) {
+  var sh = spPlanSheet_();
+  if (!sh) return { ok: false, error: "Plan sheet (gid " + SP_PLAN_GID + ") not found." };
+  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
+  var hdr = sh.getRange(1, 7, 1, 3).getValues()[0];
+  var g1 = String(hdr[0] || "").trim(), h1 = String(hdr[1] || "").trim(), i1 = String(hdr[2] || "").trim();
+  if ((g1 && g1 !== SP_PLAN_NEW_TARGET_HEADER) || (h1 && h1 !== SP_PLAN_FLAG_HEADER) || (i1 && i1 !== SP_PLAN_UPDATED_HEADER)) {
+    return { ok: false, error: "Columns G/H/I of the plan sheet are already used by something else; not touched." };
+  }
+  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
+  if (!g1 || !h1 || !i1) sh.getRange(1, 7, 1, 3).setValues([[SP_PLAN_NEW_TARGET_HEADER, SP_PLAN_FLAG_HEADER, SP_PLAN_UPDATED_HEADER]]).setFontWeight("bold");
+  var stamp = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM-dd HH:mm");
+
+  var last = sh.getLastRow();
+  var data = last >= 2 ? sh.getRange(2, 1, last - 1, 9).getValues() : [];
+  var str = function (v) { return String(v === null || v === undefined ? "" : v).trim(); };
+
+  // H for rows that were there before this feature = "Existing match" (only blanks; never overwrite a flag)
+  var flagCol = [], needFlagWrite = false;
+  for (var i = 0; i < data.length; i++) {
+    var f = str(data[i][7]);
+    if (!f && (str(data[i][0]) || str(data[i][3]))) { f = SP_FLAG_EXISTING; needFlagWrite = true; data[i][7] = f; }
+    flagCol.push([data[i][7] === "" ? "" : data[i][7]]);
+  }
+  if (needFlagWrite && data.length) sh.getRange(2, 8, data.length, 1).setValues(flagCol);
+
+  var find = function (pid, mid) {
+    for (var r = 0; r < data.length; r++) if (str(data[r][0]) === pid && str(data[r][3]) === mid) return r;
+    return -1;
+  };
+  var res = { ok: true, updated: 0, added: 0, removed: 0 };
+
+  // 1) the existing (feedback) match -> adjusted target in G
+  var ex = find(opts.productId, opts.merchantId);
+  var setTarget = function (idx, val) { // writes G (+ I timestamp) only when the target really changes
+    var oldV = data[idx][6];
+    if (String(oldV === null || oldV === undefined ? "" : oldV).trim() !== "" && Number(oldV) === Number(val)) return false;
+    sh.getRange(idx + 2, 7).setValue(val); sh.getRange(idx + 2, 9).setValue(stamp); data[idx][6] = val; data[idx][8] = stamp;
+    return true;
+  };
+  if (ex !== -1 && setTarget(ex, opts.adjustedTarget)) res.updated++;
+
+  // 2) new merchants: update when already in the sheet, else append below the data
+  var keep = {};
+  var appendRows = [];
+  for (var n = 0; n < opts.newMerchants.length; n++) {
+    var m = opts.newMerchants[n]; keep[m.id] = true;
+    var at = find(opts.productId, m.id);
+    if (at !== -1) { if (setTarget(at, m.target)) res.updated++; }
+    else appendRows.push([opts.productId, opts.productName, opts.category, String(m.id), m.name || "", "", m.target, SP_FLAG_NEW, stamp]);
+  }
+  if (appendRows.length) {
+    var start = sh.getLastRow() + 1;
+    if (start + appendRows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), appendRows.length + 50);
+    sh.getRange(start, 1, appendRows.length, 9).setValues(appendRows);
+    res.added = appendRows.length;
+  }
+
+  // 3) new-match rows added by an earlier save of this same feedback and no longer listed -> remove
+  var stale = [];
+  (opts.prevNewIds || []).forEach(function (id) {
+    if (!id || keep[id]) return;
+    var r = find(opts.productId, id);
+    if (r !== -1 && str(data[r][7]) === SP_FLAG_NEW) stale.push(r + 2);
+  });
+  stale.sort(function (a, b) { return b - a; }).forEach(function (rowNo) { sh.deleteRow(rowNo); res.removed++; });
+  return res;
+}
+
+function handleSaveSalesPlanFeedback(payload) {
+  var feedback = String(payload.feedback || "").trim();
+  var comment = String(payload.comment || "").trim();
+  var row = payload.row || {};
+  var userName = String(payload.userName || "").trim();
+  var productId = String(row.productId || "").trim(), merchantId = String(row.merchantId || "").trim();
+  if (!productId || !merchantId) return jsonResponse({ success: false, error: "Missing match details." });
+  if (SP_FEEDBACK_OPTIONS.indexOf(feedback) === -1) return jsonResponse({ success: false, error: "Pick a feedback option." });
+  if (!comment) return jsonResponse({ success: false, error: "Comment (why the target wasn't achieved) is required." });
+  if (comment.length > 2000) comment = comment.substring(0, 2000);
+  if (!userName) return jsonResponse({ success: false, error: "Missing logged-in user name." });
+
+  var adj = (feedback === "Merchant will stop - add new merchant") ? 0 : Number(payload.adjustedTarget);
+  if (feedback === SP_STOCK_ISSUE) { adj = Number(row.oldDailyTarget); if (!isFinite(adj) || adj < 0) adj = 0; }
+  else if (!isFinite(adj) || adj < 0 || payload.adjustedTarget === "" || payload.adjustedTarget === null || payload.adjustedTarget === undefined) {
+    if (feedback !== "Merchant will stop - add new merchant") return jsonResponse({ success: false, error: "Adjusted target (existing merchant) is required." });
+  }
+
+  var merchants = [];
+  if (SP_NEEDS_NEW_MERCHANT[feedback]) {
+    var list = payload.newMerchants;
+    if (!list || !list.length) return jsonResponse({ success: false, error: "Add at least one new merchant." });
+    if (list.length > SP_MAX_NEW_MERCHANTS) return jsonResponse({ success: false, error: "Max " + SP_MAX_NEW_MERCHANTS + " new merchants." });
+    var seen = {};
+    for (var i = 0; i < list.length; i++) {
+      var id = String((list[i] && list[i].id) || "").trim(), tg = Number(list[i] && list[i].target);
+      if (!id) return jsonResponse({ success: false, error: "New merchant #" + (i + 1) + ": Merchant ID is required." });
+      if (id.length > 40) id = id.substring(0, 40);
+      if (!isFinite(tg) || tg <= 0) return jsonResponse({ success: false, error: "New merchant #" + (i + 1) + ": target must be greater than 0." });
+      if (id === merchantId) return jsonResponse({ success: false, error: "New merchant can't be the same as the current merchant." });
+      if (seen[id]) return jsonResponse({ success: false, error: "Duplicate new Merchant ID: " + id });
+      seen[id] = true;
+      merchants.push({ id: id, target: Math.round(tg * 10) / 10, name: String((list[i] && list[i].name) || "").trim().substring(0, 120) });
+    }
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sh = getSalesPlanFeedbackSheet_();
+    var today = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM-dd");
+    var now = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM-dd HH:mm");
+    var num = function (v) { var x = Number(v); return isFinite(x) ? Math.round(x * 10) / 10 : 0; };
+    var vals = [today, productId, ddSafeText_(row.productName), merchantId, ddSafeText_(row.merchantName), ddSafeText_(row.category), ddSafeText_(row.acm),
+      num(row.mtdTarget), num(row.mtdActual), num(row.runRate), num(row.achPct), num(row.avgDaily), num(row.gap), num(row.remainingDays),
+      num(row.oldDailyTarget), num(row.newDailyTarget), feedback, merchants.map(function (m) { return m.id; }).join(", "), ddSafeText_(userName), ddSafeText_(payload.userEmail), now,
+      num(adj), merchants.length, ddSafeText_(comment)];
+    for (var j = 0; j < SP_MAX_NEW_MERCHANTS; j++) {
+      if (merchants[j]) { vals.push(merchants[j].id); vals.push(merchants[j].target); } else { vals.push(""); vals.push(""); }
+    }
+    var last = sh.getLastRow(), target = -1;
+    if (last >= 2) {
+      var keys = sh.getRange(2, 1, last - 1, 4).getValues(); // A..D = date, productId, name, merchantId
+      for (var k = 0; k < keys.length; k++) {
+        if (ddNormDay_(keys[k][0]) === today && String(keys[k][1]).trim() === productId && String(keys[k][3]).trim() === merchantId) { target = k + 2; break; }
+      }
+    }
+    var prevNewIds = [];
+    if (target !== -1) { // same-day re-save: remember which new merchants this feedback added before
+      var old = sh.getRange(target, 1, 1, 24 + SP_MAX_NEW_MERCHANTS * 2).getValues()[0];
+      for (var pj = 0; pj < SP_MAX_NEW_MERCHANTS; pj++) { var pid = String(old[24 + pj * 2] === undefined ? "" : old[24 + pj * 2]).trim(); if (pid) prevNewIds.push(pid); }
+    }
+    if (target === -1) target = last + 1;
+    if (target > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 50);
+    sh.getRange(target, 1, 1, 5).setNumberFormat("@");
+    sh.getRange(target, 18).setNumberFormat("@");
+    for (var c = 0; c < SP_MAX_NEW_MERCHANTS; c++) sh.getRange(target, 25 + c * 2).setNumberFormat("@"); // merchant IDs stay text; targets stay numbers
+    sh.getRange(target, 1, 1, vals.length).setValues([vals]);
+    var planSync;
+    if (feedback === SP_STOCK_ISSUE && !(prevNewIds && prevNewIds.length)) {
+      planSync = { ok: true, skipped: true };
+    } else try {
+      planSync = spSyncPlanSheet_({ productId: productId, productName: String(row.productName || ""), category: String(row.category || ""), merchantId: merchantId,
+        adjustedTarget: num(adj), newMerchants: merchants, prevNewIds: prevNewIds });
+    } catch (syncErr) { planSync = { ok: false, error: String(syncErr && syncErr.message || syncErr) }; }
+    return jsonResponse({ success: true, at: now, date: today, updated: target <= last, planSync: planSync });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Latest feedback per (Merchant || Product) for the given month ("yyyy-MM").
+function handleGetSalesPlanFeedback(payload) {
+  var month = String(payload.month || "").trim();
+  var items = {};
+  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SP_FEEDBACK_SHEET);
+  if (sh && sh.getLastRow() >= 2) {
+    var width = Math.max(sh.getLastColumn(), 1);
+    sh.getRange(2, 1, sh.getLastRow() - 1, width).getValues().forEach(function (r) {
+      var d = ddNormDay_(r[0]);
+      if (month && d.substring(0, 7) !== month) return;
+      var k = String(r[3]).trim() + "||" + String(r[1]).trim();
+      if (items[k] && items[k].date > d) return;
+      var ms = [];
+      for (var j = 0; j < SP_MAX_NEW_MERCHANTS; j++) {
+        var id = String(r[24 + j * 2] === undefined ? "" : r[24 + j * 2]).trim();
+        if (id) ms.push({ id: id, target: Number(r[25 + j * 2]) || 0 });
+      }
+      items[k] = { date: d, feedback: String(r[16] || ""), adjTarget: r[21] === "" || r[21] === undefined ? null : Number(r[21]), merchants: ms,
+        comment: String(r[23] || ""), newTarget: Number(r[15]) || 0, by: String(r[18] || ""), at: String(r[20] || "") };
+    });
+  }
+  return jsonResponse({ success: true, items: items });
+}
+
+// Run once to create the "Sales Plan Feedback" tab (it is also created on the first save).
+function setupSalesPlanFeedbackSheet() { getSalesPlanFeedbackSheet_(); }
+
+// ============================================================================
 //  REAL NUMBERS, computed here from the Google Sheet (no dashboard needed).
 //  Same logic as the dashboard's Decline Matches page:
 //   Drop = avg(DAY2..DAY5) - DAY1 (Placed), listed only if Drop >= 3 pcs; ranked by Drop; Contr% vs total drop;
 //   Impact on SKU = Drop / SKU's 4-day avg across all merchants;
 //   Stock from the Inventory tab; Locked = active lock remaining pieces.
 // ============================================================================
-var DD_DAILY_GID = 461854229;       // MERCHANT_SKU_DAILY_GID
-var DD_MAIN_GID = 2099497960;      // MAIN_GID (daily rows: PLACED_ASP col X, placed pcs col P)
-var DD_INVENTORY_GID = 1780730573;  // INVENTORY_GID
-var DD_LOCKING_GID = 2085802038;    // AVAILABILITY_LOCKING_GID
+// v1.3.48: الـ digest بقى بيقرا Main / Availability Locking / Merchant SKU Daily من Metabase API
+// (نفس الروابط اللي في METABASE_SOURCES بتاع js/app.js) — الأعمدة بنفس ترتيب الشيت القديم بالظبط.
+// Inventory (GID تحت) لسه بيتقرا من Google Sheet.
+var DD_DAILY_URL   = "https://metabase.taager.com/public/question/fae5e3b3-770d-4263-84cd-5ec7bcb3235b.json";   // Merchant SKU Daily (461854229)
+var DD_DAILY_FMT   = "json";
+var DD_MAIN_URL    = "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv"; // Main (2099497960): PLACED_PIECES col P, PLACED_GMV col V
+var DD_MAIN_FMT    = "csv";
+var DD_LOCKING_URL = "https://metabase.taager.com/public/question/6048f9a4-87b4-4a88-88d9-c2ac5e81e492.json";   // Availability Locking (2085802038)
+var DD_LOCKING_FMT = "json";
+var DD_INVENTORY_GID = 1780730573;  // INVENTORY_GID — لسه Google Sheet
 var DD_MIN_DROP = 3;
 var DD_EXCLUDED_MERCHANTS = { "1160154": true }; // excluded from Decline Matches (drops, totals, MTD lost); actual Avg Placed still counts them
 var DD_TOP_N = 20;
@@ -1275,6 +1470,47 @@ var DD_TIMEZONE = "Africa/Cairo";
 // Avg Placed Target (pieces/day) per month, key YYYY-MM. Update at the start of each month.
 var DD_AVG_PLACED_TARGETS = { "2026-10": 5429 };
 var DD_DASHBOARD_URL = "https://performance-center-taager.vercel.app/"; // optional: paste your dashboard link to get an "Open in Dashboard" button
+
+// Metabase public link -> 2D array بنفس شكل sheet.getDataRange().getValues() (صف الهيدر الأول).
+// JSON: array of objects (ترتيب الأعمدة = ترتيب المفاتيح) | CSV: Utilities.parseCsv.
+// التواريخ ISO بتتحول لـ Date (منتصف الليل بتوقيت السكربت) عشان كود الـ digest اللي بيعمل `instanceof Date` يشتغل زي الشيت.
+function ddMetabaseValues_(url, format) {
+  var text = null, lastErr = null;
+  for (var attempt = 1; attempt <= 3 && text === null; attempt++) {
+    try {
+      var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+      var code = res.getResponseCode();
+      if (code !== 200) throw new Error("HTTP " + code + ": " + String(res.getContentText()).slice(0, 200));
+      text = res.getContentText();
+    } catch (e) { lastErr = e; if (attempt < 3) Utilities.sleep(1500 * attempt); }
+  }
+  if (text === null) throw new Error("Metabase fetch failed (" + url + "): " + (lastErr && lastErr.message));
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  var conv = function (v) {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "string") {
+      var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.exec(v);
+      if (m) {
+        var midnight = !m[4] || (m[4] === "00" && m[5] === "00" && m[6] === "00" && (!m[7] || /^(Z|[+-]00:?00)$/.test(m[7])));
+        return midnight ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(v);
+      }
+      return v;
+    }
+    if (typeof v === "object") return JSON.stringify(v);
+    return v;
+  };
+  if (format === "csv") {
+    var grid = Utilities.parseCsv(text);
+    return grid.map(function (row, i) { return i === 0 ? row : row.map(conv); });
+  }
+  var arr = JSON.parse(text);
+  if (!Array.isArray(arr)) throw new Error("Metabase returned a non-array response (" + url + "): " + text.slice(0, 200));
+  if (!arr.length) return [];
+  var keys = Object.keys(arr[0]);
+  var out = [keys];
+  for (var i = 0; i < arr.length; i++) out.push(keys.map(function (k) { return conv(arr[i][k]); }));
+  return out;
+}
 
 function ddSheetByGid_(ss, gid) {
   var sheets = ss.getSheets();
@@ -1295,7 +1531,7 @@ function computeDeclineDigest_() {
 
   var todayMs = new Date().setHours(0, 0, 0, 0);
   var lockRemaining = {}, lockActive = {};
-  ddSheetByGid_(ss, DD_LOCKING_GID).getDataRange().getValues().forEach(function (r) {
+  ddMetabaseValues_(DD_LOCKING_URL, DD_LOCKING_FMT).forEach(function (r) {
     var single = s(r[0]), tager = s(r[2]);
     if (!single || single === "PRODUCT_ID" || !tager) return;
     if (s(r[4]) === "") return; // ALLOCATED_QUANTITY blank = no lock (merchant is open)
@@ -1310,7 +1546,7 @@ function computeDeclineDigest_() {
 
   // ASP per match = total Placed GMV (Main col V) / total Placed pcs (col P) over the last 4 days that had placed pcs (before today).
   var aspByMatch = {};
-  ddSheetByGid_(ss, DD_MAIN_GID).getDataRange().getValues().forEach(function (r) {
+  ddMetabaseValues_(DD_MAIN_URL, DD_MAIN_FMT).forEach(function (r) {
     var tg = s(r[1]), sk = s(r[3]), pcs = n(r[15]), gmvv = n(r[21]);
     if (!tg || !sk || !(pcs > 0) || !(gmvv > 0)) return;
     var dt = r[0] instanceof Date ? r[0].getTime() : new Date(s(r[0])).getTime();
@@ -1327,7 +1563,7 @@ function computeDeclineDigest_() {
   var aspOf = function (tager, sku, fallback) { return aspByMatch[tager + "||" + sku] || fallback; };
 
   var skuBase = {}, skuDrop = {}, cand = [], totalDrop = 0, lostGmv = 0, dailyRows = [];
-  ddSheetByGid_(ss, DD_DAILY_GID).getDataRange().getValues().forEach(function (r) {
+  ddMetabaseValues_(DD_DAILY_URL, DD_DAILY_FMT).forEach(function (r) {
     var sku = s(r[0]), tager = s(r[2]);
     if (!sku || sku === "SKU_ID" || !tager) return;
     var days = []; for (var q = 0; q < 32; q++) days.push(n(r[13 + q])); dailyRows.push({ d: days, ex: !!DD_EXCLUDED_MERCHANTS[tager] });
@@ -1380,6 +1616,13 @@ function sendDeclineDigestNow() {
   if (!d.rows.length) { Logger.log("No declining matches found - nothing sent."); return; }
   sendDeclineMail_("Marketplace Decline Matches — " + d.meta.dateLabel, buildDeclineDigestHtml_(d.rows, d.meta));
   Logger.log("Sent Top " + d.rows.length + " to " + DECLINE_DIGEST_RECIPIENTS.join(", "));
+}
+
+// RUN THIS to TEST the digest data (Metabase sources) WITHOUT sending any email — results in View > Logs.
+function testDeclineDigestMetabase() {
+  var d = computeDeclineDigest_();
+  Logger.log("Rows: " + d.rows.length + " | totalDrop: " + Math.round(d.meta.totalDrop) + " | lostGmv: " + Math.round(d.meta.lostGmv) + " | mtdPlaced: " + Math.round(d.meta.mtdPlaced));
+  d.rows.slice(0, 5).forEach(function (r) { Logger.log(r.skuId + " | " + r.merchantName + " | ACM " + r.acm + " | base " + r.base.toFixed(1) + " -> " + r.y + " | stock " + r.stock + " | " + r.cause); });
 }
 
 // RUN THIS ONCE to schedule the email every day at 12:00 Cairo time.
