@@ -7,6 +7,21 @@
   function readSet() { try { return JSON.parse(C.ls(READ_LS) || "[]"); } catch (e) { return []; } }
   function saveRead(a) { C.ls(READ_LS, JSON.stringify(a.slice(-400))); }
   function ago(iso) { var m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); if (m < 1) return "just now"; if (m < 60) return m + "m ago"; var h = Math.round(m / 60); if (h < 24) return h + "h ago"; return Math.round(h / 24) + "d ago"; }
+  // Welcome note, built on this device (no server). Existing users see it once when they open the new
+  // version; accounts created from the Sign Up form get their own first-time note.
+  function localAlerts() {
+    var s = C.session(); if (!s) return [];
+    var email = String(s.email || "").toLowerCase(), first = String(s.name || "").split(" ")[0] || "there";
+    var isNew = false; try { isNew = (localStorage.getItem("twWelcomeSignup") || "").toLowerCase() === email; } catch (e) {}
+    var id = isNew ? "welcome-signup-" + email : "welcome-v2", key = "twWelcomeAt:" + id, at = "";
+    try { at = localStorage.getItem(key) || ""; if (!at) { at = new Date().toISOString(); localStorage.setItem(key, at); } } catch (e) { at = new Date().toISOString(); }
+    return [{
+      id: id, severity: "info", at: at,
+      title: isNew ? "Welcome to Center Control, " + first : "Welcome to the new Center Control, " + first,
+      body: isNew ? "Your account is ready. Alerts sent to you will show up here in the bell."
+                  : "Center Control has a new link and a new sign-in page. Your data and access are unchanged."
+    }];
+  }
   function sevColor(s) { return s === "critical" ? "bad" : s === "warning" ? "warn" : "good"; }
   function toast(msg, kind) {
     var t = document.createElement("div"); t.className = "tw-toast " + (kind || ""); t.textContent = msg; document.body.appendChild(t);
@@ -20,6 +35,7 @@
     var wrap = document.createElement("div"); wrap.className = "tw-bellwrap";
     wrap.innerHTML = '<button type="button" class="btn tw-bell" id="twBell" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="tw-badge tw-off" id="twBadge">0</span></button><div class="tw-pop tw-off" id="twPop"></div>';
     host.insertBefore(wrap, host.firstChild);
+    renderBadge();
     $("twBell").addEventListener("click", function (e) { e.stopPropagation(); $("twPop").classList.toggle("tw-off"); renderPop(); });
     document.addEventListener("click", function (e) { var p = $("twPop"); if (p && !p.contains(e.target)) p.classList.add("tw-off"); });
   }
@@ -43,7 +59,7 @@
     C.wfetch("getAlerts", { timeout: 8000 }, "&email=" + encodeURIComponent(s.email) + "&role=" + encodeURIComponent(C.realRoleName())).then(function (j) {
       if (!j || !j.alerts) return;
       var before = seen || {}, fresh = j.alerts.filter(function (a) { return !before[a.id]; });
-      alerts = j.alerts; seen = {}; alerts.forEach(function (a) { seen[a.id] = 1; });
+      alerts = localAlerts().concat(j.alerts); seen = {}; alerts.forEach(function (a) { seen[a.id] = 1; });
       if (!firstLoad) { var r = readSet(); fresh.filter(function (a) { return r.indexOf(a.id) < 0; }).slice(0, 2).forEach(function (a) { toast("🔔 " + a.title, a.severity === "critical" ? "bad" : ""); }); }
       var wasFirst = firstLoad; firstLoad = false; renderBadge(); renderPop();
       if (wasFirst && unreadCount() > 0) setTimeout(function () { var p = $("twPop"); if (p) { p.classList.remove("tw-off"); renderPop(); } }, 900);
@@ -127,11 +143,12 @@
   function sevPill(s) { return '<span class="tw-pill ' + sevColor(s) + '">' + C.esc(s) + '</span>'; }
   function renderPage(host) {
     pageHost = host;
-    var tabs = [["inbox", "Inbox"], ["sent", "All broadcasts"], ["rules", "Rules & checks"]].map(function (t) { return '<button class="tw-ut' + (tab === t[0] ? " on" : "") + '" data-at="' + t[0] + '">' + t[1] + (t[0] === "inbox" && unreadCount() ? ' <span class="tw-ubadge">' + unreadCount() + '</span>' : "") + '</button>'; }).join("");
-    host.innerHTML = '<div class="tw-page"><div class="tw-toolbar"><span class="tw-grow"></span><button class="btn btn-primary" id="alNew">+ ' + (composeOpen ? "Close" : "New alert") + '</button></div>' +
+    var adm = C.isEffAdmin(); if (!adm) { tab = "inbox"; composeOpen = false; }
+    var tabs = [["inbox", "Inbox"], ["sent", "All broadcasts"], ["rules", "Rules & checks"]].filter(function (t) { return adm || t[0] === "inbox"; }).map(function (t) { return '<button class="tw-ut' + (tab === t[0] ? " on" : "") + '" data-at="' + t[0] + '">' + t[1] + (t[0] === "inbox" && unreadCount() ? ' <span class="tw-ubadge">' + unreadCount() + '</span>' : "") + '</button>'; }).join("");
+    host.innerHTML = '<div class="tw-page"><div class="tw-toolbar"><span class="tw-grow"></span>' + (adm ? '<button class="btn btn-primary" id="alNew">+ ' + (composeOpen ? "Close" : "New alert") + '</button>' : "") + '</div>' +
       '<div class="tw-uts">' + tabs + '</div><div id="alCompose"></div><div id="alBody"></div></div>';
     host.querySelectorAll("[data-at]").forEach(function (b) { b.onclick = function () { tab = b.dataset.at; renderPage(host); }; });
-    $("alNew").onclick = function () { composeOpen = !composeOpen; renderPage(host); };
+    if ($("alNew")) $("alNew").onclick = function () { composeOpen = !composeOpen; renderPage(host); };
     if (composeOpen) { C.loadUsers().then(function (u) { usersList = u || []; if (composeOpen && $("alCompose")) renderCompose($("alCompose")); }).catch(function () {}); renderCompose($("alCompose")); }
     if (tab === "inbox") renderInbox($("alBody")); else if (tab === "sent") loadHistory($("alBody")); else renderRules($("alBody"));
   }
@@ -226,8 +243,10 @@
   function boot() {
     C = window.TowerCore; if (!C) return;
     injectBell();
-    C.registerView("towerAlerts", { sectionId: "viewTowerAlerts", navId: "navTowerAlerts", label: "Alerts Centre", sub: "Inbox, broadcasts and automatic rules",
+    alerts = localAlerts(); renderBadge();
+    C.registerView("towerAlerts", { sectionId: "viewTowerAlerts", navId: "navTowerAlerts", label: "Alerts Centre", sub: "Inbox, broadcasts and automatic rules", open: true,
       render: function (host) { renderPage(host); } });
+    window.addEventListener("taager-auth", function () { alerts = localAlerts(); renderBadge(); poll(); });
     poll(); setInterval(poll, 60000);
     setInterval(injectBell, 3000);
   }

@@ -124,22 +124,6 @@
     localStorage.removeItem(CONFIG.STORAGE_KEY);
   }
 
-  function isTaagerEmail(email) {
-    const re = new RegExp("^[^\\s@]+@" + CONFIG.ALLOWED_DOMAIN.replace(".", "\\.") + "$", "i");
-    return re.test(String(email || "").trim());
-  }
-
-  // @taager.com, or an email an admin added in Control > Users & Roles (checked against the Worker's access config).
-  function emailAllowed(email) {
-    if (isTaagerEmail(email)) return Promise.resolve(true);
-    const em = String(email || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return Promise.resolve(false);
-    return fetch(CONFIG.WORKER_URL + "?action=getAccess", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((cfg) => !!(cfg && cfg.users && cfg.users[em]))
-      .catch(() => false);
-  }
-
   // بطلب صريح: مفيش أي timeout هنا زمان — لو نفس الـ Apps Script deployment
   // (اللي بيستقبل كمان المزامنة المركزية/الـ backup/نشر الـ Computed API/
   // heartbeats) كان مزنوق ومتأخر في الرد، طلب اللوجن كان بيفضل معلق "للأبد"
@@ -148,6 +132,8 @@
   // لوجن عادي (حتى لو السيرفر مزحوم شوية)، وبترجع رسالة واضحة بدل ما تفضل
   // مستنية من غير نهاية.
   const AUTH_API_TIMEOUT_MS = 25000;
+  // Login attempt budget: shorter than the general timeout so a stalled call is retried instead of hanging.
+  const LOGIN_ATTEMPT_MS = 12000;
 
   // v1.1.1: ⚠️ ردود أي Apps Script Web App (كبيرة أو صغيرة — حتى heartbeat
   // الصغيرة دي) بتتوصّل فعليًا عن طريق تحويل داخلي لمسار
@@ -157,14 +143,14 @@
   // بدل الرد الحقيقي، فـ res.json() بيرمي SyntaxError. ده فشل عابر بحت من
   // عند جوجل، مش خطأ في بياناتنا — بنتعامل معاه بمحاولة تانية سريعة (retry)
   // تلقائية في callApi() تحت، بدل ما نسيب heartbeat/presence "يفوتوا" بلاش.
-  function callApiOnce(payload) {
+  function callApiOnce(payload, timeoutMs) {
     if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
       return Promise.reject(
         new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
       );
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), AUTH_API_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs || AUTH_API_TIMEOUT_MS);
     return fetch(CONFIG.API_URL, {
       method: "POST",
       // text/plain avoids a CORS pre-flight request against Apps Script
@@ -186,9 +172,9 @@
       .finally(() => clearTimeout(timer));
   }
 
-  function callApi(payload, attempt) {
+  function callApi(payload, attempt, timeoutMs) {
     attempt = attempt || 1;
-    return callApiOnce(payload).catch((err) => {
+    return callApiOnce(payload, timeoutMs).catch((err) => {
       const msg = (err && err.message) || "";
       const isTransient = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0;
       if (isTransient && attempt < 3) {
@@ -196,7 +182,7 @@
         // Worker بقى بياخد طلبات القراءة الكبيرة عن Apps Script، فمفيش خوف
         // من إن المحاولة الإضافية دي تزود الزحمة، وبتقلل احتمال ظهور فشل
         // ظاهر لليوزر أكتر.
-        return new Promise((resolve) => setTimeout(resolve, 800 * attempt)).then(() => callApi(payload, attempt + 1));
+        return new Promise((resolve) => setTimeout(resolve, 800 * attempt)).then(() => callApi(payload, attempt + 1, timeoutMs));
       }
       if (isTransient) {
         throw new Error("Server is busy right now — please try again in a moment.");
@@ -210,39 +196,73 @@
    * ------------------------------------------------------------------ */
   function injectAuthStyles() {
     const css = `
-    #authOverlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
-      background:radial-gradient(circle at 30% 20%,rgba(59,130,246,0.12),transparent 45%),
-                 radial-gradient(circle at 80% 80%,rgba(139,92,246,0.12),transparent 45%),#09090b;
-      font-family:"Inter",-apple-system,sans-serif;padding:20px;}
+    #authOverlay{position:fixed;inset:0;z-index:99999;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);
+      background:radial-gradient(900px 520px at 12% -8%,color-mix(in srgb,var(--accent,#2dd4a8) 16%,transparent),transparent 70%),
+                 radial-gradient(700px 480px at 100% 110%,color-mix(in srgb,var(--purple,#a78bfa) 12%,transparent),transparent 70%),
+                 var(--bg,#04070b);
+      color:var(--text,#f6f8fb);font-family:"Inter",-apple-system,sans-serif;overflow-y:auto;}
     #authOverlay *{box-sizing:border-box;}
-    .auth-card{width:100%;max-width:380px;background:#18181b;border:1px solid #27272a;border-radius:14px;
-      padding:32px 28px;box-shadow:0 20px 60px rgba(0,0,0,0.45);}
-    .auth-brand{text-align:center;font-size:13px;font-weight:700;color:#fff;letter-spacing:0.5px;
-      background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:9px 14px;border-radius:8px;margin:0 auto 22px auto;
-      display:block;width:fit-content;text-shadow:0 1px 2px rgba(0,0,0,0.3);}
-    .auth-tabs{display:flex;background:#09090b;border:1px solid #27272a;border-radius:8px;padding:4px;margin-bottom:22px;}
-    .auth-tab{flex:1;background:transparent;border:none;padding:9px 0;font-size:12px;font-weight:600;color:#a1a1aa;
-      border-radius:6px;cursor:pointer;letter-spacing:0.3px;transition:all .2s;font-family:inherit;}
-    .auth-tab.active{background:#3b82f6;color:#fff;box-shadow:0 0 12px rgba(59,130,246,0.35);}
+    .auth-hero{display:flex;flex-direction:column;justify-content:center;gap:34px;padding:56px clamp(32px,6vw,96px);}
+    .auth-logo{display:flex;align-items:center;gap:12px;font-size:17px;font-weight:700;letter-spacing:-.01em;}
+    .auth-mark{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-weight:800;font-size:18px;
+      color:var(--accent-ink,#04251d);background:linear-gradient(145deg,var(--accent,#2dd4a8),var(--purple,#a78bfa));
+      box-shadow:0 8px 24px -8px color-mix(in srgb,var(--accent,#2dd4a8) 60%,transparent);}
+    .auth-hero h1{margin:0;font-size:clamp(28px,3.2vw,42px);line-height:1.12;letter-spacing:-.025em;font-weight:700;max-width:14em;}
+    .auth-hero h1 span{color:var(--accent,#2dd4a8);}
+    .auth-hero p{margin:0;max-width:30em;font-size:15px;line-height:1.6;color:var(--text2,#aab6c6);}
+    .auth-points{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none;}
+    .auth-points li{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--text2,#aab6c6);}
+    .auth-points li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;background:var(--accent,#2dd4a8);
+      box-shadow:0 0 0 4px color-mix(in srgb,var(--accent,#2dd4a8) 18%,transparent);}
+    .auth-side{display:flex;align-items:center;justify-content:center;padding:32px 24px;}
+    .auth-card{width:100%;max-width:420px;background:var(--panel,#0b111a);border:1px solid var(--line,#17212e);border-radius:20px;
+      padding:34px 32px 28px;box-shadow:0 30px 80px -30px rgba(0,0,0,.55);animation:authIn .45s cubic-bezier(.2,.7,.2,1) both;}
+    @keyframes authIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    .auth-minibrand{display:none;align-items:center;gap:10px;font-weight:700;font-size:15px;margin-bottom:22px;}
+    .auth-minibrand .auth-mark{width:34px;height:34px;border-radius:11px;font-size:15px;}
+    .auth-title{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em;}
+    .auth-sub{margin:6px 0 22px;font-size:13px;color:var(--text-dim,#74839a);line-height:1.5;}
+    .auth-tabs{display:flex;background:var(--panel2,#0f1722);border:1px solid var(--line,#17212e);border-radius:12px;padding:4px;margin-bottom:22px;}
+    .auth-tab{flex:1;background:transparent;border:none;padding:9px 0;font-size:13px;font-weight:600;color:var(--text-dim,#74839a);
+      border-radius:9px;cursor:pointer;transition:background .18s,color .18s;font-family:inherit;}
+    .auth-tab:hover{color:var(--text,#f6f8fb);}
+    .auth-tab.active{background:var(--panel3,#141e2c);color:var(--text,#f6f8fb);box-shadow:0 1px 3px rgba(0,0,0,.25);}
     .auth-form{display:none;flex-direction:column;gap:6px;}
     .auth-form.active{display:flex;}
-    .auth-form label{font-size:11px;font-weight:600;color:#a1a1aa;text-transform:uppercase;letter-spacing:0.5px;
-      margin-top:10px;}
-    .auth-form input,.auth-form select{width:100%;padding:10px 12px;background:#09090b;border:1px solid #27272a;
-      border-radius:7px;color:#fafafa;font-size:13px;font-family:inherit;outline:none;transition:border-color .2s;}
-    .auth-form input:focus,.auth-form select:focus{border-color:#3b82f6;}
+    .auth-form label{font-size:12px;font-weight:600;color:var(--text2,#aab6c6);margin-top:12px;}
+    .auth-form input,.auth-form select{width:100%;height:44px;padding:0 14px;background:var(--panel2,#0f1722);border:1px solid var(--line-light,#223044);
+      border-radius:11px;color:var(--text,#f6f8fb);font-size:14px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s;}
+    .auth-form input::placeholder{color:var(--dim,#4f5d71);}
+    .auth-form input:focus,.auth-form select:focus{border-color:var(--accent,#2dd4a8);
+      box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#2dd4a8) 20%,transparent);}
     .auth-form select{cursor:pointer;}
     .auth-password-wrap{position:relative;display:flex;align-items:center;}
-    .auth-password-wrap input{padding-right:56px;}
-    .auth-toggle-pass{position:absolute;right:10px;font-size:11px;color:#3b82f6;cursor:pointer;font-weight:600;
-      user-select:none;}
-    .auth-error{min-height:16px;color:#ef4444;font-size:12px;margin-top:10px;line-height:1.4;}
-    .auth-submit{margin-top:14px;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:11px 0;
-      font-size:13px;font-weight:700;letter-spacing:0.3px;cursor:pointer;transition:all .2s;
-      box-shadow:0 0 12px rgba(59,130,246,0.3);font-family:inherit;}
-    .auth-submit:hover{box-shadow:0 0 18px rgba(59,130,246,0.5);transform:translateY(-1px);}
-    .auth-submit:disabled{opacity:0.6;cursor:not-allowed;transform:none;}
-    .auth-footnote{text-align:center;margin-top:20px;font-size:11px;color:#52525b;letter-spacing:0.2px;}
+    .auth-password-wrap input{padding-right:62px;}
+    .auth-toggle-pass{position:absolute;right:8px;padding:6px 8px;font-size:12px;color:var(--accent,#2dd4a8);cursor:pointer;font-weight:600;
+      user-select:none;border-radius:7px;}
+    .auth-toggle-pass:hover{background:color-mix(in srgb,var(--accent,#2dd4a8) 12%,transparent);}
+    .auth-error{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.45;
+      color:var(--red,#fb7185);background:color-mix(in srgb,var(--red,#fb7185) 10%,transparent);
+      border:1px solid color-mix(in srgb,var(--red,#fb7185) 28%,transparent);}
+    .auth-error:not(:empty){display:block;}
+    .auth-hint{min-height:18px;margin-top:10px;font-size:12px;color:var(--text-dim,#74839a);text-align:center;line-height:1.4;}
+    .auth-submit{margin-top:6px;height:46px;display:flex;align-items:center;justify-content:center;gap:10px;background:var(--accent,#2dd4a8);
+      color:var(--accent-ink,#04251d);border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;
+      transition:transform .15s,box-shadow .15s,opacity .15s;font-family:inherit;
+      box-shadow:0 10px 24px -12px color-mix(in srgb,var(--accent,#2dd4a8) 70%,transparent);}
+    .auth-submit:hover{transform:translateY(-1px);}
+    .auth-submit:active{transform:none;}
+    .auth-submit:disabled{opacity:.75;cursor:progress;transform:none;}
+    .auth-spin{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:authSpin .7s linear infinite;}
+    @keyframes authSpin{to{transform:rotate(360deg)}}
+    .auth-footnote{text-align:center;margin-top:18px;font-size:12px;color:var(--text-dim,#74839a);}
+    @media (max-width:860px){
+      #authOverlay{grid-template-columns:1fr;}
+      .auth-hero{display:none;}
+      .auth-minibrand{display:flex;}
+      .auth-card{padding:28px 22px 24px;}
+    }
+    @media (prefers-reduced-motion:reduce){.auth-card{animation:none}.auth-spin{animation-duration:1.6s}}
     .auth-profile{display:flex;align-items:center;gap:10px;padding-bottom:14px;margin-bottom:14px;
       border-bottom:1px solid #27272a;}
     .auth-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
@@ -273,45 +293,61 @@
     const overlay = document.createElement("div");
     overlay.id = "authOverlay";
     overlay.innerHTML = `
-      <div class="auth-card">
-        <span class="auth-brand">Center Control</span>
-        <div class="auth-tabs">
-          <button type="button" class="auth-tab active" data-tab="login">Login</button>
-          <button type="button" class="auth-tab" data-tab="signup">Sign Up</button>
+      <section class="auth-hero" aria-hidden="true">
+        <div class="auth-logo"><span class="auth-mark">T</span>Center Control</div>
+        <h1>Your team's performance, <span>in one calm place.</span></h1>
+        <p>Live numbers across hubs, merchants and SKUs, with access and alerts that reach the right person.</p>
+        <ul class="auth-points">
+          <li>Live performance across every hub</li>
+          <li>Role-based access for each team</li>
+          <li>Alerts sent straight to the people who own them</li>
+        </ul>
+      </section>
+      <section class="auth-side">
+        <div class="auth-card">
+          <div class="auth-minibrand"><span class="auth-mark">T</span>Center Control</div>
+          <h2 class="auth-title" id="authTitle">Welcome back</h2>
+          <p class="auth-sub" id="authSub">Sign in to open the dashboard.</p>
+          <div class="auth-tabs" role="tablist">
+            <button type="button" class="auth-tab active" data-tab="login" role="tab">Login</button>
+            <button type="button" class="auth-tab" data-tab="signup" role="tab">Sign Up</button>
+          </div>
+
+          <form id="authLoginForm" class="auth-form active" autocomplete="on">
+            <label for="authLoginEmail">Email</label>
+            <input type="email" id="authLoginEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+            <label for="authLoginPassword">Password</label>
+            <div class="auth-password-wrap">
+              <input type="password" id="authLoginPassword" placeholder="Your password" autocomplete="current-password" required />
+              <span class="auth-toggle-pass" data-target="authLoginPassword" role="button" tabindex="0">Show</span>
+            </div>
+            <div class="auth-error" id="authLoginError" role="alert"></div>
+            <button type="submit" class="auth-submit" id="authLoginSubmit">Login</button>
+            <div class="auth-hint" id="authLoginHint"></div>
+          </form>
+
+          <form id="authSignupForm" class="auth-form" autocomplete="on">
+            <label for="authSignupName">Full name</label>
+            <input type="text" id="authSignupName" placeholder="e.g. Your name" autocomplete="name" required />
+            <label for="authSignupEmail">Email</label>
+            <input type="email" id="authSignupEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+            <label for="authSignupRole">Role</label>
+            <select id="authSignupRole" required>${roleOptions}</select>
+            <label for="authSignupPassword">Password</label>
+            <div class="auth-password-wrap">
+              <input type="password" id="authSignupPassword" placeholder="At least 6 characters" autocomplete="new-password" required />
+              <span class="auth-toggle-pass" data-target="authSignupPassword" role="button" tabindex="0">Show</span>
+            </div>
+            <label for="authSignupPasswordConfirm">Confirm password</label>
+            <input type="password" id="authSignupPasswordConfirm" placeholder="Repeat the password" autocomplete="new-password" required />
+            <div class="auth-error" id="authSignupError" role="alert"></div>
+            <button type="submit" class="auth-submit" id="authSignupSubmit">Create account</button>
+            <div class="auth-hint" id="authSignupHint"></div>
+          </form>
+
+          <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} and invited accounts</div>
         </div>
-
-        <form id="authLoginForm" class="auth-form active" autocomplete="on">
-          <label>Email</label>
-          <input type="email" id="authLoginEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
-          <label>Password</label>
-          <div class="auth-password-wrap">
-            <input type="password" id="authLoginPassword" placeholder="••••••••" autocomplete="current-password" required />
-            <span class="auth-toggle-pass" data-target="authLoginPassword">Show</span>
-          </div>
-          <div class="auth-error" id="authLoginError"></div>
-          <button type="submit" class="auth-submit" id="authLoginSubmit">Login</button>
-        </form>
-
-        <form id="authSignupForm" class="auth-form" autocomplete="off">
-          <label>Full Name</label>
-          <input type="text" id="authSignupName" placeholder="e.g. Name" required />
-          <label>Email</label>
-          <input type="email" id="authSignupEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" required />
-          <label>Role</label>
-          <select id="authSignupRole" required>${roleOptions}</select>
-          <label>Password</label>
-          <div class="auth-password-wrap">
-            <input type="password" id="authSignupPassword" placeholder="At least 6 characters" required />
-            <span class="auth-toggle-pass" data-target="authSignupPassword">Show</span>
-          </div>
-          <label>Confirm Password</label>
-          <input type="password" id="authSignupPasswordConfirm" placeholder="••••••••" required />
-          <div class="auth-error" id="authSignupError"></div>
-          <button type="submit" class="auth-submit" id="authSignupSubmit">Create Account</button>
-        </form>
-
-        <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} and invited accounts</div>
-      </div>
+      </section>
     `;
     document.body.appendChild(overlay);
 
@@ -322,17 +358,24 @@
         overlay.querySelectorAll(".auth-form").forEach((f) => f.classList.remove("active"));
         tab.classList.add("active");
         overlay.querySelector(`#auth${cap(tab.dataset.tab)}Form`).classList.add("active");
+        const signup = tab.dataset.tab === "signup";
+        overlay.querySelector("#authTitle").textContent = signup ? "Create your account" : "Welcome back";
+        overlay.querySelector("#authSub").textContent = signup
+          ? "Join with your work email. New accounts are approved by an admin."
+          : "Sign in to open the dashboard.";
       });
     });
 
     // Show/hide password
     overlay.querySelectorAll(".auth-toggle-pass").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      const toggle = () => {
         const input = document.getElementById(btn.dataset.target);
         const isPass = input.type === "password";
         input.type = isPass ? "text" : "password";
         btn.textContent = isPass ? "Hide" : "Show";
-      });
+      };
+      btn.addEventListener("click", toggle);
+      btn.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
     });
 
     // Prefill remembered email if present (edge case: cleared session but kept email)
@@ -340,6 +383,12 @@
     if (rememberedEmail) {
       document.getElementById("authLoginEmail").value = rememberedEmail;
     }
+    // Wake the Apps Script container now, so the first sign-in doesn't pay the cold start.
+    try { fetch(CONFIG.API_URL + "?action=ping", { mode: "no-cors", cache: "no-store" }).catch(() => {}); } catch (e) {}
+    setTimeout(() => {
+      const el = document.getElementById(rememberedEmail ? "authLoginPassword" : "authLoginEmail");
+      if (el) el.focus();
+    }, 60);
 
     wireLoginForm(overlay);
     wireSignupForm(overlay);
@@ -349,10 +398,35 @@
     }
   }
 
+  // Shows a spinner on the button and, if the server is slow, a calm explanation instead of a frozen screen.
+  function startBusy(btn, hintEl, label) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="auth-spin"></span>' + label;
+    hintEl.textContent = "";
+    const t = setTimeout(() => {
+      hintEl.textContent = "Waking up the server — the first sign-in can take a few seconds.";
+    }, 3500);
+    return function stop(text) {
+      clearTimeout(t);
+      hintEl.textContent = "";
+      btn.disabled = false;
+      btn.textContent = text;
+    };
+  }
+
+  function finishAuth(res, mode) {
+    const user = { name: res.name, email: res.email, role: res.role };
+    saveSession(user);
+    localStorage.setItem("taagerDashboardLastEmail", user.email);
+    if (mode === "signup") localStorage.setItem("twWelcomeSignup", user.email);
+    unlockDashboard(user);
+  }
+
   function wireLoginForm(overlay) {
     const form = overlay.querySelector("#authLoginForm");
     const errorEl = overlay.querySelector("#authLoginError");
     const submitBtn = overlay.querySelector("#authLoginSubmit");
+    const hintEl = overlay.querySelector("#authLoginHint");
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -360,37 +434,30 @@
 
       const email = overlay.querySelector("#authLoginEmail").value.trim();
       const password = overlay.querySelector("#authLoginPassword").value;
-
       if (!password) {
         errorEl.textContent = "Please enter your password.";
         return;
       }
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Signing in...";
-
-      emailAllowed(email)
-        .then((ok) => {
-          if (!ok) throw new Error(`Please use your @${CONFIG.ALLOWED_DOMAIN} email, or the email you were invited with.`);
-          return callApi({ action: "login", email: email, password: password });
+      const stop = startBusy(submitBtn, hintEl, "Signing in…");
+      const payload = { action: "login", email: email, password: password };
+      // Login is safe to repeat, so a stuck first attempt gets one quick automatic retry.
+      callApi(payload, 1, LOGIN_ATTEMPT_MS)
+        .catch((err) => {
+          if (/busy/i.test((err && err.message) || "")) return callApi(payload, 1, LOGIN_ATTEMPT_MS);
+          throw err;
         })
         .then((res) => {
           if (!res || !res.success) {
             errorEl.textContent = (res && res.message) || "Invalid email or password.";
             return;
           }
-          const user = { name: res.name, email: res.email, role: res.role };
-          saveSession(user);
-          localStorage.setItem("taagerDashboardLastEmail", user.email);
-          unlockDashboard(user);
+          finishAuth(res, "login");
         })
         .catch((err) => {
           errorEl.textContent = err.message || "Something went wrong. Please try again.";
         })
-        .finally(() => {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Login";
-        });
+        .finally(() => stop("Login"));
     });
   }
 
@@ -398,6 +465,7 @@
     const form = overlay.querySelector("#authSignupForm");
     const errorEl = overlay.querySelector("#authSignupError");
     const submitBtn = overlay.querySelector("#authSignupSubmit");
+    const hintEl = overlay.querySelector("#authSignupHint");
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -422,31 +490,20 @@
         return;
       }
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Creating account...";
-
-      emailAllowed(email)
-        .then((ok) => {
-          if (!ok) throw new Error(`Sign up is only allowed with an @${CONFIG.ALLOWED_DOMAIN} email, or the email you were invited with.`);
-          return callApi({ action: "signup", name: name, email: email, password: password, role: role });
-        })
+      const stop = startBusy(submitBtn, hintEl, "Creating account…");
+      // The server decides who may sign up (taager.com or an admin-invited email).
+      callApi({ action: "signup", name: name, email: email, password: password, role: role })
         .then((res) => {
           if (!res || !res.success) {
             errorEl.textContent = (res && res.message) || "Could not create the account.";
             return;
           }
-          const user = { name: res.name, email: res.email, role: res.role };
-          saveSession(user);
-          localStorage.setItem("taagerDashboardLastEmail", user.email);
-          unlockDashboard(user);
+          finishAuth(res, "signup");
         })
         .catch((err) => {
           errorEl.textContent = err.message || "Something went wrong. Please try again.";
         })
-        .finally(() => {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Create Account";
-        });
+        .finally(() => stop("Create account"));
     });
   }
 
@@ -458,6 +515,7 @@
     if (gate) gate.textContent = "";
     const overlay = document.getElementById("authOverlay");
     if (overlay) overlay.remove();
+    window.dispatchEvent(new Event("taager-auth"));
     onDomReady(() => {
       injectUserBadge(user);
       startPresence(user);

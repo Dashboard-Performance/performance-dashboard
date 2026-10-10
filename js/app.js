@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.4";
+const APP_VERSION = "1.15.8";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -6541,12 +6541,8 @@ function renderOverviewHero(rows, metrics) {
   const sp = (id, key, color) => { const e = $(id); if (e) e.innerHTML = ovSparkSvg(days.map(d => d[key]), color, 150, 30); };
   sp("ovSparkPlaced", "pp", "#60a5fa"); sp("ovSparkConfirmed", "cp", "#a78bfa"); sp("ovSparkDelivered", "dp", "#2dd4a8"); sp("ovSparkGmv", "gmv", "#34d399");
 
-  // Pieces funnel
-  const fun = $("ovFunnel");
-  if (fun) {
-    const stages = [["Placed", T.placedPcs, "#60a5fa", ""], ["Confirmed", T.confirmedPcs, "#a78bfa", T.placedPcs ? `${(T.confirmedPcs / T.placedPcs * 100).toFixed(1)}% of placed` : ""], ["Delivered", T.deliveredPcs, "#2dd4a8", T.confirmedPcs ? `${(T.deliveredPcs / T.confirmedPcs * 100).toFixed(1)}% of confirmed` : ""]];
-    fun.innerHTML = stages.map(s => `<div class="ov-fun-row"><div class="ov-fun-top"><span>${s[0]}</span><b>${fmtInt.format(Math.round(s[1]))}</b></div><div class="ov-fun-bar"><i style="width:${T.placedPcs ? Math.max(0.5, Math.min(100, s[1] / T.placedPcs * 100)).toFixed(2) : 0}%;background:${s[2]}"></i></div><small>${s[3] || "Start of funnel"}</small></div>`).join("");
-  }
+  // Stock Snapshot card (inventory value, days on hand, unhealthy stock) comes from the Supply Chain data
+  setTimeout(() => { if (window.TowerCore && window.TowerCore.renderOverviewStock) window.TowerCore.renderOverviewStock(); }, 300);
 
   // Avg Placed Pcs = Placed pieces ÷ days with placed activity — always up to yesterday (today's partial day is excluded)
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -18234,9 +18230,22 @@ function computeSellthroughSourceFingerprint() {
   ].join("|");
 }
 
+// A Merchant account only gets the rows of its own Merchant ID (see TowerCore.merchantScope in js/tower.js).
+function userScopedRows(rows) {
+  const sc = window.TowerCore && window.TowerCore.merchantScope ? window.TowerCore.merchantScope() : null;
+  return sc ? rows.filter(r => sc.id && String(r.merchantId || "").trim() === sc.id) : rows;
+}
+window.rescopeData = function () {
+  if (!state.allParsedRowsFull) return;
+  state.allParsedRows = userScopedRows(state.allParsedRowsFull);
+  state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows);
+  applyFilters();
+};
+
 function applySnapshotToState(snapshot) {
-  state.allParsedRows = snapshot.allParsedRows;
-  state.merchantInfoMap = buildMerchantInfoMap(snapshot.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
+  state.allParsedRowsFull = snapshot.allParsedRows;
+  state.allParsedRows = userScopedRows(snapshot.allParsedRows);
+  state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
   state.merchantTargets = snapshot.merchantTargets;
   state.merchantSegmentsMap = snapshot.merchantSegmentsMap;
   state.acmTargets = snapshot.acmTargets;

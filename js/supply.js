@@ -252,6 +252,20 @@
     var close = function () { D.classList.remove("open"); setTimeout(function () { D.remove(); }, 200); };
     D.querySelector(".tw-dback").onclick = close; D.querySelector(".tw-dx").onclick = close;
   }
+  /* ---------------------------------------------------------------- Overview card: Stock Snapshot (same numbers as the Inventory Aging tiles) */
+  C.renderOverviewStock = function () {
+    var host = $("ovStock"); if (!host) return;
+    build();
+    if (SC.empty) { host.innerHTML = '<div class="sc-note">Waiting for inventory data…</div>'; return; }
+    var rows = SC.rows, inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; }), unh = bsum(rows, 4);
+    var items = [
+      ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
+      ["Days on hand", int(dohOf(stocked)), "stock ÷ 3-day avg demand", ""],
+      ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
+    ];
+    host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
+  };
+
   /* ---------------------------------------------------------------- wiring */
   var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions] };
   var current = null;

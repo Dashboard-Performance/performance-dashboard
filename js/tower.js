@@ -5,7 +5,7 @@
   "use strict";
   function workerUrl() { return (typeof SYNC_CDN_URL !== "undefined" && SYNC_CDN_URL) || ""; }
   var MANAGER_EMAIL = "youssef.hanafy@taager.com";
-  var KEY_LS = "towerAdminKey", ACCESS_LS = "towerAccessCache", PREVIEW_SS = "towerPreviewRole", SESSION_LS = "taagerDashboardSession";
+  var KEY_LS = "towerAdminKey", ACCESS_LS = "towerAccessCache", PREVIEW_SS = "towerPreviewRole", PREVIEW_MID = "towerPreviewMerchantId", SESSION_LS = "taagerDashboardSession";
 
   // view name (switchView) -> nav element id
   var VIEW_NAV = {
@@ -114,10 +114,35 @@
   }
   function allowed(navId) {
     if (navId === "navOverview") return true;
+    if (navId === "navTowerInvite") return canInvite();
+    if (navId === "navTowerAlerts") return !!session(); // everyone can open their own Inbox
     var r = effRole();
     if (r.admin && isEffAdmin()) return true;
     if (r.views === "*") return true;
     return Array.isArray(r.views) && r.views.indexOf(navId) >= 0;
+  }
+
+  // Merchant scope: a Merchant only sees the numbers of the Merchant ID linked to their email (set in Users & Roles).
+  // null = not a Merchant (no restriction). A Merchant without an ID sees nothing until an admin links one.
+  function merchantScope() {
+    if (effRoleName() !== "Merchant") return null;
+    var s = session(), id = "", previewing = false;
+    try { previewing = !!sessionStorage.getItem(PREVIEW_SS) && isRealAdmin(); } catch (e) {}
+    if (previewing) { try { id = sessionStorage.getItem(PREVIEW_MID) || ""; } catch (e) {} }
+    else { var u = s ? userEntry(s.email) : null; id = (u && u.merchantId) || ""; }
+    return { id: String(id).trim() };
+  }
+  var lastScopeSig = "none";
+  function applyScope() {
+    var sc = merchantScope(), sig = sc ? "m:" + sc.id : "none";
+    document.body.classList.toggle("tw-mscope", !!sc);
+    var ov = $("viewOverview"), note = $("twScopeNote");
+    if (sc && ov) {
+      if (!note) { note = document.createElement("div"); note.id = "twScopeNote"; note.className = "tw-scopenote"; ov.insertBefore(note, ov.firstChild); }
+      note.classList.toggle("warn", !sc.id);
+      note.textContent = sc.id ? "Showing the numbers of Merchant ID " + sc.id + " only." : "Your account is not linked to a Merchant ID yet. Ask an admin to add it, then your numbers will appear here.";
+    } else if (note) note.remove();
+    if (sig !== lastScopeSig) { lastScopeSig = sig; if (typeof window.rescopeData === "function") window.rescopeData(); }
   }
 
   // ---------------------------------------------------------------- approval gate
@@ -165,7 +190,6 @@
 
   function applyNav() {
     checkGate();
-    var ni = $("navTowerInvite"); if (ni) ni.classList.toggle("tw-off", !canInvite());
     var model = navModel();
     model.forEach(function (g) {
       if (g.subs.length) {
@@ -177,12 +201,15 @@
       }
     });
     var admin = isEffAdmin();
-    var grp = $("navTowerGroup"); if (grp) grp.classList.toggle("tw-off", !admin);
+    // Control shows for everyone who has at least one tab in it (Alerts inbox, Invite people); the admin pages stay admin-only.
+    var grp = $("navTowerGroup"); if (grp) grp.classList.toggle("tw-off", !hubTabs(HUBS.filter(function (h) { return h.toggle === "navTowerToggle"; })[0]).length);
+    ["navTowerRoles", "navTowerTargets"].forEach(function (id) { var a = $(id); if (a) a.classList.toggle("tw-off", !admin); });
     // role chip under the name in the profile card
     var rr = document.querySelector("#authUserBadge .auth-profile-role");
     if (rr) rr.textContent = effRoleName() + " · Egypt";
     renderViewAs();
     applyAcmLock();
+    applyScope();
   }
 
   // ---------------------------------------------------------------- ACM scope
@@ -341,9 +368,6 @@
     $("navTowerToggle").addEventListener("click", function () { var m = $("towerSubmenu"); m.classList.toggle("hidden"); $("navTowerCaret").classList.toggle("rotate", m.classList.contains("hidden") ? false : true); });
     $("navTowerRoles").addEventListener("click", function () { switchView("towerRoles"); });
     $("navTowerTargets").addEventListener("click", function () { switchView("towerTargets"); });
-    var inv = document.createElement("a"); inv.className = "nav-item tw-off"; inv.id = "navTowerInvite"; inv.innerHTML = '<span class="nav-icon"></span>Invite people';
-    if (before && before.parentNode === nav) nav.insertBefore(inv, before); else nav.appendChild(inv);
-    inv.addEventListener("click", function () { window.switchView("towerInvite"); });
     ["towerRoles", "towerTargets", "towerInvite"].forEach(function (v) {
       var d = document.createElement("div"); d.id = "view" + v.charAt(0).toUpperCase() + v.slice(1); d.className = "view-section hidden"; main.appendChild(d);
     });
@@ -359,10 +383,12 @@
     if (!b) { b = document.createElement("div"); b.id = "twViewAs"; var badge = $("authUserBadge"); if (badge && badge.parentNode === footer) footer.insertBefore(b, badge); else footer.appendChild(b); }
     if (b.getAttribute("data-sig") !== sig) {
       b.setAttribute("data-sig", sig);
-      b.innerHTML = '<label>View as <span>(preview a role)</span></label><select id="twViewAsSel"><option value="">My role (' + esc(realRoleName()) + ')</option>' + roles.map(function (r) { return '<option value="' + esc(r) + '">' + esc(r) + '</option>'; }).join("") + '</select>';
+      b.innerHTML = '<label>View as <span>(preview a role)</span></label><select id="twViewAsSel"><option value="">My role (' + esc(realRoleName()) + ')</option>' + roles.map(function (r) { return '<option value="' + esc(r) + '">' + esc(r) + '</option>'; }).join("") + '</select><input id="twViewAsMid" placeholder="Merchant ID" style="display:none">';
       $("twViewAsSel").onchange = function () { setPreview(this.value || null); };
+      $("twViewAsMid").onchange = function () { try { sessionStorage.setItem(PREVIEW_MID, this.value.trim()); } catch (e) {} applyNav(); };
     }
     var sel = $("twViewAsSel"); if (sel && sel.value !== cur) sel.value = cur;
+    var vm = $("twViewAsMid"); if (vm) { vm.style.display = cur === "Merchant" ? "" : "none"; var pm = ""; try { pm = sessionStorage.getItem(PREVIEW_MID) || ""; } catch (e) {} if (document.activeElement !== vm) vm.value = pm; }
     b.classList.toggle("on", !!cur);
   }
   // Simple sidebar status block: dot + status, then "updated" and version on one row.
@@ -400,7 +426,7 @@
     var t = (st.textContent || "").toLowerCase();
     w.classList.toggle("warn", /fail|cached|retry|offline/.test(t));
   }
-  function setPreview(role) { try { if (role) sessionStorage.setItem(PREVIEW_SS, role); else sessionStorage.removeItem(PREVIEW_SS); } catch (e) {} applyNav(); window.switchView("overview"); }
+  function setPreview(role) { try { if (role) sessionStorage.setItem(PREVIEW_SS, role); else { sessionStorage.removeItem(PREVIEW_SS); sessionStorage.removeItem(PREVIEW_MID); } } catch (e) {} applyNav(); window.switchView("overview"); }
 
   // ---------------------------------------------------------------- Users & Roles page
   var usersCache = null, usersInflight = null, USERS_LS = "twUsersCache";
@@ -472,16 +498,18 @@
     m.innerHTML = '<div class="tw-mback"></div><div class="tw-mbox"><div class="tw-mhead"><h3>Edit ' + esc(u.name || email) + '</h3><button class="tw-x" data-x aria-label="Close">✕</button></div>' +
       '<div class="tw-mbody"><div class="tw-mgrid"><div class="tw-field"><label>Full name</label><input id="muName" value="' + esc(u.name || "") + '"></div><div class="tw-field"><label>Work email</label><input id="muEmail" type="email" value="' + esc(email) + '"></div>' +
       '<div class="tw-field"><label>Role</label><select id="muRole">' + opts(roleNames, u.role || draft.defaultRole) + '</select></div><div class="tw-field"><label>Status</label><select id="muStatus">' + opts(["active", "inactive"], u.status || "active") + '</select></div></div>' +
-      '<div class="tw-field"><label>Linked ACM account</label><select id="muAcm"><option value="">— none —</option>' + acms.map(function (n) { return '<option' + (n === u.acm ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("") + '</select><div class="tw-muted">Used to deliver alerts about this ACM\'s portfolio to this person. Inactive people fall back to the default role.</div></div><div class="tw-msg" id="muMsg"></div></div>' +
+      '<div class="tw-field" id="muMidWrap"' + ((u.role || draft.defaultRole) === "Merchant" ? "" : ' style="display:none"') + '><label>Merchant ID</label><input id="muMid" value="' + esc(u.merchantId || "") + '" placeholder="e.g. the merchant\'s Taager ID"><div class="tw-muted">This person only sees the numbers of this Merchant ID.</div></div><div class="tw-field"><label>Linked ACM account</label><select id="muAcm"><option value="">— none —</option>' + acms.map(function (n) { return '<option' + (n === u.acm ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("") + '</select><div class="tw-muted">Used to deliver alerts about this ACM\'s portfolio to this person. Inactive people fall back to the default role.</div></div><div class="tw-msg" id="muMsg"></div></div>' +
       '<div class="tw-mfoot"><button class="btn" data-x>Cancel</button><button class="btn btn-primary" id="muSave">Save</button></div></div>';
     document.body.appendChild(m);
     var close = function () { m.remove(); };
+    m.querySelector("#muRole").onchange = function () { m.querySelector("#muMidWrap").style.display = this.value === "Merchant" ? "" : "none"; };
     m.querySelectorAll("[data-x]").forEach(function (b) { b.onclick = close; }); m.querySelector(".tw-mback").onclick = close;
     m.querySelector("#muSave").onclick = function () {
       var em = m.querySelector("#muEmail").value.trim().toLowerCase(), msg = m.querySelector("#muMsg");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { msg.className = "tw-msg err"; msg.textContent = "Enter a valid email."; return; }
       var nu = { role: m.querySelector("#muRole").value, name: m.querySelector("#muName").value.trim(), status: m.querySelector("#muStatus").value };
       var acm = m.querySelector("#muAcm").value; if (acm) nu.acm = acm;
+      if (nu.role === "Merchant") { var mid = m.querySelector("#muMid").value.trim(); if (!mid) { msg.className = "tw-msg err"; msg.textContent = "Enter the Merchant ID for this Merchant."; return; } nu.merchantId = mid; }
       if (em !== email) delete draft.users[email]; draft.users[em] = nu;
       msg.className = "tw-msg"; msg.textContent = "Saving…";
       saveDraft(function () { close(); renderRoles(); var sm = $("twSaveMsg"); if (sm) { sm.className = "tw-msg ok"; sm.textContent = "Saved ✓"; } }, function (e) { msg.className = "tw-msg err"; msg.textContent = e.message + (e.status === 403 ? " — set the admin key in the Roles tab." : ""); });
@@ -494,24 +522,24 @@
     if (!draft.roles[editRole]) editRole = Object.keys(draft.roles)[0];
     var roleNames = Object.keys(draft.roles);
     var roleOpts = function (sel) { return roleNames.map(function (r) { return '<option' + (r === sel ? " selected" : "") + '>' + esc(r) + '</option>'; }).join(""); };
-    var uList = Object.keys(draft.users).map(function (em) { var u = typeof draft.users[em] === "string" ? { role: draft.users[em] } : draft.users[em]; return { email: em, name: u.name || "", role: u.role || draft.defaultRole, status: u.status || "active" }; });
+    var uList = Object.keys(draft.users).map(function (em) { var u = typeof draft.users[em] === "string" ? { role: draft.users[em] } : draft.users[em]; return { email: em, name: u.name || "", role: u.role || draft.defaultRole, status: u.status || "active", merchantId: u.merchantId || "" }; });
     var tabsHtml = [["people", "People"], ["permissions", "Permissions"], ["roles", "Roles"]].map(function (t) { return '<button class="tw-ut' + (rolesTab === t[0] ? " on" : "") + '" data-rt="' + t[0] + '">' + t[1] + '</button>'; }).join("");
     var body = "";
     if (rolesTab === "people") {
       var q = peopleQ.toLowerCase();
       var rows = uList.filter(function (u) { return !q || (u.name + " " + u.email + " " + u.role).toLowerCase().indexOf(q) >= 0; }).sort(function (a, b) { return (a.name || a.email).localeCompare(b.name || b.email); });
       var pendHtml = pendingReqs.length ? '<div class="tw-card" style="border-color:#fbbf24"><div class="tw-ch"><div><h3>Waiting for approval (' + pendingReqs.length + ')</h3><div class="tw-muted">These people tried to sign in. Pick a role, then approve.</div></div></div><table class="tw-table"><tbody>' + pendingReqs.map(function (r) {
-        return '<tr><td><div class="tw-pn">' + esc(r.name || r.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(r.email) + (r.invitedBy ? ' · invited by ' + esc(r.invitedBy) : '') + '</div></td><td><select data-preq-role="' + esc(r.email) + '" style="min-height:34px;padding:0 8px">' + roleOpts(r.role && draft.roles[r.role] ? r.role : draft.defaultRole) + '</select></td><td style="text-align:right"><button class="btn small btn-primary" data-preq-ok="' + esc(r.email) + '">Approve</button> <button class="btn small danger" data-preq-no="' + esc(r.email) + '">Reject</button></td></tr>';
+        return '<tr><td><div class="tw-pn">' + esc(r.name || r.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(r.email) + (r.invitedBy ? ' · invited by ' + esc(r.invitedBy) : '') + '</div></td><td><select data-preq-role="' + esc(r.email) + '" style="min-height:34px;padding:0 8px">' + roleOpts(r.role && draft.roles[r.role] ? r.role : draft.defaultRole) + '</select><input data-preq-mid="' + esc(r.email) + '" placeholder="Merchant ID" style="min-height:34px;padding:0 8px;margin-left:6px;width:130px;' + ((r.role && draft.roles[r.role] ? r.role : draft.defaultRole) === "Merchant" ? "" : "display:none") + '"></td><td style="text-align:right"><button class="btn small btn-primary" data-preq-ok="' + esc(r.email) + '">Approve</button> <button class="btn small danger" data-preq-no="' + esc(r.email) + '">Reject</button></td></tr>';
       }).join("") + '</tbody></table><span class="tw-msg" id="twPendMsg"></span></div>' : "";
       var trs = rows.map(function (u) {
         var c = roleColor(u.role);
         return '<tr class="tw-prow" data-edit="' + esc(u.email) + '"><td><div class="tw-person"><span class="tw-av" style="background:' + c + '">' + esc(initials(u.name || u.email)) + '</span><div><div class="tw-pn">' + esc(u.name || u.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(u.email) + '</div></div></div></td>' +
-          '<td><select class="tw-rolechip" style="background:' + c + '" data-urole="' + esc(u.email) + '">' + roleOpts(u.role) + '</select></td><td>' + esc(scopeOf(u.role)) + '</td><td><span class="tw-pill ' + (u.status === "inactive" ? "warn" : "good") + '">' + (u.status === "inactive" ? "Inactive" : "Active") + '</span></td>' +
+          '<td><select class="tw-rolechip" style="background:' + c + '" data-urole="' + esc(u.email) + '">' + roleOpts(u.role) + '</select></td><td>' + esc(u.role === "Merchant" ? (u.merchantId ? "Merchant ID " + u.merchantId : "No Merchant ID yet") : scopeOf(u.role)) + '</td><td><span class="tw-pill ' + (u.status === "inactive" ? "warn" : "good") + '">' + (u.status === "inactive" ? "Inactive" : "Active") + '</span></td>' +
           '<td style="text-align:right"><button class="btn small danger" data-udel="' + esc(u.email) + '">Remove</button></td></tr>';
       }).join("") || '<tr><td colspan="5" class="tw-muted" style="padding:22px">No people match.</td></tr>';
       body = pendHtml + '<div class="tw-card"><div class="tw-ch"><div><h3>People in Egypt</h3><div class="tw-muted">' + (usersLoading && !uList.length ? 'Loading people…' : uList.length + ' users. Click a row to edit, or change the role from the chip.') + '</div></div>' +
         '<div class="tw-row"><input type="search" id="twPQ" placeholder="Search people" value="' + esc(peopleQ) + '" style="min-height:36px;padding:0 10px;min-width:200px"><button class="btn btn-primary" id="twAddToggle">+ Add user</button></div></div>' +
-        (addOpen ? '<div class="tw-row tw-addrow"><input id="twNewEmail" type="email" placeholder="name@taager.com" style="min-width:240px;padding:0 10px;min-height:36px"><select id="twNewRole" style="min-height:36px;padding:0 10px">' + roleOpts(draft.defaultRole) + '</select><button class="btn" id="twUserAdd">Add</button></div>' : "") +
+        (addOpen ? '<div class="tw-row tw-addrow"><input id="twNewEmail" type="email" placeholder="name@taager.com" style="min-width:240px;padding:0 10px;min-height:36px"><select id="twNewRole" style="min-height:36px;padding:0 10px">' + roleOpts(draft.defaultRole) + '</select><input id="twNewMid" placeholder="Merchant ID" style="padding:0 10px;min-height:36px;width:150px;' + (draft.defaultRole === "Merchant" ? "" : "display:none") + '"><button class="btn" id="twUserAdd">Add</button></div>' : "") +
         '<div class="tw-scroll"><table class="tw-table tw-people-t"><thead><tr><th>Person</th><th>Role</th><th>Scope</th><th>Status</th><th></th></tr></thead><tbody>' + trs + '</tbody></table></div><div class="tw-msg" id="twUsersMsg"></div></div>';
     } else if (rolesTab === "permissions") {
       var model = navModel();
@@ -549,11 +577,15 @@
     host.querySelectorAll("tr[data-edit]").forEach(function (tr) { tr.onclick = function (e) { if (e.target.closest("select,button,input")) return; openUserModal(tr.dataset.edit); }; });
     var pq = $("twPQ"); if (pq) pq.oninput = function () { peopleQ = pq.value; var pos = pq.selectionStart; renderRoles(); var n = $("twPQ"); n.focus(); n.setSelectionRange(pos, pos); };
     var at = $("twAddToggle"); if (at) at.onclick = function () { addOpen = !addOpen; renderRoles(); };
-    var ua = $("twUserAdd"); if (ua) ua.onclick = function () { var em = $("twNewEmail").value.trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { $("twSaveMsg").className = "tw-msg err"; $("twSaveMsg").textContent = "Enter a valid email."; return; } var nr = $("twNewRole").value; draft.users[em] = { role: nr }; pendingInvites[em] = nr; addOpen = false; renderRoles(); };
+    var nrSel = $("twNewRole"); if (nrSel) nrSel.onchange = function () { $("twNewMid").style.display = nrSel.value === "Merchant" ? "" : "none"; };
+    var ua = $("twUserAdd"); if (ua) ua.onclick = function () { var em = $("twNewEmail").value.trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { $("twSaveMsg").className = "tw-msg err"; $("twSaveMsg").textContent = "Enter a valid email."; return; } var nr = $("twNewRole").value, nm = $("twNewMid").value.trim(); if (nr === "Merchant" && !nm) { $("twSaveMsg").className = "tw-msg err"; $("twSaveMsg").textContent = "Enter the Merchant ID for this Merchant."; return; } draft.users[em] = nr === "Merchant" ? { role: nr, merchantId: nm } : { role: nr }; pendingInvites[em] = nr; addOpen = false; renderRoles(); };
     function loadPending() { if (!adminKey()) return; wfetch("getPending", { admin: true }).then(function (j) { var n = (j && j.pending) || []; if (JSON.stringify(n) !== JSON.stringify(pendingReqs)) { pendingReqs = n; renderRoles(); } }).catch(function () {}); }
+    host.querySelectorAll("[data-preq-role]").forEach(function (sel) { sel.onchange = function () { var mi = host.querySelector('[data-preq-mid="' + sel.dataset.preqRole + '"]'); if (mi) mi.style.display = sel.value === "Merchant" ? "" : "none"; }; });
     host.querySelectorAll("[data-preq-ok]").forEach(function (b) { b.onclick = function () {
       var em = b.dataset.preqOk, rs = host.querySelector('[data-preq-role="' + em + '"]'), role = rs ? rs.value : draft.defaultRole, r0 = pendingReqs.filter(function (x) { return x.email === em; })[0] || {};
-      b.disabled = true; draft.users[em] = { role: role, name: r0.name || undefined }; pendingInvites[em] = role;
+      var mi = host.querySelector('[data-preq-mid="' + em + '"]'), mid = mi ? mi.value.trim() : "";
+      if (role === "Merchant" && !mid) { var pm = $("twPendMsg"); if (pm) { pm.className = "tw-msg err"; pm.textContent = "Enter the Merchant ID for " + em + "."; } return; }
+      b.disabled = true; draft.users[em] = role === "Merchant" ? { role: role, name: r0.name || undefined, merchantId: mid } : { role: role, name: r0.name || undefined }; pendingInvites[em] = role;
       saveDraft(function () { sendInvitesAfterSave().then(function () { return wfetch("resolvePending", { body: JSON.stringify({ emails: [em] }) }); }).then(function () { pendingReqs = pendingReqs.filter(function (x) { return x.email !== em; }); renderRoles(); }).catch(function () { renderRoles(); }); },
         function (e) { delete draft.users[em]; b.disabled = false; var m = $("twPendMsg"); if (m) { m.className = "tw-msg err"; m.textContent = e.message; } });
     }; });
@@ -688,7 +720,8 @@
       { nav: "navTowerTargets", view: "towerTargets", label: "Targets Upload" },
       { nav: "navTowerAlerts", view: "towerAlerts", label: "Alerts Centre" },
       { nav: "navTowerSettings", view: "towerSettings", label: "Settings" },
-      { nav: "navTowerActivity", view: "towerActivity", label: "Activity Log" }
+      { nav: "navTowerActivity", view: "towerActivity", label: "Activity Log" },
+      { nav: "navTowerInvite", view: "towerInvite", label: "Invite people" }
     ] },
     { toggle: "navAdminToggle", title: "Admin Panel", tabs: [
       { nav: "navSegmentationPanel", view: "segmentation", label: "Segmentation Panel" },
@@ -721,7 +754,7 @@
       }, true);
     });
   }
-  var SINGLE_TITLES = { overview: "Over View", merchantPerformance: "Merchants", towerRoles: "Users & Roles", towerTargets: "Targets Upload", towerInvite: "Invite people" };
+  var SINGLE_TITLES = { overview: "Over View", merchantPerformance: "Merchants", towerRoles: "Users & Roles", towerTargets: "Targets Upload" };
   function navTitle(view) { var id = VIEW_NAV[view], el = id && $(id); return el ? el.textContent.replace(/[▼▲]/g, "").trim() : ""; }
   function updateHub(view) {
     var cur = hubOfView(view), bar = $("twTabs");
@@ -785,7 +818,7 @@
     document.querySelectorAll(".nav-item.active, .nav-item-sub.active").forEach(function (el) { el.classList.remove("active"); });
     if (name === "towerInvite") {
       var iv = $("viewTowerInvite"); if (!iv) return;
-      $("navTowerInvite").classList.add("active"); renderInvite();
+      renderInvite();
       iv.classList.remove("hidden"); setTimeout(function () { iv.classList.add("active-view"); }, 10);
       var ih = document.querySelector(".topbar-title p"); if (ih) ih.textContent = "Invite people to the dashboard"; return;
     }
@@ -807,18 +840,34 @@
   }
 
   // اسم الملف في اللينك بيتغير مع التاب (inventory.html, mp-matches.html, ...) — كل ملف نسخة حقيقية من index.html فالـ reload بيفتح نفس التاب
-  function twFileOf(view) { return view === "overview" ? "index.html" : view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() + ".html"; }
+  // File names follow the tab labels shown in the sidebar (Commercial Plan -> commercial-plan.html).
+  var VIEW_SLUG = {
+    recommendedTracker: "recommended-tracker", inventory: "inventory",
+    acmPerformance: "performance-acm", merchantPerformance: "merchants", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
+    targetsCommercial: "targets", commercialDebundlized: "commercial-plan", purchasePlan: "purchase-plan",
+    cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
+    productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",
+    cm3Analyst: "cm3-analyst", poorMatches: "poor-matches", availabilityLocking: "availability-locking",
+    allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions",
+    mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
+    incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
+    weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", dohPlanner: "planner-doh"
+  };
+  function twFileOf(view) { return view === "overview" ? "index.html" : (VIEW_SLUG[view] || view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()) + ".html"; }
+  // Old file names (camelCase view name) keep working so saved links don't break; they open the same tab and the address bar switches to the new name.
+  function twLegacyFile(view) { return view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() + ".html"; }
   function twViewOfFile(file) {
     file = (file || "").toLowerCase(); if (!file || file === "index.html") return "overview";
-    for (var k in VIEW_NAV) if (twFileOf(k) === file) return k;
+    for (var k in VIEW_NAV) if (twFileOf(k) === file || twLegacyFile(k) === file) return k;
     return null;
   }
   function twPushUrl(name) {
     try {
       var nid = VIEW_NAV[name]; if (!nid) return; if (!allowed(nid)) name = "overview";
-      var file = twFileOf(name), cur = location.pathname.split("/").pop() || "index.html";
-      if (cur.toLowerCase() === file) return;
-      history.pushState({ v: name }, "", new URL(file, location.href).href);
+      var file = twFileOf(name), cur = (location.pathname.split("/").pop() || "index.html").toLowerCase();
+      if (cur === file) return;
+      var url = new URL(file, location.href).href;
+      if (cur === twLegacyFile(name)) history.replaceState({ v: name }, "", url); else history.pushState({ v: name }, "", url);
     } catch (e) {}
   }
   window.addEventListener("popstate", function () {
@@ -834,7 +883,7 @@
     };
     window.__twSwitch = function (name) {
       var res;
-      if (isOwnView(name)) { if (!(name === "towerInvite" ? canInvite() : (EXTRA_VIEWS[name] && EXTRA_VIEWS[name].open ? allowed(VIEW_NAV[name]) : isEffAdmin()))) { res = origSwitch("overview"); updateHub("overview"); return res; } res = showOwnView(name); updateHub(name); return res; }
+      if (isOwnView(name)) { if (!(name === "towerInvite" ? canInvite() : (EXTRA_VIEWS[name] && EXTRA_VIEWS[name].open ? allowed(EXTRA_VIEWS[name].navId) : isEffAdmin()))) { res = origSwitch("overview"); updateHub("overview"); return res; } res = showOwnView(name); updateHub(name); return res; }
       var nid = VIEW_NAV[name];
       if (nid && !allowed(nid)) { name = "overview"; }
       if (ADMIN_PW_VIEWS.indexOf(name) >= 0 && typeof isAdminUnlocked === "function" && !isAdminUnlocked() && origAdmin) { return origAdmin(name); }
@@ -869,6 +918,7 @@
 
   // ---------------------------------------------------------------- shared core for extra modules (alerts.js)
   window.TowerCore = {
+    merchantScope: merchantScope,
     wfetch: wfetch, logActivity: logActivity, getSettings: getSettings, loadSettings: loadSettings, saveSettings: saveSettings, esc: esc, ls: ls, session: session, adminKey: adminKey, getCfg: getCfg, navModel: navModel,
     realRoleName: realRoleName, isRealAdmin: isRealAdmin, isEffAdmin: isEffAdmin, allowed: allowed,
     registerView: function (name, def) {

@@ -528,13 +528,6 @@ html[data-theme="light"] select option, html[data-theme="light"] select optgroup
 html[data-theme="light"] input:-webkit-autofill, html[data-theme="light"] input:-webkit-autofill:focus, html[data-theme="light"] textarea:-webkit-autofill {
   -webkit-text-fill-color: #0f172a !important; caret-color: #0f172a; box-shadow: 0 0 0 1000px #ffffff inset !important; transition: background-color 9999s; }
 html[data-theme="light"] input:disabled, html[data-theme="light"] select:disabled, html[data-theme="light"] textarea:disabled { color: #64748b !important; -webkit-text-fill-color: #64748b !important; background-color: #f1f5f9; }
-/* login overlay is its own dark card: keep it self-consistent in either theme */
-html[data-theme="light"] .auth-form input:not(#a):not(#b):not(#c):not(#d), html[data-theme="light"] .auth-form select:not(#a):not(#b):not(#c):not(#d) {
-  color: #fafafa !important; -webkit-text-fill-color: #fafafa !important; caret-color: #fafafa; background-color: #09090b !important; background: #09090b !important; border-color: #27272a; }
-html[data-theme="light"] .auth-form input::placeholder { color: #71717a !important; -webkit-text-fill-color: #71717a !important; }
-html[data-theme="light"] .auth-form select option { color: #fafafa; background: #18181b; }
-html[data-theme="light"] .auth-form input:-webkit-autofill { -webkit-text-fill-color: #fafafa !important; box-shadow: 0 0 0 1000px #09090b inset !important; }
-
 
 /* ---- Planner DOH (Supply Chain) ---- */
 .doh-kpis { margin-bottom: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important; }
@@ -582,11 +575,12 @@ html[data-theme="light"] .auth-form input:-webkit-autofill { -webkit-text-fill-c
 .ov-spark { margin-top: auto; padding-top: 8px; max-width: 220px; }
 .ov-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
 .ov-row > .panel { min-width: 0; }
-.ov-funnel { padding: 6px 4px 4px; display: flex; flex-direction: column; gap: 22px; }
-.ov-fun-top { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; margin-bottom: 8px; }
-.ov-fun-bar { height: 16px; border-radius: 99px; background: var(--panel3); overflow: hidden; }
-.ov-fun-bar i { display: block; height: 100%; border-radius: 99px; transition: width .5s var(--ease); }
-.ov-fun-row small { display: block; margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+.ov-stocks { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 0; }
+.ov-stk { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--panel2); border: 1px solid var(--line); }
+.ov-stk span { display: block; font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); }
+.ov-stk small { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.ov-stk b { font-size: 26px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; }
+.ov-stk-bad b { color: var(--red); } .ov-stk-warn b { color: var(--orange); }
 .ov-aov { padding: 4px 4px 0; }
 .ov-aov-v { font-size: 36px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 4px; }
 .ov-spark-wide { max-width: none; padding: 4px 0 10px; }
@@ -595,3 +589,10 @@ html[data-theme="light"] .auth-form input:-webkit-autofill { -webkit-text-fill-c
 @media (max-width: 1100px) { .ov-hero { grid-template-columns: 1fr; } .ov-hero-l { border-right: 0; border-bottom: 1px solid var(--line); } .ov-row { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .ov-hero-r { grid-template-columns: 1fr; } .ov-tile { border-right: 0 !important; } }
 .chart-empty { height: 100%; display: grid; place-items: center; color: var(--text-dim); font-size: 13px; }
+
+/* ---- Merchant scope (Overview limited to the Merchant ID linked to the account) ---- */
+.tw-scopenote { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; font-size: 13px; color: var(--text2); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); }
+.tw-scopenote.warn { color: var(--orange); background: color-mix(in srgb, var(--orange) 9%, var(--panel)); border-color: color-mix(in srgb, var(--orange) 30%, var(--line)); }
+body.tw-mscope .panel:has(#ovStTrendChart), body.tw-mscope .panel:has(#ovStock) { display: none; }
+body.tw-mscope .ov-row:has(#ovStTrendChart), body.tw-mscope .ov-row:has(#ovStock) { grid-template-columns: 1fr; }
+#twViewAs input { width: 100%; margin-top: 6px; min-height: 34px; padding: 0 10px; border-radius: 9px; }
