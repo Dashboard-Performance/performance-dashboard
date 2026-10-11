@@ -128,7 +128,7 @@
   function segChip(g) { return chip(g, g === "Normal" ? "na" : "ok"); }
   function ageChip(a) { var i = AGES.indexOf(a); var tone = i < 0 ? "na" : i < 2 ? "ok" : i === 2 ? "warn" : "bad"; return chip(AGE_LBL[a] || a || "—", tone); }
   function dohTxt(r) { return r.stock > 0 ? (r.doh >= 999 ? "999+" : int(r.doh)) : "—"; }
-  function dohOf(rows, k) { var st = sum(rows, "stock"), av = sum(rows, k || "avg3"); return av > 0 ? st / av : 0; }
+  function dohVal(rows) { var dv = rows.reduce(function (a, r) { return a + (r.avg15 || 0) * (r.wac || 0); }, 0); return dv > 0 ? sum(rows, "inv") / dv : 0; }
   function srcChip() { return ""; }
   function catPills() {
     return '<div class="cx-pills">' + ["all"].concat(CATS).map(function (c) { return '<button type="button" class="cx-pill' + (SC.cat === c ? " on" : "") + '" data-sc-cat="' + c + '">' + (c === "all" ? "All categories" : CATL[c]) + '</button>'; }).join("") + '</div>';
@@ -149,12 +149,12 @@
   }
   function renderAging(host) {
     var rows = scoped(), inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; });
-    var unh = bsum(rows, 4), doh = dohOf(stocked), dead = stocked.filter(function (r) { return r.fms === FMS[3]; }), retV = sum(rows, "retV");
+    var unh = bsum(rows, 4), dead = stocked.filter(function (r) { return r.fms === FMS[3]; }), retV = sum(rows, "retV");
     var tiles = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
       ["SKUs in stock", int(stocked.length), "of " + int(rows.length) + " SKUs in inventory", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"],
-      ["Days on hand", int(doh), "stock ÷ 3-day avg demand", ""],
+      ["Days on hand", int(dohVal(rows)), "stock value ÷ 15-day avg daily demand value", ""],
       ["Obsolete stock", money(sum(dead, "inv")), int(dead.length) + " SKUs · sold < 10% of supply MTD", dead.length ? "bad" : "ok"],
       ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""]
     ];
@@ -216,7 +216,7 @@
       return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + money(r.wac) + '</td><td class="num font-bold">' + money(r.inv) + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
     }).join("") : '<tr><td colspan="' + COLS.length + '" class="text-dim center">No SKUs match these filters.</td></tr>';
     $("scSkuCount").textContent = int(rows.length) + " SKUs"; $("scSkuPage").textContent = "Page " + (f.page + 1) + " of " + tp;
-    var st = $("scSkuStats"); if (st) st.innerHTML = [["SKUs", int(rows.length)], ["Units", int(sum(rows, "stock"))], ["Inventory value", money(sum(rows, "inv"))], ["Avg DOH", int(dohOf(rows.filter(function (r) { return r.stock > 0; })))]].map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b></div>'; }).join("");
+    var st = $("scSkuStats"); if (st) st.innerHTML = [["SKUs", int(rows.length)], ["Units", int(sum(rows, "stock"))], ["Inventory value", money(sum(rows, "inv"))], ["Avg DOH", int(dohVal(rows))]].map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b></div>'; }).join("");
   }
 
   function renderActions(host) {
@@ -258,10 +258,9 @@
     build();
     if (SC.empty) { host.innerHTML = '<div class="sc-note">Waiting for inventory data…</div>'; return; }
     var rows = SC.rows, inv = sum(rows, "inv"), unh = bsum(rows, 4);
-    var dv = rows.reduce(function (a, r) { return a + (r.avg15 || 0) * (r.wac || 0); }, 0);
     var items = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
-      ["Days on hand", int(dv > 0 ? inv / dv : 0), "stock value ÷ 15-day avg daily demand value", ""],
+      ["Days on hand", int(dohVal(rows)), "stock value ÷ 15-day avg daily demand value", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
     ];
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
