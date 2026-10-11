@@ -128,7 +128,7 @@
   function segChip(g) { return chip(g, g === "Normal" ? "na" : "ok"); }
   function ageChip(a) { var i = AGES.indexOf(a); var tone = i < 0 ? "na" : i < 2 ? "ok" : i === 2 ? "warn" : "bad"; return chip(AGE_LBL[a] || a || "—", tone); }
   function dohTxt(r) { return r.stock > 0 ? (r.doh >= 999 ? "999+" : int(r.doh)) : "—"; }
-  function dohOf(rows) { var st = sum(rows, "stock"), av = sum(rows, "avg3"); return av > 0 ? st / av : 0; }
+  function dohOf(rows, k) { var st = sum(rows, "stock"), av = sum(rows, k || "avg3"); return av > 0 ? st / av : 0; }
   function srcChip() { return ""; }
   function catPills() {
     return '<div class="cx-pills">' + ["all"].concat(CATS).map(function (c) { return '<button type="button" class="cx-pill' + (SC.cat === c ? " on" : "") + '" data-sc-cat="' + c + '">' + (c === "all" ? "All categories" : CATL[c]) + '</button>'; }).join("") + '</div>';
@@ -260,7 +260,7 @@
     var rows = SC.rows, inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; }), unh = bsum(rows, 4);
     var items = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
-      ["Days on hand", int(dohOf(stocked)), "stock ÷ 3-day avg demand", ""],
+      ["Days on hand", int(dohOf(stocked, "avg15")), "stock ÷ 15-day avg demand", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
     ];
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
