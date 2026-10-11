@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.11";
+const APP_VERSION = "1.15.13";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5402,20 +5402,31 @@ function parseIncentiveMerchantsSheet(payload) {
 // شيت "EGY Beginning Inventory #4132" (BEGIN_INV_GID)
 // أعمدة بالترتيب: PRODUCT_ID | QTY | MONTH | PRODUCT_NAME | CATEGORY_L1
 // -------------------------------------------------------------------------
+// Finds a column by its header label (Metabase keeps the labels), falling back to the old fixed position.
+function colByLabel(payload, re, fallback) {
+  const cols = payload?.table?.cols ?? [];
+  for (let i = 0; i < cols.length; i++) if (re.test(String(cols[i]?.label || "").replace(/[^a-z0-9]/gi, "").toLowerCase())) return i;
+  return fallback;
+}
 function parseBeginningInventorySheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
+  const iId = colByLabel(payload, /^(productid|sku|skuid|internalreference)$/, 0);
+  const iQty = colByLabel(payload, /^(qty|quantity|quantityonhand|beginninginventory|begininventory|beginqty)$/, 1);
+  const iMonth = colByLabel(payload, /^month/, 2);
+  const iName = colByLabel(payload, /^(productname|name|skuname)$/, 3);
+  const iCat = colByLabel(payload, /^(categoryl1|category|cat)$/, 4);
   const rows = [];
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
-    const productId = cellText(c[0]);
+    const productId = cellText(c[iId]).trim();
     if (!productId || productId === "PRODUCT_ID") continue;
     rows.push({
       PRODUCT_ID: productId,
-      QTY: cellNumber(c[1]),
-      MONTH: cellText(c[2]),
-      PRODUCT_NAME: cellText(c[3]),
-      CATEGORY_L1: cellText(c[4])
+      QTY: cellNumber(c[iQty]),
+      MONTH: cellText(c[iMonth]),
+      PRODUCT_NAME: cellText(c[iName]),
+      CATEGORY_L1: cellText(c[iCat])
     });
   }
   return rows;
@@ -9772,7 +9783,11 @@ function populateSellthroughFilters() {
   state.sellthroughMonthOptions = options;
   if (!options.length) return;
 
-  const latestKey = options[0].key;
+  // Default month = the newest month that actually HAS Beginning Inventory rows. Using the newest month of
+  // any source made Beginning Inventory show 0 for every SKU whenever the newest month had no snapshot yet.
+  const begSrc = (state.sellthroughCountry === "IRQ" ? state.metabaseBeginningInventoryIrq : state.metabaseBeginningInventory) || [];
+  const begKeys = new Set(); begSrc.forEach(r => { const k = stMonthKeyFromValue(r.MONTH); if (k && (Number(r.QTY) || 0) > 0) begKeys.add(k); });
+  const latestKey = (options.find(o => begKeys.has(o.key)) || options[0]).key;
   const optionsHtml = options.map(o => `<option value="${o.key}">${o.key}</option>`).join("");
 
   const quickSelect = $("stMonthSelect");
@@ -10395,6 +10410,11 @@ function recomputeSellthroughRows() {
   // الفلاتر التلاتة اليدوية (لازم الثلاثة يكونوا متحددين).
   // ---------------------------------------------------------------------
   if (!begInvKey || !startKey || !endKey) { state.sellthroughDataPrepared = []; applySellthroughFiltersAndSort(); renderSellthroughSummaries([]); return; }
+
+  if (stSubtitleEl && !idx.skuByMonthBegInv.has(begInvKey)) {
+    const have = Array.from(idx.skuByMonthBegInv.keys()).sort().reverse()[0];
+    stSubtitleEl.textContent = "No Beginning Inventory data for " + begInvKey + (have ? " — pick " + have + " (latest month that has it)" : " — the Beginning Inventory source returned no rows");
+  }
 
   const rows = computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx);
 
@@ -17899,11 +17919,13 @@ async function fetchIrqSheetsOnce() {
 
 function applyIrqSheetsToState(sheets) {
   if (!sheets) return;
+  restoreFullDatasets();
   if (sheets[IRQ_INBOUND_GID]) state.inboundRowsIrq = parseIrqInboundSheet(sheets[IRQ_INBOUND_GID]);
   if (sheets[IRQ_BEGIN_INV_GID]) state.metabaseBeginningInventoryIrq = parseIrqBeginningInventorySheet(sheets[IRQ_BEGIN_INV_GID]);
   if (sheets[IRQ_SELLTHROUGH_NEEDED_GID]) state.metabaseSellthroughNeededIrq = parseSellthroughNeededSheet(sheets[IRQ_SELLTHROUGH_NEEDED_GID]);
   if (sheets[IRQ_COGS_GID]) state.cogsMapIrq = parseCogsSheet(sheets[IRQ_COGS_GID]);
   if (sheets[IRQ_INVENTORY_GID]) state.irqInventoryMap = parseIrqInventorySheet(sheets[IRQ_INVENTORY_GID]);
+  scopeAllDatasets();
   // نفس منطق applySnapshotToState: لو مصادر الـ Sellthrough اتغيّرت نبطّل الجدول المحسوب.
   const fp = computeSellthroughSourceFingerprint();
   if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== fp) { state.sellthroughPrepared = false; state._ovStTrendDone = false; }
@@ -18235,14 +18257,69 @@ function userScopedRows(rows) {
   const sc = window.TowerCore && window.TowerCore.merchantScope ? window.TowerCore.merchantScope() : null;
   return sc ? rows.filter(r => sc.id && String(r.merchantId || "").trim() === sc.id) : rows;
 }
+// Merchant scope for every other data set: a Merchant only keeps the rows of their own Merchant ID / its SKUs.
+// The full data is kept in state._scopeFull so switching role (View as) or logging out restores it.
+const SCOPE_ARR_SKU = { inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "productId" };
+const SCOPE_ARR_MID = { availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", incentiveMerchantsRows: "merchantId" };
+const SCOPE_OBJ_SKU = ["inventoryMap", "productsMap", "singleSkuTargets"];
+const SCOPE_OBJ_MID = ["merchantTargets", "merchantSegmentsMap"];
+const SCOPE_MAP_SKU = ["cogsMap", "repackMap"];
+const SCOPE_IRQ_ARR = ["inboundRowsIrq", "metabaseProductsInfoIrq", "metabaseBeginningInventoryIrq", "metabaseSellthroughNeededIrq"];
+const SCOPE_IRQ_MAP = ["cogsMapIrq", "irqInventoryMap"];
+function scopeKeys() { return [].concat(Object.keys(SCOPE_ARR_SKU), Object.keys(SCOPE_ARR_MID), SCOPE_OBJ_SKU, SCOPE_OBJ_MID, SCOPE_MAP_SKU, SCOPE_IRQ_ARR, SCOPE_IRQ_MAP, ["debundleMap"]); }
+// Put the full (unscoped) data back into state, so loaders and fallbacks always work on the full data.
+function restoreFullDatasets() {
+  if (state._scopeApplied && state._scopeFull) scopeKeys().forEach(k => { if (k in state._scopeFull) state[k] = state._scopeFull[k]; });
+  state._scopeApplied = false;
+}
+// Must be called while state holds the FULL data (right after a load, or after restoreFullDatasets()).
+function scopeAllDatasets() {
+  const sc = window.TowerCore && window.TowerCore.merchantScope ? window.TowerCore.merchantScope() : null;
+  const all = scopeKeys();
+  state._scopeFull = {};
+  const full = state._scopeFull;
+  all.forEach(k => { full[k] = state[k]; });
+  if (!sc) return;
+  const id = sc.id, mine = new Set();
+  (state.allParsedRows || []).forEach(r => { if (r.sku) mine.add(String(r.sku)); });
+  const deb = full.debundleMap || [];
+  deb.forEach(r => { if (mine.has(String(r.productId))) mine.add(String(r.singleId)); });
+  const has = v => mine.has(String(v == null ? "" : v));
+  Object.keys(SCOPE_ARR_SKU).forEach(k => { const f = SCOPE_ARR_SKU[k]; state[k] = (full[k] || []).filter(r => has(r[f])); });
+  Object.keys(SCOPE_ARR_MID).forEach(k => {
+    const f = SCOPE_ARR_MID[k], src = full[k] || [];
+    const out = src.filter(r => id && String(r[f] || "").trim() === id);
+    if (src.feedbackDateLabels) out.feedbackDateLabels = src.feedbackDateLabels;
+    state[k] = out;
+  });
+  state.debundleMap = deb.filter(r => has(r.productId) || has(r.singleId));
+  SCOPE_OBJ_SKU.forEach(k => { const o = {}, src = full[k] || {}; Object.keys(src).forEach(key => { if (has(key)) o[key] = src[key]; }); state[k] = o; });
+  SCOPE_OBJ_MID.forEach(k => { const o = {}, src = full[k] || {}; if (id && id in src) o[id] = src[id]; state[k] = o; });
+  SCOPE_MAP_SKU.forEach(k => { const m = new Map(), src = full[k]; if (src && src.forEach) src.forEach((v, key) => { if (has(key)) m.set(key, v); }); state[k] = m; });
+  SCOPE_IRQ_ARR.forEach(k => { state[k] = []; });
+  SCOPE_IRQ_MAP.forEach(k => { state[k] = new Map(); });
+  state._scopeApplied = true;
+}
 window.rescopeData = function () {
   if (!state.allParsedRowsFull) return;
   state.allParsedRows = userScopedRows(state.allParsedRowsFull);
   state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows);
+  restoreFullDatasets();
+  scopeAllDatasets();
+  state.sellthroughPrepared = false; state._ovStTrendDone = false; state.weeklyInvWeeks = [];
+  _stIndexCache = null;
   applyFilters();
 };
 
+// A source that suddenly returns a tiny fraction of the rows it had before (e.g. a Metabase question that
+// briefly returned 1 row) must not wipe good data: keep the previous rows and warn in the console.
+function keepIfCollapsed(prev, next, label) {
+  prev = prev || []; next = next || [];
+  if (prev.length >= 100 && next.length < prev.length * 0.05) { console.warn("[data] " + label + " returned only " + next.length + " rows (had " + prev.length + ") — keeping the previous data"); return prev; }
+  return next;
+}
 function applySnapshotToState(snapshot) {
+  restoreFullDatasets();
   state.allParsedRowsFull = snapshot.allParsedRows;
   state.allParsedRows = userScopedRows(snapshot.allParsedRows);
   state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
@@ -18256,10 +18333,10 @@ function applySnapshotToState(snapshot) {
   state.acmSalesPlanData = snapshot.acmSalesPlanData; 
   state.newSegRows = snapshot.newSegRows || [];
   state.newSegLoadError = snapshot.newSegLoadError || null;
-  state.inboundRows = snapshot.inboundRows || [];
+  state.inboundRows = keepIfCollapsed(state.inboundRows, snapshot.inboundRows, "Inbound");
   state.metabaseProductsInfo = snapshot.metabaseProductsInfo || [];
-  state.metabaseBeginningInventory = snapshot.metabaseBeginningInventory || [];
-  state.metabaseSellthroughNeeded = snapshot.metabaseSellthroughNeeded || [];
+  state.metabaseBeginningInventory = keepIfCollapsed(state.metabaseBeginningInventory, snapshot.metabaseBeginningInventory, "Beginning Inventory");
+  state.metabaseSellthroughNeeded = keepIfCollapsed(state.metabaseSellthroughNeeded, snapshot.metabaseSellthroughNeeded, "Sell-through Needed");
   // IRQ (v1.1.58)
   state.inboundRowsIrq = snapshot.inboundRowsIrq || [];
   state.metabaseProductsInfoIrq = snapshot.metabaseProductsInfoIrq || [];
@@ -18298,6 +18375,7 @@ function applySnapshotToState(snapshot) {
   // sellthroughPrepared زي ما هي — لو كانت true يفضل الجدول زي ما هو من
   // غير Loading Data تاني. لو فعلاً اتغيرت (أو أول مرة أصلاً)، نعمل reset
   // عشان تتحسب تاني مرة واحدة المرة الجاية اللي هتتفتح فيها.
+  scopeAllDatasets();
   const newStFingerprint = computeSellthroughSourceFingerprint();
   if (state._stSourceFingerprint !== undefined && state._stSourceFingerprint !== newStFingerprint) {
     state.sellthroughPrepared = false; state._ovStTrendDone = false;
