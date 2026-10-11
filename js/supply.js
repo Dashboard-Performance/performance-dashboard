@@ -257,10 +257,11 @@
     var host = $("ovStock"); if (!host) return;
     build();
     if (SC.empty) { host.innerHTML = '<div class="sc-note">Waiting for inventory data…</div>'; return; }
-    var rows = SC.rows, inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; }), unh = bsum(rows, 4);
+    var rows = SC.rows, inv = sum(rows, "inv"), unh = bsum(rows, 4);
+    var dv = rows.reduce(function (a, r) { return a + (r.avg15 || 0) * (r.wac || 0); }, 0);
     var items = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
-      ["Days on hand", int(dohOf(stocked, "avg15")), "stock ÷ 15-day avg demand", ""],
+      ["Days on hand", int(dv > 0 ? inv / dv : 0), "stock value ÷ 15-day avg daily demand value", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
     ];
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
