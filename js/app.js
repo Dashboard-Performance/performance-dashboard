@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.13";
+const APP_VERSION = "1.15.15";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -15382,7 +15382,11 @@ async function spfLoadFeedback() {
       body: JSON.stringify({ action: "get_sales_plan_feedback", month })
     });
     const data = await resp.json();
-    if (data && data.success && data.items) { spfState.fb = data.items; spfRender(); }
+    if (data && data.success && data.items) {
+      const sc = window.TowerCore && window.TowerCore.merchantScope ? window.TowerCore.merchantScope() : null;
+      if (sc) { const mine = {}; Object.keys(data.items).forEach(k => { if (sc.id && k.split("||")[0] === sc.id) mine[k] = data.items[k]; }); data.items = mine; }
+      spfState.fb = data.items; spfRender();
+    }
   } catch (e) { console.warn("spfLoadFeedback", e); }
 }
 
@@ -18259,8 +18263,8 @@ function userScopedRows(rows) {
 }
 // Merchant scope for every other data set: a Merchant only keeps the rows of their own Merchant ID / its SKUs.
 // The full data is kept in state._scopeFull so switching role (View as) or logging out restores it.
-const SCOPE_ARR_SKU = { inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "productId" };
-const SCOPE_ARR_MID = { availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", incentiveMerchantsRows: "merchantId" };
+const SCOPE_ARR_SKU = { inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "sku" };
+const SCOPE_ARR_MID = { acmSalesPlanData: "tagerId", availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", incentiveMerchantsRows: "merchantId" };
 const SCOPE_OBJ_SKU = ["inventoryMap", "productsMap", "singleSkuTargets"];
 const SCOPE_OBJ_MID = ["merchantTargets", "merchantSegmentsMap"];
 const SCOPE_MAP_SKU = ["cogsMap", "repackMap"];

@@ -147,16 +147,30 @@
   function distV(items, tot) {
     return items.map(function (it) { var p = tot ? it.v / tot * 100 : 0; return '<div class="sc-drow"><span class="sc-dl">' + esc(it.l) + '<small>' + int(it.n) + ' SKUs</small></span><div class="cx-bar sm" style="--c:' + it.c + '"><b style="width:' + p + '%"></b></div><em>' + money(it.v) + '<small>' + pct(p, 0) + '</small></em></div>'; }).join("");
   }
+  // Damaged BOX (WareHouse sheet, Condition = "Damaged BOX"): qty and value (qty × WAC) over the SKUs in the current category filter.
+  function damagedBox(rows) {
+    var all = SC.cat === "all", ids = {}; rows.forEach(function (r) { ids[r.id] = 1; });
+    var qty = 0, val = 0, n = 0;
+    ((state.repackMap && state.repackMap.forEach) ? state.repackMap : new Map()).forEach(function (q, id) {
+      if (!(q > 0) || (!all && !ids[id])) return;
+      var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0;
+      qty += q; val += q * w; n++;
+    });
+    return { qty: qty, val: val, n: n };
+  }
   function renderAging(host) {
     var rows = scoped(), inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; });
     var unh = bsum(rows, 4), dead = stocked.filter(function (r) { return r.fms === FMS[3]; }), retV = sum(rows, "retV");
+    var dmg = damagedBox(rows);
     var tiles = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
       ["SKUs in stock", int(stocked.length), "of " + int(rows.length) + " SKUs in inventory", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"],
       ["Days on hand", int(dohVal(rows)), "stock value ÷ 15-day avg daily demand value", ""],
       ["Obsolete stock", money(sum(dead, "inv")), int(dead.length) + " SKUs · sold < 10% of supply MTD", dead.length ? "bad" : "ok"],
-      ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""]
+      ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""],
+      ["Damaged BOX value", money(dmg.val), int(dmg.n) + " SKUs · qty × WAC", dmg.val ? "warn" : ""],
+      ["Damaged BOX qty", int(dmg.qty), "pieces in Damaged BOX condition", dmg.qty ? "warn" : ""]
     ];
     var html = '<div class="cx-bar-top"><div>' + catPills() + '</div>' + srcChip() + '</div>' +
       '<div class="cx-hero2">' + tiles.map(function (t) { return '<div class="cx-tile ' + (t[3] ? "cx-" + t[3] : "") + '"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>';
