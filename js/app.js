@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.23";
+const APP_VERSION = "1.15.24";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -18786,6 +18786,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         sellthrough: state.sellthroughPage,
         mpMatches: mpMatchesState.page,
         mpNewMatches: mpNewMatchesState.page,
+        mpStopped: mpStoppedState.page,
         poorMatches: poorMatchesState.page,
         availabilityLocking: availabilityLockingState.page,
         allocationLocking: allocationLockingState.page,
@@ -18805,7 +18806,7 @@ confirmDownloadBtn.addEventListener("click", () => {
 
     // Set to page 0 and max size
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
-    state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
+    state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; mpStoppedState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
     allocationLockingState.page = 0;
     healthyLockingState.page = 0; healthyUnlockingState.page = 0;
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
@@ -18828,6 +18829,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
     if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
     if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
+    if (typeof renderPaginatedMpStoppedTable === 'function') renderPaginatedMpStoppedTable();
     if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
     if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
     if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
@@ -18854,6 +18856,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.sellthroughPage = originalPage.sellthrough;
         mpMatchesState.page = originalPage.mpMatches;
         mpNewMatchesState.page = originalPage.mpNewMatches;
+        mpStoppedState.page = originalPage.mpStopped;
         poorMatchesState.page = originalPage.poorMatches;
         availabilityLockingState.page = originalPage.availabilityLocking;
         allocationLockingState.page = originalPage.allocationLocking;
@@ -18878,6 +18881,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
         if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
         if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
+        if (typeof renderPaginatedMpStoppedTable === 'function') renderPaginatedMpStoppedTable();
         if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
         if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
         if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
