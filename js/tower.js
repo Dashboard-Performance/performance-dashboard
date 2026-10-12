@@ -275,19 +275,33 @@
   }
 
   // ---------------------------------------------------------------- Targets (read side: used by app.js)
+  // Targets are stored per month on the Worker ("<type>.<YYYY-MM>"). Reading a month falls back to the older
+  // single upload ("<type>"), and then to the Google Sheet (handled by app.js with the payloads it already has).
+  function monthKeyFromLabel(label) {
+    var d = label ? new Date(label) : new Date();
+    if (isNaN(d)) d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  function selectedMonthKey() { var s = $("monthSelect"); return monthKeyFromLabel(s ? s.value : ""); }
+  function monthTitle(key) { var p = key.split("-"); return new Date(+p[0], +p[1] - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" }); }
+  function hasRows(p) { return !!(p && p.table && Array.isArray(p.table.rows) && p.table.rows.length); }
   window.TowerTargets = {
-    meta: null,
-    start: function () {
+    meta: null, activeKey: null, cache: {},
+    keyForSelect: selectedMonthKey,
+    start: function (key) {
       if (!workerUrl()) return Promise.resolve({});
+      key = key || selectedMonthKey();
       var self = this, found = {};
+      var get = function (type) { return wfetch("getTargets", { timeout: 9000 }, "&type=" + type).then(function (p) { return hasRows(p) ? p : null; }); };
       var jobs = TARGET_TYPES.map(function (t) {
-        return wfetch("getTargets", { timeout: 9000 }, "&type=" + t.type).then(function (p) {
-          if (p && p.table && Array.isArray(p.table.rows) && p.table.rows.length) found[t.gid] = p;
-        }).catch(function (e) { console.warn("[Tower] targets " + t.type + " failed — using fallback:", e && e.message); });
+        return get(t.type + "." + key).catch(function () { return null; }).then(function (p) { return p || get(t.type); })
+          .then(function (p) { if (p) found[t.gid] = p; })
+          .catch(function (e) { console.warn("[Tower] targets " + t.type + " failed — using fallback:", e && e.message); });
       });
       var metaJob = wfetch("getTargets", { timeout: 6000 }, "&type=meta").then(function (m) { self.meta = m; }).catch(function () {});
-      return Promise.all(jobs.concat([metaJob])).then(function () { return found; });
+      return Promise.all(jobs.concat([metaJob])).then(function () { self.cache[key] = found; self.activeKey = key; return found; });
     },
+    forMonth: function (key) { return this.cache[key] ? Promise.resolve(this.cache[key]).then(function (f) { window.TowerTargets.activeKey = key; return f; }) : this.start(key); },
     apply: function (sheets, started) {
       return (started || this.start()).then(function (found) {
         var used = Object.keys(found);
@@ -352,7 +366,9 @@
     return loadXlsx().then(function (XLSX) { var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(grid), "Sheet1"); XLSX.writeFile(wb, name); });
   }
   function payloadOf(t) {
-    return wfetch("getTargets", { timeout: 15000 }, "&type=" + t.type).then(function (p) { if (p && p.table) return p; return (typeof loadSheetWithRetry === "function") ? loadSheetWithRetry(t.gid) : null; });
+    var get = function (type) { return wfetch("getTargets", { timeout: 15000 }, "&type=" + type).then(function (p) { return p && p.table ? p : null; }).catch(function () { return null; }); };
+    return get(t.type + "." + tgMonth).then(function (p) { return p || get(t.type); })
+      .then(function (p) { if (p) return p; return (typeof loadSheetWithRetry === "function") ? loadSheetWithRetry(t.gid) : null; });
   }
 
   // ---------------------------------------------------------------- UI shell: nav + views + banner
@@ -612,40 +628,60 @@
   }
 
   // ---------------------------------------------------------------- Targets page
-  var tgState = {};
+  var tgState = {}, tgMonth = "", tgMeta = {}, tgLegacy = {};
   function renderTargets() {
     var host = $("viewTowerTargets"); if (!host) return;
-    var meta = (window.TowerTargets.meta || {});
+    if (!tgMonth) tgMonth = selectedMonthKey();
+    var key = tgMonth;
+    Promise.all([
+      wfetch("getTargets", { timeout: 6000 }, "&type=meta." + key).catch(function () { return null; }),
+      wfetch("getTargets", { timeout: 6000 }, "&type=meta").catch(function () { return null; })
+    ]).then(function (r) { if (key !== tgMonth) return; tgMeta = r[0] || {}; tgLegacy = r[1] || {}; window.TowerTargets.meta = tgLegacy; drawTargets(); });
+    if (!host.firstChild) drawTargets();
+  }
+  function drawTargets() {
+    var host = $("viewTowerTargets"); if (!host) return;
     var cards = TARGET_TYPES.map(function (t) {
-      var m = meta[t.type];
-      var pill = m ? '<span class="tw-pill good">Uploaded · ' + esc(new Date(m.at).toLocaleString()) + '</span>' : '<span class="tw-pill warn">Google Sheet (fallback)</span>';
-      var info = m ? '<div class="tw-muted">' + esc(m.rows) + ' rows · ' + esc(m.file || "") + (m.by ? " · " + esc(m.by) : "") + '</div>' : '<div class="tw-muted">Not uploaded yet — still reading the Google Sheet.</div>';
+      var m = tgMeta[t.type], g = tgLegacy[t.type], pill, info;
+      if (m) {
+        pill = '<span class="tw-pill good">Uploaded · ' + esc(new Date(m.at).toLocaleString()) + '</span>';
+        info = '<div class="tw-muted">' + esc(m.rows) + ' rows · ' + esc(m.file || "") + (m.by ? " · " + esc(m.by) : "") + '</div>';
+      } else if (g) {
+        pill = '<span class="tw-pill warn">No file for ' + esc(monthTitle(tgMonth)) + ' — using the older upload</span>';
+        info = '<div class="tw-muted">Older upload: ' + esc(g.rows) + ' rows · ' + esc(g.file || "") + ' · ' + esc(new Date(g.at).toLocaleString()) + '</div>';
+      } else {
+        pill = '<span class="tw-pill warn">Google Sheet (fallback)</span>';
+        info = '<div class="tw-muted">Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' yet — still reading the Google Sheet.</div>';
+      }
       return '<div class="tw-card tw-tgt" data-t="' + t.type + '"><div class="tw-tgt-top"><div><b>' + esc(t.title) + '</b><div class="tw-muted">' + esc(t.desc) + '</div></div>' + pill + '</div>' + info +
         '<label class="tw-drop" data-drop="' + t.type + '">Drop an .xlsx / .csv here or click to choose<input type="file" accept=".xlsx,.xls,.csv" hidden data-file="' + t.type + '"></label>' +
         '<div class="tw-msg" data-msg="' + t.type + '"></div><div data-prev="' + t.type + '"></div>' +
         '<div class="tw-row"><button class="btn small" data-tpl="' + t.type + '">Download current / template</button><button class="btn small" data-seed="' + t.type + '">Import Google Sheet now</button></div></div>';
     }).join("");
-    host.innerHTML = '<div class="tw-page"><div class="tw-head"><h2>Targets Upload</h2><p>Egypt only. Upload each target file (first sheet of the workbook, same column layout as the old Google Sheet — header row included). The dashboard reads uploaded files automatically; until a file is uploaded it keeps using the Google Sheet.</p></div>' +
-      '<div class="tw-card"><div class="tw-row"><input type="password" id="twKey2" placeholder="ADMIN_KEY" value="' + esc(adminKey()) + '" style="min-width:240px;padding:0 10px;min-height:36px"><button class="btn" id="twKey2Save">Save key</button><button class="btn" id="twSeedAll">Import all current Google Sheet data</button><span class="tw-msg" id="twTgMsg"></span></div></div>' +
+    host.innerHTML = '<div class="tw-page"><div class="tw-head"><h2>Targets Upload</h2><p>Egypt only. Targets are saved per month: pick the month, then upload each target file (first sheet of the workbook, same column layout as the old Google Sheet — header row included). The dashboard reads the targets of the month selected at the top. A month with no upload keeps using the older upload, then the Google Sheet.</p></div>' +
+      '<div class="tw-card"><div class="tw-row"><b>Month</b><input type="month" id="twMonth" value="' + esc(tgMonth) + '" style="padding:0 10px;min-height:36px"><span class="tw-muted">Everything you upload or import below is saved for ' + esc(monthTitle(tgMonth)) + '.</span></div>' +
+      '<div class="tw-row" style="margin-top:10px"><input type="password" id="twKey2" placeholder="ADMIN_KEY" value="' + esc(adminKey()) + '" style="min-width:240px;padding:0 10px;min-height:36px"><button class="btn" id="twKey2Save">Save key</button><button class="btn" id="twSeedAll">Import all current Google Sheet data</button><span class="tw-msg" id="twTgMsg"></span></div></div>' +
       '<div class="tw-grid">' + cards + '</div></div>';
+    $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
-    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all 5 targets into the dashboard storage?")) return; seed(TARGET_TYPES.slice()); };
+    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all 5 targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.slice()); };
     host.querySelectorAll("[data-file]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) pick(inp.dataset.file, inp.files[0]); inp.value = ""; }; });
     host.querySelectorAll("[data-drop]").forEach(function (d) {
       ["dragenter", "dragover"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.add("over"); }); });
       ["dragleave", "drop"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.remove("over"); }); });
       d.addEventListener("drop", function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) pick(d.dataset.drop, f); });
     });
-    host.querySelectorAll("[data-tpl]").forEach(function (b) { b.onclick = function () { var t = TARGET_TYPES.filter(function (x) { return x.type === b.dataset.tpl; })[0]; tmsg(t.type, "Preparing file…"); payloadOf(t).then(function (p) { if (!p) throw new Error("No data to export."); return downloadGrid(payloadToGrid(p), "targets_" + t.type + ".xlsx"); }).then(function () { tmsg(t.type, "Downloaded.", "ok"); }).catch(function (e) { tmsg(t.type, e.message, "err"); }); }; });
+    host.querySelectorAll("[data-tpl]").forEach(function (b) { b.onclick = function () { var t = TARGET_TYPES.filter(function (x) { return x.type === b.dataset.tpl; })[0]; tmsg(t.type, "Preparing file…"); payloadOf(t).then(function (p) { if (!p) throw new Error("No data to export."); return downloadGrid(payloadToGrid(p), "targets_" + t.type + "_" + tgMonth + ".xlsx"); }).then(function () { tmsg(t.type, "Downloaded.", "ok"); }).catch(function (e) { tmsg(t.type, e.message, "err"); }); }; });
     host.querySelectorAll("[data-seed]").forEach(function (b) { b.onclick = function () { seed(TARGET_TYPES.filter(function (x) { return x.type === b.dataset.seed; })); }; });
   }
   function gmsg(t, c) { var e = $("twTgMsg"); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }
   function tmsg(type, t, c) { var e = document.querySelector('[data-msg="' + type + '"]'); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }
   function putTarget(type, payload, file, rows) {
-    return wfetch("putTargets", { body: JSON.stringify(payload), timeout: 60000 }, "&type=" + type).then(function () {
-      var meta = Object.assign({}, window.TowerTargets.meta || {}); var s = session();
+    var key = tgMonth;
+    return wfetch("putTargets", { body: JSON.stringify(payload), timeout: 60000 }, "&type=" + type + "." + key).then(function () {
+      var meta = Object.assign({}, tgMeta || {}); var s = session();
       meta[type] = { at: new Date().toISOString(), rows: rows, file: file, by: s ? s.email : "" };
-      return wfetch("putTargets", { body: JSON.stringify(meta) }, "&type=meta").then(function () { window.TowerTargets.meta = meta; });
+      return wfetch("putTargets", { body: JSON.stringify(meta) }, "&type=meta." + key).then(function () { tgMeta = meta; delete window.TowerTargets.cache[key]; });
     });
   }
   function pick(type, file) {
@@ -661,7 +697,7 @@
       $("twCan_" + type).onclick = function () { prev.innerHTML = ""; tmsg(type, ""); delete tgState[type]; };
       $("twPub_" + type).onclick = function () {
         tmsg(type, "Publishing…");
-        putTarget(type, p, file.name, rows.length).then(function () { tmsg(type, "Published ✓ — refreshing dashboard data…", "ok"); setTimeout(function () { renderTargets(); var rb = $("refreshBtn"); if (rb) rb.click(); }, 400); }).catch(function (e) { tmsg(type, e.message + (e.status === 403 ? " — wrong admin key." : ""), "err"); });
+        putTarget(type, p, file.name, rows.length).then(function () { tmsg(type, "Published ✓ — refreshing dashboard data…", "ok"); setTimeout(function () { renderTargets(); var rb = $("refreshBtn"); if (rb && tgMonth === selectedMonthKey()) rb.click(); }, 400); }).catch(function (e) { tmsg(type, e.message + (e.status === 403 ? " — wrong admin key." : ""), "err"); });
       };
     }).catch(function (e) { tmsg(type, e.message, "err"); });
   }

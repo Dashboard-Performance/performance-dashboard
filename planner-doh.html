@@ -1097,12 +1097,6 @@
                 </div>
                 <div class="table-controls">
                   <input id="searchPpmAnalystInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
-                  <select id="ppmAnalystFilterOp" class="filter-select">
-                    <option value="">PPM% Filter</option>
-                    <option value="gte">PPM% more than</option>
-                    <option value="lte">PPM% less than</option>
-                  </select>
-                  <input id="ppmAnalystFilterValue" class="filter-number" type="number" step="0.1" placeholder="e.g. 20" />
                 </div>
               </div>
               <div class="table-responsive">
@@ -1198,12 +1192,6 @@
                 </div>
                 <div class="table-controls">
                   <input id="searchPpmAnalystSingleInput" type="search" placeholder="Search SKU ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
-                  <select id="ppmAnalystSingleFilterOp" class="filter-select">
-                    <option value="">PPM% Filter</option>
-                    <option value="gte">PPM% more than</option>
-                    <option value="lte">PPM% less than</option>
-                  </select>
-                  <input id="ppmAnalystSingleFilterValue" class="filter-number" type="number" step="0.1" placeholder="e.g. 20" />
                 </div>
               </div>
               <div class="table-responsive">
@@ -1240,10 +1228,9 @@
                       <th onclick="sortPpmAnalystSingle('deliveredGmv')" class="num" style="cursor:pointer;" title="Total delivered order value this month, Overall. No cutoff applied.">DELIVERED GMV</th>
                       <th onclick="sortPpmAnalystSingle('contrGmvPct')" class="num" style="cursor:pointer;" title="This SKU's share of total Delivered GMV this month.">CONTR GMV%</th>
                       <th onclick="sortPpmAnalystSingle('ppmSku')" class="num" style="cursor:pointer;" title="Selling Price − Profit − Cogs for this SKU (same formula used as Priceing_PPM elsewhere in the dashboard).">Priceing_PPM</th>
-                      <th onclick="sortPpmAnalystSingle('ppmPct')" class="num" style="cursor:pointer;" title="Priceing_PPM ÷ LAST ASP PLACED — profit margin as a share of the most recent placed selling price.">PPM%</th>
-                      <th onclick="sortPpmAnalystSingle('ppmSuggestPpmSku')" class="num" style="cursor:pointer;" title="LAST ASP PLACED × 25% — a suggested target Priceing_PPM based on the most recent placed selling price.">PPM SUGGEST Priceing_PPM</th>
                       <th onclick="sortPpmAnalystSingle('totalDeliveredPpm')" class="num" style="cursor:pointer;" title="Total profit-per-metric delivered this month, Overall. No cutoff applied.">TOTAL DELIVERED PPM</th>
                       <th onclick="sortPpmAnalystSingle('ppmPerPiece')" class="num" style="cursor:pointer;" title="Delivered PPM ÷ delivered pieces. No cutoff.">PPM/PIECE</th>
+                      <th onclick="sortPpmAnalystSingle('ppmPct')" class="num" style="cursor:pointer;" title="TOTAL DELIVERED PPM ÷ TOTAL DELIVERED GMV. No cutoff applied.">PPM%</th>
                       <th onclick="sortPpmAnalystSingle('cm3')" class="num" style="cursor:pointer;" title="This SKU's total CM3 this month, Overall, excluding the most recent 5 days of data.">CM3</th>
                       <th onclick="sortPpmAnalystSingle('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 per delivered piece; both figures use the same 5-day CM3 cutoff.">CM3/PCS</th>
                       <th onclick="sortPpmAnalystSingle('cm3Pct')" class="num" style="cursor:pointer;" title="CM3 as a share of Delivered GMV, both using the 5-day CM3 cutoff.">CM3%</th>
@@ -1815,6 +1802,77 @@
                   <button id="prevPageMpNewMatches" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorMpNewMatches">Page 1 of 1</span>
                   <button id="nextPageMpNewMatches" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- STOPPED MATCHES: new matches (same conditions + cutoffs as above) that stopped placing orders -->
+          <section class="mb-4 mt-4">
+            <div class="panel-head-modern" style="margin-bottom:12px;">
+              <div class="panel-title-wrapper border-red">
+                <h2>Stopped Matches</h2>
+                <p>Same matches as New Matches above (same period, same conditions, same cutoffs) that placed nothing in the last N days — compared with the new matches that are still active</p>
+              </div>
+              <div class="table-controls">
+                <label class="text-dim" style="display:flex;align-items:center;gap:8px;font-size:12px;">No Placed in the last
+                  <input id="mpStoppedDays" class="filter-number" type="number" min="1" step="1" value="7" style="width:70px;" />
+                  days</label>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table" id="mpStoppedCompareTable">
+                <thead><tr><th>Metric</th><th class="num text-red" title="New matches with no Placed in the last N days.">Stopped</th><th class="num text-green" title="New matches that placed in the last N days.">Still active</th><th class="num" title="All New Matches (the section above).">All new</th></tr></thead>
+                <tbody id="mpStoppedCompareBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-red">
+                  <h2>Stopped Matches — details</h2>
+                  <p id="mpStoppedSubtitle">SKU × Merchant details (same period and cutoffs as New Matches)</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMpStoppedInput" type="search" placeholder="Search SKU, Merchant, or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="mpStoppedTable">
+                  <thead>
+                    <tr>
+                      <th onclick="sortMpStopped('sku')" class="font-mono" style="cursor:pointer;">SKU ID</th>
+                      <th onclick="sortMpStopped('skuName')" class="truncate-cell" style="cursor:pointer;">SKU Name</th>
+                      <th onclick="sortMpStopped('category')" style="cursor:pointer;">Category</th>
+                      <th onclick="sortMpStopped('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
+                      <th onclick="sortMpStopped('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
+                      <th onclick="sortMpStopped('placed')" class="num" style="cursor:pointer;" title="Total placed pieces since this match started. No cutoff applied.">Total Placed Pcs</th>
+                      <th onclick="sortMpStopped('confirmed')" class="num text-blue" style="cursor:pointer;" title="No cutoff applied.">Total Confirmed Pcs</th>
+                      <th onclick="sortMpStopped('delivered')" class="num text-green" style="cursor:pointer;" title="No cutoff applied.">Total Delivered Pcs</th>
+                      <th onclick="sortMpStopped('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days.">CR%</th>
+                      <th onclick="sortMpStopped('drPct')" class="num" style="cursor:pointer;" title="Delivered ÷ Confirmed, excluding the most recent 4 days.">DR%</th>
+                      <th onclick="sortMpStopped('ndrPct')" class="num" style="cursor:pointer;" title="CR% × DR%.">NDR%</th>
+                      <th onclick="sortMpStopped('cm3PerPiece')" class="num" style="cursor:pointer;" title="CM3 ÷ Delivered pieces, excluding the most recent 5 days.">CM3/Pieces</th>
+                      <th onclick="sortMpStopped('cm3')" class="num" style="cursor:pointer;" title="Excluding the most recent 5 days.">CM3</th>
+                      <th onclick="sortMpStopped('cm3Pct')" class="num text-purple" style="cursor:pointer;" title="CM3 ÷ Delivered GMV, excluding the most recent 5 days.">CM3%</th>
+                      <th onclick="sortMpStopped('placedAsp')" class="num text-dim" style="cursor:pointer;">Placed ASP</th>
+                      <th onclick="sortMpStopped('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
+                      <th onclick="sortMpStopped('matchStartTs')" class="text-dim" style="cursor:pointer;">Match Start</th>
+                      <th onclick="sortMpStopped('lastPlacedTs')" class="text-dim" style="cursor:pointer;" title="Most recent day this match had Placed pieces.">Last Placed</th>
+                      <th onclick="sortMpStopped('daysStopped')" class="num text-red" style="cursor:pointer;" title="Days between the latest data day and the last day this match had Placed pieces.">Days Stopped</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mpStoppedTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMpStopped">0 Matches</span>
+                <div class="pager">
+                  <button id="prevPageMpStopped" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMpStopped">Page 1 of 1</span>
+                  <button id="nextPageMpStopped" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

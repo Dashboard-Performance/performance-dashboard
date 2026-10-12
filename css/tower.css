@@ -596,3 +596,8 @@ html[data-theme="light"] input:disabled, html[data-theme="light"] select:disable
 body.tw-mscope .panel:has(#ovStTrendChart), body.tw-mscope .panel:has(#ovStock) { display: none; }
 body.tw-mscope .ov-row:has(#ovStTrendChart), body.tw-mscope .ov-row:has(#ovStock) { grid-template-columns: 1fr; }
 #twViewAs input { width: 100%; margin-top: 6px; min-height: 34px; padding: 0 10px; border-radius: 9px; }
+
+/* Targets Scorecard: freeze the header row (Metric + category names) and the Metric column while scrolling */
+#tcNew .table-responsive { max-height: calc(100vh - 150px); overflow: auto; }
+#tcNew .cx-matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--panel2, var(--panel)); }
+#tcNew .cx-matrix thead th:first-child { z-index: 4; left: 0; }

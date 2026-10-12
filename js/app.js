@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.15";
+const APP_VERSION = "1.15.20";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -655,6 +655,8 @@ const mpMatchesState = {
 const mpNewMatchesState = {
   data: [], filtered: [], sortKey: "placed", sortDir: "desc", page: 0
 };
+// Stopped Matches (تحت New Matches): نفس الماتشات الجديدة (نفس الشروط والـ cutoffs) اللي مفيهاش أي Placed في آخر N يوم.
+const mpStoppedState = { data: [], active: [], filtered: [], sortKey: "placed", sortDir: "desc", page: 0 };
 // Poor Matches (تحت CM3 Analyst): نفس منطق شيت "Matches" + "NDR_Summary" —
 // ماتشات (Merchant × SKU) أداؤها في الـ NDR% أقل بشكل ملحوظ من باقي نفس
 // الساب-كاتيجوري بتاعتها، وبالتالي مسؤولة عن جزء من الـ "Missed Deliveries".
@@ -3860,20 +3862,10 @@ function sortPpmAnalyst(key) {
 
 function applyPpmAnalystSearchAndSort() {
   const term = $("searchPpmAnalystInput") ? $("searchPpmAnalystInput").value.trim().toLowerCase() : "";
-  // فلتر PPM% (more than / less than) — لو مفيش عملية متحددة أو الرقم فاضي،
-  // الفلتر بيتجاهل تمامًا (كل الصفوف بتعدي).
-  const filterOp = $("ppmAnalystFilterOp") ? $("ppmAnalystFilterOp").value : "";
-  const filterValueRaw = $("ppmAnalystFilterValue") ? $("ppmAnalystFilterValue").value : "";
-  const filterValue = filterValueRaw === "" ? null : parseFloat(filterValueRaw);
-  const hasFilter = filterOp && filterValue !== null && !Number.isNaN(filterValue);
 
   ppmAnalystState.filtered = (ppmAnalystState.data || []).filter(m => {
     if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
       (m.category && m.category.toLowerCase().includes(term)))) return false;
-    if (hasFilter) {
-      if (filterOp === "gte" && !(m.ppmPct > filterValue)) return false;
-      if (filterOp === "lte" && !(m.ppmPct < filterValue)) return false;
-    }
     return true;
   });
   const { sortKey, sortDir } = ppmAnalystState; const dir = sortDir === "asc" ? 1 : -1;
@@ -3931,8 +3923,6 @@ function renderPaginatedPpmAnalystTable() {
 }
 
 if ($("searchPpmAnalystInput")) $("searchPpmAnalystInput").addEventListener("input", applyPpmAnalystSearchAndSort);
-if ($("ppmAnalystFilterOp")) $("ppmAnalystFilterOp").addEventListener("change", applyPpmAnalystSearchAndSort);
-if ($("ppmAnalystFilterValue")) $("ppmAnalystFilterValue").addEventListener("input", applyPpmAnalystSearchAndSort);
 if ($("prevPagePpmAnalyst")) $("prevPagePpmAnalyst").addEventListener("click", () => { if (ppmAnalystState.page > 0) { ppmAnalystState.page -= 1; renderPaginatedPpmAnalystTable(); } });
 if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystState.filtered.length / PAGE_SIZE)); if (ppmAnalystState.page < totalPages - 1) { ppmAnalystState.page += 1; renderPaginatedPpmAnalystTable(); } });
 
@@ -4119,11 +4109,8 @@ function preparePpmAnalystSingleData() {
     // Placed فعلاً (أحدث تاريخ في placedByDate) — مش مجموع/متوسط الشهر كله.
     const lastPlacedEntries = Array.from(b.placedByDate.entries()).sort((x, y) => y[0] - x[0]);
     const lastAspPlaced = (lastPlacedEntries.length && lastPlacedEntries[0][1].pieces > 0) ? (lastPlacedEntries[0][1].gmv / lastPlacedEntries[0][1].pieces) : 0;
-    // PPM% = Priceing_PPM ÷ LAST ASP PLACED (بطلب صريح) — مش Total Delivered PPM
-    // ÷ Delivered GMV زي أماكن تانية، نفس منطق "PPM%" في Recommended Tracker بالظبط.
-    const ppmPct = lastAspPlaced > 0 ? (ppmSku / lastAspPlaced) * 100 : 0;
-    // PPM SUGGEST Priceing_PPM = LAST ASP PLACED × 25% — قيمة مقترحة لـ Priceing_PPM مبنية على آخر سعر بيع Placed.
-    const ppmSuggestPpmSku = lastAspPlaced * 0.25;
+    // PPM% = TOTAL DELIVERED PPM ÷ TOTAL DELIVERED GMV (بدون cutoff)
+    const ppmPct = b.deliveredGmv > 0 ? (b.ppm / b.deliveredGmv) * 100 : 0;
 
     const avgLast3d = (confirmed3dBySingle.get(singleId) || 0) / 3;
     const avgLast7d = (confirmed7dBySingle.get(singleId) || 0) / 7;
@@ -4166,7 +4153,7 @@ function preparePpmAnalystSingleData() {
       lastAspPlaced, aspDeliveredLast10, aspDeliveredDays,
       sellingPrice, profit, asp, cogs,
       deliveredGmv: b.deliveredGmv, contrGmvPct,
-      ppmSku, ppmPct, ppmSuggestPpmSku, totalDeliveredPpm: b.ppm,
+      ppmSku, ppmPct, totalDeliveredPpm: b.ppm,
       cm3: b.cm3, cm3PerPiece, cm3Pct,
       contrPpmPct
     });
@@ -4193,18 +4180,10 @@ function sortPpmAnalystSingle(key) {
 
 function applyPpmAnalystSingleSearchAndSort() {
   const term = $("searchPpmAnalystSingleInput") ? $("searchPpmAnalystSingleInput").value.trim().toLowerCase() : "";
-  const filterOp = $("ppmAnalystSingleFilterOp") ? $("ppmAnalystSingleFilterOp").value : "";
-  const filterValueRaw = $("ppmAnalystSingleFilterValue") ? $("ppmAnalystSingleFilterValue").value : "";
-  const filterValue = filterValueRaw === "" ? null : parseFloat(filterValueRaw);
-  const hasFilter = filterOp && filterValue !== null && !Number.isNaN(filterValue);
 
   ppmAnalystSingleState.filtered = (ppmAnalystSingleState.data || []).filter(m => {
     if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
       (m.category && m.category.toLowerCase().includes(term)))) return false;
-    if (hasFilter) {
-      if (filterOp === "gte" && !(m.ppmPct > filterValue)) return false;
-      if (filterOp === "lte" && !(m.ppmPct < filterValue)) return false;
-    }
     return true;
   });
   const { sortKey, sortDir } = ppmAnalystSingleState; const dir = sortDir === "asc" ? 1 : -1;
@@ -4254,10 +4233,9 @@ function renderPaginatedPpmAnalystSingleTable() {
       <td class="num font-bold text-light">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
       <td class="num font-bold">${fmtPctCell(m.contrGmvPct)}</td>
       <td class="num text-orange font-bold">${fmtMoneyCompactCell(m.ppmSku)}</td>
-      <td class="num">${fmtPctCell(m.ppmPct)}</td>
-      <td class="num font-bold text-purple">${fmtMoneyCompactCell(m.ppmSuggestPpmSku)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
       <td class="num">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
       <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
       <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
       <td class="num">${fmtPctCell(m.cm3Pct)}</td>
@@ -4273,8 +4251,6 @@ function renderPaginatedPpmAnalystSingleTable() {
 }
 
 if ($("searchPpmAnalystSingleInput")) $("searchPpmAnalystSingleInput").addEventListener("input", applyPpmAnalystSingleSearchAndSort);
-if ($("ppmAnalystSingleFilterOp")) $("ppmAnalystSingleFilterOp").addEventListener("change", applyPpmAnalystSingleSearchAndSort);
-if ($("ppmAnalystSingleFilterValue")) $("ppmAnalystSingleFilterValue").addEventListener("input", applyPpmAnalystSingleSearchAndSort);
 if ($("prevPagePpmAnalystSingle")) $("prevPagePpmAnalystSingle").addEventListener("click", () => { if (ppmAnalystSingleState.page > 0) { ppmAnalystSingleState.page -= 1; renderPaginatedPpmAnalystSingleTable(); } });
 if ($("nextPagePpmAnalystSingle")) $("nextPagePpmAnalystSingle").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(ppmAnalystSingleState.filtered.length / PAGE_SIZE)); if (ppmAnalystSingleState.page < totalPages - 1) { ppmAnalystSingleState.page += 1; renderPaginatedPpmAnalystSingleTable(); } });
 
@@ -14810,10 +14786,11 @@ function prepareMpNewMatchesData() {
         merchantId: r.merchantId, merchantName: r.merchantName || r.merchantId,
         placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, ppm: 0, cm3: 0, cm3Gmv: 0,
         crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
-        matchStartTs: r.timestamp, matchStartDate: r.date
+        matchStartTs: r.timestamp, matchStartDate: r.date, lastPlacedTs: 0, lastPlacedDate: ""
       });
     }
     const e = map.get(key);
+    if ((r.placedPieces || 0) > 0 && r.timestamp > e.lastPlacedTs) { e.lastPlacedTs = r.timestamp; e.lastPlacedDate = r.date; }
     e.placed += r.placedPieces || 0; e.confirmed += r.confirmedPieces || 0; e.delivered += r.deliveredPieces || 0;
     e.placedGmv += r.placedGmv || 0; e.deliveredGmv += r.deliveredGmv || 0; e.ppm += r.ppm || 0;
     if (isRowEligibleForLag(r, crCutoff, "mpNewMatches")) { e.crPlaced += r.placedPieces || 0; e.crConfirmed += r.confirmedPieces || 0; }
@@ -14844,7 +14821,86 @@ function prepareMpNewMatchesData() {
   renderMpNewMatchesSummaryCards();
   renderMpNewMatchesCategoryBoxes();
   applyMpNewMatchesSearchAndSort();
+  prepareMpStoppedData(validRows);
 }
+
+// ---- Stopped Matches: New Matches (نفس الداتا بالظبط) اللي مفيهاش Placed في آخر N يوم ----
+function prepareMpStoppedData(validRows) {
+  const dayMs = 86400000, startOfDay = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const maxDay = validRows.length ? startOfDay(validRows.reduce((m, r) => Math.max(m, r.timestamp), 0)) : 0;
+  const nRaw = $("mpStoppedDays") ? parseInt($("mpStoppedDays").value, 10) : 7;
+  const n = nRaw > 0 ? nRaw : 7;
+  const all = mpNewMatchesState.data.map(m => ({ ...m, daysStopped: m.lastPlacedTs ? Math.round((maxDay - startOfDay(m.lastPlacedTs)) / dayMs) : 0 }));
+  mpStoppedState.data = all.filter(m => m.lastPlacedTs && m.daysStopped >= n);
+  mpStoppedState.active = all.filter(m => !(m.lastPlacedTs && m.daysStopped >= n));
+  renderMpStoppedCompare(all);
+  applyMpStoppedSearchAndSort();
+}
+function mpAgg(list) {
+  const z = { n: list.length, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, ppm: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0 };
+  list.forEach(m => { Object.keys(z).forEach(k => { if (k !== "n") z[k] += m[k] || 0; }); });
+  z.crPct = z.crPlaced ? z.crConfirmed / z.crPlaced * 100 : 0; z.drPct = z.drConfirmed ? z.drDelivered / z.drConfirmed * 100 : 0; z.ndrPct = z.crPct * z.drPct / 100;
+  z.cm3Pct = z.cm3Gmv ? z.cm3 / z.cm3Gmv * 100 : 0; z.cm3PerPiece = z.delivered ? z.cm3 / z.delivered : 0; z.placedAsp = z.placed ? z.placedGmv / z.placed : 0; z.ppmPct = z.deliveredGmv ? z.ppm / z.deliveredGmv * 100 : 0;
+  return z;
+}
+function renderMpStoppedCompare(all) {
+  const body = $("mpStoppedCompareBody"); if (!body) return;
+  const S = mpAgg(mpStoppedState.data), A = mpAgg(mpStoppedState.active), T = mpAgg(all);
+  const rows = [["Matches", "n", fmtIntCell], ["Placed Pcs", "placed", fmtIntCell], ["Confirmed Pcs", "confirmed", fmtIntCell], ["Delivered Pcs", "delivered", fmtIntCell], ["Delivered GMV", "deliveredGmv", fmtMoneyCompactCell],
+    ["CR% (cutoff D-2)", "crPct", fmtPctCell], ["DR% (cutoff D-4)", "drPct", fmtPctCell], ["NDR%", "ndrPct", fmtPctCell], ["CM3 (cutoff D-5)", "cm3", fmtMoneyCompactCell], ["CM3/Piece", "cm3PerPiece", fmtMoneyCompactCell], ["CM3%", "cm3Pct", fmtPctCell], ["Placed ASP", "placedAsp", fmtMoneyCompactCell], ["PPM%", "ppmPct", fmtPctCell]];
+  body.innerHTML = rows.map(r => `<tr><td class="font-bold text-light">${r[0]}</td><td class="num text-red">${r[2](S[r[1]])}</td><td class="num text-green">${r[2](A[r[1]])}</td><td class="num">${r[2](T[r[1]])}</td></tr>`).join("");
+  if ($("mpStoppedSubtitle")) $("mpStoppedSubtitle").textContent = `${fmtInt.format(mpStoppedState.data.length)} of ${fmtInt.format(all.length)} new matches placed nothing in the last ${$("mpStoppedDays") ? ($("mpStoppedDays").value || 7) : 7} days`;
+}
+function sortMpStopped(key) {
+  if (mpStoppedState.sortKey === key) { mpStoppedState.sortDir = mpStoppedState.sortDir === "asc" ? "desc" : "asc"; } else { mpStoppedState.sortKey = key; mpStoppedState.sortDir = "desc"; }
+  applyMpStoppedSearchAndSort();
+}
+function applyMpStoppedSearchAndSort() {
+  const term = $("searchMpStoppedInput") ? $("searchMpStoppedInput").value.trim().toLowerCase() : "";
+  mpStoppedState.filtered = mpStoppedState.data.filter(m => !term || [m.skuName, m.sku, m.merchantName, m.merchantId, m.category].some(v => v && String(v).toLowerCase().includes(term)));
+  const { sortKey, sortDir } = mpStoppedState; const dir = sortDir === "asc" ? 1 : -1;
+  mpStoppedState.filtered.sort((a, b) => { const av = a[sortKey], bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  mpStoppedState.page = 0;
+  renderPaginatedMpStoppedTable();
+}
+function renderPaginatedMpStoppedTable() {
+  const tbody = $("mpStoppedTableBody"); if (!tbody) return; tbody.innerHTML = "";
+  const start = mpStoppedState.page * PAGE_SIZE;
+  mpStoppedState.filtered.slice(start, start + PAGE_SIZE).forEach(m => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="font-mono text-dim">${m.sku}</td>
+      <td class="truncate-cell" title="${m.skuName}">${m.skuName}</td>
+      <td class="truncate-cell" title="${m.category}">${m.category}</td>
+      <td class="font-mono text-dim">${m.merchantId}</td>
+      <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
+      <td class="num font-bold">${fmtIntCell(m.placed)}</td>
+      <td class="num text-blue">${fmtIntCell(m.confirmed)}</td>
+      <td class="num text-green">${fmtIntCell(m.delivered)}</td>
+      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
+      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
+      <td class="num font-bold">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
+      <td class="num font-bold ${m.cm3 >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num text-purple">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
+      <td class="num">${fmtPctCell(m.ppmPct)}</td>
+      <td class="text-dim">${m.matchStartDate || "-"}</td>
+      <td class="text-dim">${m.lastPlacedDate || "-"}</td>
+      <td class="num font-bold text-red">${fmtIntCell(m.daysStopped)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const totalPages = Math.max(1, Math.ceil(mpStoppedState.filtered.length / PAGE_SIZE));
+  if ($("rowCountMpStopped")) $("rowCountMpStopped").textContent = `${fmtInt.format(mpStoppedState.filtered.length)} Matches`;
+  if ($("pageIndicatorMpStopped")) $("pageIndicatorMpStopped").textContent = `Page ${mpStoppedState.page + 1} of ${totalPages}`;
+  if ($("prevPageMpStopped")) $("prevPageMpStopped").disabled = mpStoppedState.page === 0;
+  if ($("nextPageMpStopped")) $("nextPageMpStopped").disabled = mpStoppedState.page >= totalPages - 1;
+}
+if ($("mpStoppedDays")) $("mpStoppedDays").addEventListener("input", () => { prepareMpNewMatchesData(); });
+if ($("searchMpStoppedInput")) $("searchMpStoppedInput").addEventListener("input", applyMpStoppedSearchAndSort);
+if ($("prevPageMpStopped")) $("prevPageMpStopped").addEventListener("click", () => { if (mpStoppedState.page > 0) { mpStoppedState.page -= 1; renderPaginatedMpStoppedTable(); } });
+if ($("nextPageMpStopped")) $("nextPageMpStopped").addEventListener("click", () => { const tp = Math.max(1, Math.ceil(mpStoppedState.filtered.length / PAGE_SIZE)); if (mpStoppedState.page < tp - 1) { mpStoppedState.page += 1; renderPaginatedMpStoppedTable(); } });
 
 
 // =====================================================================
@@ -18109,6 +18165,8 @@ async function fetchAllSheetsSnapshot() {
   await mbPromise;
   Object.assign(sheets, mbSheets);
   mbStale.forEach(g => staleGids.push(g));
+  // Pre-upload payloads (Google Sheet) of the 5 target sheets: kept so a month with no upload falls back to them.
+  window.__targetBase = {}; [TARGETS_GID, TARGETS_ACM_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID, SINGLE_SKU_TARGETS_GID].forEach(g => { window.__targetBase[g] = sheets[g]; });
   try { if (window.TowerTargets && twStarted) await window.TowerTargets.apply(sheets, twStarted); } catch (e) { console.warn("[Tower] targets apply failed:", e); }
 
   const mainPayload = sheets[MAIN_GID];
@@ -18537,7 +18595,28 @@ if($("prevPageInventory")) $("prevPageInventory").addEventListener("click", () =
 if($("nextPageInventory")) $("nextPageInventory").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.filteredInventoryData.length / PAGE_SIZE)); if (state.pageInventory < totalPages - 1) { state.pageInventory += 1; renderPaginatedInventoryTable(); } });
 document.querySelectorAll("#inventoryTable thead th").forEach((th) => { if (th.dataset.ikey) { th.addEventListener("click", () => { const key = th.dataset.ikey; if (state.sortKeyInventory === key) { state.sortDirInventory = state.sortDirInventory === "asc" ? "desc" : "asc"; } else { state.sortKeyInventory = key; state.sortDirInventory = "desc"; } applyInventorySearchAndSort(); }); }});
 
-if($("monthSelect")) $("monthSelect").addEventListener("change", applyFilters);
+// Targets are saved per month (Targets Upload): switching the month swaps in that month's targets first.
+async function reloadTargetsForMonth() {
+  const TT = window.TowerTargets;
+  if (!TT || !TT.forMonth || !window.__targetBase || !TT.activeKey) return false;
+  const key = TT.keyForSelect();
+  if (key === TT.activeKey) return false;
+  const found = await TT.forMonth(key);
+  const p = Object.assign({}, window.__targetBase, found);
+  restoreFullDatasets();
+  if (p[TARGETS_GID]) state.merchantTargets = parseTargetsSheet(p[TARGETS_GID]);
+  if (p[TARGETS_ACM_GID]) state.acmTargets = parseAcmTargetsSheet(p[TARGETS_ACM_GID]);
+  if (p[CAT_TARGETS_GID]) { state.commercialTargets = parseCommercialTargetsSheet(p[CAT_TARGETS_GID]); state.categoryTargets = deriveCategoryTargetsFromCommercial(state.commercialTargets); }
+  if (p[ACM_SALES_PLAN_GID]) state.acmSalesPlanData = parseAcmSalesPlanSheet(p[ACM_SALES_PLAN_GID]);
+  if (p[SINGLE_SKU_TARGETS_GID]) state.singleSkuTargets = parseSingleSkuTargetsSheet(p[SINGLE_SKU_TARGETS_GID]);
+  window.rescopeData(); // re-applies the Merchant scope and re-renders
+  return true;
+}
+if($("monthSelect")) $("monthSelect").addEventListener("change", async () => {
+  let swapped = false;
+  try { swapped = await reloadTargetsForMonth(); } catch (e) { console.warn("[Tower] month targets failed:", e); }
+  if (!swapped) applyFilters();
+});
 if($("acmSelect")) $("acmSelect").addEventListener("change", applyFilters);
 // لو غيّر فلتر الـ ACM العام وهو فاتح صفحة Incentive Merchants، يرجع Page 1
 // بدل ما يفضل واقف في صفحة رقمها أكبر من عدد صفحات النتيجة الجديدة (بعد الفلترة).
