@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.24";
+const APP_VERSION = "1.15.25";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -11779,138 +11779,6 @@ function fcRunHorizonEngine(sd, H, opts) {
   return { results, horizon: H };
 }
 
-// ---- Monthly history support -------------------------------------------
-// The history tab can be either daily (one row per day) or monthly (one row
-// per SKU per month, dated on the 1st — e.g. a PERIOD_FILTER column). We
-// detect which, and run the matching engine: daily windows when we have real
-// daily signals, month-over-month features when we only have monthly totals.
-function fcHistoryGranularity(histRows) {
-  const byMonth = new Map();
-  for (const r of (histRows || [])) {
-    const mk = `${r.day.getFullYear()}-${r.day.getMonth()}`;
-    let s = byMonth.get(mk); if (!s) { s = new Set(); byMonth.set(mk, s); }
-    s.add(r.day.getDate());
-  }
-  if (!byMonth.size) return { monthly: false, months: 0, medianDays: 0 };
-  const counts = Array.from(byMonth.values()).map(s => s.size).sort((a, b) => a - b);
-  const med = counts[Math.floor(counts.length / 2)];
-  return { monthly: med <= 3, months: byMonth.size, medianDays: med, maxDays: counts[counts.length - 1] };
-}
-
-// Monthly totals per SKU. History months are complete by definition (the tab
-// carries the whole month on one row); Main months are complete once every
-// one of their days is a full day.
-function fcMonthlySeries(sd, histMonthKeys) {
-  const months = fcMonths(sd).map(m => {
-    const fromHist = histMonthKeys.has(m.key);
-    const end = (m.endIdx === undefined) ? sd.lastFullIdx : Math.min(m.endIdx, sd.lastFullIdx);
-    const elapsed = (m.startIdx === undefined || end < m.startIdx) ? 0 : (end - m.startIdx + 1);
-    return Object.assign({}, m, { fromHist, complete: fromHist || (m.endIdx !== undefined && m.endIdx <= sd.lastFullIdx), end, elapsed });
-  });
-  const totals = new Map();
-  sd.series.forEach((arr, sku) => {
-    const v = new Float64Array(months.length);
-    months.forEach((m, i) => { v[i] = (m.startIdx === undefined || m.end < m.startIdx) ? 0 : fcSum(arr, m.startIdx, m.end); });
-    totals.set(sku, v);
-  });
-  return { months, totals };
-}
-
-// Month-over-month features (all normalised to a 30-day month so months of
-// different lengths are comparable).
-function fcMonthlyFeatures(v, i, months) {
-  const norm = (k) => k >= 0 ? v[k] * 30 / months[k].dim : null;
-  const m0 = norm(i) || 0;
-  const m1 = norm(i - 1), m2 = norm(i - 2), m3 = norm(i - 3);
-  const hist = [m3, m2, m1, m0].filter(x => x !== null);
-  const n = hist.length;
-  const mean = hist.reduce((s, x) => s + x, 0) / n;
-  let varr = 0; hist.forEach(x => { varr += (x - mean) * (x - mean); });
-  const std = Math.sqrt(varr / n);
-  const sorted = hist.slice().sort((a, b) => a - b);
-  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
-  const last3 = [m2, m1, m0].filter(x => x !== null);
-  const avg3 = last3.reduce((s, x) => s + x, 0) / last3.length;
-  const fit = fcLinFit(hist, 0, n - 1);
-  return {
-    total: m0, m1: m1 === null ? m0 : m1, m2: m2 === null ? (m1 === null ? m0 : m1) : m2,
-    avail: n, mean, std, median, avg3, wAvg: (m1 === null ? m0 : (m2 === null ? 0.8 * m0 + 0.2 * m1 : 0.7 * m0 + 0.2 * m1 + 0.1 * m2)), maxA: Math.max.apply(null, hist), zeroMonths: hist.filter(x => x === 0).length,
-    cv: mean > 0 ? std / mean : 0,
-    growth1: (m0 + 1) / ((m1 === null ? m0 : m1) + 1),
-    growth2: m1 === null ? 1 : (m1 + 1) / ((m2 === null ? m1 : m2) + 1),
-    slope: fit.slope, r2: fit.r2
-  };
-}
-function fcMonthlyVector(f) {
-  const l = Math.log1p;
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  return [
-    l(f.total), l(f.m1), l(f.m2), l(f.avg3), l(f.maxA), l(f.median),
-    Math.log(f.growth1), Math.log(f.growth2),
-    Math.min(f.cv, 5), f.r2, clamp(f.slope / (f.mean + 1), -3, 3),
-    f.zeroMonths / f.avail, f.avail
-  ];
-}
-function fcMonthlyCategorize(f) {
-  const R = FC_RULES;
-  if (f.m1 === 0 && f.total > 0) return "Shifting Up";
-  const chg = f.total - f.m1;
-  if (f.zeroMonths >= 1 && f.avail >= 3) return "Non-Linear / Volatile";
-  if (f.avail >= 3 && f.maxA >= 2.5 * Math.max(f.median, 1) && f.cv > 0.6) return "Spiky";
-  if (chg >= R.largeChangePcs && f.growth1 >= R.largeChangeRatio) return "Shifting Up";
-  if (chg <= -R.largeChangePcs && f.growth1 <= 1 / R.largeChangeRatio) return "Shifting Down";
-  if (f.cv <= 0.25) return "Steady";
-  if (f.cv <= 0.6) return "Steady";
-  return "Non-Linear / Volatile";
-}
-function fcMonthlyBaseline(f, cat) {
-  switch (cat) {
-    case "Shifting Up": return Math.max(f.total, f.total * Math.min(f.growth1, 1.5));
-    case "Shifting Down": return 0.6 * f.total + 0.4 * (f.total * Math.max(f.growth1, 0.5));
-    case "Steady": return f.wAvg;
-    case "Non-Linear / Volatile": return Math.max(f.avg3, f.total);
-    default: return f.median;
-  }
-}
-function fcMonthlyGuardrail(v, f, cat, baseline) {
-  let out = v;
-  if (cat === "Shifting Up") out = Math.max(out, 0.85 * f.total);
-  else if (cat === "Shifting Down") out = Math.min(out, 1.10 * baseline);
-  else if (cat === "Steady") out = Math.min(Math.max(out, 0.85 * f.total), 1.15 * f.total);
-  else if (cat === "Non-Linear / Volatile") out = Math.min(out, 2.75 * Math.max(f.total, f.avg3));
-  else out = Math.min(out, 1.5 * Math.max(f.total, f.median));
-  return Math.max(0, out);
-}
-function fcMonthlyPredictOne(models, f, conf) {
-  const cat = fcMonthlyCategorize(f);
-  const x = fcMonthlyVector(f);
-  const baseline = fcMonthlyBaseline(f, cat);
-  // The model predicts the CHANGE vs last month (log ratio), so when it has
-  // nothing to go on it falls back to "same as last month" instead of drifting
-  // toward the overall average — the safe default with few training months.
-  const fromRatio = (pred) => Math.max(0, Math.min((f.total + 1) * Math.exp(pred) - 1, 10 * Math.max(f.total, f.avg3, 1)));
-  if (!models) return { cat, baseline, ml: null, w: 0, pNonzero: null, raw: fcMonthlyGuardrail(baseline, f, cat, baseline) };
-  if (cat === "Non-Linear / Volatile") {
-    const p = fcLogisticPredict(models.hurdleClf, x);
-    const amt = models.hurdleAmt ? fromRatio(fcRidgePredict(models.hurdleAmt, x)) : baseline;
-    const hurdle = p * amt;
-    const wh = 0.7 * (conf === undefined ? 1 : conf);
-    return { cat, baseline, ml: hurdle, w: wh, pNonzero: p, raw: fcMonthlyGuardrail(wh * hurdle + (1 - wh) * baseline, f, cat, baseline) };
-  }
-  const model = models.perCat[cat] || models.global;
-  const ml = fromRatio(fcRidgePredict(model, x));
-  // Trust the model only as far as the training history supports it: with a
-  // single month pair its "direction" is mostly that one month's noise.
-  const w = fcWeight(ml, f, cat) * (conf === undefined ? 1 : conf);
-  return { cat, baseline, ml, w, pNonzero: null, raw: fcMonthlyGuardrail(w * ml + (1 - w) * baseline, f, cat, baseline) };
-}
-
-// The three things we can predict next month with, per SKU (30-day units):
-//   naive    = same as last month
-//   baseline = the category's rule-based number
-//   ml       = the trained model
-// Which mix actually wins is measured on past months, per behavior, instead
-// of being hard-coded — see fcPickBlends below.
 // SKU size segments. Measured on the real data: the model earns its keep on
 // high-volume SKUs and actively hurts on low-volume ones, where a plain
 // recent-rate rule wins — so the method is chosen per segment, not globally.
@@ -12046,194 +11914,6 @@ function fcBandsAtLevels(ratiosBySeg) {
   return out;
 }
 const FC_CALIB_MIN = 0.85, FC_CALIB_MAX = 1.25;
-
-const FC_BLENDS = [
-  { key: "ml", w: [1, 0, 0], label: "ML" },
-  { key: "base", w: [0, 1, 0], label: "Baseline" },
-  { key: "naive", w: [0, 0, 1], label: "Last month" },
-  { key: "ml_base", w: [0.5, 0.5, 0], label: "50 ML / 50 Base" },
-  { key: "ml_naive", w: [0.5, 0, 0.5], label: "50 ML / 50 Last" },
-  { key: "base_naive", w: [0, 0.5, 0.5], label: "50 Base / 50 Last" },
-  { key: "even", w: [1 / 3, 1 / 3, 1 / 3], label: "Even mix" },
-  { key: "naive_heavy", w: [0.25, 0.25, 0.5], label: "25 ML / 25 Base / 50 Last" }
-];
-const FC_DEFAULT_BLEND = FC_BLENDS.find(b => b.key === "base_naive");
-
-function fcMonthlyCandidates(v, i, months, models, conf) {
-  const f = fcMonthlyFeatures(v, i, months);
-  if (f.total <= 0) return null;
-  const p = fcMonthlyPredictOne(models, f, conf);
-  return { f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total, pNonzero: p.pNonzero, w: p.w };
-}
-function fcBlendValue(c, blend) {
-  if (blend.key === "naive") return c.naive; // plain "same as last month", untouched
-  const ml = c.ml === null ? c.naive : c.ml; // no model yet -> fall back to last month
-  const raw = blend.w[0] * ml + blend.w[1] * c.baseline + blend.w[2] * c.naive;
-  return fcMonthlyGuardrail(raw, c.f, c.cat, c.baseline);
-}
-
-function fcRunEngineMonthly(sd, ms, opts) {
-  const o = Object.assign({ v2: true }, opts || {});
-  const months = ms.months;
-  const results = [];
-  const trainSamples = (limit) => {
-    const pairs = [], samples = [];
-    for (let i = 0; i + 1 < months.length; i++) {
-      if (!months[i].complete || !months[i + 1].complete) continue;
-      if (i + 1 > limit) continue;
-      pairs.push({ source: months[i], target: months[i + 1] });
-      ms.totals.forEach((v) => {
-        const f = fcMonthlyFeatures(v, i, months);
-        if (f.total <= 0) return;
-        const y = Math.log((v[i + 1] * 30 / months[i + 1].dim + 1) / (f.total + 1));
-        samples.push({ cat: fcMonthlyCategorize(f), x: fcMonthlyVector(f), y, nonzero: v[i + 1] > 0 ? 1 : 0 });
-      });
-    }
-    return { pairs, samples };
-  };
-  const cache = new Map();
-  const modelsFor = (limit) => {
-    if (!cache.has(limit)) {
-      const { pairs, samples } = trainSamples(limit);
-      cache.set(limit, { pairs, models: samples.length ? fcTrainModels(samples) : null });
-    }
-    return cache.get(limit);
-  };
-  let prevErrors = null;
-  const short = (k) => k.split(" ")[0].slice(0, 3);
-
-  // For target index t: replay every earlier month pair with models that only
-  // saw data before that month, score each candidate blend per behavior, and
-  // keep the one with the lowest error. No leakage: month t is never scored.
-  const blendCache = new Map();
-  const pickBlends = (t) => {
-    if (blendCache.has(t)) return blendCache.get(t);
-    const acc = new Map(); // cat -> { blendKey -> {absErr, sumA, n} }
-    for (let vIdx = 1; vIdx < t; vIdx++) {
-      if (!months[vIdx].complete || !months[vIdx - 1].complete) continue;
-      const { pairs, models } = modelsFor(vIdx - 1);
-      const vConf = Math.min(1, pairs.length / 3);
-      const scale = 30 / months[vIdx].dim;
-      ms.totals.forEach((v) => {
-        const c = fcMonthlyCandidates(v, vIdx - 1, months, models, vConf);
-        if (!c) return;
-        const actual = v[vIdx] * scale; // normalised to 30 days like the candidates
-        let byCat = acc.get(c.cat);
-        if (!byCat) { byCat = new Map(); acc.set(c.cat, byCat); }
-        FC_BLENDS.forEach(b => {
-          if (b.w[0] > 0 && c.ml === null) return; // ML wasn't available that month — don't credit it
-          let e = byCat.get(b.key);
-          if (!e) { e = { absErr: 0, sumA: 0, n: 0 }; byCat.set(b.key, e); }
-          e.absErr += Math.abs(fcBlendValue(c, b) - actual);
-          e.sumA += actual; e.n++;
-        });
-      });
-    }
-    const chosen = {};
-    acc.forEach((byCat, cat) => {
-      let best = null, naiveWape = null;
-      byCat.forEach((e, key) => {
-        if (e.n < 25 || e.sumA <= 0) return;
-        const wape = e.absErr / e.sumA;
-        if (key === "naive") naiveWape = wape;
-        if (!best || wape < best.wape) best = { key, wape, n: e.n };
-      });
-      // Stay on "last month" unless another blend beats it by a real margin —
-      // a tiny edge on a couple of months is noise, not skill.
-      if (best && naiveWape !== null && best.key !== "naive" && (naiveWape - best.wape) < 0.005) {
-        best = { key: "naive", wape: naiveWape, n: best.n };
-      }
-      if (best) {
-        const blend = FC_BLENDS.find(b => b.key === best.key);
-        const naiveEntry = byCat.get("naive");
-        chosen[cat] = {
-          blend, accuracy: Math.max(0, (1 - best.wape) * 100), n: best.n,
-          naiveAccuracy: naiveEntry && naiveEntry.sumA > 0 ? Math.max(0, (1 - naiveEntry.absErr / naiveEntry.sumA) * 100) : null
-        };
-      }
-    });
-    blendCache.set(t, chosen);
-    return chosen;
-  };
-
-  const build = (mode, target, srcIdx, srcLabel, limit, projectedSource) => {
-    const { pairs, models } = modelsFor(limit);
-    const conf = Math.min(1, pairs.length / 3);
-    const blends = pickBlends(target.index >= 0 ? target.index : months.length);
-    const scale = target.dim / 30;
-    const rows = [];
-    const flaggedPrev = new Set();
-    if (prevErrors) prevErrors.forEach((e, sku) => {
-      if (Math.max(e.forecast, e.actual) >= 20 && Math.abs(e.forecast - e.actual) > Math.max(e.actual, 1)) flaggedPrev.add(sku);
-    });
-    let newSkuCount = 0, newSkuPcs = 0;
-    const tIdx = target.index;
-    ms.totals.forEach((v, sku) => {
-      const f = projectedSource ? projectedSource(v) : fcMonthlyFeatures(v, srcIdx, months);
-      let actual = null, mtd = null, elapsed = 0;
-      if (mode === "backtest") actual = v[tIdx];
-      if (mode === "current") { mtd = v[tIdx]; elapsed = target.elapsed; }
-      if (f.total <= 0) { if (mode === "backtest" && actual > 0) { newSkuCount++; newSkuPcs += actual; } return; }
-      const p = fcMonthlyPredictOne(models, f, conf);
-      const pick = blends[p.cat];
-      const blend = pick ? pick.blend : (models ? null : FC_DEFAULT_BLEND);
-      let raw = blend
-        ? fcBlendValue({ f, cat: p.cat, baseline: p.baseline, ml: p.ml, naive: f.total }, blend)
-        : p.raw;
-      const sparseJumpy = f.zeroMonths >= 1 && f.cv > 1;
-      const flagged = flaggedPrev.has(sku) || sparseJumpy;
-      const flagReason = flaggedPrev.has(sku) ? "Missed >100% last month" : (sparseJumpy ? "Zero month + volatile" : "");
-      if (o.v2 && flagged && models && !(blend && blend.key === "naive")) raw = fcMonthlyGuardrail(p.baseline + 0.5 * (raw - p.baseline), f, p.cat, p.baseline);
-      const forecast = raw * scale;
-      const band = fcBandPct(p.cat, f);
-      rows.push({
-        sku, cat: p.cat, srcTotal: f.total * scale, daysSold: null, cv: f.cv,
-        blend: blend ? blend.label : null,
-        baseline: p.baseline * scale, ml: p.ml === null ? null : p.ml * scale, w: p.w, pNonzero: p.pNonzero,
-        forecast, fMin: forecast * (1 - band), fMax: forecast * (1 + band),
-        actual, mtd, elapsed, flagged, flagReason
-      });
-    });
-    const res = {
-      mode, key: target.key, label: target.key, dim: target.dim, granularity: "monthly",
-      srcColLabel: "Last Month", sourceLabel: srcLabel,
-      pairs: pairs.map(p => `${short(p.source.key)} → ${short(p.target.key)}`),
-      trainN: models ? models.n : 0, rows, newSkuCount, newSkuPcs, blends
-    };
-    if (mode === "backtest") prevErrors = new Map(rows.map(r => [r.sku, { forecast: r.forecast, actual: r.actual }]));
-    return res;
-  };
-
-  months.forEach((m, i) => { m.index = i; });
-  for (let i = 1; i < months.length; i++) {
-    if (!months[i].complete || !months[i - 1].complete) continue;
-    results.push(build("backtest", months[i], i - 1, months[i - 1].key, i - 1));
-  }
-  const lastCompleteIdx = months.reduce((acc, m, i) => m.complete ? i : acc, -1);
-  const curIdx = months.length - 1;
-  const cur = months[curIdx];
-  if (cur && !cur.complete && lastCompleteIdx === curIdx - 1 && cur.elapsed > 0) {
-    results.push(build("current", cur, curIdx - 1, months[curIdx - 1].key, curIdx - 1));
-  }
-  // Next month — source = the current partial month projected to a full month,
-  // or the last complete month when there is no open month yet.
-  if (lastCompleteIdx >= 0) {
-    const openPartial = cur && !cur.complete && cur.elapsed > 0;
-    const baseM = openPartial ? cur : months[lastCompleteIdx];
-    const ny = baseM.m === 11 ? baseM.y + 1 : baseM.y;
-    const nm = (baseM.m + 1) % 12;
-    const target = { key: fcMonthLabel(ny, nm), dim: new Date(ny, nm + 1, 0).getDate(), index: -1 };
-    const srcLabel = openPartial ? `${baseM.key} (projected from ${baseM.elapsed} of ${baseM.dim} days)` : baseM.key;
-    const projected = openPartial ? (v) => {
-      const scaled = new Float64Array(v.length);
-      for (let k = 0; k < v.length; k++) scaled[k] = v[k];
-      scaled[curIdx] = cur.elapsed > 0 ? v[curIdx] * cur.dim / cur.elapsed : 0;
-      return fcMonthlyFeatures(scaled, curIdx, months);
-    } : null;
-    results.push(build("next", target, openPartial ? curIdx : lastCompleteIdx, srcLabel, lastCompleteIdx, projected));
-  }
-  return { months, results };
-}
 
 // ---- Forecast Model: loading (lazy — only when the tab is opened) ----
 // The history tab is read straight from Google Sheets (gviz JSONP), with a
@@ -12388,30 +12068,12 @@ async function prepareForecastModelView(forceReload) {
       : (sku) => { const m = bundleProductMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
     const sd = fcBuildSeries(fcState.hist || [], state.allParsedRows || [], mappingsFor, new Date());
     fcState.series = sd;
-    // The history tab can be daily or monthly (one row per SKU per month) —
-    // detect it and run the matching engine.
-    const gran = fcHistoryGranularity(fcState.hist || []);
-    fcState.granularity = gran;
     fcSetProgress("Categorizing SKUs and training models…", 65); await fcNextFrame();
-    let engine;
-    if (gran.monthly) {
-      const histMonthKeys = new Set((fcState.hist || []).map(r => fcMonthLabel(r.day.getFullYear(), r.day.getMonth())));
-      const ms = fcMonthlySeries(sd, histMonthKeys);
-      fcState.monthly = ms;
-      engine = fcRunEngineMonthly(sd, ms, { v2: fcState.v2 });
-    } else {
-      fcState.monthly = null;
-      engine = fcRunEngine(sd, new Date(), { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
-    }
+    const engine = fcRunEngine(sd, new Date(), { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
     fcSetProgress("Forecasting the next 7 / 14 / 30 days…", 80); await fcNextFrame();
     const engines = { month: engine };
-    if (!gran.monthly) {
-      // Rolling horizons only make sense with real daily history.
-      // Built on demand instead of here: the 7- and 14-day engines cost about
-      // 45s and 115s respectively (they re-score every candidate at every
-      // rolling anchor), and most visits never leave the Month view. They are
-      // now created the first time their horizon is actually selected.
-    }
+    // Rolling 7/14-day engines are built on demand, the first time their
+    // horizon is selected (they cost ~45s and ~115s to build).
     fcSetProgress("Scoring and ranking…", 90); await fcNextFrame();
     Object.values(engines).forEach(e => fcEnrichResults(e));
     fcState.engines = engines;
@@ -12754,7 +12416,6 @@ function fcRenderGmvTarget() {
 function fcRenderMethod() {
   const el = $("fcMethodBody");
   if (!el) return;
-  const monthly = !!(fcState.granularity && fcState.granularity.monthly);
   const common = [
     ["Demand", "Confirmed pieces per Single SKU (bundles are split into their components). Same basis as DOH and Sellthrough. If a day exists in both the History tab and Main, Main wins — no double-counting."],
     ["Behavior", "Every SKU is tagged with one pattern: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, or Spiky. Each pattern gets its own model and its own rules — they're never mixed."],
@@ -12764,18 +12425,7 @@ function fcRenderMethod() {
     ["Guardrails & risk flags", "Caps per behavior pattern (below) stop any forecast running away. Separately, SKUs that missed by 100%+ last month, or that are thin and erratic, are flagged 'Risky' — that is a warning about confidence, not a change to the number."],
     ["No leakage, ever", "A backtest for any month trains only on month-pairs that ended before it, then checks the real result. The Naive column shows what just repeating last month would have scored — so Lift = what the model actually adds over doing nothing."]
   ];
-  const specific = monthly
-    ? [
-      ["Source (monthly tab)", "One row per SKU per month. Features: last month, the two before it, a recency-weighted average, the max and median month, month-over-month growth, trend slope, volatility, and how many months were zero — every month normalised to 30 days first."],
-      ["Horizon", "Target can be a calendar month or a rolling 7/14/30-day window. Shorter is more accurate on this data (measured: 7d ≈ 54% accuracy / 67% hit rate, 14d ≈ 48% / 54%, a full month ≈ 46% / 35%). Use the month for purchasing volume, the 7/14-day view for what to act on this week."],
-      ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
-      ["Method picking", "For each segment, every candidate (the model, last 10/14/21/30 days, blends of them) is scored on earlier months only, using models that never saw those months. Lowest real error wins — it only moves off 'last 30 days' when the gain is real, measured, and repeatable. Segment A also gets a bias-correction factor, clamped to ±25%."],
-      ["Model", "Ridge regression per behavior on the change vs last month, so with nothing to go on it falls back to 'same as last month' instead of drifting to the average. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
-      ["Baselines", "Up: last month continued at its growth rate (capped 1.5×). Down: a decayed last month. Steady: recency-weighted 3-month average. Non-Linear / Volatile: max(3-month average, last month). Spiky: median month."],
-      ["Guardrails", "Up: floor ≥ 0.85× last month. Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of last month. Non-Linear / Volatile: cap ≤ 2.75× last month. Spiky: cap ≤ 1.5× last month."],
-      ["Next month", "Forecast from the open month, projected to a full month using month-to-date scaled by days elapsed — the newest signal available."]
-    ]
-    : [
+  const specific = [
       ["Source (daily tab)", "The last 30 full days before the target month. Features: last 3/7/10/14/15/20/30 days, first 7 days, max day, max week, StdDev, CV, trend slope, momentum, and share of zero days."],
       ["Size segment", "SKUs are grouped by recent volume: A (100+ pcs/month), B (30–99), C (under 30). The model earns its keep on A but loses to a plain recent-rate rule on C — most of the catalogue — so each segment picks its own method instead of one rule for everything."],
       ["Method picking", "For segment A, every candidate (last 7/10/14/15/21/30 days, blends, the model) is scored on earlier months only, using models that never saw those months — lowest real error wins. B and C skip that per-month pick: measured on real backtests, a per-month 'winner' overfits their noisy scores, so they use one fixed method instead."],
@@ -12804,14 +12454,8 @@ function fcRenderStatus() {
   } else if (fcState.histMeta && sd) {
     const c = sd.coverage; const d = fcState.histMeta.detection;
     const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
-    const g = fcState.granularity || {};
-    const monthsCovered = (fcState.monthly && fcState.monthly.months || []).filter(m => m.fromHist);
-    const covered = monthsCovered.length
-      ? `${monthsCovered[0].key.split(" ")[0].slice(0, 3)} – ${monthsCovered[monthsCovered.length - 1].key.split(" ")[0].slice(0, 3)} ${monthsCovered[monthsCovered.length - 1].y} · ${monthsCovered.length} months`
-      : range(c.histFrom, c.histTo);
-    const grainBadge = g.monthly
-      ? `<span class="badge-outline blue" title="One row per SKU per month — the model runs month-over-month instead of on daily signals.">monthly totals</span>`
-      : `<span class="badge-outline blue">daily</span>`;
+    const covered = range(c.histFrom, c.histTo);
+    const grainBadge = `<span class="badge-outline blue">daily</span>`;
     parts.push(`<span class="badge-outline green">Sales history loaded</span> <span class="text-dim" title="Raw dates in the history: ${range(c.histFrom, c.histTo)}">${fcPcs(fcState.histMeta.rawRows)} rows · ${covered}${c.histDupes ? ` · ${fcPcs(c.histDupes)} duplicate rows removed` : ""}</span>`);
   }
   if (sd && sd.coverage) {
@@ -12829,29 +12473,6 @@ function fcRenderStatus() {
     const ok = pct !== null && Math.abs(pct - 100) <= 5;
     parts.push(`<span class="badge-outline ${ok ? "green" : "orange"}" title="On the ${c2.overlapDays} days both data sources overlap, they should report the same confirmed pieces. If they don't, they aren't counting the same thing — worth checking before trusting the accuracy numbers.">Data match ${pct === null ? "—" : pct.toFixed(0) + "%"}</span> <span class="text-dim">on ${fcPcs(c2.overlapDays)} overlapping days</span>`);
   }
-  // Monthly totals across both sources. A big step exactly where the history
-  // tab hands over to Main usually means the two aren't counting the same
-  // thing (country filter, debundling, confirmed vs delivered) — which would
-  // quietly wreck every forecast that crosses the seam.
-  const msx = fcState.monthly;
-  if (msx && msx.months.length) {
-    const tot = new Array(msx.months.length).fill(0);
-    msx.totals.forEach(v => { for (let i = 0; i < v.length; i++) tot[i] += v[i]; });
-    const txt = msx.months.map((m, i) => `${m.key.split(" ")[0].slice(0, 3)} ${fcCompact(tot[i])}${m.complete ? "" : " (MTD)"}`).join(" · ");
-    let warn = "";
-    let lastH = -1;
-    msx.months.forEach((m, i) => { if (m.fromHist) lastH = i; });
-    if (lastH >= 0 && lastH + 1 < msx.months.length && msx.months[lastH + 1].complete && tot[lastH] > 0) {
-      const step = tot[lastH + 1] / tot[lastH] - 1;
-      const steps = [];
-      for (let i = 1; i <= lastH; i++) if (tot[i - 1] > 0) steps.push(Math.abs(tot[i] / tot[i - 1] - 1));
-      const typical = steps.length ? steps.reduce((x, y) => x + y, 0) / steps.length : 0;
-      if (Math.abs(step) > 0.3 && Math.abs(step) > 2 * typical) {
-        warn = ` <span class="badge-outline orange" title="Within the history tab the month-to-month change averages ${(typical * 100).toFixed(0)}%, but the step from ${msx.months[lastH].key} (history tab) to ${msx.months[lastH + 1].key} (Main) is ${(step * 100).toFixed(0)}%. Check that both sources count the same thing: same country, same debundling, confirmed pieces.">level shift ${step > 0 ? "+" : ""}${(step * 100).toFixed(0)}% at the handover</span>`;
-      }
-    }
-    parts.push(`<span class="badge-outline purple">Monthly totals</span> <span class="text-dim">${txt}</span>${warn}`);
-  }
   el.innerHTML = parts.map(p => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${p}</div>`).join("");
 }
 
@@ -12864,8 +12485,7 @@ function fcFamilies() {
   const list = [{ key: "month", label: "Month" }];
   // Listed even before the engine exists — picking one builds it (see the
   // fcHorizonSelect handler). Only offered with real daily history.
-  const daily = !(fcState.granularity && fcState.granularity.monthly);
-  if (daily && fcState.series) FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => list.push({ key: "H" + H, label: H + " Day" }));
+  if (fcState.series) FC_HORIZONS.slice().sort((a, b) => b - a).forEach(H => list.push({ key: "H" + H, label: H + " Day" }));
   return list;
 }
 function fcNextKeyOf(familyKey) {
@@ -13085,7 +12705,7 @@ function fcRenderAccuracyTrend() {
     key: r.key, trained: r.trainN > 0,
     acc: fcAccuracy(r.rows, fcState.band),
     accEx: fcAccuracy(r.rows.filter(x => !x.flagged), fcState.band),
-    naive: fcAccuracy(r.rows.map(x => ({ forecast: x.srcTotal * (r.dim / (r.granularity === "monthly" ? r.dim : 30)), actual: x.actual })), fcState.band)
+    naive: fcAccuracy(r.rows.map(x => ({ forecast: x.srcTotal * (r.dim / 30), actual: x.actual })), fcState.band)
   }));
   if (body) {
     body.innerHTML = data.length ? data.map(d => {
