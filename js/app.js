@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.20";
+const APP_VERSION = "1.15.22";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14824,16 +14824,57 @@ function prepareMpNewMatchesData() {
   prepareMpStoppedData(validRows);
 }
 
-// ---- Stopped Matches: New Matches (نفس الداتا بالظبط) اللي مفيهاش Placed في آخر N يوم ----
+// ---- Stopped Matches (Overall): أي Merchant×SKU كان شغال قبل بداية الفترة وبقى مفيهوش ولا Placed جوه الفترة ----
+// الفترة = رينج New Matches لو مختار، وإلا الشهر الحالي. "قبل الفترة" = نفس طول الفترة قبل أول يوم فيها
+// (أو الشهر اللي فات لو مفيش رينج). نفس شروط New Matches: Total Placed > 5 واستبعاد Fashion / Taager Gomla.
 function prepareMpStoppedData(validRows) {
   const dayMs = 86400000, startOfDay = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
-  const maxDay = validRows.length ? startOfDay(validRows.reduce((m, r) => Math.max(m, r.timestamp), 0)) : 0;
-  const nRaw = $("mpStoppedDays") ? parseInt($("mpStoppedDays").value, 10) : 7;
-  const n = nRaw > 0 ? nRaw : 7;
-  const all = mpNewMatchesState.data.map(m => ({ ...m, daysStopped: m.lastPlacedTs ? Math.round((maxDay - startOfDay(m.lastPlacedTs)) / dayMs) : 0 }));
-  mpStoppedState.data = all.filter(m => m.lastPlacedTs && m.daysStopped >= n);
-  mpStoppedState.active = all.filter(m => !(m.lastPlacedTs && m.daysStopped >= n));
-  renderMpStoppedCompare(all);
+  const all = state.allParsedRows || [];
+  const now = new Date();
+  const curLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const prevLabel = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const df = getActiveDateRangeFilter("mpNewMatches");
+  let beforeRows, periodStartTs;
+  if (df) {
+    const len = Math.round((startOfDay(df.endTs) - startOfDay(df.startTs)) / dayMs) + 1;
+    periodStartTs = startOfDay(df.startTs);
+    const bStart = periodStartTs - len * dayMs;
+    beforeRows = all.filter(r => r.timestamp >= bStart && r.timestamp < periodStartTs);
+  } else {
+    beforeRows = all.filter(r => r.monthYear === prevLabel);
+    const cur = all.filter(r => r.monthYear === curLabel && r.timestamp);
+    periodStartTs = cur.length ? startOfDay(cur.reduce((m, r) => Math.min(m, r.timestamp), Infinity)) : startOfDay(now.getTime());
+  }
+  const periodPlaced = new Set();
+  validRows.forEach(r => { if ((r.placedPieces || 0) > 0) periodPlaced.add(r.merchantId + "||" + r.sku); });
+  const map = new Map();
+  beforeRows.forEach(r => {
+    if (!r.merchantId || !r.sku || !r.timestamp) return;
+    const key = r.merchantId + "||" + r.sku;
+    if (periodPlaced.has(key)) return;
+    const inv = state.inventoryMap[r.sku];
+    const category = (inv ? inv.category : "") || r.category || "Uncategorized";
+    if (NEW_MATCH_EXCLUDED_CATEGORIES.has(category.trim().toLowerCase())) return;
+    if (!map.has(key)) map.set(key, { sku: r.sku, skuName: (inv ? inv.skuName : "") || "Unknown", category, merchantId: r.merchantId, merchantName: r.merchantName || r.merchantId,
+      placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, ppm: 0, cm3: 0, cm3Gmv: 0, crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
+      matchStartTs: r.timestamp, matchStartDate: r.date, lastPlacedTs: 0, lastPlacedDate: "" });
+    const e = map.get(key);
+    if ((r.placedPieces || 0) > 0 && r.timestamp > e.lastPlacedTs) { e.lastPlacedTs = r.timestamp; e.lastPlacedDate = r.date; }
+    e.placed += r.placedPieces || 0; e.confirmed += r.confirmedPieces || 0; e.delivered += r.deliveredPieces || 0;
+    e.placedGmv += r.placedGmv || 0; e.deliveredGmv += r.deliveredGmv || 0; e.ppm += r.ppm || 0;
+    e.crPlaced += r.placedPieces || 0; e.crConfirmed += r.confirmedPieces || 0;
+    e.drConfirmed += r.confirmedPieces || 0; e.drDelivered += r.deliveredPieces || 0;
+    e.cm3 += r.cm3 || 0; e.cm3Gmv += r.deliveredGmv || 0;
+    if (r.timestamp < e.matchStartTs) { e.matchStartTs = r.timestamp; e.matchStartDate = r.date; }
+  });
+  mpStoppedState.data = Array.from(map.values()).filter(e => e.placed > NEW_MATCH_MIN_PLACED).map(e => {
+    const crPct = e.crPlaced ? e.crConfirmed / e.crPlaced * 100 : 0, drPct = e.drConfirmed ? e.drDelivered / e.drConfirmed * 100 : 0;
+    return { ...e, crPct, drPct, ndrPct: crPct * drPct / 100, cm3PerPiece: e.delivered ? e.cm3 / e.delivered : 0, cm3Pct: e.cm3Gmv ? e.cm3 / e.cm3Gmv * 100 : 0,
+      placedAsp: e.placed ? e.placedGmv / e.placed : 0, ppmPct: e.deliveredGmv ? e.ppm / e.deliveredGmv * 100 : 0,
+      daysStopped: e.lastPlacedTs ? Math.max(0, Math.round((periodStartTs - startOfDay(e.lastPlacedTs)) / dayMs)) : 0 };
+  });
+  mpStoppedState.active = mpNewMatchesState.data;
+  renderMpStoppedCompare();
   applyMpStoppedSearchAndSort();
 }
 function mpAgg(list) {
@@ -14843,13 +14884,14 @@ function mpAgg(list) {
   z.cm3Pct = z.cm3Gmv ? z.cm3 / z.cm3Gmv * 100 : 0; z.cm3PerPiece = z.delivered ? z.cm3 / z.delivered : 0; z.placedAsp = z.placed ? z.placedGmv / z.placed : 0; z.ppmPct = z.deliveredGmv ? z.ppm / z.deliveredGmv * 100 : 0;
   return z;
 }
-function renderMpStoppedCompare(all) {
+function renderMpStoppedCompare() {
   const body = $("mpStoppedCompareBody"); if (!body) return;
-  const S = mpAgg(mpStoppedState.data), A = mpAgg(mpStoppedState.active), T = mpAgg(all);
+  const S = mpAgg(mpStoppedState.data), A = mpAgg(mpStoppedState.active);
   const rows = [["Matches", "n", fmtIntCell], ["Placed Pcs", "placed", fmtIntCell], ["Confirmed Pcs", "confirmed", fmtIntCell], ["Delivered Pcs", "delivered", fmtIntCell], ["Delivered GMV", "deliveredGmv", fmtMoneyCompactCell],
     ["CR% (cutoff D-2)", "crPct", fmtPctCell], ["DR% (cutoff D-4)", "drPct", fmtPctCell], ["NDR%", "ndrPct", fmtPctCell], ["CM3 (cutoff D-5)", "cm3", fmtMoneyCompactCell], ["CM3/Piece", "cm3PerPiece", fmtMoneyCompactCell], ["CM3%", "cm3Pct", fmtPctCell], ["Placed ASP", "placedAsp", fmtMoneyCompactCell], ["PPM%", "ppmPct", fmtPctCell]];
-  body.innerHTML = rows.map(r => `<tr><td class="font-bold text-light">${r[0]}</td><td class="num text-red">${r[2](S[r[1]])}</td><td class="num text-green">${r[2](A[r[1]])}</td><td class="num">${r[2](T[r[1]])}</td></tr>`).join("");
-  if ($("mpStoppedSubtitle")) $("mpStoppedSubtitle").textContent = `${fmtInt.format(mpStoppedState.data.length)} of ${fmtInt.format(all.length)} new matches placed nothing in the last ${$("mpStoppedDays") ? ($("mpStoppedDays").value || 7) : 7} days`;
+  body.innerHTML = rows.map(r => `<tr><td class="font-bold text-light">${r[0]}</td><td class="num text-red">${r[2](S[r[1]])}</td><td class="num text-green">${r[2](A[r[1]])}</td></tr>`).join("");
+  const df = getActiveDateRangeFilter("mpNewMatches");
+  if ($("mpStoppedSubtitle")) $("mpStoppedSubtitle").textContent = `${fmtInt.format(mpStoppedState.data.length)} matches worked before ${df ? df.startVal : "this month"} and placed nothing in ${df ? df.startVal + " → " + df.endVal : "the current month"}`;
 }
 function sortMpStopped(key) {
   if (mpStoppedState.sortKey === key) { mpStoppedState.sortDir = mpStoppedState.sortDir === "asc" ? "desc" : "asc"; } else { mpStoppedState.sortKey = key; mpStoppedState.sortDir = "desc"; }
@@ -14897,7 +14939,6 @@ function renderPaginatedMpStoppedTable() {
   if ($("prevPageMpStopped")) $("prevPageMpStopped").disabled = mpStoppedState.page === 0;
   if ($("nextPageMpStopped")) $("nextPageMpStopped").disabled = mpStoppedState.page >= totalPages - 1;
 }
-if ($("mpStoppedDays")) $("mpStoppedDays").addEventListener("input", () => { prepareMpNewMatchesData(); });
 if ($("searchMpStoppedInput")) $("searchMpStoppedInput").addEventListener("input", applyMpStoppedSearchAndSort);
 if ($("prevPageMpStopped")) $("prevPageMpStopped").addEventListener("click", () => { if (mpStoppedState.page > 0) { mpStoppedState.page -= 1; renderPaginatedMpStoppedTable(); } });
 if ($("nextPageMpStopped")) $("nextPageMpStopped").addEventListener("click", () => { const tp = Math.max(1, Math.ceil(mpStoppedState.filtered.length / PAGE_SIZE)); if (mpStoppedState.page < tp - 1) { mpStoppedState.page += 1; renderPaginatedMpStoppedTable(); } });

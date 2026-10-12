@@ -1779,7 +1779,7 @@
                       <th onclick="sortMpNewMatches('category')" style="cursor:pointer;" title="Product category.">Category</th>
                       <th onclick="sortMpNewMatches('merchantId')" class="font-mono" style="cursor:pointer;" title="Merchant identifier.">Merchant ID</th>
                       <th onclick="sortMpNewMatches('merchantName')" class="truncate-cell" style="cursor:pointer;" title="Merchant's display name.">Merchant Name</th>
-                      <th onclick="sortMpNewMatches('placed')" class="num" style="cursor:pointer;" title="Total placed pieces since this match started. No cutoff applied.">Total Placed Pcs</th>
+                      <th onclick="sortMpNewMatches('placed')" class="num" style="cursor:pointer;" title="Total placed pieces in the previous period.">Total Placed Pcs</th>
                       <th onclick="sortMpNewMatches('confirmed')" class="num text-blue" style="cursor:pointer;" title="Total confirmed pieces since this match started. No cutoff applied.">Total Confirmed Pcs</th>
                       <th onclick="sortMpNewMatches('delivered')" class="num text-green" style="cursor:pointer;" title="Total delivered pieces since this match started. No cutoff applied.">Total Delivered Pcs</th>
                       <th onclick="sortMpNewMatches('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days.">CR%</th>
@@ -1812,17 +1812,12 @@
             <div class="panel-head-modern" style="margin-bottom:12px;">
               <div class="panel-title-wrapper border-red">
                 <h2>Stopped Matches</h2>
-                <p>Same matches as New Matches above (same period, same conditions, same cutoffs) that placed nothing in the last N days — compared with the new matches that are still active</p>
-              </div>
-              <div class="table-controls">
-                <label class="text-dim" style="display:flex;align-items:center;gap:8px;font-size:12px;">No Placed in the last
-                  <input id="mpStoppedDays" class="filter-number" type="number" min="1" step="1" value="7" style="width:70px;" />
-                  days</label>
+                <p>Overall: every Merchant × SKU that worked before the start date of the New Matches range (previous month if no range) and placed nothing inside the range. Same conditions as New Matches (Total Placed &gt; 5, no Fashion / Taager Gomla). Stopped metrics are from its previous period.</p>
               </div>
             </div>
             <div class="table-responsive">
               <table class="data-table" id="mpStoppedCompareTable">
-                <thead><tr><th>Metric</th><th class="num text-red" title="New matches with no Placed in the last N days.">Stopped</th><th class="num text-green" title="New matches that placed in the last N days.">Still active</th><th class="num" title="All New Matches (the section above).">All new</th></tr></thead>
+                <thead><tr><th>Metric</th><th class="num text-red" title="Matches that worked before the range and stopped (their previous-period numbers).">Stopped</th><th class="num text-green" title="New Matches (the section above).">New Matches</th></tr></thead>
                 <tbody id="mpStoppedCompareBody"></tbody>
               </table>
             </div>
@@ -1848,7 +1843,7 @@
                       <th onclick="sortMpStopped('category')" style="cursor:pointer;">Category</th>
                       <th onclick="sortMpStopped('merchantId')" class="font-mono" style="cursor:pointer;">Merchant ID</th>
                       <th onclick="sortMpStopped('merchantName')" class="truncate-cell" style="cursor:pointer;">Merchant Name</th>
-                      <th onclick="sortMpStopped('placed')" class="num" style="cursor:pointer;" title="Total placed pieces since this match started. No cutoff applied.">Total Placed Pcs</th>
+                      <th onclick="sortMpStopped('placed')" class="num" style="cursor:pointer;" title="Total placed pieces in the previous period.">Total Placed Pcs</th>
                       <th onclick="sortMpStopped('confirmed')" class="num text-blue" style="cursor:pointer;" title="No cutoff applied.">Total Confirmed Pcs</th>
                       <th onclick="sortMpStopped('delivered')" class="num text-green" style="cursor:pointer;" title="No cutoff applied.">Total Delivered Pcs</th>
                       <th onclick="sortMpStopped('crPct')" class="num" style="cursor:pointer;" title="Confirmed ÷ Placed, excluding the most recent 2 days.">CR%</th>
@@ -1861,7 +1856,7 @@
                       <th onclick="sortMpStopped('ppmPct')" class="num" style="cursor:pointer;">PPM%</th>
                       <th onclick="sortMpStopped('matchStartTs')" class="text-dim" style="cursor:pointer;">Match Start</th>
                       <th onclick="sortMpStopped('lastPlacedTs')" class="text-dim" style="cursor:pointer;" title="Most recent day this match had Placed pieces.">Last Placed</th>
-                      <th onclick="sortMpStopped('daysStopped')" class="num text-red" style="cursor:pointer;" title="Days between the latest data day and the last day this match had Placed pieces.">Days Stopped</th>
+                      <th onclick="sortMpStopped('daysStopped')" class="num text-red" style="cursor:pointer;" title="Days between the last day this match had Placed pieces and the start of the range.">Days Stopped</th>
                     </tr>
                   </thead>
                   <tbody id="mpStoppedTableBody"></tbody>
