@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.22";
+const APP_VERSION = "1.15.23";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14840,8 +14840,11 @@ function prepareMpStoppedData(validRows) {
     periodStartTs = startOfDay(df.startTs);
     const bStart = periodStartTs - len * dayMs;
     beforeRows = all.filter(r => r.timestamp >= bStart && r.timestamp < periodStartTs);
+    const iso = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    mpStoppedState.beforeLabel = iso(bStart) + ' → ' + iso(periodStartTs - dayMs);
   } else {
     beforeRows = all.filter(r => r.monthYear === prevLabel);
+    mpStoppedState.beforeLabel = prevLabel;
     const cur = all.filter(r => r.monthYear === curLabel && r.timestamp);
     periodStartTs = cur.length ? startOfDay(cur.reduce((m, r) => Math.min(m, r.timestamp), Infinity)) : startOfDay(now.getTime());
   }
@@ -14891,7 +14894,7 @@ function renderMpStoppedCompare() {
     ["CR% (cutoff D-2)", "crPct", fmtPctCell], ["DR% (cutoff D-4)", "drPct", fmtPctCell], ["NDR%", "ndrPct", fmtPctCell], ["CM3 (cutoff D-5)", "cm3", fmtMoneyCompactCell], ["CM3/Piece", "cm3PerPiece", fmtMoneyCompactCell], ["CM3%", "cm3Pct", fmtPctCell], ["Placed ASP", "placedAsp", fmtMoneyCompactCell], ["PPM%", "ppmPct", fmtPctCell]];
   body.innerHTML = rows.map(r => `<tr><td class="font-bold text-light">${r[0]}</td><td class="num text-red">${r[2](S[r[1]])}</td><td class="num text-green">${r[2](A[r[1]])}</td></tr>`).join("");
   const df = getActiveDateRangeFilter("mpNewMatches");
-  if ($("mpStoppedSubtitle")) $("mpStoppedSubtitle").textContent = `${fmtInt.format(mpStoppedState.data.length)} matches worked before ${df ? df.startVal : "this month"} and placed nothing in ${df ? df.startVal + " → " + df.endVal : "the current month"}`;
+  if ($("mpStoppedSubtitle")) $("mpStoppedSubtitle").textContent = `${fmtInt.format(mpStoppedState.data.length)} matches worked in ${mpStoppedState.beforeLabel} (the same-length period before the range) and placed nothing in ${df ? df.startVal + " → " + df.endVal : "the current month"}`;
 }
 function sortMpStopped(key) {
   if (mpStoppedState.sortKey === key) { mpStoppedState.sortDir = mpStoppedState.sortDir === "asc" ? "desc" : "asc"; } else { mpStoppedState.sortKey = key; mpStoppedState.sortDir = "desc"; }
