@@ -4,10 +4,15 @@ name = "taager-merchant-portal"
 main = "src/worker.js"
 compatibility_date = "2026-06-01"
 
+# Custom domain for the portal (taager.app is on this Cloudflare account; DNS + certificate are created on deploy).
+routes = [
+  { pattern = "merchants.taager.app", custom_domain = true }
+]
+
 # 1) npx wrangler kv namespace create PORTAL_KV   → paste the id below
 [[kv_namespaces]]
 binding = "PORTAL_KV"
-id = "PASTE_THE_KV_NAMESPACE_ID_HERE"
+id = "2a9b3a456d6c4f558e55245ae9576b34"
 
 # 2) Refresh the merchants' numbers every hour from the merchant query (the ONLY query this Worker can read).
 [triggers]
@@ -19,7 +24,7 @@ cpu_ms = 300000
 
 [vars]
 # Public https address of this portal (used in password emails). Leave empty to use the request address.
-PORTAL_URL = ""
+PORTAL_URL = "https://merchants.taager.app"
 # The staff dashboard Worker — only used by "Import merchants from the dashboard" in /admin.
 DASHBOARD_WORKER_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev"
 # Data is considered stale after this many minutes (a refresh is started in the background).
