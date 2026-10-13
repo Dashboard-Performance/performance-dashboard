@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.29";
+const APP_VERSION = "1.15.31";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -18393,6 +18393,16 @@ function downloadTableAsCsv(tableEl, fileName) {
             if (exportVal !== null && exportVal !== "") return exportVal;
             const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
             return Number.isFinite(rawVal) ? String(rawVal) : "0";
+        }
+        const txt = (cell.innerText || cell.textContent || "").trim();
+        // خلايا العملة (EGP/EGY/ج.م) اللي مالهاش data-raw: ننزلها رقم صافي بدون عملة.
+        const mm = txt.match(/^(-?)\s*(?:(?:EGP|EGY|LE|L\.E\.?|ج\.?\s?م\.?)\s*)?(-?)\s*([\d][\d,]*(?:\.\d+)?)\s*([KkMm]?)\s*(?:EGP|EGY|LE|ج\.?\s?م\.?)?$/);
+        if (mm && /EGP|EGY|LE\b|L\.E|ج/i.test(txt)) {
+            let v = parseFloat(mm[3].replace(/,/g, ""));
+            const u = mm[4].toUpperCase();
+            if (u === "K") v *= 1e3; else if (u === "M") v *= 1e6;
+            if (mm[1] === "-" || mm[2] === "-") v = -v;
+            return String(v);
         }
         return cell.innerText || cell.textContent || "";
     };
