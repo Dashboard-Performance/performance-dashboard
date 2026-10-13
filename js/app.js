@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.46";
+const APP_VERSION = "1.15.47";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -6096,25 +6096,46 @@ function renderTgtView(kind) {
   document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey) th.classList.toggle("sorted", th.dataset.tkey === V.sortKey); });
 }
 const ACM_GRP_BORDER = "border-left:2px solid var(--border-strong, rgba(120,140,170,.45));";
+function acmTgtGroups() {
+  const K = state.acmKpis;
+  const C = (key, label, title) => ({ key, label, title });
+  return [
+    { t: "Delivered GMV", c: "blue", w: K.gmv.weight, cols: [
+      C("targetGmv", "Target", "Sum of this ACM's merchants' full-month GMV targets."),
+      C("mtdTargetGmv", "MTD Target", "Full-month GMV target pro-rated to the days elapsed up to yesterday."),
+      C("deliveredGmv", "Actual", "Delivered GMV so far this month (Segmentation query)."),
+      C("runRate", "Run Rate (EOM)", "Projected end-of-month delivered GMV at the current daily pace."),
+      C("achievedPct", "Ach %", "Actual \u00f7 full-month target."),
+      C("gmvScore", "Score", "Points earned out of this KPI's weight (" + K.gmv.weight + ").")
+    ] },
+    { t: "Portfolio NDR %", c: "green", w: K.ndr.weight, cols: [
+      C("ndrTarget", "Target", "KPI target for NDR %."),
+      C("ndr", "Actual", "Actual NDR % = CR % \u00d7 DR %."),
+      C("ndrAch", "Ach %", "Actual \u00f7 target."),
+      C("ndrScore", "Score", "Points earned out of this KPI's weight (" + K.ndr.weight + ").")
+    ] },
+    { t: "CM3 %", c: "orange", w: K.cm3.weight, cols: [
+      C("cm3Target", "Target", "KPI target for CM3 %."),
+      C("cm3Pct", "Actual", "CM3 \u00f7 Delivered GMV."),
+      C("cm3Ach", "Ach %", "Actual \u00f7 target."),
+      C("cm3Score", "Score", "Points earned out of this KPI's weight (" + K.cm3.weight + ").")
+    ] },
+    { t: "Segment Retention", c: "purple", w: K.retention.weight, cols: [
+      C("retTarget", "Target", "KPI target for Segment Retention."),
+      C("actualRetentionPct", "Actual", "Merchants whose projected segment is higher than the current one."),
+      C("retAch", "Ach %", "Actual \u00f7 target."),
+      C("retScore", "Score", "Points earned out of this KPI's weight (" + K.retention.weight + ").")
+    ] }
+  ];
+}
 function renderAcmTgtHead() {
   const tbl = $("acmTgtTable"); if (!tbl) return;
-  const head = tbl.tHead || tbl.createTHead(); const K = state.acmKpis; const B = ACM_GRP_BORDER;
-  const grp = [
-    { t: "Delivered GMV", c: "blue",   w: K.gmv.weight,       tgt: "Sum of this ACM's merchants' GMV targets", act: "Delivered GMV (Segmentation query)", keys: ["targetGmv", "mtdTargetGmv", "deliveredGmv", "achievedPct", "gmvScore"], mtd: "Full-month GMV target pro-rated to the days elapsed up to yesterday." },
-    { t: "Portfolio NDR %", c: "green",  w: K.ndr.weight,       tgt: "KPI target for NDR %", act: "Actual NDR % = CR % \u00d7 DR %", keys: ["ndrTarget", "ndr", "ndrAch", "ndrScore"] },
-    { t: "CM3 %", c: "orange", w: K.cm3.weight,       tgt: "KPI target for CM3 %", act: "CM3 \u00f7 Delivered GMV", keys: ["cm3Target", "cm3Pct", "cm3Ach", "cm3Score"] },
-    { t: "Segment Retention", c: "purple", w: K.retention.weight, tgt: "KPI target for Segment Retention", act: "Merchants whose projected segment is higher than the current one", keys: ["retTarget", "actualRetentionPct", "retAch", "retScore"] }
-  ];
+  const head = tbl.tHead || tbl.createTHead(); const B = ACM_GRP_BORDER;
   let r1 = `<tr><th rowspan="2" data-tkey="index">#</th><th rowspan="2" data-tkey="name" title="Account manager. Click a row to show their merchants.">Account Manager</th><th rowspan="2" data-tkey="merchantCount" class="num" title="Merchants with a target under this account manager.">Merchants</th>`;
   let r2 = "<tr>";
-  grp.forEach(g => {
-    const n = g.keys.length;
-    r1 += `<th colspan="${n}" class="num" style="${B}text-align:center;color:var(--${g.c});">${g.t} <span class="text-dim" style="font-weight:600">&middot; weight ${g.w}%</span></th>`;
-    r2 += `<th data-tkey="${g.keys[0]}" class="num" style="${B}" title="${g.tgt}">Target</th>`
-       +  (g.mtd ? `<th data-tkey="${g.keys[1]}" class="num" title="${g.mtd}">MTD Target</th>` : "")
-       +  `<th data-tkey="${g.keys[n - 3]}" class="num" title="${g.act}">Actual</th>`
-       +  `<th data-tkey="${g.keys[n - 2]}" class="num" title="Actual \u00f7 full-month Target">Ach %</th>`
-       +  `<th data-tkey="${g.keys[n - 1]}" class="num" title="Points earned out of this KPI's weight (${g.w}).">Score</th>`;
+  acmTgtGroups().forEach(g => {
+    r1 += `<th colspan="${g.cols.length}" class="num" style="${B}text-align:center;color:var(--${g.c});">${g.t} <span class="text-dim" style="font-weight:600">&middot; weight ${g.w}%</span></th>`;
+    g.cols.forEach((c, i) => { r2 += `<th data-tkey="${c.key}" class="num" style="${i === 0 ? B : ""}" title="${c.title}">${c.label}</th>`; });
   });
   r1 += `<th rowspan="2" data-tkey="finalScorePct" class="num" style="${B}min-width:120px;color:var(--blue);" title="Final Weight % = \u03a3 min(Ach %, 100%) \u00d7 weight.">Final Weight %</th></tr>`;
   r2 += "</tr>";
@@ -6129,19 +6150,6 @@ function wireTgtHead(kind) {
     th.addEventListener("click", () => { const k = th.dataset.tkey; if (V.sortKey === k) V.sortDir = V.sortDir === "asc" ? "desc" : "asc"; else { V.sortKey = k; V.sortDir = "desc"; } V.page = 0; renderTgtView(kind); });
   });
 }
-function acmKpiCells(m) {
-  const K = state.acmKpis; const B = ACM_GRP_BORDER;
-  const ach = (v, has) => has ? tgtPctCell(v, true) : `<td class="num text-dim">-</td>`;
-  const score = (v, w) => `<td class="num"><span class="font-bold">${v.toFixed(1)}</span><span class="text-dim"> / ${w}</span></td>`;
-  const hasG = m.targetGmv > 0;
-  const grp = (tgt, act, a, sc, w, has, mtd) => `<td class="num text-dim" style="${B}">${tgt}</td>` + (mtd != null ? `<td class="num text-dim">${mtd}</td>` : "") + `<td class="num font-bold text-light">${act}</td>${ach(a, has)}${score(sc, w)}`;
-  const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
-  return grp(hasG ? fmtMoneyCompactCell(m.targetGmv) : "-", fmtMoneyCompactCell(m.deliveredGmv), m.achievedPct, m.gmvScore, K.gmv.weight, hasG, hasG ? fmtMoneyCompactCell(Math.round(m.mtdTargetGmv)) : "-")
-    + grp(K.ndr.target + "%", fmtPctCell(m.ndr), m.ndrAch, m.ndrScore, K.ndr.weight, K.ndr.target > 0)
-    + grp(K.cm3.target + "%", fmtPctCell(m.cm3Pct), m.cm3Ach, m.cm3Score, K.cm3.weight, K.cm3.target > 0)
-    + grp(K.retention.target + "%", fmtPctCell(m.actualRetentionPct), m.retAch, m.retentionScore, K.retention.weight, K.retention.target > 0)
-    + `<td class="num font-bold" style="${B}"><div style="font-weight:700; font-size: 13px; color:var(--${fin})">${m.finalScorePct.toFixed(1)}%</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>`;
-}
 function acmMerchantRows(a) {
   const B = ACM_GRP_BORDER; const K = state.acmKpis; const key = normalizeName(a.name);
   const list = (state.merchantTableData || []).filter(m => normalizeName(m.tgtAcm || m.acm) === key && (m.targetGmv > 0 || m.deliveredGmv > 0 || m.placed > 0)).sort((x, y) => (y.targetGmv - x.targetGmv) || (y.deliveredGmv - x.deliveredGmv));
@@ -6149,13 +6157,13 @@ function acmMerchantRows(a) {
   const out = list.map(m => {
     const tr = document.createElement("tr"); const hasG = m.targetGmv > 0;
     tr.innerHTML = `<td style="${bg}"></td><td style="${bg}padding-left:26px"><span class="text-light">${m.name}</span> <span class="font-mono text-dim" style="font-size:10px">${m.id || ""}</span></td><td class="num text-dim" style="${bg}">${m.segment || ""}</td>`
-      + `<td class="num text-dim" style="${bg}${B}">${hasG ? fmtMoneyCompactCell(m.targetGmv) : "-"}</td><td class="num text-dim" style="${bg}">${hasG ? fmtMoneyCompactCell(Math.round(m.mtdTargetGmv)) : "-"}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(m.deliveredGmv)}</td>${hasG ? tgtPctCell(m.achievedPct, true).replace("<td ", `<td style="${bg}" `) : `<td class="num text-dim" style="${bg}">-</td>`}<td style="${bg}"></td>`
+      + `<td class="num text-dim" style="${bg}${B}">${hasG ? fmtMoneyCompactCell(m.targetGmv) : "-"}</td><td class="num text-dim" style="${bg}">${hasG ? fmtMoneyCompactCell(Math.round(m.mtdTargetGmv)) : "-"}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(Math.round(m.runRate || 0))}</td>${hasG ? tgtPctCell(m.achievedPct, true).replace("<td ", `<td style="${bg}" `) : `<td class="num text-dim" style="${bg}">-</td>`}<td style="${bg}"></td>`
       + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.ndrPct != null ? m.ndrPct : (m.ndr || 0))}</td><td style="${bg}"></td><td style="${bg}"></td>`
       + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.cm3Pct || 0)}</td><td style="${bg}"></td><td style="${bg}"></td>`
       + `<td style="${bg}${B}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}${B}"></td>`;
     return tr;
   });
-  if (!out.length) { const tr = document.createElement("tr"); tr.innerHTML = `<td></td><td colspan="20" class="text-dim" style="padding-left:26px">No merchants found for this account manager</td>`; out.push(tr); }
+  if (!out.length) { const tr = document.createElement("tr"); tr.innerHTML = `<td></td><td colspan="21" class="text-dim" style="padding-left:26px">No merchants found for this account manager</td>`; out.push(tr); }
   return out;
 }
 function kpiCells(m) {
@@ -6164,6 +6172,22 @@ function kpiCells(m) {
   const cell = (v, t) => `<td class="num"><span class="badge-outline ${col(v, t)}">${fmtPctCell(v)}</span></td>`;
   return `<td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${fin})">${fmtPctCell(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>` +
     cell(m.ndr, K.ndr.target) + cell(m.cm3Pct, K.cm3.target) + cell(m.actualRetentionPct, K.retention.target);
+}
+function acmKpiCells(m) {
+  const K = state.acmKpis; const B = ACM_GRP_BORDER;
+  const hasG = m.targetGmv > 0;
+  const money = v => fmtMoneyCompactCell(Math.round(v || 0));
+  const score = (v, w) => `<td class="num"><span class="font-bold">${(v || 0).toFixed(1)}</span><span class="text-dim"> / ${w}</span></td>`;
+  const dim = v => `<td class="num text-dim">${v}</td>`;
+  const lit = v => `<td class="num font-bold text-light">${v}</td>`;
+  const ach = (v, has) => has ? tgtPctCell(v, true) : `<td class="num text-dim">-</td>`;
+  const first = v => `<td class="num text-dim" style="${B}">${v}</td>`;
+  const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
+  return first(hasG ? money(m.targetGmv) : "-") + dim(hasG ? money(m.mtdTargetGmv) : "-") + lit(money(m.deliveredGmv)) + lit(money(m.runRate)) + ach(m.achievedPct, hasG) + score(m.gmvScore, K.gmv.weight)
+    + first(K.ndr.target + "%") + lit(fmtPctCell(m.ndr)) + ach(m.ndrAch, K.ndr.target > 0) + score(m.ndrScore, K.ndr.weight)
+    + first(K.cm3.target + "%") + lit(fmtPctCell(m.cm3Pct)) + ach(m.cm3Ach, K.cm3.target > 0) + score(m.cm3Score, K.cm3.weight)
+    + first(K.retention.target + "%") + lit(fmtPctCell(m.actualRetentionPct)) + ach(m.retAch, K.retention.target > 0) + score(m.retentionScore, K.retention.weight)
+    + `<td class="num font-bold" style="${B}"><div style="font-weight:700; font-size: 13px; color:var(--${fin})">${m.finalScorePct.toFixed(1)}%</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>`;
 }
 function renderAcmKpiTable() {
   const K0 = state.acmKpis, nm = { gmv: "Delivered GMV", ndr: "Portfolio NDR %", cm3: "CM3 %", ret: "Segment Retention" }, wk = { gmv: K0.gmv, ndr: K0.ndr, cm3: K0.cm3, ret: K0.retention };
