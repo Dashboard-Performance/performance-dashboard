@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.26";
+const APP_VERSION = "1.15.29";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -7481,7 +7481,7 @@ function prepareMpSalesPlanData() {
     // المفروض يدخل حسبة الـ Critical/Good/Excellent/Upside ولا totals الملخص
     // فوق (كان بيتحسب "Critical" بس لأن مقسوم على صفر/تارجته صفر، مش لأداء
     // ضعيف فعلاً).
-    let planRows = (state.acmSalesPlanData || []).filter(p => p.dailyPlacedTarget > 0);
+    let planRows = (state.acmSalesPlanData || []).filter(p => p.dailyPlacedTarget > 0 || p.newTargetDaily === 0);
     if (selectedAcm !== "All") {
         planRows = planRows.filter(p => {
             const acm = ((state.merchantInfoMap || new Map()).get(p.tagerId) || {}).acmName || "Unassigned";
@@ -7539,10 +7539,14 @@ function prepareMpSalesPlanData() {
         const mtdAchievedPct = confirmedM.achievedPct;
         const finalStatus = confirmedM.status;
 
+        // صف New Target Daily = 0 (متعمّد): بيظهر بالـ Actual بس، ومبيدخلش في عدّادات الحالة ولا إجماليات الملخص.
+        const zeroTarget = !(plan.dailyPlacedTarget > 0);
+        if (!zeroTarget) {
         if (mtdAchievedPct < 50) countCritical++;
         else if (mtdAchievedPct < 85) countGood++;
         else if (mtdAchievedPct < 100) countExcellent++;
         else countUpside++;
+        }
 
         const wowDiff = raw.thisWeekConfirmed - raw.lastWeekConfirmed;
         let wowPct = 0;
@@ -7553,9 +7557,11 @@ function prepareMpSalesPlanData() {
         if (wowPct > 10) { wowStatus = 'Spike'; wowClass = 'spike'; wowIcon = '📈'; }
         else if (wowPct < -10) { wowStatus = 'Decline'; wowClass = 'decline'; wowIcon = '📉'; }
 
+        if (!zeroTarget) {
         totalSkus++;
         if (confirmedM.mtdActual >= confirmedM.mtdTarget) achievedCount++; else missedCount++;
         totalMtdTarget += confirmedM.mtdTarget; totalMtdActual += confirmedM.mtdActual;
+        }
 
         // Merchant Name بتيجي دلوقتي مباشرة من عمود TAGER_NAME في الشيت نفسه؛
         // لو فاضية لأي سبب، fallback لخريطة الـ Main (merchantInfoMap).
@@ -17650,6 +17656,9 @@ async function fetchAllSheetsSnapshot() {
   delete sheets[MAIN_GID];
   await mbPromise;
   Object.assign(sheets, mbSheets);
+  // وقت آخر تحديث للـ Main من Metabase (وقت السحب الفعلي، مش وقت مزامنة Apps Script).
+  const mbCached = metabaseMemCache.get(MAIN_GID);
+  const mbMainFetchedAt = mbSheets[MAIN_GID] ? ((mbCached && mbCached.at) || Date.now()) : null;
   mbStale.forEach(g => staleGids.push(g));
   // Pre-upload payloads (Google Sheet) of the 5 target sheets: kept so a month with no upload falls back to them.
   window.__targetBase = {}; [TARGETS_GID, TARGETS_ACM_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID, SINGLE_SKU_TARGETS_GID].forEach(g => { window.__targetBase[g] = sheets[g]; });
@@ -17740,7 +17749,9 @@ async function fetchAllSheetsSnapshot() {
     // توقيت المزامنة المركزية من السيرفر (نفسه لكل اليوزرز) — لو مش موجود
     // (مسار fallback القديم اللي بيسحب لايف من غير backend)، بنرجع Date.now()
     // المحلي عشان الشاشة تعرض توقيت منطقي برضه.
-    serverFetchedAt: SERVER_LAST_FETCHED_AT || Date.now()
+    // توقيت التحديث اللي بيظهر في شريط الـ Sync = آخر سحب للـ Main من Metabase.
+    // لو الـ Main فشل سحبه، نرجع لتوقيت مزامنة Apps Script القديم.
+    serverFetchedAt: mbMainFetchedAt || SERVER_LAST_FETCHED_AT || Date.now()
   };
 }
 
@@ -18242,7 +18253,10 @@ confirmDownloadBtn.addEventListener("click", () => {
         ppmAnalystSingle: ppmAnalystSingleState.page,
         prodAn: prodAnState.page,
         pma: pmaState.page,
-        incMerch: state.incentiveMerchantsPage
+        incMerch: state.incentiveMerchantsPage,
+        purchasePlan: state.purchasePlanPage,
+        hlMerchant: healthyLockingState.merchantPage,
+        fc: fcState.page
     };
     const originalIncMerchPageSize = state.incentiveMerchantsPageSize;
 
@@ -18254,10 +18268,16 @@ confirmDownloadBtn.addEventListener("click", () => {
     state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
     state.incentiveMerchantsPage = 0; state.incentiveMerchantsPageSize = 999999;
     PAGE_SIZE = 999999;
+    state.purchasePlanPage = 0; healthyLockingState.merchantPage = 0; fcState.page = 0;
+    // أي ملف تاني (زي supply.js) عنده Pagination خاص بيه يسمع للحدث ده ويعرض الداتا كلها وقت الداونلود.
+    window.__dashExport = true; window.dispatchEvent(new Event("dash:export-start"));
     const originalSpfPage = (typeof spfState !== "undefined") ? spfState.page : 0;
     SPF_PAGE_SIZE = 999999; if (typeof spfState !== "undefined") spfState.page = 0;
     if (typeof spfRender === "function") spfRender();
 
+    if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
+    if (typeof renderHealthyLockingMerchantTable === 'function') renderHealthyLockingMerchantTable();
+    if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
     if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
@@ -18289,6 +18309,8 @@ confirmDownloadBtn.addEventListener("click", () => {
         
         // Restore pagination
         PAGE_SIZE = 10;
+        window.__dashExport = false; window.dispatchEvent(new Event("dash:export-end"));
+        state.purchasePlanPage = originalPage.purchasePlan; healthyLockingState.merchantPage = originalPage.hlMerchant; fcState.page = originalPage.fc;
         SPF_PAGE_SIZE = 25; if (typeof spfState !== "undefined") spfState.page = originalSpfPage; if (typeof spfRender === "function") spfRender();
         state.page = originalPage.acm;
         state.pageMerchant = originalPage.merchant;
@@ -18315,6 +18337,9 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.incentiveMerchantsPage = originalPage.incMerch;
         state.incentiveMerchantsPageSize = originalIncMerchPageSize;
 
+        if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
+        if (typeof renderHealthyLockingMerchantTable === 'function') renderHealthyLockingMerchantTable();
+        if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
         if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();

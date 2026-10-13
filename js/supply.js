@@ -224,8 +224,8 @@
     drawSkuBody();
   }
   function drawSkuBody() {
-    var rows = skuFiltered(), f = SC.sk, tp = Math.max(1, Math.ceil(rows.length / PAGE)); if (f.page >= tp) f.page = tp - 1;
-    var pg = rows.slice(f.page * PAGE, f.page * PAGE + PAGE);
+    var rows = skuFiltered(), f = SC.sk, PG = window.__dashExport ? Math.max(1, rows.length) : PAGE, tp = Math.max(1, Math.ceil(rows.length / PG)); if (f.page >= tp) f.page = tp - 1;
+    var pg = rows.slice(f.page * PG, f.page * PG + PG);
     $("scSkuBody").innerHTML = pg.length ? pg.map(function (r) {
       return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + money(r.wac) + '</td><td class="num font-bold">' + money(r.inv) + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
     }).join("") : '<tr><td colspan="' + COLS.length + '" class="text-dim center">No SKUs match these filters.</td></tr>';
@@ -245,7 +245,7 @@
     host.innerHTML = '<div class="cx-bar-top"><div class="sc-hdr">Proposed action per SKU — ABC × FMS × purchase period (Lookups sheet)</div>' + srcChip() + '</div><div class="sc-acts">' + cards + '</div>' +
       (none.length ? '<div class="sc-note">' + int(none.length) + ' aged SKUs (' + money(sum(none, "inv")) + ') have no proposed action yet.</div>' : "") +
       '<div class="panel table-panel"><div class="panel-head-modern"><div class="panel-title-wrapper border-orange"><h2>' + esc(cur) + '</h2><p>' + esc(ACT_NOTE[cur]) + ' · ' + int(rs.length) + ' SKUs · ' + money(tot) + '</p></div></div><div class="table-responsive"><table class="data-table" id="scActTable"><thead><tr><th>SKU ID</th><th>SKU name</th><th>Category</th><th>Aging</th><th class="num">Stock</th><th class="num">Avg 3D</th><th class="num">DOH</th><th class="num">WAC</th><th class="num">Inv. value</th><th class="num">Share</th><th>Movement</th><th>ABC</th></tr></thead><tbody>' +
-      (rs.slice(0, 100).map(function (r) { return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td>' + ageChip(r.aging) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + money(r.wac) + '</td><td class="num font-bold">' + money(r.inv) + '</td><td class="num">' + pct(tot ? r.inv / tot * 100 : 0, 1) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td></tr>'; }).join("") || '<tr><td colspan="12" class="text-dim center">No SKUs for this action.</td></tr>') + '</tbody></table></div>' + (rs.length > 100 ? '<div class="table-footer"><span>Showing top 100 of ' + int(rs.length) + ' by inventory value</span></div>' : "") + '</div>';
+      (rs.slice(0, window.__dashExport ? rs.length : 100).map(function (r) { return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td>' + ageChip(r.aging) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + money(r.wac) + '</td><td class="num font-bold">' + money(r.inv) + '</td><td class="num">' + pct(tot ? r.inv / tot * 100 : 0, 1) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td></tr>'; }).join("") || '<tr><td colspan="12" class="text-dim center">No SKUs for this action.</td></tr>') + '</tbody></table></div>' + (rs.length > 100 ? '<div class="table-footer"><span>Showing top 100 of ' + int(rs.length) + ' by inventory value</span></div>' : "") + '</div>';
   }
 
   /* ---------------------------------------------------------------- drawer + connect modal */
@@ -284,6 +284,10 @@
   var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions] };
   var current = null;
   function rerender() { build(); if (current && VIEWS[current]) { var h = $(VIEWS[current][0]); if (h && !h.classList.contains("hidden")) VIEWS[current][1](h); } }
+  // وقت الداونلود (زرار Download CSV): نعرض كل الصفوف بدل الصفحة الحالية، وبعدها نرجع زي ما كان.
+  var _savedSkuPage = 0;
+  window.addEventListener("dash:export-start", function () { _savedSkuPage = SC.sk.page; SC.sk.page = 0; try { rerender(); } catch (e) { } });
+  window.addEventListener("dash:export-end", function () { SC.sk.page = _savedSkuPage; try { rerender(); } catch (e) { } });
   function onClick(e) {
     var t = e.target;
     var c = t.closest("[data-sc-cat]"); if (c) { SC.cat = c.getAttribute("data-sc-cat"); rerender(); return; }
