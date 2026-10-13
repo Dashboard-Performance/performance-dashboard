@@ -309,6 +309,22 @@
         <!-- ACCOUNT MANAGER TARGETS SECTION -->
         <div id="viewAcmTargets" class="view-section hidden">
           <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow" style="max-width:520px">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-orange">
+                  <h2>ACM KPIs &amp; Weights</h2>
+                  <p>Each account manager is scored on these KPIs. Final Weight % = Σ min(Actual ÷ Target, 1) × Weight</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="acmKpiTable">
+                  <thead><tr><th>Metrics</th><th class="num">Target</th><th class="num">Weight%</th></tr></thead>
+                  <tbody id="acmKpiBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
@@ -327,6 +343,10 @@
                       <th data-tkey="name" title="Account manager's name.">Account Manager</th>
                       <th data-tkey="merchantCount" class="num" title="Merchants with a target under this account manager.">Merchants</th>
                       <th data-tkey="targetPlaced" class="num" title="Monthly placed-orders target.">Target Placed</th><th data-tkey="mtdTargetPlaced" class="num" title="Placed target pro-rated to the days elapsed until yesterday.">MTD Target Placed</th><th data-tkey="placed" class="num" title="Actual placed orders.">Placed</th><th data-tkey="placedRunRate" class="num" title="Projected end-of-month placed orders at the current daily pace.">Placed Run Rate (EOM)</th><th data-tkey="placedAchievedPct" class="num" title="Placed ÷ monthly target.">Placed vs Target %</th><th data-tkey="placedMtdPct" class="num" title="Placed ÷ MTD target.">Placed vs MTD %</th><th data-tkey="targetGmv" class="num" title="Monthly delivered-GMV target.">Target GMV</th><th data-tkey="mtdTargetGmv" class="num" title="GMV target pro-rated to the days elapsed until yesterday.">MTD Target GMV</th><th data-tkey="deliveredGmv" class="num" title="Actual delivered GMV.">Delivered GMV</th><th data-tkey="runRate" class="num" title="Projected end-of-month delivered GMV at the current daily pace.">GMV Run Rate (EOM)</th><th data-tkey="achievedPct" class="num" title="Delivered GMV ÷ monthly target.">GMV vs Target %</th><th data-tkey="gmvMtdPct" class="num" title="Delivered GMV ÷ MTD target.">GMV vs MTD %</th>
+                      <th data-tkey="finalScorePct" class="num" style="min-width: 120px; color: var(--blue);" title="Weighted score of the 4 KPIs (see the KPIs &amp; Weights table).">Final Weight %</th>
+                      <th data-tkey="ndr" class="num" title="KPI: Portfolio NDR (orders) = CR% × DR%.">KPI NDR%</th>
+                      <th data-tkey="cm3Pct" class="num" title="KPI: CM3 ÷ Delivered GMV (5-day cutoff).">KPI CM3%</th>
+                      <th data-tkey="actualRetentionPct" class="num" title="KPI: share of the ACM's merchants whose projected segment is higher than their current segment.">KPI Retention%</th>
                     </tr>
                   </thead>
                   <tbody id="acmTgtBody"></tbody>

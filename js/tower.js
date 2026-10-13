@@ -23,7 +23,8 @@
   var ADMIN_PW_VIEWS = ["segmentation", "sellthrough", "weeklyInventory", "forecastModel"]; // still behind the Admin Panel password
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
   var TARGET_TYPES = [
-    { type: "merchants", gid: "115442405", title: "Merchant Targets (also feeds ACM Targets)", desc: "TAGER_ID · Tager_name · ACM · Target GMV (Actual) · Target Placed (Actual)" },
+    { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "TAGER_ID · Tager_name · Target GMV (Actual) · Target Placed (Actual) — each merchant's ACM is picked up automatically and its target is added to that ACM" },
+    { type: "acm", gid: " _Targets_ACM_ ", title: "KPI's Account Manager", desc: "KPI targets & weights used for the ACM Final Weight % (edit below)", editor: true },
     { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · Daily Target · CR % · DR % · ASP · CM3 · PPM …" },
     { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target · New Target · Flag" },
     { type: "singlesku", gid: "1620722565", title: "Single SKU Targets", desc: "PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
@@ -635,20 +636,28 @@
   }
 
   // ---------------------------------------------------------------- Targets page
-  var tgState = {}, tgMonth = "", tgMeta = {}, tgLegacy = {};
+  var tgState = {}, tgMonth = "", tgMeta = {}, tgLegacy = {}, tgKpi = null;
+  var KPI_DEFAULT = [["Delivered GMV", 100, 40], ["Portfolio NDR ( Orders )%", 31, 20], ["CM3 Per Merchant", 10, 30], ["Segment Retention", 100, 10]];
+  function kpiFromPayload(p) {
+    var out = KPI_DEFAULT.map(function (r) { return r.slice(); });
+    ((p && p.table && p.table.rows) || []).forEach(function (r) { var c = r.c || []; if (c.length < 3) return; var l = String(c[0] ? (c[0].v != null ? c[0].v : c[0].f) : "").toLowerCase(); var i = l.indexOf("gmv") >= 0 ? 0 : l.indexOf("ndr") >= 0 ? 1 : l.indexOf("cm3") >= 0 ? 2 : l.indexOf("retention") >= 0 ? 3 : -1; if (i < 0) return; var t = parseFloat(String(c[1] ? (c[1].v != null ? c[1].v : c[1].f) : "").replace(/[%,]/g, "")), w = parseFloat(String(c[2] ? (c[2].v != null ? c[2].v : c[2].f) : "").replace(/[%,]/g, "")); if (t > 0) out[i][1] = t; if (w >= 0) out[i][2] = w; });
+    return out;
+  }
   function renderTargets() {
     var host = $("viewTowerTargets"); if (!host) return;
     if (!tgMonth) tgMonth = selectedMonthKey();
     var key = tgMonth;
     Promise.all([
       wfetch("getTargets", { timeout: 6000 }, "&type=meta." + key).catch(function () { return null; }),
-      wfetch("getTargets", { timeout: 6000 }, "&type=meta").catch(function () { return null; })
-    ]).then(function (r) { if (key !== tgMonth) return; tgMeta = r[0] || {}; tgLegacy = r[1] || {}; window.TowerTargets.meta = tgLegacy; drawTargets(); });
+      wfetch("getTargets", { timeout: 6000 }, "&type=meta").catch(function () { return null; }),
+      wfetch("getTargets", { timeout: 6000 }, "&type=acm." + key).catch(function () { return null; }).then(function (p) { return p && p.table && (p.table.rows || []).length ? p : wfetch("getTargets", { timeout: 6000 }, "&type=acm").catch(function () { return null; }); })
+    ]).then(function (r) { if (key !== tgMonth) return; tgMeta = r[0] || {}; tgLegacy = r[1] || {}; tgKpi = kpiFromPayload(r[2]); window.TowerTargets.meta = tgLegacy; drawTargets(); });
     if (!host.firstChild) drawTargets();
   }
   function drawTargets() {
     var host = $("viewTowerTargets"); if (!host) return;
     var cards = TARGET_TYPES.map(function (t) {
+      if (t.editor) return kpiCardHtml(t);
       var m = tgMeta[t.type], g = tgLegacy[t.type], pill, info;
       if (m) {
         pill = '<span class="tw-pill good">Uploaded · ' + esc(new Date(m.at).toLocaleString()) + '</span>';
@@ -671,7 +680,8 @@
       '<div class="tw-grid">' + cards + '</div></div>';
     $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
-    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.slice()); };
+    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.filter(function (x) { return !x.editor; }).length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.filter(function (x) { return !x.editor; })); };
+    kpiWire(host);
     host.querySelectorAll("[data-file]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) pick(inp.dataset.file, inp.files[0]); inp.value = ""; }; });
     host.querySelectorAll("[data-drop]").forEach(function (d) {
       ["dragenter", "dragover"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.add("over"); }); });
@@ -680,6 +690,34 @@
     });
     host.querySelectorAll("[data-tpl]").forEach(function (b) { b.onclick = function () { var t = TARGET_TYPES.filter(function (x) { return x.type === b.dataset.tpl; })[0]; tmsg(t.type, "Preparing file…"); payloadOf(t).then(function (p) { if (!p) throw new Error("No data to export."); return downloadGrid(payloadToGrid(p), "targets_" + t.type + "_" + tgMonth + ".xlsx"); }).then(function () { tmsg(t.type, "Downloaded.", "ok"); }).catch(function (e) { tmsg(t.type, e.message, "err"); }); }; });
     host.querySelectorAll("[data-seed]").forEach(function (b) { b.onclick = function () { seed(TARGET_TYPES.filter(function (x) { return x.type === b.dataset.seed; })); }; });
+  }
+  function kpiCardHtml(t) {
+    var K = tgKpi || KPI_DEFAULT, m = tgMeta[t.type];
+    var pill = m ? '<span class="tw-pill good">Saved · ' + esc(new Date(m.at).toLocaleString()) + '</span>' : '<span class="tw-pill warn">Default values</span>';
+    var rows = K.map(function (r, i) { return '<tr><td>' + esc(r[0]) + '</td><td><input type="number" min="0" step="any" data-kpi="t' + i + '" value="' + esc(r[1]) + '" style="width:80px;padding:0 8px;min-height:32px"> %</td><td><input type="number" min="0" step="any" data-kpi="w' + i + '" value="' + esc(r[2]) + '" style="width:80px;padding:0 8px;min-height:32px"> %</td></tr>'; }).join("");
+    var tot = K.reduce(function (a, r) { return a + (+r[2] || 0); }, 0);
+    return '<div class="tw-card tw-tgt" data-t="' + t.type + '"><div class="tw-tgt-top"><div><b>' + esc(t.title) + '</b><div class="tw-muted">' + esc(t.desc) + '</div></div>' + pill + '</div>' +
+      '<div class="table-responsive"><table class="tw-table"><thead><tr><th>Metrics</th><th>Target</th><th>Weight%</th></tr></thead><tbody>' + rows + '<tr><td></td><td></td><td><b id="twKpiTot">' + tot + '%</b></td></tr></tbody></table></div>' +
+      '<div class="tw-msg" data-msg="acm"></div><div class="tw-row" style="margin-top:8px"><button class="btn btn-primary small" id="twKpiSave">Save KPIs</button><button class="btn small" id="twKpiReset">Reset to default</button></div></div>';
+  }
+  function kpiRead(host) {
+    return KPI_DEFAULT.map(function (r, i) { return [r[0], parseFloat(host.querySelector('[data-kpi="t' + i + '"]').value), parseFloat(host.querySelector('[data-kpi="w' + i + '"]').value)]; });
+  }
+  function kpiWire(host) {
+    var upd = function () { var K = kpiRead(host); var tot = K.reduce(function (a, r) { return a + (isFinite(r[2]) ? r[2] : 0); }, 0); var e = $("twKpiTot"); if (e) e.textContent = tot + "%"; };
+    host.querySelectorAll("[data-kpi]").forEach(function (i) { i.oninput = upd; });
+    var rs = $("twKpiReset"); if (rs) rs.onclick = function () { tgKpi = KPI_DEFAULT.map(function (r) { return r.slice(); }); drawTargets(); tmsg("acm", "Defaults restored — press Save KPIs to keep them.", ""); };
+    var sv = $("twKpiSave"); if (sv) sv.onclick = function () {
+      if (!adminKey()) { tmsg("acm", "Enter and save the admin key first.", "err"); return; }
+      var K = kpiRead(host), bad = K.some(function (r) { return !isFinite(r[1]) || r[1] <= 0 || !isFinite(r[2]) || r[2] < 0; });
+      if (bad) { tmsg("acm", "Every target must be above 0 and every weight 0 or more.", "err"); return; }
+      var tot = K.reduce(function (a, r) { return a + r[2]; }, 0);
+      if (Math.abs(tot - 100) > 0.001 && !confirm("The weights add up to " + tot + "%, not 100%. Save anyway?")) return;
+      var payload = { table: { cols: [], rows: K.map(function (r) { return { c: [{ v: r[0] }, { v: r[1] }, { v: r[2] }] }; }) } };
+      tmsg("acm", "Saving…");
+      putTarget("acm", payload, "KPI editor", K.length).then(function () { tgKpi = K; tmsg("acm", "Saved ✓ — refreshing dashboard data…", "ok"); setTimeout(function () { renderTargets(); var rb = $("refreshBtn"); if (rb && tgMonth === selectedMonthKey()) rb.click(); }, 400); })
+        .catch(function (e) { tmsg("acm", e.message, "err"); });
+    };
   }
   function gmsg(t, c) { var e = $("twTgMsg"); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }
   function tmsg(type, t, c) { var e = document.querySelector('[data-msg="' + type + '"]'); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }

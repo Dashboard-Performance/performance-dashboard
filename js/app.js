@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.40";
+const APP_VERSION = "1.15.41";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -576,7 +576,7 @@ const state = {
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
   purchasePlanData: [], purchasePlanFiltered: [], purchasePlanSearch: "", purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
-  acmWeights: { gmv: 40, ndr: 20, cm3: 30, retention: 10 },
+  acmKpis: { gmv: { target: 100, weight: 40 }, ndr: { target: 31, weight: 20 }, cm3: { target: 10, weight: 30 }, retention: { target: 100, weight: 10 } }, // KPI's Account Manager (Targets Upload) — الافتراضي من جدول الـ KPIs
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
   commercialTargets: {}, tcCategory: "grand total",
   debundleMap: [], singleSkuTargets: {}, cogsMap: new Map(), // Commercial Plan (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID / COGS_GID)
@@ -2198,22 +2198,48 @@ function buildMerchantInfoMap(mainRows) {
 }
 
 function parseTargetsSheet(payload) {
-  // v1.15.36: الأعمدة: A=TAGER_ID, B=Tager_name, C=ACM, D=Target GMV (Actual), E=Target Placed (Actual)
-  // (الهيدر لو موجود بيتتخطى). أهداف الـ ACM بتتحسب من نفس الداتا بالـ group by ACM.
+  // v1.15.40: Merchant Targets = TAGER_ID | Tager_name | Target GMV (Actual) | Target Placed (Actual).
+  // الـ ACM بتاع كل تاجر بيتاخد أوتوماتيك من كويري Merchant Segmentation (مش من الملف).
+  // لو الملف فيه عمود ACM (الشكل القديم: A..E) بنقراه كاحتياطي بس. الأعمدة بتتحدد من الهيدر لو موجود، وإلا بالترتيب.
   const rawRows = payload?.table?.rows ?? [];
   const targets = {};
+  let col = null; // { gmv, placed, acm }
+  const norm = (c) => cellText(c).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
     const merchantId = cellText(c[0]).trim();
     if (!merchantId) continue;
     const idKey = merchantId.toLowerCase().replace(/[\s_]+/g, "");
-    if (idKey === "tagerid" || idKey === "merchantid" || idKey === "id") continue;
-    targets[merchantId] = { gmv: cellNumber(c[3]), placed: cellNumber(c[4]), name: cellText(c[1]).trim(), acm: cellText(c[2]).trim() };
+    if (idKey === "tagerid" || idKey === "merchantid" || idKey === "id") {
+      const m = { gmv: -1, placed: -1, acm: -1 };
+      c.forEach((cell, i) => { const h = norm(cell); if (h.includes("gmv")) m.gmv = i; else if (h.includes("placed")) m.placed = i; else if (h === "acm" || h.includes("account manager") || h.includes("acc manager")) m.acm = i; });
+      if (m.gmv >= 0 && m.placed >= 0) col = m;
+      continue;
+    }
+    let g, pl, ac = -1;
+    if (col) { g = col.gmv; pl = col.placed; ac = col.acm; }
+    else if (c.length >= 5) { g = 3; pl = 4; ac = 2; } // الشكل القديم: ID | Name | ACM | GMV | Placed
+    else { g = 2; pl = 3; }                              // الشكل الجديد: ID | Name | GMV | Placed
+    targets[merchantId] = { gmv: cellNumber(c[g]), placed: cellNumber(c[pl]), name: cellText(c[1]).trim(), acm: ac >= 0 ? cellText(c[ac]).trim() : "" };
   }
   return targets;
 }
 
+// KPI's Account Manager (Targets Upload → بيتخزن في نوع "acm"): صفوف Metric | Target % | Weight %
+function parseAcmKpiSheet(payload) {
+  const kpis = { gmv: { target: 100, weight: 40 }, ndr: { target: 31, weight: 20 }, cm3: { target: 10, weight: 30 }, retention: { target: 100, weight: 10 } };
+  const rawRows = payload?.table?.rows ?? [];
+  for (const r of rawRows) {
+    const c = r.c || []; if (c.length < 3) continue;
+    const label = normalizeName(cellText(c[0]));
+    const key = label.includes("gmv") ? "gmv" : label.includes("ndr") ? "ndr" : label.includes("cm3") ? "cm3" : label.includes("retention") ? "retention" : "";
+    if (!key) continue;
+    const t = cellNumber(c[1]), w = cellNumber(c[2]);
+    if (t > 0) kpis[key].target = t; if (w >= 0) kpis[key].weight = w;
+  }
+  return kpis;
+}
 
 function parseInventorySheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
@@ -5924,6 +5950,8 @@ function prepareAcmTableData(rows) {
     segByAcm.forEach((sg, nm) => { if (!map.has(nm)) map.set(nm, { name: nm, placed: sg.placed, confirmed: sg.confirmed, delivered: sg.delivered, placedGmv: 0, deliveredGmv: sg.deliveredGmv, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, ppm: 0, crP: sg.placed, crC: sg.confirmed, drC: sg.confirmed, drD: sg.delivered }); });
   }
   const tgt = tgtTiming();
+  const retByAcm = new Map(); // improved/total merchants per ACM (projected segment higher than current)
+  (state.merchantTableData || []).forEach(mm => { const nm = mm.acm; if (!nm || nm === "Unassigned") return; if (!retByAcm.has(nm)) retByAcm.set(nm, { improved: 0, total: 0 }); const e = retByAcm.get(nm); e.total += 1; if ((SEGMENT_RANKS[normalizeName(mm.projectedSegment)] || 0) > (SEGMENT_RANKS[normalizeName(mm.currentSegment)] || 0)) e.improved += 1; });
   // أهداف الـ ACM = مجموع Merchant Targets بالـ group by ACM (عمود ACM في ملف Targets).
   const acmTgt = new Map(); // normalized acm -> { name, targetGmv, targetPlaced, merchantCount }
   (state.merchantTableData || []).forEach(mm => {
@@ -5938,7 +5966,13 @@ function prepareAcmTableData(rows) {
     const cr = m.crP ? (m.crC / m.crP) : (m.placed ? (m.confirmed / m.placed) : 0); const dr = m.drC ? (m.drD / m.drC) : (m.confirmed ? (m.delivered / m.confirmed) : 0); const ndr = (dr * cr) * 100; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) * 100 : 0;
     const ppmPct = m.deliveredGmv ? (m.ppm / m.deliveredGmv) * 100 : 0;
     const t = acmTgt.get(normalizeName(m.name)) || { targetGmv: 0, targetPlaced: 0, merchantCount: 0 };
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tgtMetrics(t.targetGmv, t.targetPlaced, m.deliveredGmv, m.placed, tgt) };
+    const tm = tgtMetrics(t.targetGmv, t.targetPlaced, m.deliveredGmv, m.placed, tgt);
+    const rt = retByAcm.get(m.name) || { improved: 0, total: 0 }; const actualRetention = rt.improved; const actualRetentionPct = rt.total ? (rt.improved / rt.total) * 100 : 0;
+    // Final Weight % = Σ min(Actual ÷ Target, 1) × Weight — لكل KPI من جدول "KPI's Account Manager"
+    const K = state.acmKpis; const part = (act, kp) => (kp.target > 0 ? Math.min(Math.max(act, 0) / kp.target, 1) * kp.weight : 0);
+    const gmvScore = t.targetGmv > 0 ? part(tm.achievedPct, K.gmv) : 0; const ndrScore = part(ndr, K.ndr); const cm3Score = part(cm3Pct, K.cm3); const retentionScore = part(actualRetentionPct, K.retention);
+    const finalScorePct = gmvScore + ndrScore + cm3Score + retentionScore;
+    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tm, actualRetention, actualRetentionPct, gmvScore, ndrScore, cm3Score, retentionScore, finalScorePct };
   });
 }
 
@@ -6041,7 +6075,8 @@ function renderTgtView(kind) {
       `<td class="num text-dim font-bold">${hasP ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim">${hasP ? fmtIntCell(Math.round(m.mtdTargetPlaced)) : '-'}</td><td class="num text-blue font-bold">${fmtIntCell(m.placed)}</td><td class="num font-bold text-light">${fmtIntCell(Math.round(m.placedRunRate))}</td>` +
       tgtPctCell(m.placedAchievedPct, hasP) + tgtPctCell(m.placedMtdPct, hasP) +
       `<td class="num text-dim font-bold">${hasG ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-dim">${hasG ? fmtMoneyCompactCell(m.mtdTargetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td>` +
-      tgtPctCell(m.achievedPct, hasG) + tgtPctCell(m.gmvMtdPct, hasG);
+      tgtPctCell(m.achievedPct, hasG) + tgtPctCell(m.gmvMtdPct, hasG) +
+      (kind === "acm" ? kpiCells(m) : "");
     tbody.appendChild(tr);
   });
   if ($(V.count)) $(V.count).textContent = `${fmtInt.format(V.rows.length)} ${V.unit}`;
@@ -6050,7 +6085,19 @@ function renderTgtView(kind) {
   if ($(V.next)) $(V.next).disabled = V.page >= totalPages - 1;
   document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey) th.classList.toggle("sorted", th.dataset.tkey === V.sortKey); });
 }
-function renderAcmTargetsView() { renderTgtView("acm"); }
+function kpiCells(m) {
+  const K = state.acmKpis; const col = (v, t) => (t > 0 && v >= t ? "green" : (v >= t * 0.6 ? "orange" : "red"));
+  const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
+  const cell = (v, t) => `<td class="num"><span class="badge-outline ${col(v, t)}">${fmtPctCell(v)}</span></td>`;
+  return `<td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${fin})">${fmtPctCell(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>` +
+    cell(m.ndr, K.ndr.target) + cell(m.cm3Pct, K.cm3.target) + cell(m.actualRetentionPct, K.retention.target);
+}
+function renderAcmKpiTable() {
+  const host = $("acmKpiBody"); if (!host) return; const K = state.acmKpis;
+  const rows = [["Delivered GMV", K.gmv, "of the GMV target"], ["Portfolio NDR (Orders)%", K.ndr, ""], ["CM3 Per Merchant", K.cm3, "CM3 %"], ["Segment Retention", K.retention, "merchants moving up a segment"]];
+  host.innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1].target}%</td><td class="num">${r[1].weight}%</td></tr>`).join("") + `<tr><td></td><td></td><td class="num font-bold">${rows.reduce((a, r) => a + r[1].weight, 0)}%</td></tr>`;
+}
+function renderAcmTargetsView() { renderAcmKpiTable(); renderTgtView("acm"); }
 function renderMerchantTargetsView() { renderTgtView("merchant"); }
 function wireTgtViews() {
   Object.keys(tgtViews).forEach(kind => {
@@ -6231,7 +6278,7 @@ function prepareMerchantTableData(rows) {
       crPieces: crPieces * 100, drPieces: drPieces * 100, ndrPieces: ndrPieces * 100,
       cm3: cm3Entry.cm3, cm3DeliveredGmv: cm3Entry.cm3DeliveredGmv, cm3Pct: cm3Pct * 100,
       confirmedGmv: cm3Entry.confirmedGmv, skuCount: cm3Entry.skus.size,
-      ...tm, ppm: cm3Entry.ppm, ppmPct, tgtAcm: (targetData.acm || "") || m.acm,
+      ...tm, ppm: cm3Entry.ppm, ppmPct, tgtAcm: (m.acm && m.acm !== "Unassigned") ? m.acm : ((targetData.acm || "") || m.acm),
       currentSegment, segConfirmed, rrConfirmed, projectedSegment
     };
   });
@@ -17830,6 +17877,7 @@ async function fetchAllSheetsSnapshot() {
   return {
     allParsedRows,
     merchantTargets: targetsPayload ? parseTargetsSheet(targetsPayload) : state.merchantTargets,
+    acmKpis: acmTargetsPayload ? parseAcmKpiSheet(acmTargetsPayload) : state.acmKpis,
     merchantSegmentsMap: state.merchantSegmentsMap,
     inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
@@ -18000,6 +18048,7 @@ function applySnapshotToState(snapshot) {
   state.allParsedRows = userScopedRows(snapshot.allParsedRows);
   state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
   state.merchantTargets = snapshot.merchantTargets;
+  state.acmKpis = snapshot.acmKpis || state.acmKpis;
   state.merchantSegmentsMap = snapshot.merchantSegmentsMap;
   state.inventoryMap = snapshot.inventoryMap;
   state.productsMap = snapshot.productsMap;
@@ -18219,6 +18268,7 @@ async function reloadTargetsForMonth() {
   const p = Object.assign({}, window.__targetBase, found);
   restoreFullDatasets();
   if (p[TARGETS_GID]) state.merchantTargets = parseTargetsSheet(p[TARGETS_GID]);
+  state.acmKpis = p[TARGETS_ACM_GID] ? parseAcmKpiSheet(p[TARGETS_ACM_GID]) : parseAcmKpiSheet(null);
   if (p[CAT_TARGETS_GID]) { state.commercialTargets = parseCommercialTargetsSheet(p[CAT_TARGETS_GID]); state.categoryTargets = deriveCategoryTargetsFromCommercial(state.commercialTargets); }
   if (p[ACM_SALES_PLAN_GID]) state.acmSalesPlanData = parseAcmSalesPlanSheet(p[ACM_SALES_PLAN_GID]);
   if (p[SINGLE_SKU_TARGETS_GID]) state.singleSkuTargets = parseSingleSkuTargetsSheet(p[SINGLE_SKU_TARGETS_GID]);
