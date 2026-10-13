@@ -1,1 +1,739 @@
-(function(_0x307af7,_0x49b9ec){const _0x42db11=a0_0x3331,_0x20ce06=_0x307af7();while(!![]){try{const _0x51b2d1=-parseInt(_0x42db11(0x17a))/0x1+-parseInt(_0x42db11(0x18e))/0x2+-parseInt(_0x42db11(0x15f))/0x3+parseInt(_0x42db11(0x1cd))/0x4*(-parseInt(_0x42db11(0x170))/0x5)+parseInt(_0x42db11(0x1c6))/0x6*(parseInt(_0x42db11(0x186))/0x7)+parseInt(_0x42db11(0x1c2))/0x8*(-parseInt(_0x42db11(0x185))/0x9)+parseInt(_0x42db11(0x1ba))/0xa;if(_0x51b2d1===_0x49b9ec)break;else _0x20ce06['push'](_0x20ce06['shift']());}catch(_0x1b34f7){_0x20ce06['push'](_0x20ce06['shift']());}}}(a0_0x1719,0x74081),(function(){'use strict';const _0x77c59d=a0_0x3331;const _0x44d38f={'API_URL':_0x77c59d(0x147),'ALLOWED_DOMAIN':_0x77c59d(0x19a),'ROLES':[_0x77c59d(0x1ce),_0x77c59d(0x1ae),'Commercial',_0x77c59d(0x18f),'Merchant'],'STORAGE_KEY':_0x77c59d(0x16e),'PRESENCE_ADMIN_EMAIL':_0x77c59d(0x1b2),'OWNER_EMAILS':[_0x77c59d(0x1b2),_0x77c59d(0x19d)],'WORKER_URL':_0x77c59d(0x163),'HEARTBEAT_INTERVAL_MS':0xea60},_0x20a03c=_0xc5566c(),_0x7f63ee=document['createElement'](_0x77c59d(0x1d2));_0x7f63ee['id']='authGateStyle';!_0x20a03c&&(_0x7f63ee[_0x77c59d(0x174)]=_0x77c59d(0x1da));document[_0x77c59d(0x195)][_0x77c59d(0x152)](_0x7f63ee),_0x931ad6();!_0x20a03c?_0x1a27bb():_0x87586b(()=>{_0x536c7c(_0x20a03c),_0x738fa8(_0x20a03c);});function _0x87586b(_0x48d4cd){const _0x392719=_0x77c59d;document['readyState']===_0x392719(0x1c7)?document[_0x392719(0x188)](_0x392719(0x14b),_0x48d4cd):_0x48d4cd();}function _0xc5566c(){const _0x196f0a=_0x77c59d;try{const _0x39bff6=localStorage[_0x196f0a(0x154)](_0x44d38f['STORAGE_KEY']);if(!_0x39bff6)return null;const _0x2c0f93=JSON[_0x196f0a(0x18b)](_0x39bff6);if(_0x2c0f93&&_0x2c0f93['email']&&_0x2c0f93[_0x196f0a(0x1bf)])return _0x2c0f93;return null;}catch(_0x57b65b){return null;}}function _0x52707f(_0x36b06b){const _0x3c680f=_0x77c59d;localStorage[_0x3c680f(0x1e3)](_0x44d38f[_0x3c680f(0x19c)],JSON['stringify'](_0x36b06b));}function _0x2d8158(){const _0x47f618=_0x77c59d;localStorage[_0x47f618(0x13f)](_0x44d38f[_0x47f618(0x19c)]);}const _0x4fb9cb=0x61a8,_0x2b8751=0x2ee0;function _0x32ea5f(_0x2f88f2,_0x3e6728){const _0x1b3097=_0x77c59d;if(!_0x44d38f[_0x1b3097(0x1a8)]||_0x44d38f[_0x1b3097(0x1a8)][_0x1b3097(0x165)](_0x1b3097(0x1d9))===0x0)return Promise['reject'](new Error(_0x1b3097(0x149)));const _0x2bd5d5=new AbortController(),_0x2f783d=setTimeout(()=>_0x2bd5d5['abort'](),_0x3e6728||_0x4fb9cb);return fetch(_0x44d38f[_0x1b3097(0x1a8)],{'method':'POST','headers':{'Content-Type':_0x1b3097(0x176)},'body':JSON[_0x1b3097(0x161)](_0x2f88f2),'signal':_0x2bd5d5[_0x1b3097(0x17c)]})[_0x1b3097(0x181)](_0x350e26=>_0x350e26[_0x1b3097(0x1ca)]()[_0x1b3097(0x182)](_0x34126f=>{throw new Error('TRANSIENT_NON_JSON_RESPONSE:\x20'+(_0x34126f&&_0x34126f['message']));}),_0x4e45e1=>{const _0x14300f=_0x1b3097;if(_0x4e45e1&&_0x4e45e1[_0x14300f(0x1bf)]===_0x14300f(0x1bc))throw new Error('Server\x20is\x20busy\x20right\x20now\x20—\x20please\x20try\x20again\x20in\x20a\x20moment.');throw new Error(_0x14300f(0x156));})[_0x1b3097(0x191)](()=>clearTimeout(_0x2f783d));}function _0x48b204(_0x5d3fe7,_0x1f68d7,_0x32a138){const _0x3b9632=_0x77c59d;return _0x1f68d7=_0x1f68d7||0x1,_0x32ea5f(_0x5d3fe7,_0x32a138)[_0x3b9632(0x182)](_0x1ddb10=>{const _0x2f2952=_0x3b9632,_0x141003=_0x1ddb10&&_0x1ddb10[_0x2f2952(0x1a3)]||'',_0x4d78ba=_0x141003[_0x2f2952(0x165)]('TRANSIENT_NON_JSON_RESPONSE')===0x0;if(_0x4d78ba&&_0x1f68d7<0x3)return new Promise(_0x162695=>setTimeout(_0x162695,0x320*_0x1f68d7))[_0x2f2952(0x181)](()=>_0x48b204(_0x5d3fe7,_0x1f68d7+0x1,_0x32a138));if(_0x4d78ba)throw new Error(_0x2f2952(0x1ab));throw _0x1ddb10;});}function _0x931ad6(){const _0x5573b4=_0x77c59d,_0x140472=_0x5573b4(0x1d8),_0x14f445=document['createElement'](_0x5573b4(0x1d2));_0x14f445['id']='authOverlayStyles',_0x14f445['textContent']=_0x140472,document[_0x5573b4(0x195)]['appendChild'](_0x14f445);}function _0x1a27bb(){const _0x1ef675=_0x77c59d,_0x274799=_0x44d38f['ROLES'][_0x1ef675(0x18c)](_0x3d60ce=>'<option\x20value=\x22'+_0x3d60ce+'\x22>'+_0x3d60ce+_0x1ef675(0x175))['join'](''),_0x38ec25=document[_0x1ef675(0x157)](_0x1ef675(0x1de));_0x38ec25['id']=_0x1ef675(0x171),_0x38ec25[_0x1ef675(0x16a)]='\x0a\x20\x20\x20\x20\x20\x20<section\x20class=\x22auth-hero\x22\x20aria-hidden=\x22true\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22auth-logo\x22><span\x20class=\x22auth-mark\x22>T</span>Center\x20Control</div>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<h1>Your\x20team\x27s\x20performance,\x20<span>in\x20one\x20calm\x20place.</span></h1>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<p>Live\x20numbers\x20across\x20hubs,\x20merchants\x20and\x20SKUs,\x20with\x20access\x20and\x20alerts\x20that\x20reach\x20the\x20right\x20person.</p>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<ul\x20class=\x22auth-points\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<li>Live\x20performance\x20across\x20every\x20hub</li>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<li>Role-based\x20access\x20for\x20each\x20team</li>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<li>Alerts\x20sent\x20straight\x20to\x20the\x20people\x20who\x20own\x20them</li>\x0a\x20\x20\x20\x20\x20\x20\x20\x20</ul>\x0a\x20\x20\x20\x20\x20\x20</section>\x0a\x20\x20\x20\x20\x20\x20<section\x20class=\x22auth-side\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22auth-card\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22auth-minibrand\x22><span\x20class=\x22auth-mark\x22>T</span>Center\x20Control</div>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<h2\x20class=\x22auth-title\x22\x20id=\x22authTitle\x22>Welcome\x20back</h2>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<p\x20class=\x22auth-sub\x22\x20id=\x22authSub\x22>Sign\x20in\x20to\x20open\x20the\x20dashboard.</p>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22auth-tabs\x22\x20role=\x22tablist\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<button\x20type=\x22button\x22\x20class=\x22auth-tab\x20active\x22\x20data-tab=\x22login\x22\x20role=\x22tab\x22>Login</button>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<button\x20type=\x22button\x22\x20class=\x22auth-tab\x22\x20data-tab=\x22signup\x22\x20role=\x22tab\x22>Sign\x20Up</button>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20</div>\x0a\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<form\x20id=\x22authLoginForm\x22\x20class=\x22auth-form\x20active\x22\x20autocomplete=\x22on\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<label\x20for=\x22authLoginEmail\x22>Email</label>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<input\x20type=\x22email\x22\x20id=\x22authLoginEmail\x22\x20placeholder=\x22name@'+_0x44d38f[_0x1ef675(0x140)]+_0x1ef675(0x194)+_0x44d38f['ALLOWED_DOMAIN']+_0x1ef675(0x1cc)+_0x274799+_0x1ef675(0x168)+_0x44d38f[_0x1ef675(0x140)]+_0x1ef675(0x15d),document['body']['appendChild'](_0x38ec25),_0x38ec25['querySelectorAll'](_0x1ef675(0x1a7))[_0x1ef675(0x1b8)](_0x162938=>{const _0x4bb61c=_0x1ef675;_0x162938[_0x4bb61c(0x188)](_0x4bb61c(0x1d7),()=>{const _0x45023c=_0x4bb61c;_0x38ec25['querySelectorAll'](_0x45023c(0x1a7))[_0x45023c(0x1b8)](_0x290d8a=>_0x290d8a[_0x45023c(0x14c)][_0x45023c(0x142)](_0x45023c(0x17e))),_0x38ec25[_0x45023c(0x16d)]('.auth-form')['forEach'](_0xb9e011=>_0xb9e011[_0x45023c(0x14c)][_0x45023c(0x142)](_0x45023c(0x17e))),_0x162938[_0x45023c(0x14c)][_0x45023c(0x159)](_0x45023c(0x17e)),_0x38ec25[_0x45023c(0x16f)](_0x45023c(0x167)+_0x1511a(_0x162938[_0x45023c(0x13c)][_0x45023c(0x1e1)])+_0x45023c(0x1c9))[_0x45023c(0x14c)]['add']('active');const _0x2fff40=_0x162938[_0x45023c(0x13c)][_0x45023c(0x1e1)]===_0x45023c(0x1dc);_0x38ec25['querySelector'](_0x45023c(0x172))[_0x45023c(0x174)]=_0x2fff40?_0x45023c(0x15b):_0x45023c(0x173),_0x38ec25[_0x45023c(0x16f)](_0x45023c(0x17b))[_0x45023c(0x174)]=_0x2fff40?_0x45023c(0x158):_0x45023c(0x17f);});}),_0x38ec25[_0x1ef675(0x16d)]('.auth-toggle-pass')[_0x1ef675(0x1b8)](_0x356050=>{const _0x290f82=_0x1ef675,_0x4d1c46=()=>{const _0x37145e=a0_0x3331,_0x3370c4=document[_0x37145e(0x1e4)](_0x356050['dataset'][_0x37145e(0x166)]),_0x378f9b=_0x3370c4['type']==='password';_0x3370c4[_0x37145e(0x19b)]=_0x378f9b?_0x37145e(0x1a9):_0x37145e(0x183),_0x356050[_0x37145e(0x174)]=_0x378f9b?_0x37145e(0x18a):_0x37145e(0x18d);};_0x356050[_0x290f82(0x188)](_0x290f82(0x1d7),_0x4d1c46),_0x356050['addEventListener'](_0x290f82(0x1b1),_0xc0f41f=>{const _0x580b35=_0x290f82;(_0xc0f41f[_0x580b35(0x1af)]==='Enter'||_0xc0f41f[_0x580b35(0x1af)]==='\x20')&&(_0xc0f41f[_0x580b35(0x193)](),_0x4d1c46());});});const _0xfc3a4=localStorage[_0x1ef675(0x154)](_0x1ef675(0x153));_0xfc3a4&&(document[_0x1ef675(0x1e4)]('authLoginEmail')[_0x1ef675(0x17d)]=_0xfc3a4);try{fetch(_0x44d38f[_0x1ef675(0x1a8)]+'?action=ping',{'mode':_0x1ef675(0x1a2),'cache':'no-store'})[_0x1ef675(0x182)](()=>{});}catch(_0xb849f5){}setTimeout(()=>{const _0x533312=_0x1ef675,_0x2359f0=document['getElementById'](_0xfc3a4?_0x533312(0x146):_0x533312(0x15a));if(_0x2359f0)_0x2359f0[_0x533312(0x1a6)]();},0x3c),_0x1c552c(_0x38ec25),_0x22529d(_0x38ec25);function _0x1511a(_0x1682aa){const _0x511693=_0x1ef675;return _0x1682aa['charAt'](0x0)[_0x511693(0x1b0)]()+_0x1682aa[_0x511693(0x162)](0x1);}}function _0x12f0f9(_0x7a3914,_0x242a7c,_0x520e02){const _0x17293d=_0x77c59d;_0x7a3914[_0x17293d(0x1c1)]=!![],_0x7a3914[_0x17293d(0x16a)]=_0x17293d(0x1cb)+_0x520e02,_0x242a7c[_0x17293d(0x174)]='';const _0x2fff72=setTimeout(()=>{const _0x45509b=_0x17293d;_0x242a7c[_0x45509b(0x174)]=_0x45509b(0x144);},0xdac);return function _0x3f7005(_0x190269){const _0x2e599a=_0x17293d;clearTimeout(_0x2fff72),_0x242a7c[_0x2e599a(0x174)]='',_0x7a3914[_0x2e599a(0x1c1)]=![],_0x7a3914['textContent']=_0x190269;};}function _0x418cd4(_0x35ee28,_0x352cc5){const _0x5dd0c2=_0x77c59d,_0xcf7fb8={'name':_0x35ee28['name'],'email':_0x35ee28['email'],'role':_0x35ee28['role']};_0x52707f(_0xcf7fb8),localStorage[_0x5dd0c2(0x1e3)](_0x5dd0c2(0x153),_0xcf7fb8[_0x5dd0c2(0x14e)]);if(_0x352cc5===_0x5dd0c2(0x1dc))localStorage[_0x5dd0c2(0x1e3)]('twWelcomeSignup',_0xcf7fb8[_0x5dd0c2(0x14e)]);_0x5647d2(_0xcf7fb8);}function _0x1c552c(_0x36e9c6){const _0x41f987=_0x77c59d,_0x3a91e2=_0x36e9c6['querySelector'](_0x41f987(0x1c8)),_0x289d98=_0x36e9c6[_0x41f987(0x16f)](_0x41f987(0x197)),_0x21a2e7=_0x36e9c6['querySelector'](_0x41f987(0x198)),_0x44d20f=_0x36e9c6[_0x41f987(0x16f)](_0x41f987(0x187));_0x3a91e2[_0x41f987(0x188)](_0x41f987(0x14d),_0x4f1196=>{const _0x5d117f=_0x41f987;_0x4f1196['preventDefault'](),_0x289d98['textContent']='';const _0x59d2f2=_0x36e9c6['querySelector'](_0x5d117f(0x150))[_0x5d117f(0x17d)][_0x5d117f(0x1bb)](),_0x20ec55=_0x36e9c6['querySelector'](_0x5d117f(0x1d3))[_0x5d117f(0x17d)];if(!_0x20ec55){_0x289d98['textContent']=_0x5d117f(0x13e);return;}const _0x3d2899=_0x12f0f9(_0x21a2e7,_0x44d20f,_0x5d117f(0x160)),_0x13f284={'action':_0x5d117f(0x192),'email':_0x59d2f2,'password':_0x20ec55};_0x48b204(_0x13f284,0x1,_0x2b8751)[_0x5d117f(0x182)](_0x5702a5=>{const _0x489ee3=_0x5d117f;if(/busy/i['test'](_0x5702a5&&_0x5702a5[_0x489ee3(0x1a3)]||''))return _0x48b204(_0x13f284,0x1,_0x2b8751);throw _0x5702a5;})[_0x5d117f(0x181)](_0x10cc48=>{const _0x6d5eba=_0x5d117f;if(!_0x10cc48||!_0x10cc48[_0x6d5eba(0x1e5)]){_0x289d98[_0x6d5eba(0x174)]=_0x10cc48&&_0x10cc48[_0x6d5eba(0x1a3)]||_0x6d5eba(0x189);return;}_0x418cd4(_0x10cc48,_0x6d5eba(0x192));})[_0x5d117f(0x182)](_0x4982ec=>{const _0x173e8b=_0x5d117f;_0x289d98[_0x173e8b(0x174)]=_0x4982ec[_0x173e8b(0x1a3)]||'Something\x20went\x20wrong.\x20Please\x20try\x20again.';})[_0x5d117f(0x191)](()=>_0x3d2899('Login'));});}function _0x22529d(_0x36f98e){const _0x2274df=_0x77c59d,_0x1d696a=_0x36f98e['querySelector'](_0x2274df(0x1ad)),_0x57cbda=_0x36f98e[_0x2274df(0x16f)](_0x2274df(0x148)),_0xc1ac0a=_0x36f98e['querySelector'](_0x2274df(0x19f)),_0x20b0ad=_0x36f98e[_0x2274df(0x16f)](_0x2274df(0x1a0));_0x1d696a[_0x2274df(0x188)](_0x2274df(0x14d),_0x1caeff=>{const _0x2880c6=_0x2274df;_0x1caeff[_0x2880c6(0x193)](),_0x57cbda[_0x2880c6(0x174)]='';const _0x3b7917=_0x36f98e[_0x2880c6(0x16f)](_0x2880c6(0x16b))['value'][_0x2880c6(0x1bb)](),_0x2a56ae=_0x36f98e[_0x2880c6(0x16f)]('#authSignupEmail')['value'][_0x2880c6(0x1bb)](),_0x10d97e=_0x36f98e['querySelector']('#authSignupRole')[_0x2880c6(0x17d)],_0x1a0fbc=_0x36f98e[_0x2880c6(0x16f)]('#authSignupPassword')[_0x2880c6(0x17d)],_0x30c1fe=_0x36f98e['querySelector'](_0x2880c6(0x1c5))[_0x2880c6(0x17d)];if(!_0x3b7917){_0x57cbda[_0x2880c6(0x174)]='Please\x20enter\x20your\x20full\x20name.';return;}if(_0x1a0fbc['length']<0x6){_0x57cbda['textContent']=_0x2880c6(0x1e7);return;}if(_0x1a0fbc!==_0x30c1fe){_0x57cbda[_0x2880c6(0x174)]=_0x2880c6(0x19e);return;}const _0x135918=_0x12f0f9(_0xc1ac0a,_0x20b0ad,_0x2880c6(0x1b7));_0x48b204({'action':'signup','name':_0x3b7917,'email':_0x2a56ae,'password':_0x1a0fbc,'role':_0x10d97e})[_0x2880c6(0x181)](_0x425657=>{const _0xe8a08b=_0x2880c6;if(!_0x425657||!_0x425657[_0xe8a08b(0x1e5)]){_0x57cbda[_0xe8a08b(0x174)]=_0x425657&&_0x425657['message']||_0xe8a08b(0x184);return;}_0x418cd4(_0x425657,_0xe8a08b(0x1dc));})['catch'](_0x5e0057=>{const _0x39b3b6=_0x2880c6;_0x57cbda['textContent']=_0x5e0057[_0x39b3b6(0x1a3)]||'Something\x20went\x20wrong.\x20Please\x20try\x20again.';})[_0x2880c6(0x191)](()=>_0x135918(_0x2880c6(0x1db)));});}function _0x5647d2(_0x39abfd){const _0x31ee3c=_0x77c59d,_0x112a5c=document[_0x31ee3c(0x1e4)]('authGateStyle');if(_0x112a5c)_0x112a5c[_0x31ee3c(0x174)]='';const _0x57b979=document[_0x31ee3c(0x1e4)](_0x31ee3c(0x171));if(_0x57b979)_0x57b979[_0x31ee3c(0x142)]();window[_0x31ee3c(0x1a4)](new Event(_0x31ee3c(0x141))),_0x87586b(()=>{_0x536c7c(_0x39abfd),_0x738fa8(_0x39abfd);});}function _0x536c7c(_0x57c67a){const _0x42a512=_0x77c59d;if(document[_0x42a512(0x1e4)](_0x42a512(0x1a1)))return;const _0x10f6d6=document[_0x42a512(0x16f)](_0x42a512(0x1b9));if(!_0x10f6d6)return;const _0x1b841e=document['createElement'](_0x42a512(0x1de));_0x1b841e['id']=_0x42a512(0x1a1),_0x1b841e['className']=_0x42a512(0x1c0),_0x1b841e[_0x42a512(0x16a)]=_0x42a512(0x1d5)+_0x1dc8e1(_0xffa796(_0x57c67a[_0x42a512(0x1bf)]))+_0x42a512(0x14f)+_0x1dc8e1(_0x57c67a[_0x42a512(0x1bf)])+'</div>\x0a\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22auth-profile-role\x22>'+_0x1dc8e1(_0x57c67a[_0x42a512(0x179)])+_0x42a512(0x164),_0x1b841e[_0x42a512(0x16f)](_0x42a512(0x16c))[_0x42a512(0x188)](_0x42a512(0x1d7),()=>{const _0x1a6e0a=_0x42a512;_0x2d8158(),window[_0x1a6e0a(0x1d0)][_0x1a6e0a(0x1d4)]();}),_0x10f6d6['prepend'](_0x1b841e);}function _0x15d956(){const _0x22b2db=_0x77c59d;return typeof document===_0x22b2db(0x1df)||document[_0x22b2db(0x15c)]!==_0x22b2db(0x177);}function _0x738fa8(_0x48c1f3){const _0x397296=_0x77c59d;setTimeout(()=>_0x767f72(_0x48c1f3),0xfa0),setInterval(()=>{if(_0x15d956())_0x767f72(_0x48c1f3);},_0x44d38f[_0x397296(0x15e)]),_0x44d38f[_0x397296(0x1b5)][_0x397296(0x165)](String(_0x48c1f3['email']||'')[_0x397296(0x1bb)]()[_0x397296(0x1b3)]())!==-0x1&&(_0x21a9d5(),_0x33f0ec(_0x48c1f3));}function _0x767f72(_0x3266c5){const _0x42c5d9=_0x77c59d;if(!_0x44d38f[_0x42c5d9(0x1bd)])return;const _0x2979d1=_0x44d38f[_0x42c5d9(0x1bd)]+_0x42c5d9(0x169)+encodeURIComponent(_0x3266c5[_0x42c5d9(0x14e)])+'&name='+encodeURIComponent(_0x3266c5[_0x42c5d9(0x1bf)]||'');fetch(_0x2979d1,{'method':_0x42c5d9(0x1c4),'cache':_0x42c5d9(0x14a)})['catch'](()=>{});}function _0x21a9d5(){const _0x5ab8ee=_0x77c59d,_0xd2f5ab='\x0a\x20\x20\x20\x20.presence-widget{position:relative;display:inline-flex;z-index:9500;font-family:\x22Inter\x22,-apple-system,sans-serif;}\x0a\x20\x20\x20\x20.presence-pill{display:flex;align-items:center;gap:7px;background:#18181b;border:1px\x20solid\x20#27272a;\x0a\x20\x20\x20\x20\x20\x20border-radius:20px;padding:7px\x2014px\x207px\x2010px;cursor:pointer;box-shadow:0\x208px\x2024px\x20rgba(0,0,0,0.35);\x0a\x20\x20\x20\x20\x20\x20transition:border-color\x20.2s;font-family:inherit;}\x0a\x20\x20\x20\x20.presence-pill:hover{border-color:#3f3f46;}\x0a\x20\x20\x20\x20.presence-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;\x0a\x20\x20\x20\x20\x20\x20box-shadow:0\x200\x200\x200\x20rgba(34,197,94,0.55);animation:presencePulse\x202s\x20infinite;}\x0a\x20\x20\x20\x20@keyframes\x20presencePulse{\x0a\x20\x20\x20\x20\x20\x200%{box-shadow:0\x200\x200\x200\x20rgba(34,197,94,0.55);}\x0a\x20\x20\x20\x20\x20\x2070%{box-shadow:0\x200\x200\x206px\x20rgba(34,197,94,0);}\x0a\x20\x20\x20\x20\x20\x20100%{box-shadow:0\x200\x200\x200\x20rgba(34,197,94,0);}\x0a\x20\x20\x20\x20}\x0a\x20\x20\x20\x20.presence-count{font-size:12px;font-weight:700;color:#fafafa;}\x0a\x20\x20\x20\x20.presence-label{font-size:11px;font-weight:600;color:#a1a1aa;letter-spacing:0.3px;}\x0a\x20\x20\x20\x20.presence-panel{position:absolute;top:calc(100%\x20+\x208px);right:0;width:280px;max-height:340px;overflow-y:auto;\x0a\x20\x20\x20\x20\x20\x20background:#18181b;border:1px\x20solid\x20#27272a;border-radius:12px;box-shadow:0\x2020px\x2060px\x20rgba(0,0,0,0.45);\x0a\x20\x20\x20\x20\x20\x20padding:8px;}\x0a\x20\x20\x20\x20.presence-panel.hidden{display:none;}\x0a\x20\x20\x20\x20.presence-panel-header{display:flex;align-items:center;justify-content:space-between;padding:6px\x208px\x2010px\x208px;\x0a\x20\x20\x20\x20\x20\x20border-bottom:1px\x20solid\x20#27272a;margin-bottom:6px;}\x0a\x20\x20\x20\x20.presence-panel-title{font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.5px;}\x0a\x20\x20\x20\x20.presence-panel-sub{font-size:10px;color:#52525b;font-family:\x27JetBrains\x20Mono\x27,monospace;}\x0a\x20\x20\x20\x20.presence-row{display:flex;align-items:center;gap:9px;padding:7px\x208px;border-radius:8px;}\x0a\x20\x20\x20\x20.presence-row:hover{background:#09090b;}\x0a\x20\x20\x20\x20.presence-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);\x0a\x20\x20\x20\x20\x20\x20display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;\x0a\x20\x20\x20\x20\x20\x20flex-shrink:0;text-transform:uppercase;}\x0a\x20\x20\x20\x20.presence-row-info{flex:1;min-width:0;}\x0a\x20\x20\x20\x20.presence-row-name{font-size:12px;font-weight:600;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\x0a\x20\x20\x20\x20.presence-row-email{font-size:10px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\x0a\x20\x20\x20\x20.presence-row-time{font-size:10px;color:#22c55e;font-family:\x27JetBrains\x20Mono\x27,monospace;flex-shrink:0;}\x0a\x20\x20\x20\x20.presence-empty{padding:16px\x208px;text-align:center;font-size:11px;color:#52525b;}\x0a\x20\x20\x20\x20',_0x3e1179=document['createElement'](_0x5ab8ee(0x1d2));_0x3e1179['id']=_0x5ab8ee(0x1cf),_0x3e1179['textContent']=_0xd2f5ab,document[_0x5ab8ee(0x195)]['appendChild'](_0x3e1179);}function _0x33f0ec(_0x56d5c4){const _0x3e4580=_0x77c59d;if(document[_0x3e4580(0x1e4)]('presenceWidget'))return;const _0x2d46fd=document['createElement']('div');_0x2d46fd['id']=_0x3e4580(0x1ac),_0x2d46fd[_0x3e4580(0x1e2)]=_0x3e4580(0x178),_0x2d46fd[_0x3e4580(0x16a)]=_0x3e4580(0x1b6);const _0x4150eb=document[_0x3e4580(0x16f)](_0x3e4580(0x1a5));_0x4150eb?_0x4150eb[_0x3e4580(0x196)](_0x2d46fd):document[_0x3e4580(0x13d)][_0x3e4580(0x152)](_0x2d46fd);const _0x52b0f7=_0x2d46fd['querySelector'](_0x3e4580(0x1b4)),_0x3069a0=_0x2d46fd[_0x3e4580(0x16f)](_0x3e4580(0x1aa));_0x52b0f7[_0x3e4580(0x188)](_0x3e4580(0x1d7),()=>{const _0x6d913c=_0x3e4580,_0x11b57a=_0x3069a0['classList'][_0x6d913c(0x1dd)](_0x6d913c(0x177));_0x3069a0['classList']['toggle'](_0x6d913c(0x177));if(_0x11b57a)_0x2dcab8(_0x56d5c4);}),document['addEventListener'](_0x3e4580(0x1d7),_0x540a0f=>{const _0x257896=_0x3e4580;if(!_0x2d46fd[_0x257896(0x1dd)](_0x540a0f[_0x257896(0x166)]))_0x3069a0[_0x257896(0x14c)][_0x257896(0x159)]('hidden');}),setTimeout(()=>_0x2dcab8(_0x56d5c4),0x36b0),setInterval(()=>{if(_0x15d956())_0x2dcab8(_0x56d5c4);},_0x44d38f[_0x3e4580(0x15e)]);}function _0x2dcab8(_0x29b4a3){const _0x300c41=_0x77c59d;if(!_0x44d38f[_0x300c41(0x1bd)])return;const _0x3b3276=_0x44d38f['WORKER_URL']+_0x300c41(0x1d1)+encodeURIComponent(_0x29b4a3[_0x300c41(0x14e)]);fetch(_0x3b3276,{'method':_0x300c41(0x1c4),'cache':_0x300c41(0x14a)})[_0x300c41(0x181)](_0x1dbfc0=>_0x1dbfc0[_0x300c41(0x1ca)]())[_0x300c41(0x181)](_0x4e7c89=>{const _0x20dfd7=_0x300c41;if(!_0x4e7c89||!_0x4e7c89[_0x20dfd7(0x1e5)])return;_0x36cac9(_0x4e7c89['users']||[],_0x4e7c89[_0x20dfd7(0x1d6)]||Date['now']());})[_0x300c41(0x182)](()=>{});}function _0x36cac9(_0x4b758b,_0x1a2d6d){const _0x4a9af0=_0x77c59d,_0x4335bb=document[_0x4a9af0(0x1e4)](_0x4a9af0(0x143)),_0xadb5a6=document[_0x4a9af0(0x1e4)](_0x4a9af0(0x145)),_0x4fa66e=document[_0x4a9af0(0x1e4)]('presenceUpdatedAt');if(!_0x4335bb||!_0xadb5a6)return;_0x4335bb['textContent']=String(_0x4b758b[_0x4a9af0(0x180)]),_0x4fa66e[_0x4a9af0(0x174)]=_0x4a9af0(0x1d6);if(!_0x4b758b[_0x4a9af0(0x180)]){_0xadb5a6['innerHTML']=_0x4a9af0(0x151);return;}_0xadb5a6[_0x4a9af0(0x16a)]=_0x4b758b[_0x4a9af0(0x18c)](_0x2c09ab=>{const _0x4b953c=_0x4a9af0,_0x1ceb63=Math[_0x4b953c(0x1be)](0x0,Math['round']((_0x1a2d6d-_0x2c09ab[_0x4b953c(0x1e6)])/0x3e8));return'\x0a\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22presence-row\x22>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22presence-avatar\x22>'+_0x1dc8e1(_0xffa796(_0x2c09ab[_0x4b953c(0x1bf)]))+_0x4b953c(0x155)+_0x1dc8e1(_0x2c09ab[_0x4b953c(0x1bf)])+_0x4b953c(0x199)+_0x1dc8e1(_0x2c09ab[_0x4b953c(0x14e)])+'</div>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20</div>\x0a\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20<div\x20class=\x22presence-row-time\x22>'+_0x5857dc(_0x1ceb63)+_0x4b953c(0x1e0);})['join']('');}function _0x5857dc(_0x3df881){const _0x5e70bf=_0x77c59d;if(_0x3df881<0xa)return _0x5e70bf(0x1d6);if(_0x3df881<0x3c)return _0x3df881+'s';return Math['round'](_0x3df881/0x3c)+'m';}function _0xffa796(_0x3f79d8){const _0x38e4f3=_0x77c59d,_0xfe17df=String(_0x3f79d8||'')['trim']()[_0x38e4f3(0x190)](/\s+/)[_0x38e4f3(0x1c3)](Boolean);if(!_0xfe17df['length'])return'?';if(_0xfe17df[_0x38e4f3(0x180)]===0x1)return _0xfe17df[0x0][_0x38e4f3(0x162)](0x0,0x2);return _0xfe17df[0x0]['charAt'](0x0)+_0xfe17df[_0xfe17df['length']-0x1]['charAt'](0x0);}function _0x1dc8e1(_0x1f2713){const _0x22a284=_0x77c59d,_0x31af1d=document['createElement'](_0x22a284(0x1de));return _0x31af1d[_0x22a284(0x174)]=String(_0x1f2713),_0x31af1d['innerHTML'];}}()));function a0_0x3331(_0x1dd029,_0x5bfd8f){const _0x171938=a0_0x1719();return a0_0x3331=function(_0x33312f,_0x210433){_0x33312f=_0x33312f-0x13c;let _0x2dd2cb=_0x171938[_0x33312f];if(a0_0x3331['VJgFgZ']===undefined){var _0x430972=function(_0x44d38f){const _0x20a03c='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=';let _0x7f63ee='',_0x87586b='';for(let _0xc5566c=0x0,_0x52707f,_0x2d8158,_0x4fb9cb=0x0;_0x2d8158=_0x44d38f['charAt'](_0x4fb9cb++);~_0x2d8158&&(_0x52707f=_0xc5566c%0x4?_0x52707f*0x40+_0x2d8158:_0x2d8158,_0xc5566c++%0x4)?_0x7f63ee+=String['fromCharCode'](0xff&_0x52707f>>(-0x2*_0xc5566c&0x6)):0x0){_0x2d8158=_0x20a03c['indexOf'](_0x2d8158);}for(let _0x2b8751=0x0,_0x32ea5f=_0x7f63ee['length'];_0x2b8751<_0x32ea5f;_0x2b8751++){_0x87586b+='%'+('00'+_0x7f63ee['charCodeAt'](_0x2b8751)['toString'](0x10))['slice'](-0x2);}return decodeURIComponent(_0x87586b);};a0_0x3331['XzunFf']=_0x430972,_0x1dd029=arguments,a0_0x3331['VJgFgZ']=!![];}const _0x1e9b21=_0x171938[0x0],_0x4c16bf=_0x33312f+_0x1e9b21,_0x4cd522=_0x1dd029[_0x4c16bf];return!_0x4cd522?(_0x2dd2cb=a0_0x3331['XzunFf'](_0x2dd2cb),_0x1dd029[_0x4c16bf]=_0x2dd2cb):_0x2dd2cb=_0x4cd522,_0x2dd2cb;},a0_0x3331(_0x1dd029,_0x5bfd8f);}function a0_0x1719(){const _0x8a5599=['C29TyxLHlNLVDxnZzwzaDgfHz2vYlMnVBq','ugfZC3DVCMrZigrVig5VDcbTyxrJAc4','i2f1DgHtAwDUDxbtDwjTAxq','i2f1DgHtAwDUDxbiAw50','yxv0AfvZzxjcywrNzq','BM8Ty29YCW','BwvZC2fNzq','zgLZCgf0y2HfDMvUDa','lNrVCgjHCI1Hy3rPB25Z','zM9JDxm','lMf1DgGTDgfI','qvbjx1vsta','Dgv4Da','i3bYzxnLBMnLugfUzwW','u2vYDMvYigLZigj1C3KGCMLNAhqGBM93iokaLcbWBgvHC2uGDhj5igfNywLUigLUigeGBw9Tzw50lG','ChjLC2vUy2vxAwrNzxq','i2f1DgHtAwDUDxbgB3jT','qwnJB3vUDcbnyw5Hz2vY','A2v5','Dg9vChbLCKnHC2u','A2v5zg93BG','Ew91C3nLzI5Oyw5HzNLaDgfHz2vYlMnVBq','Dg9mB3DLCKnHC2u','i3bYzxnLBMnLugLSBej0BG','t1DorvjFru1bsuXt','cIaGicaGidXIDxr0B24GDhLWzt0IyNv0Dg9UiIbJBgfZCZ0IChjLC2vUy2uTCgLSBciGAwq9iNbYzxnLBMnLugLSBej0BIiGDgL0Bgu9iLDOBYDZig9UBgLUzsi+cIaGicaGicaGphnWyw4Gy2XHC3m9iNbYzxnLBMnLlwrVDci+pc9ZCgfUpGOGicaGicaGidXZCgfUignSyxnZpsjWCMvZzw5Jzs1JB3vUDciGAwq9iNbYzxnLBMnLq291BNqIpUkaLdWVC3bHBJ4kicaGicaGica8C3bHBIbJBgfZCZ0IChjLC2vUy2uTBgfIzwWIpK9UBgLUztWVC3bHBJ4kicaGicaGpc9IDxr0B24+cIaGicaGidXKAxyGy2XHC3m9iNbYzxnLBMnLlxbHBMvSigHPzgrLBIiGAwq9iNbYzxnLBMnLugfUzwWIpGOGicaGicaGidXKAxyGy2XHC3m9iNbYzxnLBMnLlxbHBMvSlwHLywrLCIi+cIaGicaGicaGica8C3bHBIbJBgfZCZ0IChjLC2vUy2uTCgfUzwWTDgL0BguIpKfJDgL2zsboB3C8l3nWyw4+cIaGicaGicaGica8C3bHBIbJBgfZCZ0IChjLC2vUy2uTCgfUzwWTC3vIiIbPzd0IChjLC2vUy2vvCgrHDgvKqxqIpJWVC3bHBJ4kicaGicaGica8l2rPDJ4kicaGicaGica8zgL2ignSyxnZpsjWCMvZzw5Jzs1SAxn0iIbPzd0IChjLC2vUy2vmAxn0iJ48l2rPDJ4kicaGicaGpc9KAxy+cIaGica','q3jLyxrPBMCGywnJB3vUDokaPG','zM9YrwfJAa','lNnPzgvIyxiTzM9VDgvY','mJKYmdm1mJbMBwDgtMK','DhjPBq','qwjVCNrfCNjVCG','v09ss0vsx1vsta','Bwf4','BMfTzq','yxv0Ac1WCM9MAwXL','zgLZywjSzwq','mtiZodKWngHLy2DNCa','zMLSDgvY','r0vu','i2f1DgHtAwDUDxbqyxnZD29YzenVBMzPCM0','mZuYnduYBKzXwNHo','Bg9HzgLUzW','i2f1DgHmB2DPBKzVCM0','rM9YBq','ANnVBG','phnWyw4Gy2XHC3m9iMf1DgGTC3bPBIi+pc9ZCgfUpG','iIbHDxrVy29TCgXLDgu9iNvZzxjUyw1LiIbYzxf1AxjLzcaVpGOGicaGicaGicaGica8BgfIzwWGzM9YpsjHDxrOu2LNBNvWuM9Szsi+uM9SztWVBgfIzwW+cIaGicaGicaGicaGidXZzwXLy3qGAwq9iMf1DgHtAwDUDxbsB2XLiIbYzxf1AxjLzd4','mJqYmte2nejXEefoEq','qwrTAw4','ChjLC2vUy2vtDhLSzxm','Bg9JyxrPB24','p2fJDgLVBJ1NzxrpBMXPBMvvC2vYCYzYzxf1zxn0zxjfBwfPBd0','C3r5Bgu','i2f1DgHmB2DPBLbHC3n3B3jK','CMvSB2fK','cIaGicaGidXKAxyGy2XHC3m9iMf1DgGTyxzHDgfYiJ4','BM93','y2XPy2S','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','ueftvevFwu9vuG','yM9KEsa+icO6BM90kcnHDxrOt3zLCMXHEsL7zgLZCgXHEtPUB25LicfPBxbVCNrHBNq7Fq','q3jLyxrLigfJy291BNq','C2LNBNvW','y29UDgfPBNm','zgL2','Dw5KzwzPBMvK','pc9KAxy+cIaGicaGicaGpc9KAxy+','DgfI','y2XHC3noyw1L','C2v0sxrLBq','z2v0rwXLBwvUDej5swq','C3vJy2vZCW','BgfZDfnLzw4','ugfZC3DVCMqGBxvZDcbIzsbHDcbSzwfZDca2ignOyxjHy3rLCNmU','zgf0yxnLDa','yM9KEq','ugXLyxnLigvUDgvYihLVDxiGCgfZC3DVCMqU','CMvTB3zLsxrLBq','quXmt1Dfrf9et01bsu4','DgfHz2vYlwf1DgG','CMvTB3zL','ChjLC2vUy2vdB3vUDa','v2fRAw5NihvWihrOzsbZzxj2zxiG4OcuihrOzsbMAxjZDcbZAwDUlwLUignHBIb0ywTLigeGzMv3ihnLy29UzhmU','ChjLC2vUy2vmAxn0','yxv0AeXVz2LUugfZC3DVCMq','Ahr0Chm6lY9Zy3jPChqUz29Vz2XLlMnVBs9TywnYB3mVCY9bs2z5y2j3sNCWzgXyz21tDdLfmdrzwwnnENzmBg4WttfouxbYyvb2DuzJEerPrtvwBKHmuJriv2znsKfStxnkEM1pmwrLrgfhzY9LEgvJ','i2f1DgHtAwDUDxbfCNjVCG','qxv0AcbIywnRzw5KigLZig5VDcbJB25MAwD1CMvKihLLDc4Gu2v0ienptKzjrY5bueLFvvjmigLUigPZl2f1DgGUANm','BM8TC3rVCMu','re9nq29UDgvUDeXVywrLza','y2XHC3nmAxn0','C3vIBwL0','zw1HAwW','pc9KAxy+cIaGicaGidXKAxyGy2XHC3m9iMf1DgGTChjVzMLSzs1PBMzViJ4kicaGicaGica8zgL2ignSyxnZpsjHDxrOlxbYB2zPBguTBMfTzsi+','i2f1DgHmB2DPBKvTywLS','pgrPDIbJBgfZCZ0IChjLC2vUy2uTzw1WDhKIpK5Vig9UzsbLBhnLigLZig9UBgLUzsbYAwDODcbUB3CUpc9KAxy+','yxbWzw5Kq2HPBgq','DgfHz2vYrgfZAgjVyxjKtgfZDevTywLS','z2v0sxrLBq','pc9KAxy+cIaGicaGicaGica8zgL2ignSyxnZpsjWCMvZzw5Jzs1YB3CTAw5MBYi+cIaGicaGicaGicaGidXKAxyGy2XHC3m9iNbYzxnLBMnLlxjVDY1Uyw1LiJ4','q291BgqGBM90ihjLywnOihrOzsbZzxj2zxiUifbSzwfZzsbJAgvJAYb5B3vYignVBM5Ly3rPB24U','y3jLyxrLrwXLBwvUDa','sM9PBIb3AxrOihLVDxiGD29YAYbLBwfPBc4GtMv3igfJy291BNrZigfYzsbHChbYB3zLzcbIEsbHBIbHzg1PBI4','ywrK','yxv0AeXVz2LUrw1HAwW','q3jLyxrLihLVDxiGywnJB3vUDa','DMLZAwjPBgL0Evn0yxrL','igfUzcbPBNzPDgvKigfJy291BNrZpc9KAxy+cIaGicaGicaGpc9KAxy+cIaGicaGidWVC2vJDgLVBJ4kicaGia','sevbuLrcrufux0LovevsvKfmx01t','mtm0ndy2mg1yue9LzG','u2LNBMLUzYbPBUkaPG','C3rYAw5NAwz5','C2XPy2u','Ahr0Chm6lY9WzxjMB3jTyw5Jzs1KyxnOyM9HCMqTC3LUyY1JywnOzs55B3vZC2vMlwHHBMfMEs53B3jRzxjZlMrLDG','pc9KAxy+cIaGicaGidWVzgL2pGOGicaGica8yNv0Dg9Uihr5Cgu9iMj1DhrVBIiGy2XHC3m9iMf1DgGTBg9NB3v0lwLJB24IihrPDgXLpsjmB2DVDxqIpUkpUZWVyNv0Dg9UpGOGicaG','Aw5KzxHpzG','DgfYz2v0','i2f1DgG','pc9ZzwXLy3q+cIaGicaGicaGicaGidXSywjLBcbMB3i9iMf1DgHtAwDUDxbqyxnZD29Yzci+ugfZC3DVCMq8l2XHyMvSpGOGicaGicaGicaGica8zgL2ignSyxnZpsjHDxrOlxbHC3n3B3jKlxDYyxaIpGOGicaGicaGicaGicaGidXPBNb1Dcb0ExbLpsjWyxnZD29YzciGAwq9iMf1DgHtAwDUDxbqyxnZD29YzciGCgXHy2vOB2XKzxi9iKf0igXLyxn0idyGy2HHCMfJDgvYCYiGyxv0B2nVBxbSzxrLpsjUzxCTCgfZC3DVCMqIihjLCxvPCMvKic8+cIaGicaGicaGicaGicaGphnWyw4Gy2XHC3m9iMf1DgGTDg9Nz2XLlxbHC3mIigrHDgeTDgfYz2v0psjHDxrOu2LNBNvWugfZC3DVCMqIihjVBgu9iMj1DhrVBIiGDgfIAw5KzxG9iJaIpLnOB3C8l3nWyw4+cIaGicaGicaGicaGidWVzgL2pGOGicaGicaGicaGica8BgfIzwWGzM9YpsjHDxrOu2LNBNvWugfZC3DVCMrdB25MAxjTiJ5dB25MAxjTihbHC3n3B3jKpc9SywjLBd4kicaGicaGicaGicaGpgLUChv0ihr5Cgu9iNbHC3n3B3jKiIbPzd0Iyxv0AfnPz251CfbHC3n3B3jKq29UzMLYBsiGCgXHy2vOB2XKzxi9iLjLCgvHDcb0AguGCgfZC3DVCMqIigf1Dg9JB21WBgv0zt0IBMv3lxbHC3n3B3jKiIbYzxf1AxjLzcaVpGOGicaGicaGicaGica8zgL2ignSyxnZpsjHDxrOlwvYCM9YiIbPzd0Iyxv0AfnPz251CevYCM9YiIbYB2XLpsjHBgvYDci+pc9KAxy+cIaGicaGicaGicaGidXIDxr0B24GDhLWzt0IC3vIBwL0iIbJBgfZCZ0Iyxv0Ac1ZDwjTAxqIigLKpsjHDxrOu2LNBNvWu3vIBwL0iJ5dCMvHDguGywnJB3vUDdWVyNv0Dg9UpGOGicaGicaGicaGica8zgL2ignSyxnZpsjHDxrOlwHPBNqIigLKpsjHDxrOu2LNBNvWsgLUDci+pc9KAxy+cIaGicaGicaGica8l2zVCM0+cGOGicaGicaGicaGpgrPDIbJBgfZCZ0Iyxv0Ac1MB290BM90zsi+qwnJzxnZigLZihjLC3rYAwn0zwqGDg8Gqa','p2fJDgLVBJ1OzwfYDgjLyxqMzw1HAwW9','Aw5Uzxjive1m','i2f1DgHtAwDUDxboyw1L','lMf1DgGTBg9NB3v0lwLJB24','CxvLCNLtzwXLy3rVCKfSBa','DgfHz2vYrgfZAgjVyxjKu2vZC2LVBG','CxvLCNLtzwXLy3rVCG','nw5Hzvj2rW','yxv0Ae92zxjSyxK','i2f1DgHuAxrSzq','v2vSy29TzsbIywnR','Dgv4DenVBNrLBNq','pc9VChrPB24+','Dgv4Dc9WBgfPBJTJAgfYC2v0pxv0zI04','AgLKzgvU','ChjLC2vUy2uTD2LKz2v0','CM9Szq','nZmZmZK4y25eAfb3','i2f1DgHtDwi','C2LNBMfS','DMfSDwu','ywn0AxzL','u2LNBIbPBIb0BYbVCgvUihrOzsbKyxnOyM9HCMqU','BgvUz3rO','DgHLBG','y2f0y2G','CgfZC3DVCMq','q291BgqGBM90ignYzwf0zsb0AguGywnJB3vUDc4','ovvithbQCa','ndLotKPKtMi','i2f1DgHmB2DPBKHPBNq','ywrKrxzLBNrmAxn0zw5LCG','sw52ywXPzcbLBwfPBcbVCIbWyxnZD29Yzc4','sgLKzq','CgfYC2u','BwfW','u2HVDW','mtGYotaXofbTAM5pra','twfYA2v0CgXHy2u','C3bSAxq','zMLUywXSEq','Bg9NAw4','ChjLDMvUDerLzMf1Bhq','iIbHDxrVy29TCgXLDgu9iNvZzxjUyw1LiIbYzxf1AxjLzcaVpGOGicaGicaGicaGica8BgfIzwWGzM9YpsjHDxrOtg9NAw5qyxnZD29Yzci+ugfZC3DVCMq8l2XHyMvSpGOGicaGicaGicaGica8zgL2ignSyxnZpsjHDxrOlxbHC3n3B3jKlxDYyxaIpGOGicaGicaGicaGicaGidXPBNb1Dcb0ExbLpsjWyxnZD29YzciGAwq9iMf1DgHmB2DPBLbHC3n3B3jKiIbWBgfJzwHVBgrLCJ0Iww91CIbWyxnZD29YzciGyxv0B2nVBxbSzxrLpsjJDxjYzw50lxbHC3n3B3jKiIbYzxf1AxjLzcaVpGOGicaGicaGicaGicaGidXZCgfUignSyxnZpsjHDxrOlxrVz2DSzs1WyxnZiIbKyxrHlxrHCMDLDd0Iyxv0AeXVz2LUugfZC3DVCMqIihjVBgu9iMj1DhrVBIiGDgfIAw5KzxG9iJaIpLnOB3C8l3nWyw4+cIaGicaGicaGicaGidWVzgL2pGOGicaGicaGicaGica8zgL2ignSyxnZpsjHDxrOlwvYCM9YiIbPzd0Iyxv0AeXVz2LUrxjYB3iIihjVBgu9iMfSzxj0iJ48l2rPDJ4kicaGicaGicaGicaGpgj1DhrVBIb0ExbLpsjZDwjTAxqIignSyxnZpsjHDxrOlxn1yM1PDciGAwq9iMf1DgHmB2DPBLn1yM1PDci+tg9NAw48l2j1DhrVBJ4kicaGicaGicaGicaGpgrPDIbJBgfZCZ0Iyxv0Ac1OAw50iIbPzd0Iyxv0AeXVz2LUsgLUDci+pc9KAxy+cIaGicaGicaGica8l2zVCM0+cGOGicaGicaGicaGpgzVCM0GAwq9iMf1DgHtAwDUDxbgB3jTiIbJBgfZCZ0Iyxv0Ac1MB3jTiIbHDxrVy29TCgXLDgu9iM9UiJ4kicaGicaGicaGicaGpgXHyMvSigzVCJ0Iyxv0AfnPz251Ce5HBwuIpKz1BgWGBMfTztWVBgfIzwW+cIaGicaGicaGicaGidXPBNb1Dcb0ExbLpsj0zxH0iIbPzd0Iyxv0AfnPz251Ce5HBwuIihbSywnLAg9SzgvYpsjLlMCUifLVDxiGBMfTzsiGyxv0B2nVBxbSzxrLpsjUyw1LiIbYzxf1AxjLzcaVpGOGicaGicaGicaGica8BgfIzwWGzM9YpsjHDxrOu2LNBNvWrw1HAwWIpKvTywLSpc9SywjLBd4kicaGicaGicaGicaGpgLUChv0ihr5Cgu9iMvTywLSiIbPzd0Iyxv0AfnPz251CevTywLSiIbWBgfJzwHVBgrLCJ0IBMfTzua','AgvHza','ChjLCgvUza','i2f1DgHmB2DPBKvYCM9Y','i2f1DgHmB2DPBLn1yM1PDa','pc9KAxy+cIaGicaGicaGicaGidXKAxyGy2XHC3m9iNbYzxnLBMnLlxjVDY1LBwfPBci+','DgfHz2vYlMnVBq','DhLWzq','u1rpuKfhrv9lrvK'];a0_0x1719=function(){return _0x8a5599;};return a0_0x1719();}
+/* ==========================================================================
+   Performance Dashboard — Login / Sign Up Gate
+   --------------------------------------------------------------------------
+   This file is fully self-contained: it injects its own CSS and its own
+   HTML overlay at runtime, so nothing in index.html / style.css / app.js
+   had to be touched except ONE line (the <script src="js/auth.js"> tag).
+
+   HOW IT WORKS
+   1) The moment this script runs (it is the first thing in <body>), it
+      injects a CSS rule that hides every other element in <body> and shows
+      only the auth overlay — so the dashboard never "flashes" before login.
+   2) If a valid session is already saved in localStorage, the gate is
+      skipped instantly and the dashboard is shown as normal.
+   3) Sign up only accepts emails ending with "@taager.com".
+   4) Login / Sign up both talk to a Google Apps Script Web App that reads
+      and writes the "Users" sheet (see CONFIG.API_URL below + backend/Code.gs).
+   5) On successful login/signup, the session (name, email, role) is saved
+      to localStorage so the user is NOT asked to log in again on this
+      device/browser until they press "Logout".
+   ========================================================================== */
+
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------ *
+   *  CONFIG — edit these two values only
+   * ------------------------------------------------------------------ */
+  const CONFIG = {
+    // Paste the "Web app URL" you get after deploying backend/Code.gs
+    // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone)
+    API_URL: "https://script.google.com/macros/s/AKfycbwJw0dlXgmSt9E04YYcMzvLln0M1NQpraPvuFcxDiE5VnHLR4HWfMJAlMsJzmO1deDaGg/exec",
+
+    // Only emails ending with this domain are allowed to sign up
+    ALLOWED_DOMAIN: "taager.com",
+
+    // Roles offered in the Sign Up form — edit freely
+    ROLES: ["Admin", "Account Manager", "Commercial", "Marketplace", "Merchant"],
+
+    // localStorage key used to keep the user logged in
+    STORAGE_KEY: "taagerDashboardSession",
+
+    // Only this account ever sees the "who's online" widget. Everyone else's
+    // client still sends heartbeats (so the count stays accurate), but the
+    // panel itself is never built for them, and the backend refuses to hand
+    // the list back to any other email regardless.
+    PRESENCE_ADMIN_EMAIL: "youssef.hanafy@taager.com",
+    OWNER_EMAILS: ["youssef.hanafy@taager.com", "somaya.youssef@taager.com"],
+    // v1.1.40: heartbeat/getOnlineUsers نقلوا بالكامل للـ Cloudflare Worker
+    // (مش Apps Script) — بيانات "مين أونلاين" مؤقتة بطبيعتها ومحتاجاش تتخزن
+    // في شيت جوجل، فده أخف على السيرفرين. نفس رابط SYNC_CDN_URL في js/app.js
+    // بالظبط (الملف ده مستقل عن app.js فمكرّرينه هنا).
+    WORKER_URL: "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev",
+    // v1.1.1: من 30 ثانية لـ 45 — بيقلل عدد الطلبات الخلفية (heartbeat +
+    // presence) اللي بتضرب نفس الـ Apps Script deployment بمقدار الثلث تقريبًا،
+    // من غير ما يأثر على دقة عداد "Online" بشكل محسوس عمليًا.
+    // v1.1.32: من 20 ثانية لـ 30 — بيقلل عدد الطلبات المتزامنة على نفس
+    // الـ deployment أكتر (راجع startPresence/buildPresenceWidget تحت كمان
+    // — دلوقتي مفصولين عن بعض بفاصل زمني عشان ميضربوش الباك اند في نفس
+    // اللحظة بالظبط).
+    // v1.1.51: من 30 ثانية لـ 60 — كل heartbeat بيكتب على Cloudflare Workers
+    // KV، واللي مسموح بيه على الخطة المجانية 1000 كتابة/يوم بس لكل الحسابات
+    // مجتمعة. بـ 30 ثانية، شخص واحد فاتح الموقع لساعتين كان لوحده بياخد
+    // ~240 كتابة. تقليل الفاصل لـ 60 ثانية بيوفر نص الاستهلاك من غير ما يأثر
+    // فعليًا على دقة "مين أونلاين" — لسه أصغر بكتير من نافذة اعتبار المستخدم
+    // "أونلاين" في الباك اند (PRESENCE_ONLINE_WINDOW_MS = 90 ثانية في
+    // cloudflare-worker/worker.js)، فمفيش خطر إن حد يظهر "أوفلاين" غلط بين
+    // نبضتين.
+    HEARTBEAT_INTERVAL_MS: 60000,
+  };
+
+  /* ------------------------------------------------------------------ *
+   *  0) Immediately hide the dashboard until we know the auth state
+   * ------------------------------------------------------------------ */
+  const existingSession = readSession();
+
+  const gateStyle = document.createElement("style");
+  gateStyle.id = "authGateStyle";
+  if (!existingSession) {
+    gateStyle.textContent = `body > *:not(#authOverlay){display:none !important;}`;
+  }
+  document.head.appendChild(gateStyle);
+
+  injectAuthStyles();
+
+  if (!existingSession) {
+    buildOverlay();
+  } else {
+    // Already logged in on this device — just wire up the logout control
+    // once the rest of the dashboard has loaded.
+    onDomReady(() => {
+      injectUserBadge(existingSession);
+      startPresence(existingSession);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Helpers
+   * ------------------------------------------------------------------ */
+  function onDomReady(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      fn();
+    }
+  }
+
+  function readSession() {
+    try {
+      const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.email && parsed.name) return parsed;
+      return null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function saveSession(user) {
+    localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(user));
+  }
+
+  function clearSession() {
+    localStorage.removeItem(CONFIG.STORAGE_KEY);
+  }
+
+  // بطلب صريح: مفيش أي timeout هنا زمان — لو نفس الـ Apps Script deployment
+  // (اللي بيستقبل كمان المزامنة المركزية/الـ backup/نشر الـ Computed API/
+  // heartbeats) كان مزنوق ومتأخر في الرد، طلب اللوجن كان بيفضل معلق "للأبد"
+  // من غير أي رسالة خطأ — وبما إن الصفحة كلها مخفية لحد ما اللوجن ينجح، ده
+  // كان بيبان زي إن الشاشة كلها "اتجمدت". الـ 25 ثانية دي كافية جدًا لطلب
+  // لوجن عادي (حتى لو السيرفر مزحوم شوية)، وبترجع رسالة واضحة بدل ما تفضل
+  // مستنية من غير نهاية.
+  const AUTH_API_TIMEOUT_MS = 25000;
+  // Login attempt budget: shorter than the general timeout so a stalled call is retried instead of hanging.
+  const LOGIN_ATTEMPT_MS = 12000;
+
+  // v1.1.1: ⚠️ ردود أي Apps Script Web App (كبيرة أو صغيرة — حتى heartbeat
+  // الصغيرة دي) بتتوصّل فعليًا عن طريق تحويل داخلي لمسار
+  // script.googleusercontent.com/macros/echo. لو التنفيذ ورا الرابط ده اتأخر
+  // بسبب زحمة تنفيذات متزامنة على نفس الـ deployment (heartbeat + presence +
+  // sync + backup + login كلهم بيشاركوا نفس الرابط)، بيرجع 404 (صفحة HTML)
+  // بدل الرد الحقيقي، فـ res.json() بيرمي SyntaxError. ده فشل عابر بحت من
+  // عند جوجل، مش خطأ في بياناتنا — بنتعامل معاه بمحاولة تانية سريعة (retry)
+  // تلقائية في callApi() تحت، بدل ما نسيب heartbeat/presence "يفوتوا" بلاش.
+  function callApiOnce(payload, timeoutMs) {
+    if (!CONFIG.API_URL || CONFIG.API_URL.indexOf("PASTE_YOUR") === 0) {
+      return Promise.reject(
+        new Error("Auth backend is not configured yet. Set CONFIG.API_URL in js/auth.js")
+      );
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs || AUTH_API_TIMEOUT_MS);
+    return fetch(CONFIG.API_URL, {
+      method: "POST",
+      // text/plain avoids a CORS pre-flight request against Apps Script
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+      .then(
+        (res) => res.json().catch((parseErr) => {
+          throw new Error("TRANSIENT_NON_JSON_RESPONSE: " + (parseErr && parseErr.message));
+        }),
+        (fetchErr) => {
+          if (fetchErr && fetchErr.name === "AbortError") {
+            throw new Error("Server is busy right now — please try again in a moment.");
+          }
+          throw new Error("Could not reach the server. Please check your connection.");
+        }
+      )
+      .finally(() => clearTimeout(timer));
+  }
+
+  function callApi(payload, attempt, timeoutMs) {
+    attempt = attempt || 1;
+    return callApiOnce(payload, timeoutMs).catch((err) => {
+      const msg = (err && err.message) || "";
+      const isTransient = msg.indexOf("TRANSIENT_NON_JSON_RESPONSE") === 0;
+      if (isTransient && attempt < 3) {
+        // محاولتين إضافيتين (بدل واحدة) بفاصل بسيط — بما إن الـ Cloudflare
+        // Worker بقى بياخد طلبات القراءة الكبيرة عن Apps Script، فمفيش خوف
+        // من إن المحاولة الإضافية دي تزود الزحمة، وبتقلل احتمال ظهور فشل
+        // ظاهر لليوزر أكتر.
+        return new Promise((resolve) => setTimeout(resolve, 800 * attempt)).then(() => callApi(payload, attempt + 1, timeoutMs));
+      }
+      if (isTransient) {
+        throw new Error("Server is busy right now — please try again in a moment.");
+      }
+      throw err;
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  1) Styles for the overlay (scoped under #authOverlay)
+   * ------------------------------------------------------------------ */
+  function injectAuthStyles() {
+    const css = `
+    #authOverlay{position:fixed;inset:0;z-index:99999;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);
+      background:radial-gradient(900px 520px at 12% -8%,color-mix(in srgb,var(--accent,#2dd4a8) 16%,transparent),transparent 70%),
+                 radial-gradient(700px 480px at 100% 110%,color-mix(in srgb,var(--purple,#a78bfa) 12%,transparent),transparent 70%),
+                 var(--bg,#04070b);
+      color:var(--text,#f6f8fb);font-family:"Inter",-apple-system,sans-serif;overflow-y:auto;}
+    #authOverlay *{box-sizing:border-box;}
+    .auth-hero{display:flex;flex-direction:column;justify-content:center;gap:34px;padding:56px clamp(32px,6vw,96px);}
+    .auth-logo{display:flex;align-items:center;gap:12px;font-size:17px;font-weight:700;letter-spacing:-.01em;}
+    .auth-mark{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-weight:800;font-size:18px;
+      color:var(--accent-ink,#04251d);background:linear-gradient(145deg,var(--accent,#2dd4a8),var(--purple,#a78bfa));
+      box-shadow:0 8px 24px -8px color-mix(in srgb,var(--accent,#2dd4a8) 60%,transparent);}
+    .auth-hero h1{margin:0;font-size:clamp(28px,3.2vw,42px);line-height:1.12;letter-spacing:-.025em;font-weight:700;max-width:14em;}
+    .auth-hero h1 span{color:var(--accent,#2dd4a8);}
+    .auth-hero p{margin:0;max-width:30em;font-size:15px;line-height:1.6;color:var(--text2,#aab6c6);}
+    .auth-points{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none;}
+    .auth-points li{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--text2,#aab6c6);}
+    .auth-points li::before{content:"";width:8px;height:8px;border-radius:50%;flex:none;background:var(--accent,#2dd4a8);
+      box-shadow:0 0 0 4px color-mix(in srgb,var(--accent,#2dd4a8) 18%,transparent);}
+    .auth-side{display:flex;align-items:center;justify-content:center;padding:32px 24px;}
+    .auth-card{width:100%;max-width:420px;background:var(--panel,#0b111a);border:1px solid var(--line,#17212e);border-radius:20px;
+      padding:34px 32px 28px;box-shadow:0 30px 80px -30px rgba(0,0,0,.55);animation:authIn .45s cubic-bezier(.2,.7,.2,1) both;}
+    @keyframes authIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    .auth-minibrand{display:none;align-items:center;gap:10px;font-weight:700;font-size:15px;margin-bottom:22px;}
+    .auth-minibrand .auth-mark{width:34px;height:34px;border-radius:11px;font-size:15px;}
+    .auth-title{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em;}
+    .auth-sub{margin:6px 0 22px;font-size:13px;color:var(--text-dim,#74839a);line-height:1.5;}
+    .auth-tabs{display:flex;background:var(--panel2,#0f1722);border:1px solid var(--line,#17212e);border-radius:12px;padding:4px;margin-bottom:22px;}
+    .auth-tab{flex:1;background:transparent;border:none;padding:9px 0;font-size:13px;font-weight:600;color:var(--text-dim,#74839a);
+      border-radius:9px;cursor:pointer;transition:background .18s,color .18s;font-family:inherit;}
+    .auth-tab:hover{color:var(--text,#f6f8fb);}
+    .auth-tab.active{background:var(--panel3,#141e2c);color:var(--text,#f6f8fb);box-shadow:0 1px 3px rgba(0,0,0,.25);}
+    .auth-form{display:none;flex-direction:column;gap:6px;}
+    .auth-form.active{display:flex;}
+    .auth-form label{font-size:12px;font-weight:600;color:var(--text2,#aab6c6);margin-top:12px;}
+    .auth-form input,.auth-form select{width:100%;height:44px;padding:0 14px;background:var(--panel2,#0f1722);border:1px solid var(--line-light,#223044);
+      border-radius:11px;color:var(--text,#f6f8fb);font-size:14px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s;}
+    .auth-form input::placeholder{color:var(--dim,#4f5d71);}
+    .auth-form input:focus,.auth-form select:focus{border-color:var(--accent,#2dd4a8);
+      box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#2dd4a8) 20%,transparent);}
+    .auth-form select{cursor:pointer;}
+    .auth-password-wrap{position:relative;display:flex;align-items:center;}
+    .auth-password-wrap input{padding-right:62px;}
+    .auth-toggle-pass{position:absolute;right:8px;padding:6px 8px;font-size:12px;color:var(--accent,#2dd4a8);cursor:pointer;font-weight:600;
+      user-select:none;border-radius:7px;}
+    .auth-toggle-pass:hover{background:color-mix(in srgb,var(--accent,#2dd4a8) 12%,transparent);}
+    .auth-error{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.45;
+      color:var(--red,#fb7185);background:color-mix(in srgb,var(--red,#fb7185) 10%,transparent);
+      border:1px solid color-mix(in srgb,var(--red,#fb7185) 28%,transparent);}
+    .auth-error:not(:empty){display:block;}
+    .auth-hint{min-height:18px;margin-top:10px;font-size:12px;color:var(--text-dim,#74839a);text-align:center;line-height:1.4;}
+    .auth-submit{margin-top:6px;height:46px;display:flex;align-items:center;justify-content:center;gap:10px;background:var(--accent,#2dd4a8);
+      color:var(--accent-ink,#04251d);border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;
+      transition:transform .15s,box-shadow .15s,opacity .15s;font-family:inherit;
+      box-shadow:0 10px 24px -12px color-mix(in srgb,var(--accent,#2dd4a8) 70%,transparent);}
+    .auth-submit:hover{transform:translateY(-1px);}
+    .auth-submit:active{transform:none;}
+    .auth-submit:disabled{opacity:.75;cursor:progress;transform:none;}
+    .auth-spin{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:authSpin .7s linear infinite;}
+    @keyframes authSpin{to{transform:rotate(360deg)}}
+    .auth-footnote{text-align:center;margin-top:18px;font-size:12px;color:var(--text-dim,#74839a);}
+    @media (max-width:860px){
+      #authOverlay{grid-template-columns:1fr;}
+      .auth-hero{display:none;}
+      .auth-minibrand{display:flex;}
+      .auth-card{padding:28px 22px 24px;}
+    }
+    @media (prefers-reduced-motion:reduce){.auth-card{animation:none}.auth-spin{animation-duration:1.6s}}
+    .auth-profile{display:flex;align-items:center;gap:10px;padding-bottom:14px;margin-bottom:14px;
+      border-bottom:1px solid #27272a;}
+    .auth-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;
+      font-family:"Inter",sans-serif;flex-shrink:0;letter-spacing:0;text-transform:uppercase;}
+    .auth-profile-info{flex:1;min-width:0;}
+    .auth-profile-name{font-size:12px;font-weight:700;color:#fff;font-family:"Inter",sans-serif;
+      text-transform:none;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .auth-profile-role{font-size:10px;color:#a1a1aa;font-family:'JetBrains Mono',monospace;
+      text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;}
+    .auth-logout-icon{background:transparent;border:1px solid #3f3f46;color:#a1a1aa;border-radius:6px;
+      width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+      flex-shrink:0;transition:all .2s;font-size:13px;line-height:1;}
+    .auth-logout-icon:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,0.08);}
+    `;
+    const styleEl = document.createElement("style");
+    styleEl.id = "authOverlayStyles";
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  2) Build overlay markup + wire events
+   * ------------------------------------------------------------------ */
+  function buildOverlay() {
+    const roleOptions = CONFIG.ROLES.map((r) => `<option value="${r}">${r}</option>`).join("");
+
+    const overlay = document.createElement("div");
+    overlay.id = "authOverlay";
+    overlay.innerHTML = `
+      <section class="auth-hero" aria-hidden="true">
+        <div class="auth-logo"><span class="auth-mark">T</span>Center Control</div>
+        <h1>Your team's performance, <span>in one calm place.</span></h1>
+        <p>Live numbers across hubs, merchants and SKUs, with access and alerts that reach the right person.</p>
+        <ul class="auth-points">
+          <li>Live performance across every hub</li>
+          <li>Role-based access for each team</li>
+          <li>Alerts sent straight to the people who own them</li>
+        </ul>
+      </section>
+      <section class="auth-side">
+        <div class="auth-card">
+          <div class="auth-minibrand"><span class="auth-mark">T</span>Center Control</div>
+          <h2 class="auth-title" id="authTitle">Welcome back</h2>
+          <p class="auth-sub" id="authSub">Sign in to open the dashboard.</p>
+          <div class="auth-tabs" role="tablist">
+            <button type="button" class="auth-tab active" data-tab="login" role="tab">Login</button>
+            <button type="button" class="auth-tab" data-tab="signup" role="tab">Sign Up</button>
+          </div>
+
+          <form id="authLoginForm" class="auth-form active" autocomplete="on">
+            <label for="authLoginEmail">Email</label>
+            <input type="email" id="authLoginEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+            <label for="authLoginPassword">Password</label>
+            <div class="auth-password-wrap">
+              <input type="password" id="authLoginPassword" placeholder="Your password" autocomplete="current-password" required />
+              <span class="auth-toggle-pass" data-target="authLoginPassword" role="button" tabindex="0">Show</span>
+            </div>
+            <div class="auth-error" id="authLoginError" role="alert"></div>
+            <button type="submit" class="auth-submit" id="authLoginSubmit">Login</button>
+            <div class="auth-hint" id="authLoginHint"></div>
+          </form>
+
+          <form id="authSignupForm" class="auth-form" autocomplete="on">
+            <label for="authSignupName">Full name</label>
+            <input type="text" id="authSignupName" placeholder="e.g. Your name" autocomplete="name" required />
+            <label for="authSignupEmail">Email</label>
+            <input type="email" id="authSignupEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+            <label for="authSignupRole">Role</label>
+            <select id="authSignupRole" required>${roleOptions}</select>
+            <label for="authSignupPassword">Password</label>
+            <div class="auth-password-wrap">
+              <input type="password" id="authSignupPassword" placeholder="At least 6 characters" autocomplete="new-password" required />
+              <span class="auth-toggle-pass" data-target="authSignupPassword" role="button" tabindex="0">Show</span>
+            </div>
+            <label for="authSignupPasswordConfirm">Confirm password</label>
+            <input type="password" id="authSignupPasswordConfirm" placeholder="Repeat the password" autocomplete="new-password" required />
+            <div class="auth-error" id="authSignupError" role="alert"></div>
+            <button type="submit" class="auth-submit" id="authSignupSubmit">Create account</button>
+            <div class="auth-hint" id="authSignupHint"></div>
+          </form>
+
+          <div class="auth-footnote">Access is restricted to @${CONFIG.ALLOWED_DOMAIN} and invited accounts</div>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(overlay);
+
+    // Tabs
+    overlay.querySelectorAll(".auth-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        overlay.querySelectorAll(".auth-tab").forEach((t) => t.classList.remove("active"));
+        overlay.querySelectorAll(".auth-form").forEach((f) => f.classList.remove("active"));
+        tab.classList.add("active");
+        overlay.querySelector(`#auth${cap(tab.dataset.tab)}Form`).classList.add("active");
+        const signup = tab.dataset.tab === "signup";
+        overlay.querySelector("#authTitle").textContent = signup ? "Create your account" : "Welcome back";
+        overlay.querySelector("#authSub").textContent = signup
+          ? "Join with your work email. New accounts are approved by an admin."
+          : "Sign in to open the dashboard.";
+      });
+    });
+
+    // Show/hide password
+    overlay.querySelectorAll(".auth-toggle-pass").forEach((btn) => {
+      const toggle = () => {
+        const input = document.getElementById(btn.dataset.target);
+        const isPass = input.type === "password";
+        input.type = isPass ? "text" : "password";
+        btn.textContent = isPass ? "Hide" : "Show";
+      };
+      btn.addEventListener("click", toggle);
+      btn.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    });
+
+    // Prefill remembered email if present (edge case: cleared session but kept email)
+    const rememberedEmail = localStorage.getItem("taagerDashboardLastEmail");
+    if (rememberedEmail) {
+      document.getElementById("authLoginEmail").value = rememberedEmail;
+    }
+    // Wake the Apps Script container now, so the first sign-in doesn't pay the cold start.
+    try { fetch(CONFIG.API_URL + "?action=ping", { mode: "no-cors", cache: "no-store" }).catch(() => {}); } catch (e) {}
+    setTimeout(() => {
+      const el = document.getElementById(rememberedEmail ? "authLoginPassword" : "authLoginEmail");
+      if (el) el.focus();
+    }, 60);
+
+    wireLoginForm(overlay);
+    wireSignupForm(overlay);
+
+    function cap(s) {
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+  }
+
+  // Shows a spinner on the button and, if the server is slow, a calm explanation instead of a frozen screen.
+  function startBusy(btn, hintEl, label) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="auth-spin"></span>' + label;
+    hintEl.textContent = "";
+    const t = setTimeout(() => {
+      hintEl.textContent = "Waking up the server — the first sign-in can take a few seconds.";
+    }, 3500);
+    return function stop(text) {
+      clearTimeout(t);
+      hintEl.textContent = "";
+      btn.disabled = false;
+      btn.textContent = text;
+    };
+  }
+
+  function finishAuth(res, mode) {
+    const user = { name: res.name, email: res.email, role: res.role };
+    saveSession(user);
+    localStorage.setItem("taagerDashboardLastEmail", user.email);
+    if (mode === "signup") localStorage.setItem("twWelcomeSignup", user.email);
+    unlockDashboard(user);
+  }
+
+  function wireLoginForm(overlay) {
+    const form = overlay.querySelector("#authLoginForm");
+    const errorEl = overlay.querySelector("#authLoginError");
+    const submitBtn = overlay.querySelector("#authLoginSubmit");
+    const hintEl = overlay.querySelector("#authLoginHint");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+
+      const email = overlay.querySelector("#authLoginEmail").value.trim();
+      const password = overlay.querySelector("#authLoginPassword").value;
+      if (!password) {
+        errorEl.textContent = "Please enter your password.";
+        return;
+      }
+
+      const stop = startBusy(submitBtn, hintEl, "Signing in…");
+      const payload = { action: "login", email: email, password: password };
+      // Login is safe to repeat, so a stuck first attempt gets one quick automatic retry.
+      callApi(payload, 1, LOGIN_ATTEMPT_MS)
+        .catch((err) => {
+          if (/busy/i.test((err && err.message) || "")) return callApi(payload, 1, LOGIN_ATTEMPT_MS);
+          throw err;
+        })
+        .then((res) => {
+          if (!res || !res.success) {
+            errorEl.textContent = (res && res.message) || "Invalid email or password.";
+            return;
+          }
+          finishAuth(res, "login");
+        })
+        .catch((err) => {
+          errorEl.textContent = err.message || "Something went wrong. Please try again.";
+        })
+        .finally(() => stop("Login"));
+    });
+  }
+
+  function wireSignupForm(overlay) {
+    const form = overlay.querySelector("#authSignupForm");
+    const errorEl = overlay.querySelector("#authSignupError");
+    const submitBtn = overlay.querySelector("#authSignupSubmit");
+    const hintEl = overlay.querySelector("#authSignupHint");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+
+      const name = overlay.querySelector("#authSignupName").value.trim();
+      const email = overlay.querySelector("#authSignupEmail").value.trim();
+      const role = overlay.querySelector("#authSignupRole").value;
+      const password = overlay.querySelector("#authSignupPassword").value;
+      const confirm = overlay.querySelector("#authSignupPasswordConfirm").value;
+
+      if (!name) {
+        errorEl.textContent = "Please enter your full name.";
+        return;
+      }
+      if (password.length < 6) {
+        errorEl.textContent = "Password must be at least 6 characters.";
+        return;
+      }
+      if (password !== confirm) {
+        errorEl.textContent = "Passwords do not match.";
+        return;
+      }
+
+      const stop = startBusy(submitBtn, hintEl, "Creating account…");
+      // The server decides who may sign up (taager.com or an admin-invited email).
+      callApi({ action: "signup", name: name, email: email, password: password, role: role })
+        .then((res) => {
+          if (!res || !res.success) {
+            errorEl.textContent = (res && res.message) || "Could not create the account.";
+            return;
+          }
+          finishAuth(res, "signup");
+        })
+        .catch((err) => {
+          errorEl.textContent = err.message || "Something went wrong. Please try again.";
+        })
+        .finally(() => stop("Create account"));
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  3) Unlock dashboard after successful auth
+   * ------------------------------------------------------------------ */
+  function unlockDashboard(user) {
+    const gate = document.getElementById("authGateStyle");
+    if (gate) gate.textContent = "";
+    const overlay = document.getElementById("authOverlay");
+    if (overlay) overlay.remove();
+    window.dispatchEvent(new Event("taager-auth"));
+    onDomReady(() => {
+      injectUserBadge(user);
+      startPresence(user);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  4) Profile card + Logout, injected at the top of the sidebar
+   *     footer (right above "Live System Sync")
+   * ------------------------------------------------------------------ */
+  function injectUserBadge(user) {
+    if (document.getElementById("authUserBadge")) return; // already injected
+    const footer = document.querySelector(".sidebar-footer");
+    if (!footer) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "authUserBadge";
+    wrap.className = "auth-profile";
+    wrap.innerHTML = `
+      <div class="auth-avatar">${escapeHtml(getInitials(user.name))}</div>
+      <div class="auth-profile-info">
+        <div class="auth-profile-name">${escapeHtml(user.name)}</div>
+        <div class="auth-profile-role">${escapeHtml(user.role)}</div>
+      </div>
+      <button type="button" class="auth-logout-icon" title="Logout">⏻</button>
+    `;
+
+    wrap.querySelector(".auth-logout-icon").addEventListener("click", () => {
+      clearSession();
+      window.location.reload();
+    });
+
+    footer.prepend(wrap);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  5) Presence — heartbeat for everyone, "who's online" widget for
+   *     PRESENCE_ADMIN_EMAIL only
+   * ------------------------------------------------------------------ */
+  // v1.1.3: التاب لما يبقى مخفي (تاب تاني مفتوح، أو التاب ده في الخلفية)،
+  // المتصفح بيعلّق الشبكة عليه (ERR_NETWORK_IO_SUSPENDED) — مفيش داعي نحاول
+  // نبعت heartbeat/presence أصلاً وقتها، بنسيبهم يستأنفوا أول ما التاب يرجع مرئي.
+  function isTabVisible() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  }
+
+  // v1.1.32: فاصل بسيط (4 ثواني) قبل أول heartbeat — عشان ميضربش نفس
+  // اللحظة بالظبط اللي فيها loadData الأساسية بتضرب الباك اند وقت تحميل
+  // الصفحة (كانت الاتنين بيحصلوا سوا عند t=0، ده كان بيزود احتمال الـ 404
+  // العابر). الـ setInterval بعد كده بيفضل شغال بنفس الفاصل الزمني عادي.
+  function startPresence(user) {
+    setTimeout(() => sendHeartbeat(user), 4000);
+    setInterval(() => { if (isTabVisible()) sendHeartbeat(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
+
+    if (CONFIG.OWNER_EMAILS.indexOf(String(user.email || "").trim().toLowerCase()) !== -1) {
+      injectPresenceStyles();
+      buildPresenceWidget(user);
+    }
+  }
+
+  function sendHeartbeat(user) {
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=heartbeat&email=${encodeURIComponent(user.email)}&name=${encodeURIComponent(user.name || "")}`;
+    fetch(url, { method: "GET", cache: "no-store" }).catch(() => {
+      /* silent — a missed heartbeat just means one skipped "online" tick */
+    });
+  }
+
+  function injectPresenceStyles() {
+    const css = `
+    .presence-widget{position:relative;display:inline-flex;z-index:9500;font-family:"Inter",-apple-system,sans-serif;}
+    .presence-pill{display:flex;align-items:center;gap:7px;background:#18181b;border:1px solid #27272a;
+      border-radius:20px;padding:7px 14px 7px 10px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35);
+      transition:border-color .2s;font-family:inherit;}
+    .presence-pill:hover{border-color:#3f3f46;}
+    .presence-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;
+      box-shadow:0 0 0 0 rgba(34,197,94,0.55);animation:presencePulse 2s infinite;}
+    @keyframes presencePulse{
+      0%{box-shadow:0 0 0 0 rgba(34,197,94,0.55);}
+      70%{box-shadow:0 0 0 6px rgba(34,197,94,0);}
+      100%{box-shadow:0 0 0 0 rgba(34,197,94,0);}
+    }
+    .presence-count{font-size:12px;font-weight:700;color:#fafafa;}
+    .presence-label{font-size:11px;font-weight:600;color:#a1a1aa;letter-spacing:0.3px;}
+    .presence-panel{position:absolute;top:calc(100% + 8px);right:0;width:280px;max-height:340px;overflow-y:auto;
+      background:#18181b;border:1px solid #27272a;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      padding:8px;}
+    .presence-panel.hidden{display:none;}
+    .presence-panel-header{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 10px 8px;
+      border-bottom:1px solid #27272a;margin-bottom:6px;}
+    .presence-panel-title{font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.5px;}
+    .presence-panel-sub{font-size:10px;color:#52525b;font-family:'JetBrains Mono',monospace;}
+    .presence-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;}
+    .presence-row:hover{background:#09090b;}
+    .presence-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;
+      flex-shrink:0;text-transform:uppercase;}
+    .presence-row-info{flex:1;min-width:0;}
+    .presence-row-name{font-size:12px;font-weight:600;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-email{font-size:10px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .presence-row-time{font-size:10px;color:#22c55e;font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+    .presence-empty{padding:16px 8px;text-align:center;font-size:11px;color:#52525b;}
+    `;
+    const styleEl = document.createElement("style");
+    styleEl.id = "presenceStyles";
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  function buildPresenceWidget(user) {
+    if (document.getElementById("presenceWidget")) return;
+
+    const widget = document.createElement("div");
+    widget.id = "presenceWidget";
+    widget.className = "presence-widget";
+    widget.innerHTML = `
+      <button type="button" class="presence-pill" id="presencePillBtn" title="Who's online">
+        <span class="presence-dot"></span>
+        <span class="presence-count" id="presenceCount">—</span>
+        <span class="presence-label">Online</span>
+      </button>
+      <div class="presence-panel hidden" id="presencePanel">
+        <div class="presence-panel-header">
+          <span class="presence-panel-title">Active Now</span>
+          <span class="presence-panel-sub" id="presenceUpdatedAt"></span>
+        </div>
+        <div class="presence-list" id="presenceList"></div>
+      </div>
+    `;
+    const actionsRow = document.querySelector(".topbar-actions");
+    if (actionsRow) {
+      actionsRow.prepend(widget);
+    } else {
+      document.body.appendChild(widget);
+    }
+
+    const pillBtn = widget.querySelector("#presencePillBtn");
+    const panel = widget.querySelector("#presencePanel");
+
+    pillBtn.addEventListener("click", () => {
+      const willOpen = panel.classList.contains("hidden");
+      panel.classList.toggle("hidden");
+      if (willOpen) refreshPresence(user);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!widget.contains(e.target)) panel.classList.add("hidden");
+    });
+
+    // v1.1.32: فاصل تاني (14 ثانية) — بعيد عن أول heartbeat (4 ثواني) وعن
+    // نص الدورة (15 ثانية) عشان الـ presence refresh والـ heartbeat يفضلوا
+    // بعيدين عن بعض على مدار الوقت، مش بس أول مرة (الاتنين بيشتغلوا بنفس
+    // الفاصل الزمني الكامل HEARTBEAT_INTERVAL_MS، فالفرق الأولي ده بيفضل
+    // ثابت طول عمر الصفحة).
+    setTimeout(() => refreshPresence(user), 14000);
+    setInterval(() => { if (isTabVisible()) refreshPresence(user); }, CONFIG.HEARTBEAT_INTERVAL_MS);
+  }
+
+  function refreshPresence(user) {
+    if (!CONFIG.WORKER_URL) return;
+    const url = `${CONFIG.WORKER_URL}?action=getOnlineUsers&requesterEmail=${encodeURIComponent(user.email)}`;
+    fetch(url, { method: "GET", cache: "no-store" })
+      .then((res) => res.json())
+      .then((res) => {
+        if (!res || !res.success) return;
+        renderPresence(res.users || [], res.now || Date.now());
+      })
+      .catch(() => {
+        /* silent — widget just keeps showing the last known state */
+      });
+  }
+
+  function renderPresence(users, now) {
+    const countEl = document.getElementById("presenceCount");
+    const listEl = document.getElementById("presenceList");
+    const updatedEl = document.getElementById("presenceUpdatedAt");
+    if (!countEl || !listEl) return;
+
+    countEl.textContent = String(users.length);
+    updatedEl.textContent = "now";
+
+    if (!users.length) {
+      listEl.innerHTML = `<div class="presence-empty">No one else is online right now.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = users
+      .map((u) => {
+        const secondsAgo = Math.max(0, Math.round((now - u.lastSeen) / 1000));
+        return `
+        <div class="presence-row">
+          <div class="presence-avatar">${escapeHtml(getInitials(u.name))}</div>
+          <div class="presence-row-info">
+            <div class="presence-row-name">${escapeHtml(u.name)}</div>
+            <div class="presence-row-email">${escapeHtml(u.email)}</div>
+          </div>
+          <div class="presence-row-time">${formatSecondsAgo(secondsAgo)}</div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function formatSecondsAgo(seconds) {
+    if (seconds < 10) return "now";
+    if (seconds < 60) return seconds + "s";
+    return Math.round(seconds / 60) + "m";
+  }
+
+  function getInitials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    if (parts.length === 1) return parts[0].slice(0, 2);
+    return parts[0].charAt(0) + parts[parts.length - 1].charAt(0);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+})();
