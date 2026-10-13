@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.47";
+const APP_VERSION = "1.15.48";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5970,10 +5970,10 @@ function prepareAcmTableData(rows) {
     const rt = retByAcm.get(m.name) || { improved: 0, total: 0 }; const actualRetention = rt.improved; const actualRetentionPct = rt.total ? (rt.improved / rt.total) * 100 : 0;
     // Final Weight % = Σ min(Actual ÷ Target, 1) × Weight — لكل KPI من جدول "KPI's Account Manager"
     const K = state.acmKpis; const part = (act, kp) => (kp.target > 0 ? Math.min(Math.max(act, 0) / kp.target, 1) * kp.weight : 0);
-    const gmvScore = t.targetGmv > 0 ? part(tm.achievedPct, K.gmv) : 0; const ndrScore = part(ndr, K.ndr); const cm3Score = part(cm3Pct, K.cm3); const retentionScore = part(actualRetentionPct, K.retention);
+    const gmvScore = t.targetGmv > 0 ? part(tm.gmvMtdPct, K.gmv) : 0; const ndrScore = part(ndr, K.ndr); const cm3Score = part(cm3Pct, K.cm3); const retentionScore = part(actualRetentionPct, K.retention);
     const finalScorePct = gmvScore + ndrScore + cm3Score + retentionScore;
     const ach = (act, kp) => (kp.target > 0 ? (act / kp.target) * 100 : 0);
-    return { ...m, ndrTarget: K.ndr.target, cm3Target: K.cm3.target, retTarget: K.retention.target, ndrAch: ach(ndr, K.ndr), cm3Ach: ach(cm3Pct, K.cm3), retAch: ach(actualRetentionPct, K.retention), gmvAchKpi: ach(tm.achievedPct, K.gmv),  cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tm, actualRetention, actualRetentionPct, gmvScore, ndrScore, cm3Score, retentionScore, retScore: retentionScore, finalScorePct };
+    return { ...m, ndrTarget: K.ndr.target, cm3Target: K.cm3.target, retTarget: K.retention.target, ndrAch: ach(ndr, K.ndr), cm3Ach: ach(cm3Pct, K.cm3), retAch: ach(actualRetentionPct, K.retention), gmvAchKpi: ach(tm.gmvMtdPct, K.gmv),  cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tm, actualRetention, actualRetentionPct, gmvScore, ndrScore, cm3Score, retentionScore, retScore: retentionScore, finalScorePct };
   });
 }
 
@@ -6105,8 +6105,8 @@ function acmTgtGroups() {
       C("mtdTargetGmv", "MTD Target", "Full-month GMV target pro-rated to the days elapsed up to yesterday."),
       C("deliveredGmv", "Actual", "Delivered GMV so far this month (Segmentation query)."),
       C("runRate", "Run Rate (EOM)", "Projected end-of-month delivered GMV at the current daily pace."),
-      C("achievedPct", "Ach %", "Actual \u00f7 full-month target."),
-      C("gmvScore", "Score", "Points earned out of this KPI's weight (" + K.gmv.weight + ").")
+      C("gmvMtdPct", "Ach % (MTD)", "Actual \u00f7 MTD target (full-month target pro-rated to the days elapsed up to yesterday)."),
+      C("gmvScore", "Score", "Points earned out of this KPI's weight (" + K.gmv.weight + "), from the MTD Ach %.")
     ] },
     { t: "Portfolio NDR %", c: "green", w: K.ndr.weight, cols: [
       C("ndrTarget", "Target", "KPI target for NDR %."),
@@ -6137,7 +6137,7 @@ function renderAcmTgtHead() {
     r1 += `<th colspan="${g.cols.length}" class="num" style="${B}text-align:center;color:var(--${g.c});">${g.t} <span class="text-dim" style="font-weight:600">&middot; weight ${g.w}%</span></th>`;
     g.cols.forEach((c, i) => { r2 += `<th data-tkey="${c.key}" class="num" style="${i === 0 ? B : ""}" title="${c.title}">${c.label}</th>`; });
   });
-  r1 += `<th rowspan="2" data-tkey="finalScorePct" class="num" style="${B}min-width:120px;color:var(--blue);" title="Final Weight % = \u03a3 min(Ach %, 100%) \u00d7 weight.">Final Weight %</th></tr>`;
+  r1 += `<th rowspan="2" data-tkey="finalScorePct" class="num" style="${B}min-width:120px;color:var(--blue);" title="Final Weight % = \u03a3 min(Ach %, 100%) \u00d7 weight. Delivered GMV uses the MTD Ach %.">Final Weight %</th></tr>`;
   r2 += "</tr>";
   head.innerHTML = r1 + r2;
   wireTgtHead("acm");
@@ -6157,7 +6157,7 @@ function acmMerchantRows(a) {
   const out = list.map(m => {
     const tr = document.createElement("tr"); const hasG = m.targetGmv > 0;
     tr.innerHTML = `<td style="${bg}"></td><td style="${bg}padding-left:26px"><span class="text-light">${m.name}</span> <span class="font-mono text-dim" style="font-size:10px">${m.id || ""}</span></td><td class="num text-dim" style="${bg}">${m.segment || ""}</td>`
-      + `<td class="num text-dim" style="${bg}${B}">${hasG ? fmtMoneyCompactCell(m.targetGmv) : "-"}</td><td class="num text-dim" style="${bg}">${hasG ? fmtMoneyCompactCell(Math.round(m.mtdTargetGmv)) : "-"}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(Math.round(m.runRate || 0))}</td>${hasG ? tgtPctCell(m.achievedPct, true).replace("<td ", `<td style="${bg}" `) : `<td class="num text-dim" style="${bg}">-</td>`}<td style="${bg}"></td>`
+      + `<td class="num text-dim" style="${bg}${B}">${hasG ? fmtMoneyCompactCell(m.targetGmv) : "-"}</td><td class="num text-dim" style="${bg}">${hasG ? fmtMoneyCompactCell(Math.round(m.mtdTargetGmv)) : "-"}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(Math.round(m.runRate || 0))}</td>${hasG ? tgtPctCell(m.gmvMtdPct, true).replace("<td ", `<td style="${bg}" `) : `<td class="num text-dim" style="${bg}">-</td>`}<td style="${bg}"></td>`
       + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.ndrPct != null ? m.ndrPct : (m.ndr || 0))}</td><td style="${bg}"></td><td style="${bg}"></td>`
       + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.cm3Pct || 0)}</td><td style="${bg}"></td><td style="${bg}"></td>`
       + `<td style="${bg}${B}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}${B}"></td>`;
@@ -6183,7 +6183,7 @@ function acmKpiCells(m) {
   const ach = (v, has) => has ? tgtPctCell(v, true) : `<td class="num text-dim">-</td>`;
   const first = v => `<td class="num text-dim" style="${B}">${v}</td>`;
   const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
-  return first(hasG ? money(m.targetGmv) : "-") + dim(hasG ? money(m.mtdTargetGmv) : "-") + lit(money(m.deliveredGmv)) + lit(money(m.runRate)) + ach(m.achievedPct, hasG) + score(m.gmvScore, K.gmv.weight)
+  return first(hasG ? money(m.targetGmv) : "-") + dim(hasG ? money(m.mtdTargetGmv) : "-") + lit(money(m.deliveredGmv)) + lit(money(m.runRate)) + ach(m.gmvMtdPct, hasG) + score(m.gmvScore, K.gmv.weight)
     + first(K.ndr.target + "%") + lit(fmtPctCell(m.ndr)) + ach(m.ndrAch, K.ndr.target > 0) + score(m.ndrScore, K.ndr.weight)
     + first(K.cm3.target + "%") + lit(fmtPctCell(m.cm3Pct)) + ach(m.cm3Ach, K.cm3.target > 0) + score(m.cm3Score, K.cm3.weight)
     + first(K.retention.target + "%") + lit(fmtPctCell(m.actualRetentionPct)) + ach(m.retAch, K.retention.target > 0) + score(m.retentionScore, K.retention.weight)

@@ -654,30 +654,73 @@
     ]).then(function (r) { if (key !== tgMonth) return; tgMeta = r[0] || {}; tgLegacy = r[1] || {}; tgKpi = kpiFromPayload(r[2]); window.TowerTargets.meta = tgLegacy; drawTargets(); });
     if (!host.firstChild) drawTargets();
   }
+  // --- view helpers (v1.15.48 redesign) -------------------------------------
+  var TG_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function tgWhen(x) {
+    var d = new Date(x); if (isNaN(d.getTime())) return "";
+    var h = d.getHours(), ap = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12, mi = ("0" + d.getMinutes()).slice(-2);
+    return d.getDate() + " " + TG_MONTHS[d.getMonth()] + " " + d.getFullYear() + " · " + h12 + ":" + mi + " " + ap;
+  }
+  var TG_ICONS = {
+    file: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M19 9v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7z"/><path d="M9 13h6M9 17h4"/></svg>',
+    tune: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="2.2" fill="currentColor" stroke="none"/></svg>',
+    up: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>'
+  };
+  function tgStatus(t) {
+    if (t.editor) return tgMeta[t.type] ? "ok" : "idle";
+    if (tgMeta[t.type]) return "ok";
+    if (tgLegacy[t.type]) return "warn";
+    return "idle";
+  }
   function drawTargets() {
     var host = $("viewTowerTargets"); if (!host) return;
-    var cards = TARGET_TYPES.map(function (t) {
+    var counts = { ok: 0, warn: 0, idle: 0 };
+    TARGET_TYPES.forEach(function (t) { counts[tgStatus(t)]++; });
+
+    // file cards first, the full-width KPI editor last — so the grid never leaves a hole
+    var ordered = TARGET_TYPES.filter(function (x) { return !x.editor; }).concat(TARGET_TYPES.filter(function (x) { return x.editor; }));
+    var cards = ordered.map(function (t) {
       if (t.editor) return kpiCardHtml(t);
-      var m = tgMeta[t.type], g = tgLegacy[t.type], pill, info;
+      var st = tgStatus(t), m = tgMeta[t.type], g = tgLegacy[t.type], pill, info;
       if (m) {
-        pill = '<span class="tw-pill good">Uploaded · ' + esc(new Date(m.at).toLocaleString()) + '</span>';
-        info = '<div class="tw-muted">' + esc(m.rows) + ' rows · ' + esc(m.file || "") + (m.by ? " · " + esc(m.by) : "") + '</div>';
+        pill = '<span class="tg-pill ok" title="Uploaded ' + esc(tgWhen(m.at)) + '">Uploaded · ' + esc(tgWhen(m.at)) + '</span>';
+        info = '<div class="tg-meta"><span>' + esc(m.rows) + ' rows · ' + esc(m.file || "") + '</span>' + (m.by ? '<span>by ' + esc(m.by) + '</span>' : "") + '</div>';
       } else if (g) {
-        pill = '<span class="tw-pill warn">No file for ' + esc(monthTitle(tgMonth)) + ' — using the older upload</span>';
-        info = '<div class="tw-muted">Older upload: ' + esc(g.rows) + ' rows · ' + esc(g.file || "") + ' · ' + esc(new Date(g.at).toLocaleString()) + '</div>';
+        pill = '<span class="tg-pill warn">Older upload in use</span>';
+        info = '<div class="tg-meta"><span>Nothing for ' + esc(monthTitle(tgMonth)) + ' — using ' + esc(g.rows) + ' rows · ' + esc(g.file || "") + '</span><span>uploaded ' + esc(tgWhen(g.at)) + '</span></div>';
       } else {
-        pill = '<span class="tw-pill warn">Google Sheet (fallback)</span>';
-        info = '<div class="tw-muted">Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' yet — still reading the Google Sheet.</div>';
+        pill = '<span class="tg-pill">Google Sheet (fallback)</span>';
+        info = '<div class="tg-meta"><span>Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' — still reading the Google Sheet.</span></div>';
       }
-      return '<div class="tw-card tw-tgt" data-t="' + t.type + '"><div class="tw-tgt-top"><div><b>' + esc(t.title) + '</b><div class="tw-muted">' + esc(t.desc) + '</div></div>' + pill + '</div>' + info +
-        '<label class="tw-drop" data-drop="' + t.type + '">Drop an .xlsx / .csv here or click to choose<input type="file" accept=".xlsx,.xls,.csv" hidden data-file="' + t.type + '"></label>' +
+      return '<div class="tg-card ' + st + '" data-t="' + t.type + '">' +
+        '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.file + '</span>' +
+        '<div class="tg-ht"><b title="' + esc(t.title) + '">' + esc(t.title) + '</b>' + pill + '</div></div>' +
+        '<p class="tg-desc" title="' + esc(t.desc) + '">' + esc(t.desc) + '</p>' + info +
+        '<label class="tg-drop" data-drop="' + t.type + '">' + TG_ICONS.up + '<b>Drop an .xlsx / .csv file</b><span>or click to choose</span>' +
+        '<input type="file" accept=".xlsx,.xls,.csv" hidden data-file="' + t.type + '"></label>' +
         '<div class="tw-msg" data-msg="' + t.type + '"></div><div data-prev="' + t.type + '"></div>' +
-        '<div class="tw-row"><button class="btn small" data-tpl="' + t.type + '">Download current / template</button><button class="btn small" data-seed="' + t.type + '">Import Google Sheet now</button></div></div>';
+        '<div class="tg-acts"><button class="btn small" data-tpl="' + t.type + '">Download current / template</button>' +
+        '<button class="btn small" data-seed="' + t.type + '">Import Google Sheet</button></div></div>';
     }).join("");
-    host.innerHTML = '<div class="tw-page"><div class="tw-head"><h2>Targets Upload</h2><p>Egypt only. Targets are saved per month: pick the month, then upload each target file (first sheet of the workbook, same column layout as the old Google Sheet — header row included). The dashboard reads the targets of the month selected at the top. A month with no upload keeps using the older upload, then the Google Sheet.</p></div>' +
-      '<div class="tw-card"><div class="tw-row"><b>Month</b><input type="month" id="twMonth" value="' + esc(tgMonth) + '" style="padding:0 10px;min-height:36px"><span class="tw-muted">Everything you upload or import below is saved for ' + esc(monthTitle(tgMonth)) + '.</span></div>' +
-      '<div class="tw-row" style="margin-top:10px"><input type="password" id="twKey2" placeholder="ADMIN_KEY" value="' + esc(adminKey()) + '" style="min-width:240px;padding:0 10px;min-height:36px"><button class="btn" id="twKey2Save">Save key</button><button class="btn" id="twSeedAll">Import all current Google Sheet data</button><span class="tw-msg" id="twTgMsg"></span></div></div>' +
-      '<div class="tw-grid">' + cards + '</div></div>';
+
+    host.innerHTML = '<div class="tw-page tg-page">' +
+      '<div class="tg-head"><div><h2>Targets Upload</h2>' +
+      '<p>Egypt only. Targets are saved per month — pick the month, then upload each file (first sheet of the workbook, same columns as the old Google Sheet, header row included). A month with no upload keeps using the older upload, then the Google Sheet.</p></div>' +
+      '<span class="tg-month-badge">' + esc(monthTitle(tgMonth)) + '</span></div>' +
+
+      '<div class="tw-card tg-bar-card"><div class="tg-bar">' +
+      '<label class="tg-f month"><span>Target month</span><input type="month" id="twMonth" value="' + esc(tgMonth) + '"></label>' +
+      '<label class="tg-f key"><span>Admin key</span><input type="password" id="twKey2" placeholder="ADMIN_KEY" value="' + esc(adminKey()) + '"></label>' +
+      '<button class="btn tg-btn-field" id="twKey2Save">Save key</button>' +
+      '<span class="tg-spacer"></span>' +
+      '<button class="btn btn-primary tg-btn-field" id="twSeedAll">Import all from Google Sheet</button></div>' +
+      '<div class="tg-note"><span class="tg-chip ok"><i></i>' + counts.ok + ' uploaded for this month</span>' +
+      '<span class="tg-chip warn"><i></i>' + counts.warn + ' on an older upload</span>' +
+      '<span class="tg-chip"><i></i>' + counts.idle + ' on the Google Sheet</span>' +
+      '<span class="tw-msg" id="twTgMsg"></span></div></div>' +
+
+      '<div class="tg-grid">' + cards + '</div></div>';
+
     $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
     $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.filter(function (x) { return !x.editor; }).length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.filter(function (x) { return !x.editor; })); };
@@ -692,19 +735,25 @@
     host.querySelectorAll("[data-seed]").forEach(function (b) { b.onclick = function () { seed(TARGET_TYPES.filter(function (x) { return x.type === b.dataset.seed; })); }; });
   }
   function kpiCardHtml(t) {
-    var K = tgKpi || KPI_DEFAULT, m = tgMeta[t.type];
-    var pill = m ? '<span class="tw-pill good">Saved · ' + esc(new Date(m.at).toLocaleString()) + '</span>' : '<span class="tw-pill warn">Default values</span>';
-    var rows = K.map(function (r, i) { return '<tr><td>' + esc(r[0]) + '</td><td><input type="number" min="0" step="any" data-kpi="t' + i + '" value="' + esc(r[1]) + '" style="width:80px;padding:0 8px;min-height:32px"> %</td><td><input type="number" min="0" step="any" data-kpi="w' + i + '" value="' + esc(r[2]) + '" style="width:80px;padding:0 8px;min-height:32px"> %</td></tr>'; }).join("");
+    var K = tgKpi || KPI_DEFAULT, m = tgMeta[t.type], st = tgStatus(t);
+    var pill = m ? '<span class="tg-pill ok">Saved · ' + esc(tgWhen(m.at)) + '</span>' : '<span class="tg-pill">Default values</span>';
+    var num = function (k, v) { return '<span class="tg-num"><input type="number" min="0" step="any" data-kpi="' + k + '" value="' + esc(v) + '"><s>%</s></span>'; };
+    var rows = K.map(function (r, i) { return '<tr><td>' + esc(r[0]) + '</td><td class="n">' + num("t" + i, r[1]) + '</td><td class="n">' + num("w" + i, r[2]) + '</td></tr>'; }).join("");
     var tot = K.reduce(function (a, r) { return a + (+r[2] || 0); }, 0);
-    return '<div class="tw-card tw-tgt" data-t="' + t.type + '"><div class="tw-tgt-top"><div><b>' + esc(t.title) + '</b><div class="tw-muted">' + esc(t.desc) + '</div></div>' + pill + '</div>' +
-      '<div class="table-responsive"><table class="tw-table"><thead><tr><th>Metrics</th><th>Target</th><th>Weight%</th></tr></thead><tbody>' + rows + '<tr><td></td><td></td><td><b id="twKpiTot">' + tot + '%</b></td></tr></tbody></table></div>' +
-      '<div class="tw-msg" data-msg="acm"></div><div class="tw-row" style="margin-top:8px"><button class="btn btn-primary small" id="twKpiSave">Save KPIs</button><button class="btn small" id="twKpiReset">Reset to default</button></div></div>';
+    return '<div class="tg-card wide ' + st + '" data-t="' + t.type + '">' +
+      '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span>' +
+      '<div class="tg-ht"><b>' + esc(t.title) + '</b>' + pill + '</div></div>' +
+      '<p class="tg-desc">' + esc(t.desc) + '</p>' +
+      '<div class="tg-kpi-wrap"><table class="tg-kpi-t"><thead><tr><th>Metric</th><th class="n">Target</th><th class="n">Weight</th></tr></thead>' +
+      '<tbody>' + rows + '<tr class="tg-totr"><td>Total weight</td><td class="n"></td><td class="n"><b id="twKpiTot" class="tg-tot' + (Math.abs(tot - 100) > 0.001 ? " bad" : "") + '">' + tot + '%</b></td></tr></tbody></table></div>' +
+      '<div class="tw-msg" data-msg="acm"></div>' +
+      '<div class="tg-acts"><button class="btn btn-primary small" id="twKpiSave">Save KPIs</button><button class="btn small" id="twKpiReset">Reset to default</button></div></div>';
   }
   function kpiRead(host) {
     return KPI_DEFAULT.map(function (r, i) { return [r[0], parseFloat(host.querySelector('[data-kpi="t' + i + '"]').value), parseFloat(host.querySelector('[data-kpi="w' + i + '"]').value)]; });
   }
   function kpiWire(host) {
-    var upd = function () { var K = kpiRead(host); var tot = K.reduce(function (a, r) { return a + (isFinite(r[2]) ? r[2] : 0); }, 0); var e = $("twKpiTot"); if (e) e.textContent = tot + "%"; };
+    var upd = function () { var K = kpiRead(host); var tot = K.reduce(function (a, r) { return a + (isFinite(r[2]) ? r[2] : 0); }, 0); var e = $("twKpiTot"); if (e) { e.textContent = tot + "%"; e.className = "tg-tot" + (Math.abs(tot - 100) > 0.001 ? " bad" : ""); } };
     host.querySelectorAll("[data-kpi]").forEach(function (i) { i.oninput = upd; });
     var rs = $("twKpiReset"); if (rs) rs.onclick = function () { tgKpi = KPI_DEFAULT.map(function (r) { return r.slice(); }); drawTargets(); tmsg("acm", "Defaults restored — press Save KPIs to keep them.", ""); };
     var sv = $("twKpiSave"); if (sv) sv.onclick = function () {
@@ -737,7 +786,9 @@
       tgState[type] = { payload: p, file: file.name };
       var rows = p.table.rows, show = rows.slice(0, 5).map(function (r) { return '<tr>' + (r.c || []).slice(0, 8).map(function (c) { return '<td>' + esc(c ? (c.f != null ? c.f : c.v) : "") + '</td>'; }).join("") + '</tr>'; }).join("");
       var prev = document.querySelector('[data-prev="' + type + '"]');
-      prev.innerHTML = '<div class="table-responsive"><table class="tw-table">' + show + '</table></div><div class="tw-row" style="margin-top:8px"><button class="btn btn-primary small" id="twPub_' + type + '">Publish ' + rows.length + ' rows</button><button class="btn small" id="twCan_' + type + '">Cancel</button></div>';
+      prev.innerHTML = '<div class="tg-prev"><div class="tg-prev-h">Preview · first ' + Math.min(5, rows.length) + ' of ' + rows.length + ' rows</div>' +
+        '<div class="tg-prev-s"><table class="tg-prev-t">' + show + '</table></div>' +
+        '<div class="tg-acts" style="margin-top:10px"><button class="btn btn-primary small" id="twPub_' + type + '">Publish ' + rows.length + ' rows</button><button class="btn small" id="twCan_' + type + '">Cancel</button></div></div>';
       tmsg(type, "Check the preview, then publish.", "");
       $("twCan_" + type).onclick = function () { prev.innerHTML = ""; tmsg(type, ""); delete tgState[type]; };
       $("twPub_" + type).onclick = function () {
