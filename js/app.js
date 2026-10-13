@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.41";
+const APP_VERSION = "1.15.44";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -5972,7 +5972,8 @@ function prepareAcmTableData(rows) {
     const K = state.acmKpis; const part = (act, kp) => (kp.target > 0 ? Math.min(Math.max(act, 0) / kp.target, 1) * kp.weight : 0);
     const gmvScore = t.targetGmv > 0 ? part(tm.achievedPct, K.gmv) : 0; const ndrScore = part(ndr, K.ndr); const cm3Score = part(cm3Pct, K.cm3); const retentionScore = part(actualRetentionPct, K.retention);
     const finalScorePct = gmvScore + ndrScore + cm3Score + retentionScore;
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tm, actualRetention, actualRetentionPct, gmvScore, ndrScore, cm3Score, retentionScore, finalScorePct };
+    const ach = (act, kp) => (kp.target > 0 ? (act / kp.target) * 100 : 0);
+    return { ...m, ndrTarget: K.ndr.target, cm3Target: K.cm3.target, retTarget: K.retention.target, ndrAch: ach(ndr, K.ndr), cm3Ach: ach(cm3Pct, K.cm3), retAch: ach(actualRetentionPct, K.retention), gmvAchKpi: ach(tm.achievedPct, K.gmv),  cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tm, actualRetention, actualRetentionPct, gmvScore, ndrScore, cm3Score, retentionScore, retScore: retentionScore, finalScorePct };
   });
 }
 
@@ -6049,7 +6050,7 @@ function renderPaginatedAcmTable() {
 
 // ---- Targets tables (Target ACM + Merchant Targets) — نفس الأعمدة، الاتنين بيتفرزوا ويتصفّحوا لوحدهم
 const tgtViews = {
-  acm:      { body: "acmTgtBody", table: "acmTgtTable", search: "searchAcmTgtInput", count: "rowCountAcmTgt", pager: "pageIndicatorAcmTgt", prev: "prevPageAcmTgt", next: "nextPageAcmTgt", unit: "ACMs", sortKey: "targetGmv", sortDir: "desc", page: 0, rows: [], source: () => (state.acmTableData || []).filter(m => m.targetGmv > 0 || m.targetPlaced > 0), match: (m, t) => m.name.toLowerCase().includes(t) },
+  acm:      { body: "acmTgtBody", table: "acmTgtTable", search: "searchAcmTgtInput", count: "rowCountAcmTgt", pager: "pageIndicatorAcmTgt", prev: "prevPageAcmTgt", next: "nextPageAcmTgt", unit: "ACMs", sortKey: "targetGmv", sortDir: "desc", page: 0, open: new Set(), rows: [], source: () => (state.acmTableData || []).filter(m => m.targetGmv > 0 || m.targetPlaced > 0), match: (m, t) => m.name.toLowerCase().includes(t) },
   merchant: { body: "merchantTgtBody", table: "merchantTgtTable", search: "searchMerchantTgtInput", count: "rowCountMerchantTgt", pager: "pageIndicatorMerchantTgt", prev: "prevPageMerchantTgt", next: "nextPageMerchantTgt", unit: "Merchants", sortKey: "targetGmv", sortDir: "desc", page: 0, rows: [], source: () => (state.merchantTableData || []).filter(m => m.targetGmv > 0 || m.targetPlaced > 0), match: (m, t) => String(m.name).toLowerCase().includes(t) || String(m.tgtAcm || m.acm).toLowerCase().includes(t) || String(m.id).includes(t) }
 };
 function tgtPctCell(v, hasTarget) {
@@ -6071,12 +6072,20 @@ function renderTgtView(kind) {
       ? `<td class="text-dim">#${start + idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-dim">${fmtIntCell(m.merchantCount || 0)}</td>`
       : `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.tgtAcm || m.acm}</td>`;
     const hasP = m.targetPlaced > 0, hasG = m.targetGmv > 0;
+    if (kind === "acm") {
+      const open = V.open.has(m.name);
+      tr.className = "acm-tgt-row"; tr.style.cursor = "pointer"; tr.title = "Click to show this account manager's merchants";
+      tr.innerHTML = lead.replace('<td class="font-bold text-light">', `<td class="font-bold text-light"><span style="display:inline-block;width:14px;color:var(--blue)">${open ? "▾" : "▸"}</span>`) + acmKpiCells(m);
+      tr.addEventListener("click", () => { if (V.open.has(m.name)) V.open.delete(m.name); else V.open.add(m.name); renderTgtView("acm"); });
+      tbody.appendChild(tr);
+      if (open) acmMerchantRows(m).forEach(x => tbody.appendChild(x));
+      return;
+    }
     tr.innerHTML = lead +
       `<td class="num text-dim font-bold">${hasP ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim">${hasP ? fmtIntCell(Math.round(m.mtdTargetPlaced)) : '-'}</td><td class="num text-blue font-bold">${fmtIntCell(m.placed)}</td><td class="num font-bold text-light">${fmtIntCell(Math.round(m.placedRunRate))}</td>` +
       tgtPctCell(m.placedAchievedPct, hasP) + tgtPctCell(m.placedMtdPct, hasP) +
       `<td class="num text-dim font-bold">${hasG ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-dim">${hasG ? fmtMoneyCompactCell(m.mtdTargetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td>` +
-      tgtPctCell(m.achievedPct, hasG) + tgtPctCell(m.gmvMtdPct, hasG) +
-      (kind === "acm" ? kpiCells(m) : "");
+      tgtPctCell(m.achievedPct, hasG) + tgtPctCell(m.gmvMtdPct, hasG);
     tbody.appendChild(tr);
   });
   if ($(V.count)) $(V.count).textContent = `${fmtInt.format(V.rows.length)} ${V.unit}`;
@@ -6084,6 +6093,36 @@ function renderTgtView(kind) {
   if ($(V.prev)) $(V.prev).disabled = V.page === 0;
   if ($(V.next)) $(V.next).disabled = V.page >= totalPages - 1;
   document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey) th.classList.toggle("sorted", th.dataset.tkey === V.sortKey); });
+}
+const ACM_GRP_BORDER = "border-left:2px solid var(--border-strong, rgba(120,140,170,.45));";
+function acmKpiCells(m) {
+  const K = state.acmKpis; const B = ACM_GRP_BORDER;
+  const ach = (v, has) => has ? tgtPctCell(v, true) : `<td class="num text-dim">-</td>`;
+  const score = (v, w) => `<td class="num"><span class="font-bold">${v.toFixed(1)}</span><span class="text-dim"> / ${w}</span></td>`;
+  const hasG = m.targetGmv > 0;
+  const grp = (tgt, act, a, sc, w, has) => `<td class="num text-dim" style="${B}">${tgt}</td><td class="num font-bold text-light">${act}</td>${ach(a, has)}${score(sc, w)}`;
+  const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
+  return grp(hasG ? fmtMoneyCompactCell(m.targetGmv) : "-", fmtMoneyCompactCell(m.deliveredGmv), m.achievedPct, m.gmvScore, K.gmv.weight, hasG)
+    + grp(K.ndr.target + "%", fmtPctCell(m.ndr), m.ndrAch, m.ndrScore, K.ndr.weight, K.ndr.target > 0)
+    + grp(K.cm3.target + "%", fmtPctCell(m.cm3Pct), m.cm3Ach, m.cm3Score, K.cm3.weight, K.cm3.target > 0)
+    + grp(K.retention.target + "%", fmtPctCell(m.actualRetentionPct), m.retAch, m.retentionScore, K.retention.weight, K.retention.target > 0)
+    + `<td class="num font-bold" style="${B}"><div style="font-weight:700; font-size: 13px; color:var(--${fin})">${m.finalScorePct.toFixed(1)}%</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>`;
+}
+function acmMerchantRows(a) {
+  const B = ACM_GRP_BORDER; const K = state.acmKpis; const key = normalizeName(a.name);
+  const list = (state.merchantTableData || []).filter(m => normalizeName(m.tgtAcm || m.acm) === key && (m.targetGmv > 0 || m.deliveredGmv > 0 || m.placed > 0)).sort((x, y) => (y.targetGmv - x.targetGmv) || (y.deliveredGmv - x.deliveredGmv));
+  const bg = "background:rgba(120,140,170,.08);";
+  const out = list.map(m => {
+    const tr = document.createElement("tr"); const hasG = m.targetGmv > 0;
+    tr.innerHTML = `<td style="${bg}"></td><td style="${bg}padding-left:26px"><span class="text-light">${m.name}</span> <span class="font-mono text-dim" style="font-size:10px">${m.id || ""}</span></td><td class="num text-dim" style="${bg}">${m.segment || ""}</td>`
+      + `<td class="num text-dim" style="${bg}${B}">${hasG ? fmtMoneyCompactCell(m.targetGmv) : "-"}</td><td class="num text-light" style="${bg}">${fmtMoneyCompactCell(m.deliveredGmv)}</td>${hasG ? tgtPctCell(m.achievedPct, true).replace("<td ", `<td style="${bg}" `) : `<td class="num text-dim" style="${bg}">-</td>`}<td style="${bg}"></td>`
+      + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.ndrPct != null ? m.ndrPct : (m.ndr || 0))}</td><td style="${bg}"></td><td style="${bg}"></td>`
+      + `<td class="num text-dim" style="${bg}${B}">-</td><td class="num text-light" style="${bg}">${fmtPctCell(m.cm3Pct || 0)}</td><td style="${bg}"></td><td style="${bg}"></td>`
+      + `<td style="${bg}${B}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}"></td><td style="${bg}${B}"></td>`;
+    return tr;
+  });
+  if (!out.length) { const tr = document.createElement("tr"); tr.innerHTML = `<td></td><td colspan="19" class="text-dim" style="padding-left:26px">No merchants found for this account manager</td>`; out.push(tr); }
+  return out;
 }
 function kpiCells(m) {
   const K = state.acmKpis; const col = (v, t) => (t > 0 && v >= t ? "green" : (v >= t * 0.6 ? "orange" : "red"));
@@ -6093,6 +6132,8 @@ function kpiCells(m) {
     cell(m.ndr, K.ndr.target) + cell(m.cm3Pct, K.cm3.target) + cell(m.actualRetentionPct, K.retention.target);
 }
 function renderAcmKpiTable() {
+  const K0 = state.acmKpis, nm = { gmv: "Delivered GMV", ndr: "Portfolio NDR %", cm3: "CM3 %", ret: "Segment Retention" }, wk = { gmv: K0.gmv, ndr: K0.ndr, cm3: K0.cm3, ret: K0.retention };
+  document.querySelectorAll("#acmTgtTable .acm-kpi-grp").forEach(th => { const g = th.dataset.kgrp; th.textContent = `${nm[g]} · weight ${wk[g].weight}%`; });
   const host = $("acmKpiBody"); if (!host) return; const K = state.acmKpis;
   const rows = [["Delivered GMV", K.gmv, "of the GMV target"], ["Portfolio NDR (Orders)%", K.ndr, ""], ["CM3 Per Merchant", K.cm3, "CM3 %"], ["Segment Retention", K.retention, "merchants moving up a segment"]];
   host.innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1].target}%</td><td class="num">${r[1].weight}%</td></tr>`).join("") + `<tr><td></td><td></td><td class="num font-bold">${rows.reduce((a, r) => a + r[1].weight, 0)}%</td></tr>`;
