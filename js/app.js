@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.39";
+const APP_VERSION = "1.15.40";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -14991,7 +14991,7 @@ function spfRowHtml(r) {
   const achCls = r.achPct < 50 ? "red" : "orange";
   const inp = "font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid #3a4a63;background:transparent;color:inherit";
   const opts = '<option value="">— Select —</option>' + SPF_OPTIONS.map(o => `<option value="${escapeHtml(o)}"${o === d.feedback ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
-  const stop = d.feedback === "Merchant will stop - add new merchant" || d.spfNoChange(feedback);
+  const stop = d.feedback === "Merchant will stop - add new merchant" || spfNoChange(d.feedback);
   const countOpts = Array.from({ length: SPF_MAX_NEW }, (_, i) => `<option value="${i + 1}"${d.count === i + 1 ? " selected" : ""}>${i + 1}</option>`).join("");
   const pairs = d.needs ? d.merchants.map((m, i) => `<div class="spf-m-row" data-i="${i}" style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
       <span class="text-dim" style="font-size:11px;min-width:16px">#${i + 1}</span>
@@ -15093,7 +15093,7 @@ async function spfSave(tr) {
       method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "save_sales_plan_feedback", feedback: v.feedback, comment: v.comment,
-        adjustedTarget: v.spfNoChange(feedback) ? Number(r.oldDailyTarget || 0) : Number(v.adj), newMerchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target), name: ((state.merchantInfoMap || new Map()).get(m.id) || {}).merchantName || "" })),
+        adjustedTarget: spfNoChange(v.feedback) ? Number(r.oldDailyTarget || 0) : Number(v.adj), newMerchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target), name: ((state.merchantInfoMap || new Map()).get(m.id) || {}).merchantName || "" })),
         userName: user.name || "", userEmail: user.email || "",
         row: {
           productId: r.productId, productName: r.productName, merchantId: r.tagerId, merchantName: r.merchantName,
@@ -15106,7 +15106,7 @@ async function spfSave(tr) {
     const data = await resp.json();
     if (!data || data.success === false) throw new Error((data && data.error) || "Save failed");
     spfState.fb[key] = {
-      date: data.date || spfTodayKey(), feedback: v.feedback, comment: v.comment, adjTarget: v.spfNoChange(feedback) ? Number(r.oldDailyTarget || 0) : Number(v.adj),
+      date: data.date || spfTodayKey(), feedback: v.feedback, comment: v.comment, adjTarget: spfNoChange(v.feedback) ? Number(r.oldDailyTarget || 0) : Number(v.adj),
       merchants: v.merchants.map(m => ({ id: m.id, target: Number(m.target) })),
       newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || ""
     };
@@ -15152,7 +15152,7 @@ if ($("spfTableBody")) {
       if (fb === "Merchant will scale on new target") d.adj = ""; // يتملّى بالـ New Target المحسوب
       else if (fb === "Merchant will stop - add new merchant") d.adj = 0;
       else if (spfNoChange(fb)) d.adj = "";
-      else if (old.feedback === "Merchant will stop - add new merchant" || old.feedback === "Merchant will scale on new target" || old.spfNoChange(feedback)) d.adj = "";
+      else if (old.feedback === "Merchant will stop - add new merchant" || old.feedback === "Merchant will scale on new target" || spfNoChange(old.feedback)) d.adj = "";
       if (!SPF_NEEDS_MERCHANT[fb]) { d.merchants = []; d.count = 0; }
       else if (!d.count) d.count = 1;
       spfRerenderRow(tr);
