@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.33";
+const APP_VERSION = "1.15.34";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -2593,6 +2593,20 @@ function computeCommercialActuals(mainRowsAll) {
 // MERCHANT_SKU_DAILY_GID) بدل ما ييجوا من أعمدة تارجت منفصلة زي الأول —
 // ACM مبقاش عمود في الشيت، فبيتجاب لكل صف من merchantInfoMap (شيت الـ
 // Main) على أساس Merchant ID، زي أي سكشن تاني في الداشبورد.
+// تاريخ خلية (gviz) → Date عند منتصف الليل، أو null لو فاضية/مش تاريخ.
+// بيقرا النص المنسّق "YYYY-MM-DD HH:mm" أو القيمة الخام "Date(y,m,d,...)".
+function sheetCellDate(cell) {
+  if (!cell) return null;
+  const f = cell.f != null ? String(cell.f) : "";
+  let m = f.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  const v = cell.v != null ? String(cell.v) : "";
+  m = v.match(/Date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2], +m[3]);
+  m = v.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  return null;
+}
 function parseAcmSalesPlanSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const plan = [];
@@ -2624,7 +2638,8 @@ function parseAcmSalesPlanSheet(payload) {
       dailyPlacedTarget: (hasNewTarget ? newTargetDaily : originalTarget),
       originalDailyTarget: originalTarget,        // F — التارجت الأصلي
       newTargetDaily: hasNewTarget ? newTargetDaily : null, // G
-      matchFlag: cellText(c[7]).trim()            // H — "Existing match" / "New match"
+      matchFlag: cellText(c[7]).trim(),           // H — "Existing match" / "New match"
+      lastTargetUpdate: sheetCellDate(c[8])       // I — Last Target Update (Date بدون وقت، أو null)
     });
   }
   return plan;
@@ -7427,8 +7442,8 @@ function getMpSalesPlanFinalStatus(pct) {
 // مش بس MTD)، و Run Rate % = نسبة الإسقاط ده من التارجت الشهري الكامل
 // (Daily Target × عدد أيام الشهر) — ده اللي بيجاوب سؤال "هيتحقق ولا لأ لو
 // الوضع فضل زي ما هو".
-function mpSpBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays, currentMonthDays) {
-    const mtdTarget = dailyTarget * daysUntilYesterday;
+function mpSpBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays, currentMonthDays, mtdTargetOverride) {
+    const mtdTarget = (mtdTargetOverride !== undefined && mtdTargetOverride !== null) ? mtdTargetOverride : dailyTarget * daysUntilYesterday;
     const monthlyTarget = dailyTarget * currentMonthDays;
     const gap = mtdTarget - mtdActual;
     const runRate = (mtdActual / elapsedDays) * currentMonthDays;
@@ -7524,15 +7539,35 @@ function prepareMpSalesPlanData() {
         // النسبة/الـ ASP قبل ما نضربه في daysUntilYesterday بيدّي بالظبط
         // نفس نتيجة إننا نضرب الـ MTD Target نفسه في النسبة دي (لأن الاتنين
         // بيتضربوا في نفس daysUntilYesterday).
+        // بداية حساب الـ MTD Target (بطلب صريح):
+        //  - Match جديد (Match Flag = New match): التارجت بيتحسب من يوم Last Target Update
+        //    (يوم الحفظ) لحد امبارح، مش من أول الشهر.
+        //  - Match قديم اتغيّر New Target بتاعه: الأيام قبل يوم التغيير بالتارجت الأصلي
+        //    (Target Placed Daily) والأيام من يوم التغيير بالتارجت الجديد.
+        //  - لو Last Target Update فاضي أو قبل الشهر: من أول الشهر بالتارجت الفعّال، زي الأول.
+        let placedMtdOverride = null;
+        const upd = plan.lastTargetUpdate;
+        if (upd && upd.getFullYear() === today.getFullYear() && upd.getMonth() === today.getMonth()) {
+            const updDay = upd.getDate();
+            const daysBefore = Math.max(0, Math.min(daysUntilYesterday, updDay - 1));
+            const daysAfter = Math.max(0, daysUntilYesterday - (updDay - 1));
+            if (/new/i.test(plan.matchFlag || "")) {
+                placedMtdOverride = plan.dailyPlacedTarget * daysAfter;
+            } else if (plan.newTargetDaily !== null && plan.newTargetDaily !== undefined) {
+                placedMtdOverride = (plan.originalDailyTarget || 0) * daysBefore + plan.newTargetDaily * daysAfter;
+            }
+        }
         const matchStats = matchStatsMap.get(plan.productId + "||" + plan.tagerId) || { cr: 0, dr: 0, asp: 0 };
         const confirmedDailyTarget = plan.dailyPlacedTarget * (matchStats.cr / 100);
         const deliveredDailyTarget = confirmedDailyTarget * (matchStats.dr / 100);
         const gmvDailyTarget = deliveredDailyTarget * matchStats.asp;
 
-        const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays);
-        const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays);
+        const ov = (m) => placedMtdOverride === null ? null : placedMtdOverride * m;
+        const crF = matchStats.cr / 100, drF = matchStats.dr / 100;
+        const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(1));
+        const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF));
+        const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF));
+        const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF * matchStats.asp));
 
         // Confirmed Pieces هو المقياس الأساسي اللي بيحدد "الحالة العامة" للصف
         // وكروت الملخص فوق (زي ما كان قبل كده، ده أساس عمود "Rounded Daily Confirmed").
