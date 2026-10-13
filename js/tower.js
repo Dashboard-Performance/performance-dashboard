@@ -10,7 +10,7 @@
   // view name (switchView) -> nav element id
   var VIEW_NAV = {
     overview: "navOverview", recommendedTracker: "navRecommendedTracker", inventory: "navInventory",
-    acmPerformance: "navAcmPerf", merchantPerformance: "navMerchantPerf", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
+    acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
     targetsCommercial: "navTargetsCommercial", commercialDebundlized: "navCommercialDebundlized", purchasePlan: "navPurchasePlan",
     cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle",
     productsMatchesAnalyst: "navProductsMatchesAnalyst", scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions",
@@ -23,8 +23,7 @@
   var ADMIN_PW_VIEWS = ["segmentation", "sellthrough", "weeklyInventory", "forecastModel"]; // still behind the Admin Panel password
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
   var TARGET_TYPES = [
-    { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "Merchant ID · … · GMV (col D) · Placed (col E)" },
-    { type: "acm", gid: "2042936628", title: "ACM Targets", desc: "ACM · Target GMV · NDR % · CM3 % · Retention (+ weights)" },
+    { type: "merchants", gid: "115442405", title: "Merchant Targets (also feeds ACM Targets)", desc: "TAGER_ID · Tager_name · ACM · Target GMV (Actual) · Target Placed (Actual)" },
     { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · Daily Target · CR % · DR % · ASP · CM3 · PPM …" },
     { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target · New Target · Flag" },
     { type: "singlesku", gid: "1620722565", title: "Single SKU Targets", desc: "PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
@@ -64,7 +63,7 @@
       roles: {
         "Admin": { views: "*", admin: true },
         "Country Manager": { views: "*", admin: true },
-        "Account Manager": { views: base.concat(g("navAcmToggle"), ["navMerchantPerf"], g("navIncentivesToggle")) },
+        "Account Manager": { views: base.concat(g("navAcmToggle"), g("navMerchantsToggle"), g("navIncentivesToggle")) },
         "Commercial": { views: base.concat(g("navCommercialToggle")) },
         "Marketplace": { views: base.concat(g("navMarketplaceToggle")) },
         "Supply Chain": { views: base.concat(g("navSupplyChainToggle")) },
@@ -87,6 +86,13 @@
     if (!c.roles.Merchant) c.roles.Merchant = d.roles.Merchant;
     if (c.defaultRole === "Viewer") c.defaultRole = "Merchant";
     Object.keys(c.users).forEach(function (em) { var u = c.users[em]; if (u === "Viewer") c.users[em] = "Merchant"; else if (u && typeof u === "object" && u.role === "Viewer") u.role = "Merchant"; });
+    // v1.15.36: Target ACM / Merchant Targets tabs — أي دور كان شايف Performance ACM / Merchants يشوف التابات الجديدة كمان
+    Object.keys(c.roles).forEach(function (n) {
+      var r = c.roles[n]; if (!r || !Array.isArray(r.views)) return;
+      var v = r.views, add = function (has, id) { if (v.indexOf(has) >= 0 && v.indexOf(id) < 0) v.push(id); };
+      add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets");
+      if (v.indexOf("navMerchantPerf") >= 0 && v.indexOf("navMerchantsToggle") < 0) v.push("navMerchantsToggle");
+    });
     if (!c.defaultRole || !c.roles[c.defaultRole]) c.defaultRole = "Merchant";
     return c;
   }
@@ -411,6 +417,7 @@
   var NAV_ICONS = {
     navOverview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     navAcmToggle: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M17 14.2c2.6.2 4.5 2 4.5 5"/>',
+    navMerchantsToggle: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0A2.7 2.7 0 0 0 20 9"/><path d="M5 12v8h14v-8"/><path d="M10 20v-5h4v5"/>',
     navMerchantPerf: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0A2.7 2.7 0 0 0 20 9"/><path d="M5 12v8h14v-8"/><path d="M10 20v-5h4v5"/>',
     navCommercialToggle: '<path d="M3 17l5-5 4 4 8-9"/><path d="M15 7h5v5"/>',
     navSupplyChainToggle: '<path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
@@ -664,7 +671,7 @@
       '<div class="tw-grid">' + cards + '</div></div>';
     $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
-    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all 5 targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.slice()); };
+    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.slice()); };
     host.querySelectorAll("[data-file]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) pick(inp.dataset.file, inp.files[0]); inp.value = ""; }; });
     host.querySelectorAll("[data-drop]").forEach(function (d) {
       ["dragenter", "dragover"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.add("over"); }); });
@@ -768,7 +775,12 @@
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
       { nav: "navIncMerchants", view: "incentiveMerchants", label: "Incentive Merchants" }
     ] },
+    { toggle: "navMerchantsToggle", title: "Merchants", tabs: [
+      { nav: "navMerchantTargets", view: "merchantTargets", label: "Merchant Targets" },
+      { nav: "navMerchantPerf", view: "merchantPerformance", label: "Merchant Performance" }
+    ] },
     { toggle: "navAcmToggle", title: "Account Manager", tabs: [
+      { nav: "navAcmTargets", view: "acmTargets", label: "Target ACM" },
       { nav: "navAcmPerf", view: "acmPerformance", label: "Performance ACM" },
       { nav: "navMpSalesPlan", view: "mpSalesPlan", label: "Sales Plan-ACM" },
       { nav: "navSpFeedback", view: "spFeedback", label: "Sales Plan - Feedback" }
@@ -790,7 +802,7 @@
       }, true);
     });
   }
-  var SINGLE_TITLES = { overview: "Over View", merchantPerformance: "Merchants", towerRoles: "Users & Roles", towerTargets: "Targets Upload" };
+  var SINGLE_TITLES = { overview: "Over View", towerRoles: "Users & Roles", towerTargets: "Targets Upload" };
   function navTitle(view) { var id = VIEW_NAV[view], el = id && $(id); return el ? el.textContent.replace(/[▼▲]/g, "").trim() : ""; }
   function updateHub(view) {
     var cur = hubOfView(view), bar = $("twTabs");
@@ -879,7 +891,7 @@
   // File names follow the tab labels shown in the sidebar (Commercial Plan -> commercial-plan.html).
   var VIEW_SLUG = {
     recommendedTracker: "recommended-tracker", inventory: "inventory",
-    acmPerformance: "performance-acm", merchantPerformance: "merchants", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
+    acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
     targetsCommercial: "targets", commercialDebundlized: "commercial-plan", purchasePlan: "purchase-plan",
     cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
     productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",

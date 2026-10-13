@@ -30,12 +30,22 @@
             <span class="nav-caret" id="navAcmCaret">▼</span>
           </a>
           <div class="nav-submenu hidden" id="acmSubmenu">
+            <a class="nav-item-sub" id="navAcmTargets">Target ACM</a>
             <a class="nav-item-sub" id="navAcmPerf">Performance ACM</a>
             <a class="nav-item-sub" id="navMpSalesPlan">Sales Plan-ACM</a>
             <a class="nav-item-sub" id="navSpFeedback">Sales Plan - Feedback</a>
           </div>
         </div>
-        <a class="nav-item" id="navMerchantPerf"><span class="nav-icon"></span>Merchants</a>
+        <div class="nav-dropdown-wrapper">
+          <a class="nav-item" id="navMerchantsToggle">
+            <span class="nav-icon"></span>Merchants
+            <span class="nav-caret" id="navMerchantsCaret">▼</span>
+          </a>
+          <div class="nav-submenu hidden" id="merchantsSubmenu">
+            <a class="nav-item-sub" id="navMerchantTargets">Merchant Targets</a>
+            <a class="nav-item-sub" id="navMerchantPerf">Merchant Performance</a>
+          </div>
+        </div>
         <div class="nav-dropdown-wrapper">
           <a class="nav-item" id="navCommercialToggle">
             <span class="nav-icon"></span>Commercial
@@ -296,14 +306,51 @@
           </section>
         </div>
         <!-- ACCOUNT MANAGER PERFORMANCE SECTION -->
+        <!-- ACCOUNT MANAGER TARGETS SECTION -->
+        <div id="viewAcmTargets" class="view-section hidden">
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Account Manager Targets</h2>
+                  <p>Each account manager's monthly Placed and Delivered GMV targets (the sum of their merchants' targets) vs actuals, MTD target and month-end run rate</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchAcmTgtInput" type="search" placeholder="Search ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="acmTgtTable">
+                  <thead>
+                    <tr>
+                      <th data-tkey="index" title="Row number.">#</th>
+                      <th data-tkey="name" title="Account manager's name.">Account Manager</th>
+                      <th data-tkey="merchantCount" class="num" title="Merchants with a target under this account manager.">Merchants</th>
+                      <th data-tkey="targetPlaced" class="num" title="Monthly placed-orders target.">Target Placed</th><th data-tkey="mtdTargetPlaced" class="num" title="Placed target pro-rated to the days elapsed until yesterday.">MTD Target Placed</th><th data-tkey="placed" class="num" title="Actual placed orders.">Placed</th><th data-tkey="placedRunRate" class="num" title="Projected end-of-month placed orders at the current daily pace.">Placed Run Rate (EOM)</th><th data-tkey="placedAchievedPct" class="num" title="Placed ÷ monthly target.">Placed vs Target %</th><th data-tkey="placedMtdPct" class="num" title="Placed ÷ MTD target.">Placed vs MTD %</th><th data-tkey="targetGmv" class="num" title="Monthly delivered-GMV target.">Target GMV</th><th data-tkey="mtdTargetGmv" class="num" title="GMV target pro-rated to the days elapsed until yesterday.">MTD Target GMV</th><th data-tkey="deliveredGmv" class="num" title="Actual delivered GMV.">Delivered GMV</th><th data-tkey="runRate" class="num" title="Projected end-of-month delivered GMV at the current daily pace.">GMV Run Rate (EOM)</th><th data-tkey="achievedPct" class="num" title="Delivered GMV ÷ monthly target.">GMV vs Target %</th><th data-tkey="gmvMtdPct" class="num" title="Delivered GMV ÷ MTD target.">GMV vs MTD %</th>
+                    </tr>
+                  </thead>
+                  <tbody id="acmTgtBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountAcmTgt">0 ACMs</span>
+                <div class="pager">
+                  <button id="prevPageAcmTgt" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorAcmTgt">Page 1 of 1</span>
+                  <button id="nextPageAcmTgt" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
         <div id="viewAcmPerformance" class="view-section hidden">
           
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
-                  <h2>Account Manager Comprehensive Performance</h2>
-                  <p><span class="icon-calendar"></span> <span id="tableDateRange">All Time</span> | Targets vs Actuals & Final KPIs Weight</p>
+                  <h2>Account Manager Performance</h2>
+                  <p><span class="icon-calendar"></span> <span id="tableDateRange">All Time</span> | Orders, GMV, rates, CM3 and PPM</p>
                 </div>
                 <div class="table-controls">
                   <input id="searchInput" type="search" placeholder="Search ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
@@ -315,20 +362,17 @@
                     <tr>
                       <th data-key="index" title="Row number.">#</th>
                       <th data-key="name" title="Account manager's name.">Account Manager</th>
-                      <th data-key="finalScorePct" class="num" style="min-width: 120px; color: var(--blue);" title="Weighted score combining GMV, NDR, CM3% (5-day cutoff) and Retention vs targets.">Final Weight %</th>
-                      <th data-key="targetGmv" class="num text-dim" title="GMV target assigned to this account manager.">Target GMV</th>
-                      <th data-key="deliveredGmv" class="num" title="Total delivered GMV. No cutoff applied.">Delivered GMV</th>
-                      <th data-key="achievedPct" class="num" style="min-width: 110px;" title="Delivered GMV ÷ Target GMV.">GMV Achieved %</th>
-                      <th data-key="runRate" class="num text-blue" title="Projected end-of-month GMV based on the current daily pace.">Run Rate (EOM)</th>
-                      <th data-key="targetNdr" class="num text-dim" title="NDR% target assigned to this account manager.">Target NDR%</th>
-                      <th data-key="ndr" class="num" title="CR% × DR%. No cutoff applied.">Actual NDR%</th>
-                      <th data-key="targetCm3" class="num text-dim" title="CM3% target assigned to this account manager.">Target CM3%</th>
-                      <th data-key="cm3Pct" class="num" title="CM3 ÷ Delivered GMV, excluding the most recent 5 days.">Actual CM3%</th>
-                      <th data-key="targetRetention" class="num text-dim" title="Retention target (merchants expected to move up a segment).">Target Retention</th>
-                      <th data-key="actualRetention" class="num" title="Count of merchants under this account manager whose projected segment improved.">Actual Retention</th>
-                      <th data-key="placed" class="num text-dim" title="Total placed orders. No cutoff applied.">Placed</th>
-                      <th data-key="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
-                      <th data-key="delivered" class="num text-dim" title="Total delivered orders. No cutoff applied.">Delivered</th>
+                      <th data-key="placed" class="num" title="Total placed orders. No cutoff applied.">Total Placed Orders</th>
+                      <th data-key="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Total Confirmed</th>
+                      <th data-key="delivered" class="num" title="Total delivered orders. No cutoff applied.">Total Delivered</th>
+                      <th data-key="deliveredGmv" class="num" title="Total delivered GMV. No cutoff applied.">Total Delivered GMV</th>
+                      <th data-key="cr" class="num" title="Confirmed ÷ Placed.">CR%</th>
+                      <th data-key="dr" class="num" title="Delivered ÷ Confirmed.">DR%</th>
+                      <th data-key="ndr" class="num" title="CR% × DR%.">NDR%</th>
+                      <th data-key="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
+                      <th data-key="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3%</th>
+                      <th data-key="ppm" class="num" title="Total delivered PPM. No cutoff applied.">Total Delivered PPM</th>
+                      <th data-key="ppmPct" class="num text-purple" title="Total Delivered PPM ÷ Delivered GMV.">PPM%</th>
                     </tr>
                   </thead>
                   <tbody id="acmTableBody"></tbody>
@@ -346,53 +390,40 @@
           </section>
 
         </div>
-        <!-- MERCHANT PERFORMANCE SECTION -->
-        <div id="viewMerchantPerformance" class="view-section hidden">
-          
-          
+<!-- MERCHANT PERFORMANCE SECTION -->
+        <!-- MERCHANT TARGETS SECTION -->
+        <div id="viewMerchantTargets" class="view-section hidden">
           <section class="table-section mt-4">
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
-                  <h2>Overall Merchant Performance (With Targets)</h2>
-                  <p>Detailed performance for all merchants (Targets, Run Rate, CM3, etc.)</p>
+                  <h2>Merchant Targets</h2>
+                  <p>Each merchant's monthly Placed and Delivered GMV targets vs actuals, MTD target and month-end run rate</p>
                 </div>
                 <div class="table-controls">
-                  <input id="searchMerchantInput" type="search" placeholder="Search Merchant or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                  <input id="searchMerchantTgtInput" type="search" placeholder="Search Merchant or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
               </div>
               <div class="table-responsive">
-                <table class="data-table" id="merchantTable">
+                <table class="data-table" id="merchantTgtTable">
                   <thead>
                     <tr>
-                      <th data-mkey="index" title="Row number.">#</th>
-                      <th data-mkey="id" title="Merchant's unique ID.">ID</th>
-                      <th data-mkey="name" title="Merchant's name.">Merchant Name</th>
-                      <th data-mkey="acm" title="Account manager assigned to this merchant.">ACM</th>
-                      <th data-mkey="targetGmv" class="num" title="GMV target assigned to this merchant.">Target GMV</th>
-                      <th data-mkey="deliveredGmv" class="num" title="Total delivered GMV.">Delivered GMV</th>
-                      <th data-mkey="runRate" class="num" title="Projected end-of-month GMV based on the current daily pace.">Run Rate (EOM)</th>
-                      <th data-mkey="achievedPct" class="num" style="min-width: 100px;" title="Delivered GMV ÷ Target GMV.">Achieved %</th>
-                      <th data-mkey="targetPlaced" class="num" title="Placed-orders target assigned to this merchant.">Target Placed</th>
-                      <th data-mkey="placed" class="num" title="Total placed orders. No cutoff applied.">Placed</th>
-                      <th data-mkey="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Confirmed</th>
-                      <th data-mkey="delivered" class="num" title="Total delivered orders. No cutoff applied.">Delivered</th>
-                      <th data-mkey="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
-                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3 %</th>
-                      <th data-mkey="cr" class="num" title="Confirmed ÷ Placed. No cutoff applied.">CR%</th>
-                      <th data-mkey="dr" class="num" title="Delivered ÷ Confirmed. No cutoff applied.">DR%</th>
-                      <th data-mkey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th data-tkey="index" title="Row number.">#</th>
+                      <th data-tkey="id" title="Merchant's unique ID.">ID</th>
+                      <th data-tkey="name" title="Merchant's name.">Merchant Name</th>
+                      <th data-tkey="acm" title="Account manager assigned to this merchant.">ACM</th>
+                      <th data-tkey="targetPlaced" class="num" title="Monthly placed-orders target.">Target Placed</th><th data-tkey="mtdTargetPlaced" class="num" title="Placed target pro-rated to the days elapsed until yesterday.">MTD Target Placed</th><th data-tkey="placed" class="num" title="Actual placed orders.">Placed</th><th data-tkey="placedRunRate" class="num" title="Projected end-of-month placed orders at the current daily pace.">Placed Run Rate (EOM)</th><th data-tkey="placedAchievedPct" class="num" title="Placed ÷ monthly target.">Placed vs Target %</th><th data-tkey="placedMtdPct" class="num" title="Placed ÷ MTD target.">Placed vs MTD %</th><th data-tkey="targetGmv" class="num" title="Monthly delivered-GMV target.">Target GMV</th><th data-tkey="mtdTargetGmv" class="num" title="GMV target pro-rated to the days elapsed until yesterday.">MTD Target GMV</th><th data-tkey="deliveredGmv" class="num" title="Actual delivered GMV.">Delivered GMV</th><th data-tkey="runRate" class="num" title="Projected end-of-month delivered GMV at the current daily pace.">GMV Run Rate (EOM)</th><th data-tkey="achievedPct" class="num" title="Delivered GMV ÷ monthly target.">GMV vs Target %</th><th data-tkey="gmvMtdPct" class="num" title="Delivered GMV ÷ MTD target.">GMV vs MTD %</th>
                     </tr>
                   </thead>
-                  <tbody id="merchantTableBody"></tbody>
+                  <tbody id="merchantTgtBody"></tbody>
                 </table>
               </div>
               <div class="table-footer">
-                <span id="rowCountMerchant">0 Merchants</span>
+                <span id="rowCountMerchantTgt">0 Merchants</span>
                 <div class="pager">
-                  <button id="prevPageMerchant" class="btn btn-outline small">Prev</button>
-                  <span id="pageIndicatorMerchant">Page 1 of 1</span>
-                  <button id="nextPageMerchant" class="btn btn-outline small">Next</button>
+                  <button id="prevPageMerchantTgt" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMerchantTgt">Page 1 of 1</span>
+                  <button id="nextPageMerchantTgt" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>
@@ -432,6 +463,54 @@
                   <button id="prevPageSeg" class="btn btn-outline small">Prev</button>
                   <span id="pageIndicatorSeg">Page 1 of 1</span>
                   <button id="nextPageSeg" class="btn btn-outline small">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        
+        </div>
+        <div id="viewMerchantPerformance" class="view-section hidden">
+          <section class="table-section mt-4">
+            <div class="panel table-panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-blue">
+                  <h2>Merchant Performance</h2>
+                  <p>Orders, GMV, rates, CM3 and PPM for all merchants</p>
+                </div>
+                <div class="table-controls">
+                  <input id="searchMerchantInput" type="search" placeholder="Search Merchant or ACM..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table" id="merchantTable">
+                  <thead>
+                    <tr>
+                      <th data-mkey="index" title="Row number.">#</th>
+                      <th data-mkey="id" title="Merchant's unique ID.">ID</th>
+                      <th data-mkey="name" title="Merchant's name.">Merchant Name</th>
+                      <th data-mkey="acm" title="Account manager assigned to this merchant.">ACM</th>
+                      <th data-mkey="placed" class="num" title="Total placed orders. No cutoff applied.">Total Placed Orders</th>
+                      <th data-mkey="confirmed" class="num" title="Total confirmed orders. No cutoff applied.">Total Confirmed</th>
+                      <th data-mkey="delivered" class="num" title="Total delivered orders. No cutoff applied.">Total Delivered</th>
+                      <th data-mkey="deliveredGmv" class="num" title="Total delivered GMV.">Total Delivered GMV</th>
+                      <th data-mkey="cr" class="num" title="Confirmed ÷ Placed. No cutoff applied.">CR%</th>
+                      <th data-mkey="dr" class="num" title="Delivered ÷ Confirmed. No cutoff applied.">DR%</th>
+                      <th data-mkey="ndr" class="num" title="CR% × DR%. No cutoff applied.">NDR%</th>
+                      <th data-mkey="cm3" class="num" title="Total contribution margin, excluding the most recent 5 days.">Total CM3</th>
+                      <th data-mkey="cm3Pct" class="num text-purple" title="Total CM3 ÷ Delivered GMV, using the same 5-day cutoff.">CM3%</th>
+                      <th data-mkey="ppm" class="num" title="Total delivered PPM. No cutoff applied.">Total Delivered PPM</th>
+                      <th data-mkey="ppmPct" class="num text-purple" title="Total Delivered PPM ÷ Delivered GMV.">PPM%</th>
+                    </tr>
+                  </thead>
+                  <tbody id="merchantTableBody"></tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="rowCountMerchant">0 Merchants</span>
+                <div class="pager">
+                  <button id="prevPageMerchant" class="btn btn-outline small">Prev</button>
+                  <span id="pageIndicatorMerchant">Page 1 of 1</span>
+                  <button id="nextPageMerchant" class="btn btn-outline small">Next</button>
                 </div>
               </div>
             </div>

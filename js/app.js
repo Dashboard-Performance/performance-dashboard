@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.35";
+const APP_VERSION = "1.15.38";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -25,7 +25,7 @@ function hideLoadingShowError(msg) {
 const SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 const MAIN_GID = "2099497960";
 const TARGETS_GID = "115442405";
-const TARGETS_ACM_GID = "2042936628";
+const TARGETS_ACM_GID = " _Targets_ACM_ "; // v1.15.36: ACM targets بقت بتتحسب من Merchant Targets (group by ACM) — الشيت المنفصل اتشال
 const INVENTORY_GID = "1780730573";
 const PRODUCTS_GID = "1779314157";
 const CAT_TARGETS_GID = "1656655269";
@@ -595,7 +595,7 @@ const state = {
   availabilityLockingSkuRows: [], availabilityLockingCategoryRows: [], availabilityLockingTotals: null,
   cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
   cdzFiltered: [], cdzPage: 0,
-  acmTableData: [], filteredAcmData: [], sortKey: "finalScorePct", sortDir: "desc", page: 0,
+  acmTableData: [], filteredAcmData: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0,
   merchantTableData: [], filteredMerchantData: [], sortKeyMerchant: "deliveredGmv", sortDirMerchant: "desc", pageMerchant: 0,
   filteredSegData: [], sortKeySeg: "rrConfirmed", sortDirSeg: "desc", pageSeg: 0,
   inventoryTableData: [], filteredInventoryData: [], sortKeyInventory: "conf3d", sortDirInventory: "desc", pageInventory: 0,
@@ -900,6 +900,11 @@ const navAcmToggle = $("navAcmToggle");
 const acmSubmenu = $("acmSubmenu");
 const navAcmPerf = $("navAcmPerf");
 const navMerchantPerf = $("navMerchantPerf");
+const navAcmTargets = $("navAcmTargets");
+const navMerchantTargets = $("navMerchantTargets");
+const navMerchantsToggle = $("navMerchantsToggle");
+const merchantsSubmenu = $("merchantsSubmenu");
+const navMerchantsCaret = $("navMerchantsCaret");
 const navAcmCaret = $("navAcmCaret");
 const navCommercialToggle = $("navCommercialToggle");
 const commercialSubmenu = $("commercialSubmenu");
@@ -961,6 +966,12 @@ if (navAcmToggle) {
   navAcmToggle.addEventListener("click", () => {
     acmSubmenu.classList.toggle("hidden");
     if(navAcmCaret) navAcmCaret.classList.toggle("rotate");
+  });
+}
+if (navMerchantsToggle) {
+  navMerchantsToggle.addEventListener("click", () => {
+    merchantsSubmenu.classList.toggle("hidden");
+    if(navMerchantsCaret) navMerchantsCaret.classList.toggle("rotate");
   });
 }
 if (navCommercialToggle) {
@@ -1248,6 +1259,8 @@ function switchView(viewName) {
   if(navInventory) navInventory.classList.remove("active");
   if(navAcmPerf) navAcmPerf.classList.remove("active");
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
+  if(navAcmTargets) navAcmTargets.classList.remove("active");
+  if(navMerchantTargets) navMerchantTargets.classList.remove("active");
   if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
   if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
   if(navPurchasePlan) navPurchasePlan.classList.remove("active");
@@ -1279,6 +1292,8 @@ function switchView(viewName) {
   else if (viewName === "recommendedTracker") { activeSection = $("viewRecommendedTracker"); if(navRecommendedTracker) navRecommendedTracker.classList.add("active"); prepareRecommendedTrackerData(); }
   else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); }
   else if (viewName === "acmPerformance") { activeSection = $("viewAcmPerformance"); if(navAcmPerf) navAcmPerf.classList.add("active"); } 
+  else if (viewName === "acmTargets") { activeSection = $("viewAcmTargets"); if(navAcmTargets) navAcmTargets.classList.add("active"); renderAcmTargetsView(); }
+  else if (viewName === "merchantTargets") { activeSection = $("viewMerchantTargets"); if(navMerchantTargets) navMerchantTargets.classList.add("active"); renderMerchantTargetsView(); }
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
   else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
@@ -1338,6 +1353,8 @@ if(navRecommendedTracker) navRecommendedTracker.addEventListener("click", () => 
 if(navInventory) navInventory.addEventListener("click", () => switchView("inventory"));
 if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerformance"));
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
+if(navAcmTargets) navAcmTargets.addEventListener("click", () => switchView("acmTargets"));
+if(navMerchantTargets) navMerchantTargets.addEventListener("click", () => switchView("merchantTargets"));
 if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
 if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
 if(navPurchasePlan) navPurchasePlan.addEventListener("click", () => switchView("purchasePlan"));
@@ -2181,49 +2198,22 @@ function buildMerchantInfoMap(mainRows) {
 }
 
 function parseTargetsSheet(payload) {
+  // v1.15.36: الأعمدة: A=TAGER_ID, B=Tager_name, C=ACM, D=Target GMV (Actual), E=Target Placed (Actual)
+  // (الهيدر لو موجود بيتتخطى). أهداف الـ ACM بتتحسب من نفس الداتا بالـ group by ACM.
   const rawRows = payload?.table?.rows ?? [];
   const targets = {};
   for (const r of rawRows) {
     const c = r.c || [];
     if (!c || c.length === 0) continue;
-    const merchantId = cellText(c[0]);
-    if (merchantId) { targets[merchantId] = { gmv: cellNumber(c[3]), placed: cellNumber(c[4]) }; }
+    const merchantId = cellText(c[0]).trim();
+    if (!merchantId) continue;
+    const idKey = merchantId.toLowerCase().replace(/[\s_]+/g, "");
+    if (idKey === "tagerid" || idKey === "merchantid" || idKey === "id") continue;
+    targets[merchantId] = { gmv: cellNumber(c[3]), placed: cellNumber(c[4]), name: cellText(c[1]).trim(), acm: cellText(c[2]).trim() };
   }
   return targets;
 }
 
-
-function parseAcmTargetsSheet(payload) {
-  const acmTargetsMap = {};
-  let weights = { gmv: 40, ndr: 20, cm3: 30, retention: 10 };
-  try {
-    const rawRows = payload?.table?.rows ?? [];
-    for (let i = 0; i < rawRows.length; i++) {
-      const c = rawRows[i].c || [];
-      if (!c || c.length === 0) continue;
-      const acmName = cellText(c[0]).trim();
-      const lowerAcm = normalizeName(acmName);
-      if (acmName && lowerAcm !== "acm" && lowerAcm !== "total" && lowerAcm !== "kpis" && lowerAcm !== "weight%") {
-        let gmv = cellNumber(c[1]);
-        let ndrNum = cellPercent(c[2]);
-        let cm3Num = cellPercent(c[3]);
-        let retention = cellNumber(c[4]);
-        acmTargetsMap[acmName] = { targetGmv: gmv, targetNdr: ndrNum, targetCm3: cm3Num, targetRetention: retention };
-      }
-      for (let j = 1; j < c.length - 1; j++) {
-        const cellStr = normalizeName(cellText(c[j]));
-        if (!cellStr) continue;
-        let weightVal = cellPercent(c[j + 1]);
-        if (cellStr.includes("delivered gmv") && weightVal > 0) weights.gmv = weightVal;
-        else if (cellStr.includes("portfolio ndr") && weightVal > 0) weights.ndr = weightVal;
-        else if (cellStr.includes("cm3") && weightVal > 0) weights.cm3 = weightVal;
-        else if (cellStr.includes("segment retention") && weightVal > 0) weights.retention = weightVal;
-      }
-    }
-    state.acmWeights = weights;
-  } catch (error) { console.error("Parse Error in ACM Targets:", error); }
-  return acmTargetsMap;
-}
 
 function parseInventorySheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
@@ -5677,7 +5667,7 @@ async function updateDashboard(rows) {
   if ($("viewIncMerchants") && $("viewIncMerchants").classList.contains("active-view")) renderIncentiveMerchantsPanel();
   await yieldToMainThread();
   applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
-  renderTop10Merchants(); renderOverallTargetSummary(); applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
+  renderTop10Merchants(); renderOverallTargetSummary(); try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) {} applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
 
 function computeMetrics(rows) {
@@ -5909,33 +5899,68 @@ function prepareAcmTableData(rows) {
   const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   rows.forEach(r => {
     if (!r.acmName || r.acmName === "Unassigned") return;
-    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, actualRetention: 0, crP: 0, crC: 0, drC: 0, drD: 0 }); }
+    if (!map.has(r.acmName)) { map.set(r.acmName, { name: r.acmName, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, ppm: 0, crP: 0, crC: 0, drC: 0, drD: 0 }); }
     const entry = map.get(r.acmName); entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
     if (r.timestamp <= __crLim) { entry.crP += r.placedOrders; entry.crC += r.confirmedOrders; }
-    if (r.timestamp <= __drLim) { entry.drC += r.confirmedOrders; entry.drD += r.deliveredOrders; } entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv;
+    if (r.timestamp <= __drLim) { entry.drC += r.confirmedOrders; entry.drD += r.deliveredOrders; } entry.deliveredGmv += r.deliveredGmv; entry.confirmedGmv += r.confirmedGmv; entry.ppm += (r.ppm || 0);
     // cm3DeliveredGmv: نفس الـ deliveredGmv بس بكات أوف الـ CM3 بالظبط — ده اللي بيتحسب بيه cm3Pct
     // عشان مايبقاش عندنا CM3 واقفة عند يوم و GMV ماشية لحد آخر يوم موجود في الداتا (بيبوظ النسبة).
     // deliveredGmv العادي فاضل من غير لاج زي ما هو، مستخدم لأهداف الـ GMV والـ Run Rate بتاعت الـ ACM.
     if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.cm3DeliveredGmv += r.deliveredGmv; }
   });
-  state.merchantTableData.forEach(merch => {
-    if (merch.acm && map.has(merch.acm)) {
-      const currentRank = SEGMENT_RANKS[normalizeName(merch.currentSegment)] || 0; const projectedRank = SEGMENT_RANKS[normalizeName(merch.projectedSegment)] || 0;
-      if (projectedRank > currentRank) { map.get(merch.acm).actualRetention += 1; }
-    }
+  // v1.15.38: أرقام الأوردرات (Placed/Confirmed/Delivered/Delivered GMV) بتتقرا من كويري Merchant Segmentation
+  // (Metabase) مجمّعة بالـ ACM — بدل الشيت الرئيسي (Main). CM3 و PPM لسه من Main (مش في الكويري).
+  // لو الكويري فاضية بنفضل على Main.
+  if ((state.merchantSegSourceRows || []).length) {
+    const segByAcm = new Map();
+    (state.merchantTableData || []).forEach(mm => {
+      const nm = mm.acm; if (!nm || nm === "Unassigned") return;
+      if (!segByAcm.has(nm)) segByAcm.set(nm, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 });
+      const e = segByAcm.get(nm); e.placed += mm.placed || 0; e.confirmed += mm.confirmed || 0; e.delivered += mm.delivered || 0; e.deliveredGmv += mm.deliveredGmv || 0;
+    });
+    map.forEach(v => { const sg = segByAcm.get(v.name) || { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 };
+      v.placed = sg.placed; v.confirmed = sg.confirmed; v.delivered = sg.delivered; v.deliveredGmv = sg.deliveredGmv;
+      v.crP = sg.placed; v.crC = sg.confirmed; v.drC = sg.confirmed; v.drD = sg.delivered; });
+    segByAcm.forEach((sg, nm) => { if (!map.has(nm)) map.set(nm, { name: nm, placed: sg.placed, confirmed: sg.confirmed, delivered: sg.delivered, placedGmv: 0, deliveredGmv: sg.deliveredGmv, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, ppm: 0, crP: sg.placed, crC: sg.confirmed, drC: sg.confirmed, drD: sg.delivered }); });
+  }
+  const tgt = tgtTiming();
+  // أهداف الـ ACM = مجموع Merchant Targets بالـ group by ACM (عمود ACM في ملف Targets).
+  const acmTgt = new Map(); // normalized acm -> { name, targetGmv, targetPlaced, merchantCount }
+  (state.merchantTableData || []).forEach(mm => {
+    if (!(mm.targetGmv > 0 || mm.targetPlaced > 0)) return;
+    const nm = (mm.tgtAcm || mm.acm || "Unassigned"); const k = normalizeName(nm);
+    if (!acmTgt.has(k)) acmTgt.set(k, { name: nm, targetGmv: 0, targetPlaced: 0, merchantCount: 0 });
+    const e = acmTgt.get(k); e.targetGmv += mm.targetGmv || 0; e.targetPlaced += mm.targetPlaced || 0; e.merchantCount += 1;
   });
-  const normalizedTargets = {}; for(let key in state.acmTargets) { normalizedTargets[normalizeName(key)] = state.acmTargets[key]; }
-  const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30;
-  if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; } else { elapsedDays = totalDays; } } }
+  const byKey = new Map(); map.forEach(v => byKey.set(normalizeName(v.name), v));
+  acmTgt.forEach((t, k) => { if (!byKey.has(k) && t.name !== "Unassigned") { const blank = { name: t.name, placed: 0, confirmed: 0, delivered: 0, placedGmv: 0, deliveredGmv: 0, confirmedGmv: 0, cm3: 0, cm3DeliveredGmv: 0, ppm: 0, crP: 0, crC: 0, drC: 0, drD: 0 }; map.set(t.name, blank); byKey.set(k, blank); } });
   state.acmTableData = Array.from(map.values()).map(m => {
     const cr = m.crP ? (m.crC / m.crP) : (m.placed ? (m.confirmed / m.placed) : 0); const dr = m.drC ? (m.drD / m.drC) : (m.confirmed ? (m.delivered / m.confirmed) : 0); const ndr = (dr * cr) * 100; const cm3Pct = m.cm3DeliveredGmv ? (m.cm3 / m.cm3DeliveredGmv) * 100 : 0;
-    const targetData = normalizedTargets[normalizeName(m.name)] || { targetGmv: 0, targetNdr: 0, targetCm3: 0, targetRetention: 0 };
-    const targetGmv = targetData.targetGmv; const targetNdr = targetData.targetNdr; const targetCm3 = targetData.targetCm3; const targetRetention = targetData.targetRetention;
-    const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
-    const w = state.acmWeights; const gmvScore = targetGmv > 0 ? Math.min(m.deliveredGmv / targetGmv, 1) * w.gmv : 0; const ndrScore = targetNdr > 0 ? Math.min(ndr / targetNdr, 1) * w.ndr : 0; const cm3Score = targetCm3 > 0 ? Math.min(cm3Pct / targetCm3, 1) * w.cm3 : 0; const retentionScore = targetRetention > 0 ? Math.min(m.actualRetention / targetRetention, 1) * w.retention : 0;
-    const finalScorePct = gmvScore + ndrScore + cm3Score + retentionScore;
-    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, targetGmv, targetNdr, targetCm3, targetRetention, achievedPct, runRate, finalScorePct };
+    const ppmPct = m.deliveredGmv ? (m.ppm / m.deliveredGmv) * 100 : 0;
+    const t = acmTgt.get(normalizeName(m.name)) || { targetGmv: 0, targetPlaced: 0, merchantCount: 0 };
+    return { ...m, cr: cr * 100, dr: dr * 100, ndr: ndr, cm3Pct: cm3Pct, ppmPct, merchantCount: t.merchantCount, ...tgtMetrics(t.targetGmv, t.targetPlaced, m.deliveredGmv, m.placed, tgt) };
   });
+}
+
+// =========================================================================
+// Targets timing / metrics — مشترك بين Merchant Targets و Target ACM.
+// MTD Target = Target ÷ أيام الشهر × الأيام لحد امبارح (الشهر الحالي) أو الشهر كامل (شهر فات)،
+// Run Rate = Actual ÷ الأيام اللي عدت × أيام الشهر (نفس منطق الداشبورد كله).
+// =========================================================================
+function tgtTiming() {
+  const selectedMonthStr = $("monthSelect") ? $("monthSelect").value : ""; let elapsedDays = 1; let totalDays = 30; let isCurrent = false;
+  if (selectedMonthStr) { const d = new Date(selectedMonthStr); if (!isNaN(d)) { const now = new Date(); totalDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { elapsedDays = now.getDate() || 1; isCurrent = true; } else { elapsedDays = totalDays; } } }
+  const mtdDays = isCurrent ? Math.max(1, elapsedDays - 1) : totalDays;
+  return { elapsedDays, totalDays, mtdDays };
+}
+function tgtMetrics(targetGmv, targetPlaced, deliveredGmv, placed, t) {
+  const mtdTargetGmv = (targetGmv / t.totalDays) * t.mtdDays; const mtdTargetPlaced = (targetPlaced / t.totalDays) * t.mtdDays;
+  const runRate = (deliveredGmv / t.elapsedDays) * t.totalDays; const placedRunRate = (placed / t.elapsedDays) * t.totalDays;
+  return {
+    targetGmv, targetPlaced, mtdTargetGmv, mtdTargetPlaced, runRate, placedRunRate,
+    achievedPct: targetGmv > 0 ? (deliveredGmv / targetGmv) * 100 : 0, gmvMtdPct: mtdTargetGmv > 0 ? (deliveredGmv / mtdTargetGmv) * 100 : 0,
+    placedAchievedPct: targetPlaced > 0 ? (placed / targetPlaced) * 100 : 0, placedMtdPct: mtdTargetPlaced > 0 ? (placed / mtdTargetPlaced) * 100 : 0
+  };
 }
 
 function renderOverallAcmTargetsSummary() {
@@ -5962,26 +5987,21 @@ function renderPaginatedAcmTable() {
   const tbody = $("acmTableBody"); if(!tbody) return; tbody.innerHTML = "";
   const start = state.page * PAGE_SIZE; const pageRows = state.filteredAcmData.slice(start, start + PAGE_SIZE);
   pageRows.forEach((m, idx) => {
-    let gmvColor = m.targetGmv === 0 ? "dim" : (m.achievedPct >= 100 ? "green" : (m.achievedPct < 50 ? "red" : "orange"));
-    let finalColor = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="text-dim">#${start + idx + 1}</td>
       <td class="font-bold text-light">${m.name}</td>
-      <td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${finalColor})">${fmtPctCell(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${finalColor}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>
-      <td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td>
-      <td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
-      <td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${gmvColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${gmvColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td>
-      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.runRate)}</td>
-      <td class="num text-dim">${m.targetNdr > 0 ? m.targetNdr + '%' : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.ndr >= m.targetNdr && m.targetNdr > 0 ? 'green' : 'red'}">${fmtPctCell(m.ndr)}</span></td>
-      <td class="num text-dim">${m.targetCm3 > 0 ? m.targetCm3 + '%' : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.cm3Pct >= m.targetCm3 && m.targetCm3 > 0 ? 'green' : 'red'}">${fmtPctCell(m.cm3Pct)}</span></td>
-      <td class="num text-dim font-bold">${m.targetRetention > 0 ? fmtIntCell(m.targetRetention) : '-'}</td>
-      <td class="num"><span class="badge-outline ${m.actualRetention >= m.targetRetention && m.targetRetention > 0 ? 'green' : 'red'}">${fmtIntCell(m.actualRetention)}</span></td>
       <td class="num text-dim">${fmtIntCell(m.placed)}</td>
       <td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td>
       <td class="num text-dim">${fmtIntCell(m.delivered)}</td>
+      <td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td>
+      <td class="num">${fmtPctCell(m.cr)}</td>
+      <td class="num text-dim">${fmtPctCell(m.dr)}</td>
+      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>
+      <td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td>
+      <td class="num font-bold text-light">${fmtMoneyCompactCell(m.ppm)}</td>
+      <td class="num font-bold text-purple">${fmtPctCell(m.ppmPct)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -5991,6 +6011,55 @@ function renderPaginatedAcmTable() {
   if($("prevPage")) $("prevPage").disabled = state.page === 0;
   if($("nextPage")) $("nextPage").disabled = state.page >= totalPages - 1;
   document.querySelectorAll("#acmTable th").forEach((th) => { if(th.dataset.key) th.classList.toggle("sorted", th.dataset.key === state.sortKey); });
+}
+
+// ---- Targets tables (Target ACM + Merchant Targets) — نفس الأعمدة، الاتنين بيتفرزوا ويتصفّحوا لوحدهم
+const tgtViews = {
+  acm:      { body: "acmTgtBody", table: "acmTgtTable", search: "searchAcmTgtInput", count: "rowCountAcmTgt", pager: "pageIndicatorAcmTgt", prev: "prevPageAcmTgt", next: "nextPageAcmTgt", unit: "ACMs", sortKey: "targetGmv", sortDir: "desc", page: 0, rows: [], source: () => (state.acmTableData || []).filter(m => m.targetGmv > 0 || m.targetPlaced > 0), match: (m, t) => m.name.toLowerCase().includes(t) },
+  merchant: { body: "merchantTgtBody", table: "merchantTgtTable", search: "searchMerchantTgtInput", count: "rowCountMerchantTgt", pager: "pageIndicatorMerchantTgt", prev: "prevPageMerchantTgt", next: "nextPageMerchantTgt", unit: "Merchants", sortKey: "targetGmv", sortDir: "desc", page: 0, rows: [], source: () => (state.merchantTableData || []).filter(m => m.targetGmv > 0 || m.targetPlaced > 0), match: (m, t) => String(m.name).toLowerCase().includes(t) || String(m.tgtAcm || m.acm).toLowerCase().includes(t) || String(m.id).includes(t) }
+};
+function tgtPctCell(v, hasTarget) {
+  if (!hasTarget) return `<td class="num text-dim">-</td>`;
+  const color = v >= 100 ? "green" : (v < 50 ? "red" : (v < 80 ? "orange" : "blue"));
+  return `<td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${color})">${v.toFixed(1)}%</div><div class="progress-bar"><div class="progress-fill ${color}" style="width: ${Math.min(v, 100)}%"></div></div></td>`;
+}
+function renderTgtView(kind) {
+  const V = tgtViews[kind]; const tbody = $(V.body); if (!tbody) return;
+  const term = $(V.search) ? $(V.search).value.trim().toLowerCase() : "";
+  V.rows = V.source().filter(m => !term || V.match(m, term));
+  const dir = V.sortDir === "asc" ? 1 : -1; const key = V.sortKey;
+  V.rows.sort((a, b) => { const av = key === "acm" ? (a.tgtAcm || a.acm) : a[key]; const bv = key === "acm" ? (b.tgtAcm || b.acm) : b[key]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
+  const totalPages = Math.max(1, Math.ceil(V.rows.length / PAGE_SIZE)); if (V.page > totalPages - 1) V.page = totalPages - 1;
+  const start = V.page * PAGE_SIZE; tbody.innerHTML = "";
+  V.rows.slice(start, start + PAGE_SIZE).forEach((m, idx) => {
+    const tr = document.createElement("tr");
+    const lead = kind === "acm"
+      ? `<td class="text-dim">#${start + idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-dim">${fmtIntCell(m.merchantCount || 0)}</td>`
+      : `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.tgtAcm || m.acm}</td>`;
+    const hasP = m.targetPlaced > 0, hasG = m.targetGmv > 0;
+    tr.innerHTML = lead +
+      `<td class="num text-dim font-bold">${hasP ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim">${hasP ? fmtIntCell(Math.round(m.mtdTargetPlaced)) : '-'}</td><td class="num text-blue font-bold">${fmtIntCell(m.placed)}</td><td class="num font-bold text-light">${fmtIntCell(Math.round(m.placedRunRate))}</td>` +
+      tgtPctCell(m.placedAchievedPct, hasP) + tgtPctCell(m.placedMtdPct, hasP) +
+      `<td class="num text-dim font-bold">${hasG ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-dim">${hasG ? fmtMoneyCompactCell(m.mtdTargetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td>` +
+      tgtPctCell(m.achievedPct, hasG) + tgtPctCell(m.gmvMtdPct, hasG);
+    tbody.appendChild(tr);
+  });
+  if ($(V.count)) $(V.count).textContent = `${fmtInt.format(V.rows.length)} ${V.unit}`;
+  if ($(V.pager)) $(V.pager).textContent = `Page ${V.page + 1} of ${totalPages}`;
+  if ($(V.prev)) $(V.prev).disabled = V.page === 0;
+  if ($(V.next)) $(V.next).disabled = V.page >= totalPages - 1;
+  document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey) th.classList.toggle("sorted", th.dataset.tkey === V.sortKey); });
+}
+function renderAcmTargetsView() { renderTgtView("acm"); }
+function renderMerchantTargetsView() { renderTgtView("merchant"); }
+function wireTgtViews() {
+  Object.keys(tgtViews).forEach(kind => {
+    const V = tgtViews[kind];
+    if ($(V.search)) $(V.search).addEventListener("input", () => { V.page = 0; renderTgtView(kind); });
+    if ($(V.prev)) $(V.prev).addEventListener("click", () => { if (V.page > 0) { V.page -= 1; renderTgtView(kind); } });
+    if ($(V.next)) $(V.next).addEventListener("click", () => { V.page += 1; renderTgtView(kind); });
+    document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey && th.dataset.tkey !== "index") th.addEventListener("click", () => { const k = th.dataset.tkey; if (V.sortKey === k) V.sortDir = V.sortDir === "asc" ? "desc" : "asc"; else { V.sortKey = k; V.sortDir = "desc"; } V.page = 0; renderTgtView(kind); }); });
+  });
 }
 
 function renderTrendTables(allRows, selectedAcm) {
@@ -6101,8 +6170,8 @@ function prepareMerchantTableData(rows) {
   const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
   rows.forEach(r => {
     if (!r.merchantId || r.merchantId === "Unassigned") return;
-    if (!cm3Map.has(r.merchantId)) { cm3Map.set(r.merchantId, { name: r.merchantName, acm: r.acmName, cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, skus: new Set() }); }
-    const entry = cm3Map.get(r.merchantId); entry.confirmedGmv += r.confirmedGmv;
+    if (!cm3Map.has(r.merchantId)) { cm3Map.set(r.merchantId, { name: r.merchantName, acm: r.acmName, cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, ppm: 0, skus: new Set() }); }
+    const entry = cm3Map.get(r.merchantId); entry.confirmedGmv += r.confirmedGmv; entry.ppm += (r.ppm || 0);
     // cm3DeliveredGmv بكات أوف الـ CM3 بالظبط — نفس المنطق: مايبقاش الـ CM3 لحد يوم والـ GMV لحد يوم تاني
     if (isCm3RowEligible(r, cm3Cutoff)) { entry.cm3 += r.cm3; entry.cm3DeliveredGmv += r.deliveredGmv; }
     if(r.sku && r.placedOrders > 0) entry.skus.add(r.sku);
@@ -6131,8 +6200,9 @@ function prepareMerchantTableData(rows) {
   Object.keys(state.merchantTargets || {}).forEach(id => {
     if (segAggMap.has(id)) return;
     const fallback = cm3Map.get(id) || {};
+    const tf = state.merchantTargets[id] || {};
     segAggMap.set(id, {
-      id, name: fallback.name || id, acm: fallback.acm || "Unassigned", country: "",
+      id, name: fallback.name || tf.name || id, acm: fallback.acm || tf.acm || "Unassigned", country: "",
       placed: 0, confirmed: 0, delivered: 0,
       placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0,
       deliveredGmv: 0, _latestMonthTs: -Infinity,
@@ -6144,10 +6214,11 @@ function prepareMerchantTableData(rows) {
   state.merchantTableData = Array.from(segAggMap.values()).map(m => {
     const cr = m.placed ? (m.confirmed / m.placed) : 0; const dr = m.confirmed ? (m.delivered / m.confirmed) : 0; const ndr = dr * cr;
     const crPieces = m.placedPieces ? (m.confirmedPieces / m.placedPieces) : 0; const drPieces = m.confirmedPieces ? (m.deliveredPieces / m.confirmedPieces) : 0; const ndrPieces = drPieces * crPieces;
-    const cm3Entry = cm3Map.get(m.id) || { cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, skus: new Set() };
+    const cm3Entry = cm3Map.get(m.id) || { cm3: 0, cm3DeliveredGmv: 0, confirmedGmv: 0, ppm: 0, skus: new Set() };
     const cm3Pct = cm3Entry.cm3DeliveredGmv ? (cm3Entry.cm3 / cm3Entry.cm3DeliveredGmv) : 0;
     const targetData = state.merchantTargets[m.id] || { gmv: 0, placed: 0 }; const targetGmv = targetData.gmv; const targetPlaced = targetData.placed;
-    const achievedPct = targetGmv > 0 ? (m.deliveredGmv / targetGmv) * 100 : 0; const runRate = (m.deliveredGmv / elapsedDays) * totalDays;
+    const tm = tgtMetrics(targetGmv, targetPlaced, m.deliveredGmv, m.placed, tgtTiming()); const achievedPct = tm.achievedPct; const runRate = tm.runRate;
+    const ppmPct = m.deliveredGmv ? (cm3Entry.ppm / m.deliveredGmv) * 100 : 0;
     const currentSegment = state.merchantSegmentsMap[m.id] || "In active";
     // segConfirmed = نفس Confirmed Orders بتاعت الشيت الجديد أصلاً (m.confirmed) —
     // ده اللي بيتعرض في عمود "Confirmed Orders" وبيتحسب منه "RR Confirmed
@@ -6160,7 +6231,7 @@ function prepareMerchantTableData(rows) {
       crPieces: crPieces * 100, drPieces: drPieces * 100, ndrPieces: ndrPieces * 100,
       cm3: cm3Entry.cm3, cm3DeliveredGmv: cm3Entry.cm3DeliveredGmv, cm3Pct: cm3Pct * 100,
       confirmedGmv: cm3Entry.confirmedGmv, skuCount: cm3Entry.skus.size,
-      targetGmv, targetPlaced, achievedPct, runRate,
+      ...tm, ppm: cm3Entry.ppm, ppmPct, tgtAcm: (targetData.acm || "") || m.acm,
       currentSegment, segConfirmed, rrConfirmed, projectedSegment
     };
   });
@@ -6453,9 +6524,8 @@ function renderPaginatedMerchantTable() {
   const tbody = $("merchantTableBody"); if(!tbody) return; tbody.innerHTML = "";
   const start = state.pageMerchant * PAGE_SIZE; const pageRows = state.filteredMerchantData.slice(start, start + PAGE_SIZE);
   pageRows.forEach((m, idx) => {
-    let progressColor = "blue"; if(m.targetGmv === 0) progressColor = "dim"; else if(m.achievedPct >= 100) progressColor = "green"; else if(m.achievedPct < 50) progressColor = "red"; else if(m.achievedPct >= 50 && m.achievedPct < 80) progressColor = "orange";
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim font-bold">${m.targetGmv > 0 ? fmtMoneyCompactCell(m.targetGmv) : '-'}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.runRate)}</td><td class="num"><div style="font-weight:600; font-size: 11px; color:var(--${progressColor})">${m.targetGmv > 0 ? m.achievedPct.toFixed(1) + '%' : 'N/A'}</div><div class="progress-bar"><div class="progress-fill ${progressColor}" style="width: ${Math.min(m.achievedPct, 100)}%"></div></div></td><td class="num text-dim font-bold">${m.targetPlaced > 0 ? fmtIntCell(m.targetPlaced) : '-'}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td><td class="num">${fmtPctCell(m.cr)}</td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>`;
+    tr.innerHTML = `<td class="text-dim">#${start + idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-dim">${fmtIntCell(m.placed)}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmed)}</td><td class="num text-dim">${fmtIntCell(m.delivered)}</td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num">${fmtPctCell(m.cr)}</td><td class="num text-dim">${fmtPctCell(m.dr)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.cm3)}</td><td class="num font-bold text-purple">${fmtPctCell(m.cm3Pct)}</td><td class="num font-bold text-light">${fmtMoneyCompactCell(m.ppm)}</td><td class="num font-bold text-purple">${fmtPctCell(m.ppmPct)}</td>`;
     tbody.appendChild(tr);
   });
   const totalPages = Math.max(1, Math.ceil(state.filteredMerchantData.length / PAGE_SIZE));
@@ -17758,7 +17828,6 @@ async function fetchAllSheetsSnapshot() {
     allParsedRows,
     merchantTargets: targetsPayload ? parseTargetsSheet(targetsPayload) : state.merchantTargets,
     merchantSegmentsMap: state.merchantSegmentsMap,
-    acmTargets: acmTargetsPayload ? parseAcmTargetsSheet(acmTargetsPayload) : state.acmTargets,
     inventoryMap: invPayload ? parseInventorySheet(invPayload) : state.inventoryMap,
     productsMap: prodPayload ? parseProductsSheet(prodPayload) : state.productsMap,
     categoryTargets: catTargetsPayload ? deriveCategoryTargetsFromCommercial(commercialTargetsResult) : state.categoryTargets,
@@ -17929,7 +17998,6 @@ function applySnapshotToState(snapshot) {
   state.merchantInfoMap = buildMerchantInfoMap(state.allParsedRows); // <-- ACM/Merchant Name من شيت الـ Main
   state.merchantTargets = snapshot.merchantTargets;
   state.merchantSegmentsMap = snapshot.merchantSegmentsMap;
-  state.acmTargets = snapshot.acmTargets;
   state.inventoryMap = snapshot.inventoryMap;
   state.productsMap = snapshot.productsMap;
   state.categoryTargets = snapshot.categoryTargets;
@@ -18122,6 +18190,7 @@ if($("prevPage")) $("prevPage").addEventListener("click", () => { if (state.page
 if($("nextPage")) $("nextPage").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.filteredAcmData.length / PAGE_SIZE)); if (state.page < totalPages - 1) { state.page += 1; renderPaginatedAcmTable(); } });
 document.querySelectorAll("#acmTable thead th").forEach((th) => { if (th.dataset.key) { th.addEventListener("click", () => { const key = th.dataset.key; if (state.sortKey === key) { state.sortDir = state.sortDir === "asc" ? "desc" : "asc"; } else { state.sortKey = key; state.sortDir = "desc"; } applyTableSearchAndSort(); }); }});
 
+wireTgtViews();
 if($("searchMerchantInput")) $("searchMerchantInput").addEventListener("input", applyMerchantSearchAndSort);
 if($("prevPageMerchant")) $("prevPageMerchant").addEventListener("click", () => { if (state.pageMerchant > 0) { state.pageMerchant -= 1; renderPaginatedMerchantTable(); } });
 if($("nextPageMerchant")) $("nextPageMerchant").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.filteredMerchantData.length / PAGE_SIZE)); if (state.pageMerchant < totalPages - 1) { state.pageMerchant += 1; renderPaginatedMerchantTable(); } });
@@ -18147,7 +18216,6 @@ async function reloadTargetsForMonth() {
   const p = Object.assign({}, window.__targetBase, found);
   restoreFullDatasets();
   if (p[TARGETS_GID]) state.merchantTargets = parseTargetsSheet(p[TARGETS_GID]);
-  if (p[TARGETS_ACM_GID]) state.acmTargets = parseAcmTargetsSheet(p[TARGETS_ACM_GID]);
   if (p[CAT_TARGETS_GID]) { state.commercialTargets = parseCommercialTargetsSheet(p[CAT_TARGETS_GID]); state.categoryTargets = deriveCategoryTargetsFromCommercial(state.commercialTargets); }
   if (p[ACM_SALES_PLAN_GID]) state.acmSalesPlanData = parseAcmSalesPlanSheet(p[ACM_SALES_PLAN_GID]);
   if (p[SINGLE_SKU_TARGETS_GID]) state.singleSkuTargets = parseSingleSkuTargetsSheet(p[SINGLE_SKU_TARGETS_GID]);
@@ -18331,6 +18399,7 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
+    try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) { }
     if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
     if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
     if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
@@ -18388,6 +18457,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
         if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
+        try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) { }
         if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
         if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
         if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
