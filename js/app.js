@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.44";
+const APP_VERSION = "1.15.45";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -6060,6 +6060,7 @@ function tgtPctCell(v, hasTarget) {
 }
 function renderTgtView(kind) {
   const V = tgtViews[kind]; const tbody = $(V.body); if (!tbody) return;
+  if (kind === "acm" && !$("acmTgtTable").dataset.headDone) { $("acmTgtTable").dataset.headDone = "1"; renderAcmTgtHead(); }
   const term = $(V.search) ? $(V.search).value.trim().toLowerCase() : "";
   V.rows = V.source().filter(m => !term || V.match(m, term));
   const dir = V.sortDir === "asc" ? 1 : -1; const key = V.sortKey;
@@ -6095,6 +6096,37 @@ function renderTgtView(kind) {
   document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey) th.classList.toggle("sorted", th.dataset.tkey === V.sortKey); });
 }
 const ACM_GRP_BORDER = "border-left:2px solid var(--border-strong, rgba(120,140,170,.45));";
+function renderAcmTgtHead() {
+  const tbl = $("acmTgtTable"); if (!tbl) return;
+  const head = tbl.tHead || tbl.createTHead(); const K = state.acmKpis; const B = ACM_GRP_BORDER;
+  const grp = [
+    { t: "Delivered GMV", c: "blue",   w: K.gmv.weight,       tgt: "Sum of this ACM's merchants' GMV targets", act: "Delivered GMV (Segmentation query)", keys: ["targetGmv", "deliveredGmv", "achievedPct", "gmvScore"] },
+    { t: "Portfolio NDR %", c: "green",  w: K.ndr.weight,       tgt: "KPI target for NDR %", act: "Actual NDR % = CR % \u00d7 DR %", keys: ["ndrTarget", "ndr", "ndrAch", "ndrScore"] },
+    { t: "CM3 %", c: "orange", w: K.cm3.weight,       tgt: "KPI target for CM3 %", act: "CM3 \u00f7 Delivered GMV", keys: ["cm3Target", "cm3Pct", "cm3Ach", "cm3Score"] },
+    { t: "Segment Retention", c: "purple", w: K.retention.weight, tgt: "KPI target for Segment Retention", act: "Merchants whose projected segment is higher than the current one", keys: ["retTarget", "actualRetentionPct", "retAch", "retScore"] }
+  ];
+  let r1 = `<tr><th rowspan="2" data-tkey="index">#</th><th rowspan="2" data-tkey="name" title="Account manager. Click a row to show their merchants.">Account Manager</th><th rowspan="2" data-tkey="merchantCount" class="num" title="Merchants with a target under this account manager.">Merchants</th>`;
+  let r2 = "<tr>";
+  grp.forEach(g => {
+    r1 += `<th colspan="4" class="num" style="${B}text-align:center;color:var(--${g.c});">${g.t} <span class="text-dim" style="font-weight:600">&middot; weight ${g.w}%</span></th>`;
+    r2 += `<th data-tkey="${g.keys[0]}" class="num" style="${B}" title="${g.tgt}">Target</th>`
+       +  `<th data-tkey="${g.keys[1]}" class="num" title="${g.act}">Actual</th>`
+       +  `<th data-tkey="${g.keys[2]}" class="num" title="Actual \u00f7 Target">Ach %</th>`
+       +  `<th data-tkey="${g.keys[3]}" class="num" title="Points earned out of this KPI's weight (${g.w}).">Score</th>`;
+  });
+  r1 += `<th rowspan="2" data-tkey="finalScorePct" class="num" style="${B}min-width:120px;color:var(--blue);" title="Final Weight % = \u03a3 min(Ach %, 100%) \u00d7 weight.">Final Weight %</th></tr>`;
+  r2 += "</tr>";
+  head.innerHTML = r1 + r2;
+  wireTgtHead("acm");
+}
+function wireTgtHead(kind) {
+  const V = tgtViews[kind];
+  document.querySelectorAll("#" + V.table + " thead th").forEach(th => {
+    if (!th.dataset.tkey || th.dataset.tkey === "index" || th.dataset.wired) return;
+    th.dataset.wired = "1"; th.style.cursor = "pointer";
+    th.addEventListener("click", () => { const k = th.dataset.tkey; if (V.sortKey === k) V.sortDir = V.sortDir === "asc" ? "desc" : "asc"; else { V.sortKey = k; V.sortDir = "desc"; } V.page = 0; renderTgtView(kind); });
+  });
+}
 function acmKpiCells(m) {
   const K = state.acmKpis; const B = ACM_GRP_BORDER;
   const ach = (v, has) => has ? tgtPctCell(v, true) : `<td class="num text-dim">-</td>`;
@@ -6138,7 +6170,7 @@ function renderAcmKpiTable() {
   const rows = [["Delivered GMV", K.gmv, "of the GMV target"], ["Portfolio NDR (Orders)%", K.ndr, ""], ["CM3 Per Merchant", K.cm3, "CM3 %"], ["Segment Retention", K.retention, "merchants moving up a segment"]];
   host.innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1].target}%</td><td class="num">${r[1].weight}%</td></tr>`).join("") + `<tr><td></td><td></td><td class="num font-bold">${rows.reduce((a, r) => a + r[1].weight, 0)}%</td></tr>`;
 }
-function renderAcmTargetsView() { renderAcmKpiTable(); renderTgtView("acm"); }
+function renderAcmTargetsView() { renderAcmTgtHead(); renderAcmKpiTable(); renderTgtView("acm"); }
 function renderMerchantTargetsView() { renderTgtView("merchant"); }
 function wireTgtViews() {
   Object.keys(tgtViews).forEach(kind => {
@@ -6146,7 +6178,7 @@ function wireTgtViews() {
     if ($(V.search)) $(V.search).addEventListener("input", () => { V.page = 0; renderTgtView(kind); });
     if ($(V.prev)) $(V.prev).addEventListener("click", () => { if (V.page > 0) { V.page -= 1; renderTgtView(kind); } });
     if ($(V.next)) $(V.next).addEventListener("click", () => { V.page += 1; renderTgtView(kind); });
-    document.querySelectorAll("#" + V.table + " thead th").forEach(th => { if (th.dataset.tkey && th.dataset.tkey !== "index") th.addEventListener("click", () => { const k = th.dataset.tkey; if (V.sortKey === k) V.sortDir = V.sortDir === "asc" ? "desc" : "asc"; else { V.sortKey = k; V.sortDir = "desc"; } V.page = 0; renderTgtView(kind); }); });
+    wireTgtHead(kind);
   });
 }
 
