@@ -5,11 +5,13 @@
   "use strict";
   function workerUrl() { return (typeof SYNC_CDN_URL !== "undefined" && SYNC_CDN_URL) || ""; }
   var MANAGER_EMAIL = "youssef.hanafy@taager.com";
+  // v1.16.0: لينك بورتال الميرشنتس (merchant-portal/) — حطه هنا بعد ما تعمله Deploy
+  var MERCHANT_PORTAL_URL = "";
   var KEY_LS = "towerAdminKey", ACCESS_LS = "towerAccessCache", PREVIEW_SS = "towerPreviewRole", PREVIEW_MID = "towerPreviewMerchantId", SESSION_LS = "taagerDashboardSession";
 
   // view name (switchView) -> nav element id
   var VIEW_NAV = {
-    overview: "navOverview", recommendedTracker: "navRecommendedTracker", inventory: "navInventory",
+    overview: "navOverview", inventory: "navInventory",
     acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
     targetsCommercial: "navTargetsCommercial", commercialDebundlized: "navCommercialDebundlized", purchasePlan: "navPurchasePlan",
     cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle",
@@ -27,7 +29,7 @@
     { type: "acm", gid: " _Targets_ACM_ ", title: "KPI's Account Manager", desc: "KPI targets & weights used for the ACM Final Weight % (edit below)", editor: true },
     { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · Daily Target · CR % · DR % · ASP · CM3 · PPM …" },
     { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target · New Target · Flag" },
-    { type: "singlesku", gid: "1620722565", title: "Single SKU Targets", desc: "PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
+    { type: "singlesku", gid: "1620722565", title: "SKU Targets (Bundle & Single)", desc: "Overall SKU tracker — bundle and single SKUs: PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
   ];
 
   function $(id) { return document.getElementById(id); }
@@ -51,7 +53,6 @@
     });
     return out;
   }
-  function allLeafIds(model) { var ids = []; model.forEach(function (g) { if (g.subs.length) g.subs.forEach(function (s) { ids.push(s.id); }); else ids.push(g.id); }); return ids; }
 
   // ---------------------------------------------------------------- access config
   var FULL_ROLES = ["Admin", "Country Manager"]; // always full access, cannot be edited or deleted
@@ -82,6 +83,9 @@
     c.users = c.users && typeof c.users === "object" ? c.users : {};
     if (c.trustLoginRole === undefined) c.trustLoginRole = true;
     c.requireApproval = !!c.requireApproval;
+    // v1.15.49: إيميلات اللي بيوصلهم إشعار (Inbox + إيميل) لما حد يطلب دخول
+    c.rejected = (Array.isArray(c.rejected) ? c.rejected : []).map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
+    c.approvers = (Array.isArray(c.approvers) ? c.approvers : []).map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(function (x, i, a) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x) && a.indexOf(x) === i; });
     // v1.15.0: role "Viewer" was renamed "Merchant" — migrate saved configs
     if (c.roles.Viewer) { if (!c.roles.Merchant) c.roles.Merchant = c.roles.Viewer; delete c.roles.Viewer; }
     if (!c.roles.Merchant) c.roles.Merchant = d.roles.Merchant;
@@ -104,11 +108,14 @@
     if (u && u.status === "inactive" && (s.email || "").toLowerCase() !== MANAGER_EMAIL) return c.defaultRole || "Merchant";
     if (u && u.role && c.roles[u.role]) return u.role;
     var sr = s.role === "Viewer" ? "Merchant" : s.role;
-    if (c.trustLoginRole && sr && c.roles[sr]) return sr;
+    // v1.15.49: رول الـ sign-up مايدّيش صلاحيات أدمن أبدًا (أي حد كان بيختار Admin في التسجيل كان بياخد كل حاجة)
+    if (c.trustLoginRole && sr && c.roles[sr] && !c.roles[sr].admin && c.roles[sr].views !== "*" && FULL_ROLES.indexOf(sr) < 0) return sr;
     return c.defaultRole || "Merchant";
   }
+  var STAFF_DOMAIN_RE = /@taager\.com$/i; // v1.16.0: Admin / Country Manager = @taager.com only
   function isRealAdmin() {
     var s = session(); if (!s) return false;
+    if (!STAFF_DOMAIN_RE.test(s.email || "")) return false;
     if ((s.email || "").toLowerCase() === MANAGER_EMAIL) return true;
     var r = getCfg().roles[realRoleName()]; return !!(r && (r.admin || r.views === "*"));
   }
@@ -153,18 +160,45 @@
   }
 
   // ---------------------------------------------------------------- approval gate
-  var gateTimer = null, gateAsked = "";
+  var gateTimer = null, gateAsked = "", accessKnown = false, accessFailed = false;
   function needsApproval() {
-    var s = session(); if (!s || !getCfg().requireApproval) return false;
+    var s = session(); if (!s) return false;
+    if ((s.email || "").toLowerCase() === MANAGER_EMAIL) return false;
+    // v1.15.49: قبل كده لو الكونفيج لسه ما اتحملش (أول زيارة / الووركر وقع) requireApproval كان false فالكل بيدخل
+    if (!accessKnown) return "checking";
+    if (realRoleName() === "Merchant" && !isRealAdmin()) return "merchant";
+    if ((getCfg().rejected || []).indexOf((s.email || "").toLowerCase()) >= 0 && !userEntry(s.email)) return "rejected";
+    if (!getCfg().requireApproval) return false;
     var em = (s.email || "").toLowerCase();
     return em !== MANAGER_EMAIL && !userEntry(em);
   }
   function checkGate() {
-    var el = $("twPendingGate");
-    if (!needsApproval()) { if (el) el.remove(); if (gateTimer) { clearInterval(gateTimer); gateTimer = null; } return; }
+    var el = $("twPendingGate"), need = needsApproval();
+    if (!need) { if (el) el.remove(); if (gateTimer) { clearInterval(gateTimer); gateTimer = null; } return; }
+    if (need === "checking") {
+      if (!el) { el = document.createElement("div"); el.id = "twPendingGate"; el.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:var(--bg,#0b1220);padding:24px"; document.body.appendChild(el); }
+      el.dataset.mode = "checking";
+      el.innerHTML = '<div style="max-width:420px;text-align:center;color:var(--text,#e5e7eb)"><div class="spinner" style="margin:0 auto 14px"></div><div style="opacity:.8">' + (accessFailed ? 'Could not check your access. <button class="btn small" id="twGateRetry">Try again</button>' : 'Checking your access…') + '</div></div>';
+      var rt = $("twGateRetry"); if (rt) rt.onclick = function () { accessFailed = false; checkGate(); loadAccess().then(applyNav); };
+      return;
+    }
     var s = session(), em = (s.email || "").toLowerCase();
+    if (el && el.dataset.mode !== (need === "rejected" || need === "merchant" ? need : "waiting")) { el.remove(); el = null; }
+    if (need === "merchant") {
+      if (!el) { el = document.createElement("div"); el.id = "twPendingGate"; el.dataset.mode = "merchant"; el.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:var(--bg,#0b1220);padding:24px";
+        el.innerHTML = '<div style="max-width:460px;text-align:center;background:var(--panel,#111a2e);color:var(--text,#e5e7eb);border:1px solid var(--line-light,#243049);border-radius:16px;padding:36px 30px"><div style="font-size:42px">🏪</div><h2 style="margin:10px 0 8px">This dashboard is for Taager staff</h2><p style="line-height:1.6;opacity:.8;margin:0 0 20px">Merchants see their numbers on the Taager merchant portal.</p>' + (MERCHANT_PORTAL_URL ? '<a class="btn btn-primary" href="' + esc(MERCHANT_PORTAL_URL) + '" style="margin-right:8px">Open the merchant portal</a>' : "") + '<button class="btn" id="twGateOut">Sign out</button></div>';
+        document.body.appendChild(el); $("twGateOut").onclick = function () { try { localStorage.removeItem(SESSION_LS); } catch (e) {} location.reload(); }; }
+      return;
+    }
+    if (need === "rejected") {
+      if (!el) { el = document.createElement("div"); el.id = "twPendingGate"; el.dataset.mode = "rejected"; el.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:var(--bg,#0b1220);padding:24px";
+        el.innerHTML = '<div style="max-width:440px;text-align:center;background:var(--panel,#111a2e);color:var(--text,#e5e7eb);border:1px solid var(--line-light,#243049);border-radius:16px;padding:36px 30px"><div style="font-size:42px">⛔</div><h2 style="margin:10px 0 8px">Access not approved</h2><p style="line-height:1.6;opacity:.8;margin:0 0 20px">Your request to access the dashboard was declined. Contact the dashboard admin if you think this is a mistake.</p><button class="btn" id="twGateOut">Sign out</button></div>';
+        document.body.appendChild(el); $("twGateOut").onclick = function () { try { localStorage.removeItem(SESSION_LS); } catch (e) {} location.reload(); }; }
+      if (!gateTimer) gateTimer = setInterval(function () { loadAccess().then(applyNav); }, 30000);
+      return;
+    }
     if (!el) {
-      el = document.createElement("div"); el.id = "twPendingGate";
+      el = document.createElement("div"); el.id = "twPendingGate"; el.dataset.mode = "waiting";
       el.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:var(--bg,#0b1220);padding:24px";
       el.innerHTML = '<div style="max-width:440px;text-align:center;background:var(--panel,#111a2e);color:var(--text,#e5e7eb);border:1px solid var(--line-light,#243049);border-radius:16px;padding:36px 30px"><div style="font-size:42px">⏳</div><h2 style="margin:10px 0 8px">Waiting for admin approval</h2><p style="line-height:1.6;opacity:.8;margin:0 0 20px">Your request to access the dashboard was sent to the admin. This page opens automatically once you are approved.</p><button class="btn" id="twGateOut">Sign out</button></div>';
       document.body.appendChild(el);
@@ -215,13 +249,8 @@
     var rr = document.querySelector("#authUserBadge .auth-profile-role");
     if (rr) rr.textContent = effRoleName() + " · Egypt";
     renderViewAs();
-    applyAcmLock();
     applyScope();
   }
-
-  // ---------------------------------------------------------------- ACM scope
-  var acmTimer = null;
-  function applyAcmLock() {}
 
   // ---------------------------------------------------------------- worker I/O
   function wfetch(action, opts, params) {
@@ -278,7 +307,8 @@
   function saveSettings(obj) { var n = normSettings(obj); return wfetch("putSettings", { body: JSON.stringify(n) }).then(function () { settingsCache = n; ls(SETTINGS_LS, JSON.stringify(n)); return n; }); }
 
   function loadAccess() {
-    return wfetch("getAccess", { timeout: 8000 }).then(function (j) { if (j) { cfg = normCfg(j); ls(ACCESS_LS, JSON.stringify(cfg)); } }).catch(function () {});
+    return wfetch("getAccess", { timeout: 8000 }).then(function (j) { if (j) { cfg = normCfg(j); ls(ACCESS_LS, JSON.stringify(cfg)); } accessKnown = true; accessFailed = false; })
+      .catch(function () { if (ls(ACCESS_LS)) accessKnown = true; else accessFailed = true; });
   }
 
   // ---------------------------------------------------------------- Targets (read side: used by app.js)
@@ -458,7 +488,7 @@
   function loadRegisteredUsers() {
     var api = (typeof DATA_API_URL !== "undefined" && DATA_API_URL) || "";
       function viaAppsScript() {
-        var keys = [ls("towerUsersKey"), adminKey(), "Admin-Panal-Center"].filter(function (k, i, a) { return k && a.indexOf(k) === i; });
+        var keys = [ls("towerUsersKey"), adminKey()].filter(function (k, i, a) { return k && a.indexOf(k) === i; });
         function next(i) {
           if (i >= keys.length) return Promise.reject(new Error("keys rejected"));
           return fetch(api, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "list_users", key: keys[i] }) })
@@ -495,13 +525,31 @@
   function roleColor(name) { var i = Object.keys((draft || getCfg()).roles).indexOf(name); return ROLE_COLORS[(i < 0 ? 0 : i) % ROLE_COLORS.length]; }
   function initials(n) { var p = String(n || "?").replace(/@.*/, "").split(/[\s._-]+/).filter(Boolean); return ((p[0] || "?")[0] + ((p[1] || "")[0] || "")).toUpperCase(); }
   function scopeOf(role) { var r = draft.roles[role]; if (!r) return "—"; if (r.views === "*") return "Everything"; var n = (r.views || []).length; return n + " section" + (n === 1 ? "" : "s"); }
+  var regWaiting = []; // v1.15.49: ناس مسجلين في شيت اليوزرز بس لسه ما اتعملهمش approve
   function mergeUsers(users) {
     var added = 0;
-    users.forEach(function (u) { if (!draft.users[u.email]) { draft.users[u.email] = { role: draft.roles[u.role] ? u.role : draft.defaultRole, name: u.name }; added++; } else if (typeof draft.users[u.email] === "object" && !draft.users[u.email].name && u.name) draft.users[u.email].name = u.name; });
+    if (draft.requireApproval) regWaiting = [];
+    users.forEach(function (u) {
+      if (!draft.users[u.email] && draft.requireApproval) {
+        // قبل كده كانوا بيتضافوا هنا لـ People تلقائي، وأول ما الأدمن يدوس Save (أو Approve لأي حد) كلهم بيتعملهم approve
+        if (u.email !== MANAGER_EMAIL) regWaiting.push({ email: u.email, name: u.name || "", at: "", invitedBy: "", role: u.role || "" });
+        return;
+      }
+      if (!draft.users[u.email]) { var r0 = draft.roles[u.role]; draft.users[u.email] = { role: r0 && !r0.admin && r0.views !== "*" ? u.role : draft.defaultRole, name: u.name }; added++; } else if (typeof draft.users[u.email] === "object" && !draft.users[u.email].name && u.name) draft.users[u.email].name = u.name; });
     return added;
+  }
+  // قائمة الانتظار = طلبات الووركر (requestAccess) + المسجلين في الشيت اللي لسه مش في People ولا مرفوضين
+  function waitList() {
+    var seen = {}, out = [], rej = (draft && draft.rejected) || [];
+    pendingReqs.concat(regWaiting).forEach(function (r) { var e = r && r.email; if (!e || seen[e] || (draft && draft.users[e]) || rej.indexOf(e) >= 0) return; seen[e] = 1; out.push(r); });
+    return out;
+  }
+  function nonStaffAdmins(d) {
+    return Object.keys(d.users).filter(function (em) { var u = d.users[em], r = d.roles[typeof u === "string" ? u : (u && u.role)]; return r && (r.admin || r.views === "*") && !STAFF_DOMAIN_RE.test(em); });
   }
   function saveDraft(done, fail) {
     FULL_ROLES.forEach(function (n) { draft.roles[n] = { views: "*", admin: true }; });
+    var bad = nonStaffAdmins(draft); if (bad.length) { if (fail) fail(new Error("Admin roles are for @taager.com emails only: " + bad.join(", "))); return Promise.resolve(); }
     return wfetch("putAccess", { body: JSON.stringify(draft) }).then(function () { cfg = normCfg(JSON.parse(JSON.stringify(draft))); ls(ACCESS_LS, JSON.stringify(cfg)); applyNav(); if (done) done(); }).catch(function (e) { if (fail) fail(e); });
   }
   // Invite email for users added by hand (not for self-registered ones). Runs after a successful save.
@@ -552,9 +600,10 @@
     if (rolesTab === "people") {
       var q = peopleQ.toLowerCase();
       var rows = uList.filter(function (u) { return !q || (u.name + " " + u.email + " " + u.role).toLowerCase().indexOf(q) >= 0; }).sort(function (a, b) { return (a.name || a.email).localeCompare(b.name || b.email); });
-      var pendHtml = pendingReqs.length ? '<div class="tw-card" style="border-color:#fbbf24"><div class="tw-ch"><div><h3>Waiting for approval (' + pendingReqs.length + ')</h3><div class="tw-muted">These people tried to sign in. Pick a role, then approve.</div></div></div><table class="tw-table"><tbody>' + pendingReqs.map(function (r) {
+      var wl = waitList();
+      var pendHtml = (!adminKey() ? '<div class="tw-card" style="border-color:#fbbf24"><div class="tw-muted">Access requests are hidden until the admin key is saved in this browser (Roles tab → Admin key).</div></div>' : "") + (wl.length ? '<div class="tw-card" style="border-color:#fbbf24"><div class="tw-ch"><div><h3>Waiting for approval (' + wl.length + ')</h3><div class="tw-muted">These people signed up or tried to sign in. Pick a role, then approve.</div></div></div><table class="tw-table"><tbody>' + wl.map(function (r) {
         return '<tr><td><div class="tw-pn">' + esc(r.name || r.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(r.email) + (r.invitedBy ? ' · invited by ' + esc(r.invitedBy) : '') + '</div></td><td><select data-preq-role="' + esc(r.email) + '" style="min-height:34px;padding:0 8px">' + roleOpts(r.role && draft.roles[r.role] ? r.role : draft.defaultRole) + '</select><input data-preq-mid="' + esc(r.email) + '" placeholder="Merchant ID" style="min-height:34px;padding:0 8px;margin-left:6px;width:130px;' + ((r.role && draft.roles[r.role] ? r.role : draft.defaultRole) === "Merchant" ? "" : "display:none") + '"></td><td style="text-align:right"><button class="btn small btn-primary" data-preq-ok="' + esc(r.email) + '">Approve</button> <button class="btn small danger" data-preq-no="' + esc(r.email) + '">Reject</button></td></tr>';
-      }).join("") + '</tbody></table><span class="tw-msg" id="twPendMsg"></span></div>' : "";
+      }).join("") + '</tbody></table><span class="tw-msg" id="twPendMsg"></span></div>' : "");
       var trs = rows.map(function (u) {
         var c = roleColor(u.role);
         return '<tr class="tw-prow" data-edit="' + esc(u.email) + '"><td><div class="tw-person"><span class="tw-av" style="background:' + c + '">' + esc(initials(u.name || u.email)) + '</span><div><div class="tw-pn">' + esc(u.name || u.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(u.email) + '</div></div></div></td>' +
@@ -584,7 +633,9 @@
         '<div class="tw-row"><button class="btn btn-primary" id="twRoleNew">+ New role</button><button class="btn danger" id="twRoleDel"' + (["Admin", "Country Manager", "Merchant"].indexOf(editRole) >= 0 ? " disabled" : "") + '>Delete “' + esc(editRole) + '”</button></div></div><div class="tw-rolegrid">' + cards + '</div></div>' +
         '<div class="tw-card"><h3>Sign-up defaults</h3><div class="tw-row" style="margin-top:10px"><label class="tw-check"><input type="checkbox" id="twTrust"' + (draft.trustLoginRole ? " checked" : "") + '> Trust the role picked at sign-up for people not listed in People</label></div>' +
         '<div class="tw-row" style="margin-top:10px"><label class="tw-check"><input type="checkbox" id="twReqAppr"' + (draft.requireApproval ? " checked" : "") + '> Require admin approval: anyone not listed in People waits for approval before entering</label></div>' +
-        '<div class="tw-row" style="margin-top:10px"><span class="tw-muted">Default role for everyone else:</span><select id="twDefRole" style="min-height:34px;padding:0 8px">' + roleOpts(draft.defaultRole) + '</select></div></div>' +
+        '<div class="tw-row" style="margin-top:10px"><span class="tw-muted">Default role for everyone else:</span><select id="twDefRole" style="min-height:34px;padding:0 8px">' + roleOpts(draft.defaultRole) + '</select></div>' +
+        '<div style="margin-top:14px"><div class="tw-muted" style="margin-bottom:6px"><b>Approvers</b> — get a notification (Inbox + email) every time someone asks for access. One email per line. Admins and Country Managers always get it in their Inbox. To approve, the person needs the Admin or Country Manager role and the admin key.</div>' +
+        '<textarea id="twApprovers" rows="3" placeholder="name@taager.com" style="width:100%;max-width:520px;padding:8px 10px;font:inherit;font-size:13px">' + esc((draft.approvers || []).join("\n")) + '</textarea></div></div>' +
         '<div class="tw-card"><h3>Admin key</h3><div class="tw-muted">Needed once per browser to save changes, upload targets and send alerts. It is the ADMIN_KEY secret of the Worker.</div><div class="tw-row" style="margin-top:10px"><input type="password" id="twKey" placeholder="ADMIN_KEY (Worker secret)" value="' + esc(adminKey()) + '" style="min-width:260px;padding:0 10px;min-height:36px"><button class="btn" id="twKeyCheck">Save &amp; check</button><span class="tw-msg" id="twKeyMsg"></span></div></div>';
     }
     host.innerHTML = '<div class="tw-page"><div class="tw-uts">' + tabsHtml + '</div>' + body +
@@ -606,15 +657,23 @@
     function loadPending() { if (!adminKey()) return; wfetch("getPending", { admin: true }).then(function (j) { var n = (j && j.pending) || []; if (JSON.stringify(n) !== JSON.stringify(pendingReqs)) { pendingReqs = n; renderRoles(); } }).catch(function () {}); }
     host.querySelectorAll("[data-preq-role]").forEach(function (sel) { sel.onchange = function () { var mi = host.querySelector('[data-preq-mid="' + sel.dataset.preqRole + '"]'); if (mi) mi.style.display = sel.value === "Merchant" ? "" : "none"; }; });
     host.querySelectorAll("[data-preq-ok]").forEach(function (b) { b.onclick = function () {
-      var em = b.dataset.preqOk, rs = host.querySelector('[data-preq-role="' + em + '"]'), role = rs ? rs.value : draft.defaultRole, r0 = pendingReqs.filter(function (x) { return x.email === em; })[0] || {};
+      var em = b.dataset.preqOk, rs = host.querySelector('[data-preq-role="' + em + '"]'), role = rs ? rs.value : draft.defaultRole, r0 = waitList().filter(function (x) { return x.email === em; })[0] || {};
+      draft.rejected = (draft.rejected || []).filter(function (x) { return x !== em; });
       var mi = host.querySelector('[data-preq-mid="' + em + '"]'), mid = mi ? mi.value.trim() : "";
       if (role === "Merchant" && !mid) { var pm = $("twPendMsg"); if (pm) { pm.className = "tw-msg err"; pm.textContent = "Enter the Merchant ID for " + em + "."; } return; }
       b.disabled = true; draft.users[em] = role === "Merchant" ? { role: role, name: r0.name || undefined, merchantId: mid } : { role: role, name: r0.name || undefined }; pendingInvites[em] = role;
       saveDraft(function () { sendInvitesAfterSave().then(function () { return wfetch("resolvePending", { body: JSON.stringify({ emails: [em] }) }); }).then(function () { pendingReqs = pendingReqs.filter(function (x) { return x.email !== em; }); renderRoles(); }).catch(function () { renderRoles(); }); },
         function (e) { delete draft.users[em]; b.disabled = false; var m = $("twPendMsg"); if (m) { m.className = "tw-msg err"; m.textContent = e.message; } });
     }; });
-    host.querySelectorAll("[data-preq-no]").forEach(function (b) { b.onclick = function () { var em = b.dataset.preqNo; wfetch("resolvePending", { body: JSON.stringify({ emails: [em] }) }).then(function () { pendingReqs = pendingReqs.filter(function (x) { return x.email !== em; }); renderRoles(); }).catch(function () {}); }; });
-    if (!host._pendLoaded) { host._pendLoaded = true; loadPending(); }
+    host.querySelectorAll("[data-preq-no]").forEach(function (b) { b.onclick = function () {
+      var em = b.dataset.preqNo; if (!confirm("Decline access for " + em + "?")) return; b.disabled = true;
+      // v1.15.49: الرفض بقى بيتسجل في الكونفيج — قبل كده كان بيمسح الطلب بس، فالشخص يرجع يطلب تاني أو يدخل لو الـ approval اتقفل
+      draft.rejected = (draft.rejected || []).filter(function (x) { return x !== em; }).concat([em]);
+      saveDraft(function () { wfetch("resolvePending", { body: JSON.stringify({ emails: [em] }) }).catch(function () {}).then(function () { pendingReqs = pendingReqs.filter(function (x) { return x.email !== em; }); renderRoles(); }); },
+        function (e) { draft.rejected = draft.rejected.filter(function (x) { return x !== em; }); b.disabled = false; var m = $("twPendMsg"); if (m) { m.className = "tw-msg err"; m.textContent = e.message; } });
+    }; });
+    if (!host._pendAt || Date.now() - host._pendAt > 30000) { host._pendAt = Date.now(); loadPending(); }
+    if (!host._pendTimer) host._pendTimer = setInterval(function () { var v = $("viewTowerRoles"); if (v && v.offsetParent !== null && rolesTab === "people") { host._pendAt = Date.now(); loadPending(); } }, 45000);
     function loadRegistered() {
       usersLoading = true;
       loadRegisteredUsers().then(function (users) {
@@ -623,14 +682,20 @@
       }).catch(function (e) { usersLoading = false; renderRoles(); var mm = $("twUsersMsg"); if (mm) { mm.className = "tw-msg err"; mm.textContent = "Could not read registered users (" + (e && e.message) + ")."; } });
     }
     if (!usersLoaded) { usersLoaded = true; loadRegistered(); }
-    var ra = $("twReqAppr"); if (ra) ra.onchange = function (e) { draft.requireApproval = e.target.checked; };
+    var ra = $("twReqAppr"); if (ra) ra.onchange = function (e) {
+      draft.requireApproval = e.target.checked;
+      // لما الـ approval يتفتح: اللي اتضافوا للمسودة من شيت اليوزرز ومش محفوظين فعلاً يرجعوا لقائمة الانتظار
+      if (draft.requireApproval) { var saved = getCfg().users || {}; Object.keys(draft.users).forEach(function (em) { if (!saved[em] && !pendingInvites[em]) delete draft.users[em]; }); mergeUsers(cachedUsers() || []); }
+    };
     var tr = $("twTrust"); if (tr) tr.onchange = function (e) { draft.trustLoginRole = e.target.checked; };
     var dr = $("twDefRole"); if (dr) dr.onchange = function (e) { draft.defaultRole = e.target.value; };
+    var ap = $("twApprovers"); if (ap) ap.onchange = function () { draft.approvers = ap.value.split(/[\s,;]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(function (x, i, a) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x) && a.indexOf(x) === i; }); };
     var kc = $("twKeyCheck"); if (kc) kc.onclick = function () { ls(KEY_LS, $("twKey").value.trim()); var m = $("twKeyMsg"); m.className = "tw-msg"; m.textContent = "Checking…"; wfetch("checkAdminKey", { body: "{}" }).then(function () { m.className = "tw-msg ok"; m.textContent = "Key accepted ✓"; }).catch(function (e) { m.className = "tw-msg err"; m.textContent = e.message; }); };
     $("twDiscard").onclick = function () { draft = null; pendingInvites = {}; usersLoaded = false; renderRoles(); };
     $("twSave").onclick = function () {
       var m = $("twSaveMsg"); m.className = "tw-msg"; m.textContent = "Saving…";
       FULL_ROLES.forEach(function (n) { draft.roles[n] = { views: "*", admin: true }; });
+      var bad = nonStaffAdmins(draft); if (bad.length) { m.className = "tw-msg err"; m.textContent = "Admin roles are for @taager.com emails only: " + bad.join(", "); return; }
       wfetch("putAccess", { body: JSON.stringify(draft) }).then(function () { cfg = normCfg(JSON.parse(JSON.stringify(draft))); ls(ACCESS_LS, JSON.stringify(cfg)); applyNav(); m.className = "tw-msg ok"; m.textContent = "Saved ✓"; return sendInvitesAfterSave().then(function (t) { if (t) { m.textContent = "Saved ✓" + t; if (t.indexOf("failed") >= 0) m.className = "tw-msg err"; } }); }).catch(function (e) { m.className = "tw-msg err"; m.textContent = e.message + (e.status === 403 ? " — set the admin key in the Roles tab." : ""); });
     };
   }
@@ -979,7 +1044,7 @@
   // اسم الملف في اللينك بيتغير مع التاب (inventory.html, mp-matches.html, ...) — كل ملف نسخة حقيقية من index.html فالـ reload بيفتح نفس التاب
   // File names follow the tab labels shown in the sidebar (Commercial Plan -> commercial-plan.html).
   var VIEW_SLUG = {
-    recommendedTracker: "recommended-tracker", inventory: "inventory",
+    inventory: "inventory",
     acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
     targetsCommercial: "targets", commercialDebundlized: "commercial-plan", purchasePlan: "purchase-plan",
     cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
@@ -1128,7 +1193,7 @@
   // ---------------------------------------------------------------- boot
   var lastEmail = null;
   function boot() {
-    try { var c = ls(ACCESS_LS); if (c) cfg = normCfg(JSON.parse(c)); } catch (e) {}
+    try { var c = ls(ACCESS_LS); if (c) { cfg = normCfg(JSON.parse(c)); accessKnown = true; } } catch (e) {}
     injectShell(); injectThemeBtn(); wrapNav(); initEntryView(); setupHubs(); injectMerchantsToolbar(); injectExportButtons(); applyNav(); updateHub("overview");
     loadAccess().then(function () { applyNav(); try { if (isRealAdmin()) loadRegisteredUsers().catch(function () {}); } catch (e) {} }); loadSettings();
     setInterval(function () { loadAccess().then(applyNav); }, 5 * 60 * 1000);

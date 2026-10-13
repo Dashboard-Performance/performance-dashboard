@@ -1,0 +1,6 @@
+{
+  "name": "taager-dashboard-worker",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test/staff-gate.mjs" }
+}

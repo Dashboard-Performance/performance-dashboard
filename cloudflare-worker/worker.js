@@ -121,17 +121,30 @@ const PRESENCE_ONLINE_WINDOW_MS = 90 * 1000;
 const PRESENCE_STALE_MS = 15 * 60 * 1000;
 const ALLOWED_EMAIL_DOMAIN = "taager.com";
 
-// Metabase public-link CORS proxy: pure streaming passthrough (no body parsing -> negligible CPU).
-// Only metabase.taager.com public question/card endpoints are allowed.
-async function handleMetabaseProxy(url) {
-  const target = url.searchParams.get("url") || "";
-  let t;
-  try { t = new URL(target); } catch (e) { return jsonResponse({ success: false, message: "bad url" }, 400); }
-  const okPath = /^\/(public\/question\/|api\/public\/card\/)[0-9a-f-]{36}(\.json|\/query\/(json|csv))?$/i.test(t.pathname);
-  if (t.protocol !== "https:" || t.hostname !== "metabase.taager.com" || !okPath) {
-    return jsonResponse({ success: false, message: "url not allowed" }, 403);
-  }
-  const r = await fetch(t.toString(), { redirect: "follow" });
+// Metabase proxy: pure streaming passthrough (no body parsing -> negligible CPU).
+// v1.16.0: the dashboard sends only the gid — the Metabase links live HERE, never in the browser code,
+// and the proxy no longer forwards arbitrary URLs. Override a link with the secret METABASE_LINKS (JSON {gid: url}).
+const METABASE_SOURCES = {
+  "22283311": { label: "Beginning Inventory", url: "https://metabase.taager.com/public/question/d94cd9a2-79e9-4354-8b61-ba306e19a8a1.json" },
+  "461854229": { label: "Merchant SKU Daily", url: "https://metabase.taager.com/public/question/fae5e3b3-770d-4263-84cd-5ec7bcb3235b.json" },
+  "531154071": { label: "Products Info", url: "https://metabase.taager.com/public/question/e36159b1-ba09-4374-a982-636bd91de1df.json" },
+  "548859670": { label: "Sell-through Needed", url: "https://metabase.taager.com/public/question/c56380be-b777-4785-ba01-8dac06da65b9.json" },
+  "620123165": { label: "Merchant Segmentation", url: "https://metabase.taager.com/api/public/card/5761d362-9da0-4f6a-9c83-2d569d8c5f38/query/json" },
+  "964398740": { label: "Confirmed by Day", url: "https://metabase.taager.com/public/question/f5b9a1ab-01b3-46b4-a8b8-cf55354fcca3.json" },
+  "1304674893": { label: "New Segmentation", url: "https://metabase.taager.com/public/question/261252c6-61b8-4b74-a3d5-e3a4dd1ff2f4.json" },
+  "1409034448": { label: "Products Debundle Map", url: "https://metabase.taager.com/public/question/022be39b-ece7-4252-ba69-62f034369919.json" },
+  "1779314157": { label: "Products", url: "https://metabase.taager.com/public/question/7d6164a3-d064-445f-98cf-b55623a25957.json" },
+  "2085802038": { label: "Availability Locking", url: "https://metabase.taager.com/public/question/6048f9a4-87b4-4a88-88d9-c2ac5e81e492.json" },
+  "2099497960": { label: "Main", url: "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv" }
+};
+function metabaseLink(env, gid) {
+  if (env.METABASE_LINKS) { try { const o = JSON.parse(env.METABASE_LINKS); if (o[gid]) return String(o[gid]); } catch (e) {} }
+  return METABASE_SOURCES[gid] ? METABASE_SOURCES[gid].url : "";
+}
+async function handleMetabaseProxy(url, env) {
+  const target = metabaseLink(env, String(url.searchParams.get("gid") || ""));
+  if (!target) return jsonResponse({ success: false, message: "unknown source" }, 404);
+  const r = await fetch(target, { redirect: "follow" });
   const h = corsHeaders();
   h["Content-Type"] = r.headers.get("Content-Type") || "application/octet-stream";
   h["Cache-Control"] = "no-store";
@@ -145,6 +158,12 @@ async function handleMetabaseProxy(url) {
 // raw text (no JSON parse) to stay within the free-plan CPU budget.
 // ---------------------------------------------------------------------------
 const TOWER_TARGET_TYPES = ["merchants", "acm", "category", "salesplan", "singlesku", "meta"];
+// v1.15.17 — each target type is stored per month: "<type>.<YYYY-MM>" (e.g. "merchants.2026-11", "meta.2026-11").
+// The plain "<type>" key (no month) is the older single upload and stays readable as a fallback.
+function towerTargetTypeOk(type) {
+  const m = /^([a-z]+)(?:\.(\d{4})-(0[1-9]|1[0-2]))?$/.exec(type || "");
+  return !!m && TOWER_TARGET_TYPES.indexOf(m[1]) >= 0;
+}
 const TOWER_MAX_BYTES = 20 * 1024 * 1024;
 function towerAdminOk(request, env) {
   const key = request.headers.get("X-Admin-Key") || "";
@@ -166,15 +185,25 @@ async function towerWriteKv(request, env, key) {
   return jsonResponse({ success: true, bytes: text.length });
 }
 function handleGetAccess(env) { return towerReadKv(env, "access:config", "null"); }
-function handlePutAccess(request, env) { return towerWriteKv(request, env, "access:config"); }
+// v1.16.0: Admin / Country Manager (any role with full access) can only belong to @taager.com emails.
+async function handlePutAccess(request, env) {
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
+  const text = await request.clone().text();
+  let cfg; try { cfg = JSON.parse(text); } catch (e) { return jsonResponse({ success: false, message: "Body must be JSON." }, 400); }
+  const roles = (cfg && cfg.roles) || {}, users = (cfg && cfg.users) || {};
+  const bad = Object.keys(users).filter((em) => { const u = users[em], r = roles[typeof u === "string" ? u : (u && u.role)]; return r && (r.admin || r.views === "*") && !STAFF_DOMAIN_RE.test(em); });
+  if (bad.length) return jsonResponse({ success: false, message: "Admin roles are for @taager.com emails only: " + bad.slice(0, 5).join(", ") }, 400);
+  _cfgCache = { at: 0, cfg: null };
+  return towerWriteKv(request, env, "access:config");
+}
 function handleGetTargets(url, env) {
   const type = url.searchParams.get("type") || "";
-  if (TOWER_TARGET_TYPES.indexOf(type) < 0) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
+  if (!towerTargetTypeOk(type)) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
   return towerReadKv(env, "targets:" + type, "null");
 }
 function handlePutTargets(request, url, env) {
   const type = url.searchParams.get("type") || "";
-  if (TOWER_TARGET_TYPES.indexOf(type) < 0) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
+  if (!towerTargetTypeOk(type)) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
   return towerWriteKv(request, env, "targets:" + type);
 }
 function handleCheckAdminKey(request, env) {
@@ -286,8 +315,35 @@ async function handleRequestAccess(request, env) {
     if (Object.keys(p).length >= 200) return jsonResponse({ success: false, message: "Too many pending requests." }, 429);
     p[email] = { name: String(b.name || "").trim().slice(0, 80), at: new Date().toISOString(), invitedBy: String(b.invitedBy || "").trim().toLowerCase().slice(0, 120), role: String(b.role || "").slice(0, 60) };
     await env.SYNC_CACHE.put("access:pending", JSON.stringify(p));
+    // v1.15.49: قبل كده الطلب كان بيتخزن بس ومحدش بيعرف بيه غير لو فتح Users & Roles بنفسه
+    try { await notifyAccessRequest(env, email, p[email]); } catch (e) {}
   }
   return jsonResponse({ success: true });
+}
+// Inbox alert (Admin + Country Manager + approvers) + email to the approvers (if Resend is set up).
+async function notifyAccessRequest(env, email, entry) {
+  let cfg = {};
+  try { cfg = JSON.parse((await env.SYNC_CACHE.get("access:config")) || "{}") || {}; } catch (e) {}
+  if (Array.isArray(cfg.rejected) && cfg.rejected.indexOf(email) >= 0) return; // already declined: no new noise
+  const okEmail = (x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x);
+  const approvers = (Array.isArray(cfg.approvers) ? cfg.approvers : []).map((x) => String(x).trim().toLowerCase()).filter(okEmail).slice(0, 50);
+  const users = Array.from(new Set(approvers.concat([MANAGER_EMAIL])));
+  const who = entry.name ? entry.name + " (" + email + ")" : email;
+  const body = entry.invitedBy
+    ? entry.invitedBy + " invited " + who + (entry.role ? " with the suggested role " + entry.role : "") + ". Open Users & Roles to approve or decline."
+    : who + " signed in and is waiting for approval. Open Users & Roles to pick a role and approve or decline.";
+  const alert = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), at: new Date().toISOString(), title: "Access request: " + who, body, severity: "warning",
+    audience: { all: false, roles: ["Admin", "Country Manager"], users }, about: { type: "General", label: "Access request" }, link: "towerRoles", by: "system" };
+  const all = await towerLoadAlerts(env);
+  all.unshift(alert);
+  await env.SYNC_CACHE.put(TOWER_ALERTS_KEY, JSON.stringify(all.slice(0, TOWER_ALERTS_MAX)));
+  if (!env.RESEND_API_KEY || !env.MAIL_FROM || !approvers.length) return;
+  const link = /^https:\/\/[^\s"<>]+$/.test(String(env.DASHBOARD_URL || "")) ? String(env.DASHBOARD_URL) : "";
+  const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
+    '<h2 style="margin:0 0 12px">New access request</h2><p style="line-height:1.6">' + inviteEsc(body) + '</p>' +
+    (link ? '<p style="margin:24px 0"><a href="' + inviteEsc(link) + '" style="background:#0f9d7a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Open the dashboard</a></p>' : "") + '</div>';
+  await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: env.MAIL_FROM, to: approvers, subject: "Access request: " + who, html }) });
 }
 async function handleGetPending(request, env) {
   if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
@@ -339,11 +395,89 @@ async function handleLogActivity(request, env) {
   return jsonResponse({ success: true });
 }
 
+// ---------------------------------------------------------------------------
+// v1.16.0 — Staff sessions. Login goes through this Worker: it checks the password with Apps Script
+// (server to server), allows only @taager.com emails or staff listed in Users & Roles (never Merchants),
+// and returns a signed token the dashboard sends back as X-Staff-Token on every call.
+// ---------------------------------------------------------------------------
+const STAFF_DOMAIN_RE = /@taager\.com$/i;
+const STAFF_SESSION_DAYS = 7;
+// actions that keep their own protection (API key / admin key / upload secret) and are called by other servers
+const STAFF_OPEN = new Set(["getComputed", "listComputed", "publishComputed", "releaseUpload", "checkAdminKey"]);
+function staffGateOn(env) { return !!env.STAFF_SESSION_SECRET && String(env.STAFF_SESSION_SECRET).length >= 32; }
+const _enc = new TextEncoder();
+function b64url(bytes) { let s = ""; const b = new Uint8Array(bytes); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+function unb64url(str) { str = String(str).replace(/-/g, "+").replace(/_/g, "/"); while (str.length % 4) str += "="; return atob(str); }
+async function hmacB64(secret, data) {
+  const key = await crypto.subtle.importKey("raw", _enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64url(await crypto.subtle.sign("HMAC", key, _enc.encode(data)));
+}
+function sameStr(a, b) { a = String(a); b = String(b); let d = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0); return d === 0; }
+let _cfgCache = { at: 0, cfg: null };
+async function accessCfg(env) {
+  if (Date.now() - _cfgCache.at < 60000 && _cfgCache.cfg) return _cfgCache.cfg;
+  let cfg = {}; try { cfg = JSON.parse((await env.SYNC_CACHE.get("access:config")) || "{}") || {}; } catch (e) {}
+  _cfgCache = { at: Date.now(), cfg }; return cfg;
+}
+// Who may sign in to the staff dashboard: @taager.com, or someone an admin listed with a staff (non-Merchant) role.
+async function staffEligible(env, email) {
+  email = String(email || "").toLowerCase();
+  const cfg = await accessCfg(env), u0 = cfg.users && cfg.users[email], u = typeof u0 === "string" ? { role: u0 } : u0;
+  if (u && u.status === "inactive") return false;
+  if (Array.isArray(cfg.rejected) && cfg.rejected.indexOf(email) >= 0 && !u) return false;
+  if (u && (u.role === "Merchant" || u.role === "Viewer")) return false;
+  return STAFF_DOMAIN_RE.test(email) || !!u;
+}
+// Who may READ data: eligible, and — when "Require admin approval" is on — already approved (listed in People).
+async function staffAllowed(env, email) {
+  email = String(email || "").toLowerCase();
+  if (!(await staffEligible(env, email))) return false;
+  const cfg = await accessCfg(env);
+  return !cfg.requireApproval || email === MANAGER_EMAIL || !!(cfg.users && cfg.users[email]);
+}
+async function staffSession(request, url, env, action) {
+  const tok = request.headers.get("X-Staff-Token") || url.searchParams.get("st") || "";
+  const [payload, sig] = String(tok).split(".");
+  if (!payload || !sig || tok.length > 600) return null;
+  if (!sameStr(sig, await hmacB64(env.STAFF_SESSION_SECRET, payload))) return null;
+  let s; try { s = JSON.parse(unb64url(payload)); } catch (e) { return null; }
+  if (!s || !s.e || !(s.exp > Date.now())) return null;
+  if (!(await staffEligible(env, s.e))) return null;
+  // someone still waiting for approval may only ask for access and see whether they were approved
+  if (action === "requestAccess" || action === "getAccess") return s;
+  return (await staffAllowed(env, s.e)) ? s : { pending: true };
+}
+async function serviceOk(request, env) {
+  const k = request.headers.get("X-Service-Key") || "";
+  return !!k && ((env.SERVICE_KEY && String(env.SERVICE_KEY).length >= 16 && sameStr(k, env.SERVICE_KEY)) || (env.ADMIN_KEY && sameStr(k, env.ADMIN_KEY)));
+}
+async function handleStaffLogin(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Bad request." }, 400); }
+  const email = String(b.email || "").trim().toLowerCase().slice(0, 160), password = String(b.password || "").slice(0, 200);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !password) return jsonResponse({ success: false, message: "Enter your email and password." }, 400);
+  const ip = request.headers.get("CF-Connecting-IP") || "x", kIp = "rl:staff:ip:" + ip, kEm = "rl:staff:em:" + email;
+  const [nIp, nEm] = await Promise.all([env.SYNC_CACHE.get(kIp), env.SYNC_CACHE.get(kEm)]);
+  if ((+nIp || 0) >= 40 || (+nEm || 0) >= 10) return jsonResponse({ success: false, message: "Too many attempts. Try again in 15 minutes." }, 429);
+  const res = await callAppsScriptPost(env, { action: "login", email, password });
+  if (!res || !res.success) {
+    await Promise.all([env.SYNC_CACHE.put(kIp, String((+nIp || 0) + 1), { expirationTtl: 900 }), env.SYNC_CACHE.put(kEm, String((+nEm || 0) + 1), { expirationTtl: 900 })]);
+    return jsonResponse({ success: false, message: (res && res.message) || "Invalid email or password." });
+  }
+  if (!(await staffEligible(env, email))) return jsonResponse({ success: false, message: "This dashboard is for Taager staff. Merchants use the Taager merchant portal." }, 403);
+  let token = "";
+  if (staffGateOn(env)) {
+    const payload = b64url(_enc.encode(JSON.stringify({ e: email, exp: Date.now() + STAFF_SESSION_DAYS * 86400000 })));
+    token = payload + "." + (await hmacB64(env.STAFF_SESSION_SECRET, payload));
+  }
+  return jsonResponse({ success: true, name: res.name, email: res.email || email, role: res.role, token });
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret, X-Admin-Key",
+    "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret, X-Admin-Key, X-Staff-Token, X-Service-Key",
     "Access-Control-Expose-Headers": "Content-Disposition",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -972,16 +1106,18 @@ async function handleReleaseUpload(request, env) {
 //   (3) Feedback (match / decline / sales-plan): الحفظ بيرجّع نجاح فورًا ويتكتب في
 //       الشيت في الخلفية مع إعادة محاولة أوتوماتيك — مفيش Error بسبب بطء/تقطيع Apps Script.
 // ===========================================================================
-const COMPUTED_DEFAULT_KEYS = ["Admin-Panal-Center"];
+// v1.16.0: مفيش مفتاح افتراضي مكتوب في الكود — المفاتيح من الـ secret COMPUTED_API_KEYS بس
+// (wrangler secret put COMPUTED_API_KEYS). لو مش متظبط، getComputed/listComputed مقفولين.
 function computedKeys(env) {
   const raw = (env && env.COMPUTED_API_KEYS) ? String(env.COMPUTED_API_KEYS) : "";
-  const list = raw.split(",").map(x => x.trim()).filter(Boolean);
-  return list.length ? list : COMPUTED_DEFAULT_KEYS;
+  return raw.split(",").map(x => x.trim()).filter(x => x.length >= 12);
 }
 function sanitizeComputedName(name) { return String(name || "").trim().replace(/[^A-Za-z0-9_-]/g, ""); }
 
 async function handlePublishComputed(request, env) {
   if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  // v1.16.0: قبل كده أي حد كان يقدر يكتب أرقام مزيفة هنا من غير أي مفتاح
+  if (!towerAdminOk(request, env)) return jsonResponse({ success: false, message: "Wrong admin key." }, 403);
   let payload;
   try { payload = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Invalid request body." }, 400); }
   const sections = payload && payload.sections;
@@ -1028,7 +1164,7 @@ async function handleListComputed(url, env) {
 // ---- getLastSync read-through cache --------------------------------------
 const LASTSYNC_KEYS = { general: "lastsync:general_v1", irq: "lastsync:irq_v1", meta: "lastsync:meta_v1" };
 async function appsScriptGet(env, qs) {
-  const r = await fetch(env.APPS_SCRIPT_URL + "?" + qs, { redirect: "follow" });
+  const r = await fetch(env.APPS_SCRIPT_URL + "?" + qs + (env.APPS_SCRIPT_SERVICE_KEY ? "&k=" + encodeURIComponent(env.APPS_SCRIPT_SERVICE_KEY) : ""), { redirect: "follow" });
   return await r.text();
 }
 async function refreshLastSyncCache(env) {
@@ -1169,7 +1305,17 @@ export default {
     const url = new URL(request.url);
     const action = url.searchParams.get("action");
 
-    if (action === "metabase") return handleMetabaseProxy(url);
+    // v1.16.0 — staff gate: every data/query action needs a Taager staff session issued by this Worker
+    // (staffLogin). Active once the STAFF_SESSION_SECRET secret is set. Merchants never get one.
+    if (action === "staffLogin") return handleStaffLogin(request, env);
+    if (staffGateOn(env) && !STAFF_OPEN.has(action)) {
+      const okService = action === "getAccess" && (await serviceOk(request, env));
+      const ss = okService ? null : await staffSession(request, url, env, action);
+      if (!okService && !ss) return jsonResponse({ success: false, code: "staff_auth", message: "Please sign in again." }, 401);
+      if (ss && ss.pending) return jsonResponse({ success: false, code: "staff_pending", message: "Waiting for admin approval." }, 403);
+    }
+
+    if (action === "metabase") return handleMetabaseProxy(url, env);
     if (action === "getAccess") return handleGetAccess(env);
     if (action === "putAccess") return handlePutAccess(request, env);
     if (action === "getTargets") return handleGetTargets(url, env);

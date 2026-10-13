@@ -33,7 +33,7 @@
  * ============================================================================
  */
 
-var SPREADSHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
+var WEBSITE_EGY_SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA";
 var USERS_SHEET_GID = 1839838273;
 var ALLOWED_EMAIL_DOMAIN = "taager.com";
 // Cloudflare Worker endpoint that serves the access config (people added by an admin).
@@ -78,7 +78,12 @@ var ANALYST_SINGLE_DAILY_PROP_KEY = "analystSingleDailyMeta";
 
 // Shared secret used by handleListUsers (Users & Roles page). The Computed Data
 // API that also used it moved to the Worker (env COMPUTED_API_KEYS there).
-var COMPUTED_API_KEYS = ["Admin-Panal-Center"]; // <-- replace before sharing this URL with anyone
+// v1.16.0: المفتاح مبقاش مكتوب في الكود — بيتقرا من Script Properties (Project Settings → Script Properties):
+//   API_KEYS = مفتاح أو أكتر مفصولين بفاصلة (حط فيه نفس قيمة ADMIN_KEY بتاع الووركر عشان Users & Roles يشتغل).
+function getApiKeys_() {
+  var raw = PropertiesService.getScriptProperties().getProperty("API_KEYS") || "";
+  return raw.split(",").map(function (k) { return k.trim(); }).filter(function (k) { return k.length >= 12; });
+}
 
 function doPost(e) {
   var payload;
@@ -135,7 +140,7 @@ function handlePublishAnalystSingleDaily(payload) {
   if (!gotLock) return jsonResponse({ success: false, message: "Busy — another publish is in progress, will retry on the next cycle." });
 
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
     var sheet = ss.getSheetByName(ANALYST_SINGLE_DAILY_SHEET_NAME);
     if (!sheet) sheet = ss.insertSheet(ANALYST_SINGLE_DAILY_SHEET_NAME);
 
@@ -365,7 +370,7 @@ function handleAddNewLockedMatches(payload) {
 }
 
 function getMatchesSheet() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     if (sheets[i].getSheetId() === PRODUCTS_MATCHES_GID) return sheets[i];
@@ -530,6 +535,12 @@ function pruneOldBackups(folder) {
  */
 function doGet(e) {
   var action = e && e.parameter ? e.parameter.action : null;
+  // v1.16.0: once the Script Property SERVICE_KEY is set, the data reads below answer only the dashboard Worker
+  // (it sends &k=<APPS_SCRIPT_SERVICE_KEY>). Browsers read the same data through the Worker, behind the staff login.
+  var svc = PropertiesService.getScriptProperties().getProperty("SERVICE_KEY") || "";
+  if (svc && /^(getLastSync|getLastSyncMeta|getLastSyncDebug|getAnalystSingleDailyMeta)$/.test(String(action)) && String((e && e.parameter && e.parameter.k) || "") !== svc) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, message: "Not authorized." })).setMimeType(ContentService.MimeType.JSON);
+  }
   if (action === "getLastSync") return handleGetLastSync(e);
   if (action === "getLastSyncMeta") return handleGetLastSyncMeta(e);
   if (action === "getLastSyncDebug") return handleGetLastSyncDebug(e);
@@ -629,7 +640,7 @@ function sheetRowCount_(sheet) {
 
 function gvizRequest_(gid) {
   return {
-    url: "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
+    url: "https://docs.google.com/spreadsheets/d/" + WEBSITE_EGY_SHEET_ID + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:json",
     muteHttpExceptions: true,
     followRedirects: true
   };
@@ -799,7 +810,7 @@ function handleGetLastSyncMeta(e) {
   return jsonResponse({ success: true, fetchedAt: fetchedAt, unstableGids: unstable ? unstable.split(",") : [] });
 }
 
-var LAST_SYNC_GID_LABELS_ = { "1620722565": "Single SKU Targets",
+var LAST_SYNC_GID_LABELS_ = { "1620722565": "SKU Targets (Bundle & Single)",
   "1724469150": "COGS",
   "1298408207": "Products & Matches", "1289659887": "Weekly Inventory",
   "897709273": "Warehouse Repack",
@@ -880,6 +891,14 @@ function handleSignup(payload) {
   if (password.length < 6) {
     return jsonResponse({ success: false, message: "Password must be at least 6 characters." });
   }
+  // v1.15.49: محدش يسجل نفسه Admin / Country Manager — الأدمن هو اللي بيدي الرول ده من Users & Roles
+  if (["admin", "country manager"].indexOf(role.toLowerCase()) !== -1) {
+    return jsonResponse({ success: false, message: "This role can only be given by an admin." });
+  }
+  // v1.16.0: الميرشنتس ليهم بورتال منفصل — الداشبورد ده للموظفين بس
+  if (role.toLowerCase() === "merchant" || role.toLowerCase() === "viewer") {
+    return jsonResponse({ success: false, message: "Merchants sign in on the Taager merchant portal, not here." });
+  }
 
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -894,7 +913,7 @@ function handleSignup(payload) {
       }
     }
 
-    sheet.appendRow([name, email, password, role]);
+    sheet.appendRow([name, email, hashPassword_(password), role]);
     return jsonResponse({ success: true, name: name, email: email, role: role });
   } finally {
     lock.releaseLock();
@@ -916,7 +935,9 @@ function handleLogin(payload) {
     var rowEmail = String(data[i][1] || "").trim().toLowerCase();
     if (rowEmail === email) {
       var rowPassword = String(data[i][2] || "");
-      if (rowPassword === password) {
+      if (verifyPassword_(password, rowPassword)) {
+        // v1.16.0: باسورد قديم متخزن نص عادي → يتحول لـ hash أول ما صاحبه يعمل لوجين صح
+        if (rowPassword.indexOf("h1$") !== 0) { try { sheet.getRange(i + 1, 3).setValue(hashPassword_(password)); } catch (e) {} }
         return jsonResponse({
           success: true,
           name: data[i][0],
@@ -935,7 +956,7 @@ function handleLogin(payload) {
 // Users & Roles. محمية بنفس مفتاح COMPUTED_API_KEYS.
 function handleListUsers(payload) {
   var key = String(payload.key || "");
-  if (!key || COMPUTED_API_KEYS.indexOf(key) < 0) {
+  if (!key || getApiKeys_().indexOf(key) < 0) {
     return jsonResponse({ success: false, message: "Wrong key." });
   }
   var data = getUsersSheet().getDataRange().getValues();
@@ -949,7 +970,7 @@ function handleListUsers(payload) {
 }
 
 function getUsersSheet() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     if (sheets[i].getSheetId() === USERS_SHEET_GID) return sheets[i];
@@ -957,14 +978,41 @@ function getUsersSheet() {
   throw new Error("Users sheet with GID " + USERS_SHEET_GID + " was not found.");
 }
 
+// ---------------------------------------------------------------------------
+// v1.16.0 — Password hashing: "h1$<iterations>$<saltHex>$<hashHex>" (iterated HMAC-SHA256 with a random salt).
+// Plain-text rows (older accounts) still log in once and are rewritten as a hash on that login.
+// ---------------------------------------------------------------------------
+var PW_ITERATIONS_ = 1500;
+function bytesToHex_(bytes) { return bytes.map(function (b) { return ("0" + (b & 0xff).toString(16)).slice(-2); }).join(""); }
+function pwDigest_(password, saltHex, iterations) {
+  var h = Utilities.computeHmacSha256Signature(saltHex, password);
+  for (var i = 1; i < iterations; i++) h = Utilities.computeHmacSha256Signature(h, Utilities.newBlob(password).getBytes());
+  return bytesToHex_(h);
+}
+function hashPassword_(password) {
+  var salt = bytesToHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Date.now() + Math.random())).slice(0, 32);
+  return "h1$" + PW_ITERATIONS_ + "$" + salt + "$" + pwDigest_(password, salt, PW_ITERATIONS_);
+}
+function verifyPassword_(password, stored) {
+  stored = String(stored || "");
+  if (stored.indexOf("h1$") !== 0) return stored !== "" && stored === password; // legacy plain text
+  var p = stored.split("$"); if (p.length !== 4) return false;
+  var calc = pwDigest_(password, p[2], Number(p[1]) || PW_ITERATIONS_), want = p[3], diff = calc.length ^ want.length;
+  for (var i = 0; i < Math.min(calc.length, want.length); i++) diff |= calc.charCodeAt(i) ^ want.charCodeAt(i);
+  return diff === 0;
+}
+
 function isAllowedEmail(email) {
   var re = new RegExp("^[^\\s@]+@" + ALLOWED_EMAIL_DOMAIN.replace(".", "\\.") + "$", "i");
   if (re.test(email)) return true;
   // v1.15.1: anyone an admin added in Control > Users & Roles may sign up, whatever the email domain.
   try {
-    var res = UrlFetchApp.fetch(ACCESS_CONFIG_URL, { muteHttpExceptions: true });
+    var svcKey = PropertiesService.getScriptProperties().getProperty("WORKER_SERVICE_KEY") || "";
+    var res = UrlFetchApp.fetch(ACCESS_CONFIG_URL, { muteHttpExceptions: true, headers: svcKey ? { "X-Service-Key": svcKey } : {} });
     var cfg = JSON.parse(res.getContentText());
-    return !!(cfg && cfg.users && cfg.users[String(email).trim().toLowerCase()]);
+    var u = cfg && cfg.users && cfg.users[String(email).trim().toLowerCase()];
+    var role = u && (typeof u === "string" ? u : u.role);
+    return !!u && role !== "Merchant" && role !== "Viewer"; // v1.16.0: merchants use the merchant portal
   } catch (e) { return false; }
 }
 
@@ -1094,7 +1142,7 @@ var DECLINE_FEEDBACK_SHEET = "Decline Feedback";
 var DECLINE_FEEDBACK_HEADERS = ["Feedback Date", "Decline Day", "SKU ID", "SKU Name", "Merchant ID", "Merchant Name", "ACM", "4D Avg", "Yesterday", "Drop", "Lost GMV", "Likely Cause", "Feedback", "Submitted By", "Submitted By Email"];
 
 function getDeclineFeedbackSheet_() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
   var sh = ss.getSheetByName(DECLINE_FEEDBACK_SHEET);
   if (!sh) {
     sh = ss.insertSheet(DECLINE_FEEDBACK_SHEET);
@@ -1182,7 +1230,7 @@ function handleSaveDeclineFeedback(payload) {
 function handleGetDeclineFeedback(payload) {
   var day = String(payload.declineDay || "").trim();
   var items = {};
-  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(DECLINE_FEEDBACK_SHEET);
+  var sh = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID).getSheetByName(DECLINE_FEEDBACK_SHEET);
   if (sh && sh.getLastRow() >= 2) {
     sh.getRange(2, 1, sh.getLastRow() - 1, DECLINE_FEEDBACK_HEADERS.length).getValues().forEach(function (r) {
       if (ddNormDay_(r[1]) !== day) return;
@@ -1215,16 +1263,18 @@ var SP_FEEDBACK_OPTIONS = [
   "Merchant will scale on new target",
   "Reduce merchant target - add new merchant",
   "Merchant will stop - add new merchant",
-  "Stock issue"
+  "Stock issue",
+  "No Feedback"
 ];
 var SP_STOCK_ISSUE = "Stock issue"; // no target change, plan sheet untouched
+function spNoChange_(fb) { return fb === "Stock issue" || fb === "No Feedback"; } // "No Feedback" is handled exactly like Stock issue
 var SP_NEEDS_NEW_MERCHANT = {
   "Reduce merchant target - add new merchant": true,
   "Merchant will stop - add new merchant": true
 };
 
 function getSalesPlanFeedbackSheet_() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
   var sh = ss.getSheetByName(SP_FEEDBACK_SHEET);
   if (!sh) {
     sh = ss.insertSheet(SP_FEEDBACK_SHEET);
@@ -1263,7 +1313,7 @@ var SP_FLAG_NEW = "New match";
 var SP_PLAN_UPDATED_HEADER = "Last Target Update"; // column I: date+time of the last time G was set/changed for that row
 
 function spPlanSheet_() {
-  var sheets = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets();
+  var sheets = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID).getSheets();
   for (var i = 0; i < sheets.length; i++) if (sheets[i].getSheetId() === SP_PLAN_GID) return sheets[i];
   return null;
 }
@@ -1351,7 +1401,7 @@ function handleSaveSalesPlanFeedback(payload) {
   if (!userName) return jsonResponse({ success: false, error: "Missing logged-in user name." });
 
   var adj = (feedback === "Merchant will stop - add new merchant") ? 0 : Number(payload.adjustedTarget);
-  if (feedback === SP_STOCK_ISSUE) { adj = Number(row.oldDailyTarget); if (!isFinite(adj) || adj < 0) adj = 0; }
+  if (spNoChange_(feedback)) { adj = Number(row.oldDailyTarget); if (!isFinite(adj) || adj < 0) adj = 0; }
   else if (!isFinite(adj) || adj < 0 || payload.adjustedTarget === "" || payload.adjustedTarget === null || payload.adjustedTarget === undefined) {
     if (feedback !== "Merchant will stop - add new merchant") return jsonResponse({ success: false, error: "Adjusted target (existing merchant) is required." });
   }
@@ -1407,7 +1457,7 @@ function handleSaveSalesPlanFeedback(payload) {
     for (var c = 0; c < SP_MAX_NEW_MERCHANTS; c++) sh.getRange(target, 25 + c * 2).setNumberFormat("@"); // merchant IDs stay text; targets stay numbers
     sh.getRange(target, 1, 1, vals.length).setValues([vals]);
     var planSync;
-    if (feedback === SP_STOCK_ISSUE && !(prevNewIds && prevNewIds.length)) {
+    if (spNoChange_(feedback) && !(prevNewIds && prevNewIds.length)) {
       planSync = { ok: true, skipped: true };
     } else try {
       planSync = spSyncPlanSheet_({ productId: productId, productName: String(row.productName || ""), category: String(row.category || ""), merchantId: merchantId,
@@ -1423,7 +1473,7 @@ function handleSaveSalesPlanFeedback(payload) {
 function handleGetSalesPlanFeedback(payload) {
   var month = String(payload.month || "").trim();
   var items = {};
-  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SP_FEEDBACK_SHEET);
+  var sh = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID).getSheetByName(SP_FEEDBACK_SHEET);
   if (sh && sh.getLastRow() >= 2) {
     var width = Math.max(sh.getLastColumn(), 1);
     sh.getRange(2, 1, sh.getLastRow() - 1, width).getValues().forEach(function (r) {
@@ -1519,7 +1569,7 @@ function ddSheetByGid_(ss, gid) {
 }
 
 function computeDeclineDigest_() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID);
   var n = function (v) { var x = Number(v); return isFinite(x) ? x : 0; };
   var s = function (v) { return String(v === null || v === undefined ? "" : v).trim(); };
 
@@ -1753,4 +1803,14 @@ function buildDeclineIntroHtml_() {
 function sendDeclineIntroEmail() {
   sendDeclineMail_("Marketplace Decline Matches — daily email at 12:00 & feedback needed", buildDeclineIntroHtml_(), DECLINE_INTRO_RECIPIENTS);
   Logger.log("Intro sent to " + DECLINE_INTRO_RECIPIENTS.join(", "));
+}
+
+// يمسح ملفات آخر مزامنة المحفوظة (عشان أول مزامنة بعدها تبدأ من صفر من غير مقارنة بنسخة قديمة).
+function resetLastSyncFiles() {
+  var folder = getOrCreateLastSyncFolder_();
+  [LAST_SYNC_FILE_NAME, LAST_SYNC_IRQ_FILE_NAME].forEach(function (n) {
+    var it = folder.getFilesByName(n);
+    while (it.hasNext()) { it.next().setTrashed(true); }
+  });
+  PropertiesService.getScriptProperties().deleteProperty("last_sync_content_hash_v1");
 }

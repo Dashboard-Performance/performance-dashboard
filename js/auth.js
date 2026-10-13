@@ -34,7 +34,9 @@
     ALLOWED_DOMAIN: "taager.com",
 
     // Roles offered in the Sign Up form — edit freely
-    ROLES: ["Admin", "Account Manager", "Commercial", "Marketplace", "Merchant"],
+    // v1.15.49: "Admin" اتشال من التسجيل — أي حد كان يقدر يسجل نفسه Admin ويشوف كل حاجة
+    // v1.16.0: الميرشنتس اتنقلوا لبورتال منفصل (merchant-portal/) — الداشبورد ده للموظفين بس
+    ROLES: ["Account Manager", "Commercial", "Marketplace"],
 
     // localStorage key used to keep the user logged in
     STORAGE_KEY: "taagerDashboardSession",
@@ -115,6 +117,35 @@
       return null;
     }
   }
+
+  // v1.16.0 — staff sign-in through the Worker + the token on every Worker call
+  function staffLogin(email, password) {
+    return fetch(CONFIG.WORKER_URL + "?action=staffLogin", { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ email: email, password: password }) })
+      .then((r) => r.json().catch(() => ({ success: false, message: "Server error " + r.status })));
+  }
+  (function wrapFetch() {
+    const orig = window.fetch;
+    if (!orig || orig.__twStaff) return;
+    const wrapped = function (input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      const toWorker = CONFIG.WORKER_URL && url.indexOf(CONFIG.WORKER_URL) === 0 && url.indexOf("action=staffLogin") < 0;
+      const s = toWorker ? readSession() : null;
+      if (s && s.token) {
+        init = Object.assign({}, init || {});
+        const h = new Headers(init.headers || (typeof input !== "string" && input.headers) || undefined);
+        if (!h.has("X-Staff-Token")) h.set("X-Staff-Token", s.token);
+        init.headers = h;
+      }
+      return orig.call(this, input, init).then((res) => {
+        if (toWorker && res.status === 401 && s) {
+          res.clone().json().then((j) => { if (j && j.code === "staff_auth") { clearSession(); location.reload(); } }).catch(() => {});
+        }
+        return res;
+      });
+    };
+    wrapped.__twStaff = true;
+    window.fetch = wrapped;
+  })();
 
   function saveSession(user) {
     localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(user));
@@ -416,7 +447,10 @@
 
   function finishAuth(res, mode) {
     const user = { name: res.name, email: res.email, role: res.role };
+    if (res.token) user.token = res.token; // v1.16.0: staff session signed by the Worker
     saveSession(user);
+    // data that loaded before sign-in was refused by the Worker — reload once with the new session
+    if (res.token) { localStorage.setItem("taagerDashboardLastEmail", user.email); location.reload(); return; }
     localStorage.setItem("taagerDashboardLastEmail", user.email);
     if (mode === "signup") localStorage.setItem("twWelcomeSignup", user.email);
     unlockDashboard(user);
@@ -440,13 +474,8 @@
       }
 
       const stop = startBusy(submitBtn, hintEl, "Signing in…");
-      const payload = { action: "login", email: email, password: password };
-      // Login is safe to repeat, so a stuck first attempt gets one quick automatic retry.
-      callApi(payload, 1, LOGIN_ATTEMPT_MS)
-        .catch((err) => {
-          if (/busy/i.test((err && err.message) || "")) return callApi(payload, 1, LOGIN_ATTEMPT_MS);
-          throw err;
-        })
+      // v1.16.0: sign-in goes through the Worker — it checks the password with Apps Script and returns the staff token.
+      staffLogin(email, password)
         .then((res) => {
           if (!res || !res.success) {
             errorEl.textContent = (res && res.message) || "Invalid email or password.";
@@ -498,7 +527,11 @@
             errorEl.textContent = (res && res.message) || "Could not create the account.";
             return;
           }
-          finishAuth(res, "signup");
+          // the account exists now — sign in through the Worker to get the staff token
+          return staffLogin(email, password).then((r2) => {
+            if (!r2 || !r2.success) { errorEl.textContent = (r2 && r2.message) || "Account created — please sign in."; return; }
+            finishAuth(r2, "signup");
+          });
         })
         .catch((err) => {
           errorEl.textContent = err.message || "Something went wrong. Please try again.";

@@ -1,0 +1,37 @@
+# Taager Merchant Portal — its own Worker, its own KV, its own secrets.
+# Nothing here is shared with the staff dashboard Worker.
+name = "taager-merchant-portal"
+main = "src/worker.js"
+compatibility_date = "2026-06-01"
+
+# 1) npx wrangler kv namespace create PORTAL_KV   → paste the id below
+[[kv_namespaces]]
+binding = "PORTAL_KV"
+id = "PASTE_THE_KV_NAMESPACE_ID_HERE"
+
+# 2) Refresh the merchants' numbers every hour from the merchant query (the ONLY query this Worker can read).
+[triggers]
+crons = ["0 * * * *"]
+
+# Reading the whole merchant query on each refresh needs the Workers Paid plan.
+[limits]
+cpu_ms = 300000
+
+[vars]
+# Public https address of this portal (used in password emails). Leave empty to use the request address.
+PORTAL_URL = ""
+# The staff dashboard Worker — only used by "Import merchants from the dashboard" in /admin.
+DASHBOARD_WORKER_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev"
+# Data is considered stale after this many minutes (a refresh is started in the background).
+DATA_MAX_AGE_MIN = "90"
+DATA_SHARDS = "32"
+# MAIL_FROM = "Taager <no-reply@your-domain>"   # optional: with the RESEND_API_KEY secret, enables emails
+# QUERY_COLUMNS = '{"deliveredGmv":5}'           # optional: only if the merchant query's columns move
+
+# Secrets (never put them in this file):
+#   npx wrangler secret put ADMIN_KEY        (16+ chars — opens /admin)
+#   npx wrangler secret put SESSION_SECRET   (32+ random chars — signs the login cookie)
+#   npx wrangler secret put MERCHANT_QUERY_URL  (the merchant query link: https://metabase.taager.com/public/question/5761d362-…)
+#     — or, better, once public sharing is switched off in Metabase:
+#   npx wrangler secret put METABASE_URL / METABASE_API_KEY / MERCHANT_CARD_ID
+#   npx wrangler secret put RESEND_API_KEY   (optional, for emails)

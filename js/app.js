@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.48";
+const APP_VERSION = "1.16.0";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -300,17 +300,17 @@ const DATA_API_TIMEOUT_MS = 90000;
 // لإضافة/تغيير مصدر: عدّل الـ url هنا (وفي METABASE_URLS_ALLOWLIST بتاع الـ Worker).
 // =========================================================================
 const METABASE_SOURCES = {
-  [MAIN_GID]:                 { label: "Main",                     format: "csv",  url: "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv" },
-  [PRODUCTS_GID]:             { label: "Products",                 format: "json", url: "https://metabase.taager.com/public/question/7d6164a3-d064-445f-98cf-b55623a25957.json" },
-  [NEW_SEGMENTATION_GID]:     { label: "New Segmentation",         format: "json", url: "https://metabase.taager.com/public/question/261252c6-61b8-4b74-a3d5-e3a4dd1ff2f4.json" },
-  [PRODUCTS_INFO_GID]:        { label: "Products Info",            format: "json", url: "https://metabase.taager.com/public/question/e36159b1-ba09-4374-a982-636bd91de1df.json" },
-  [BEGIN_INV_GID]:            { label: "Beginning Inventory",      format: "json", url: "https://metabase.taager.com/public/question/d94cd9a2-79e9-4354-8b61-ba306e19a8a1.json" },
-  [SELLTHROUGH_NEEDED_GID]:   { label: "Sell-through Needed",      format: "json", url: "https://metabase.taager.com/public/question/c56380be-b777-4785-ba01-8dac06da65b9.json" },
-  [PRODUCTS_DEBUNDLE_MAP_GID]:{ label: "Products Debundle Map",    format: "json", url: "https://metabase.taager.com/public/question/022be39b-ece7-4252-ba69-62f034369919.json" },
-  [AVAILABILITY_LOCKING_GID]: { label: "Availability Locking",     format: "json", url: "https://metabase.taager.com/public/question/6048f9a4-87b4-4a88-88d9-c2ac5e81e492.json" },
-  [MERCHANT_SKU_DAILY_GID]:   { label: "Merchant SKU Daily",       format: "json", url: "https://metabase.taager.com/public/question/fae5e3b3-770d-4263-84cd-5ec7bcb3235b.json" },
-  [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json", url: "https://metabase.taager.com/api/public/card/5761d362-9da0-4f6a-9c83-2d569d8c5f38/query/json" },
-  [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json", url: "https://metabase.taager.com/public/question/f5b9a1ab-01b3-46b4-a8b8-cf55354fcca3.json" }
+  [MAIN_GID]:                 { label: "Main",                     format: "csv" },
+  [PRODUCTS_GID]:             { label: "Products",                 format: "json" },
+  [NEW_SEGMENTATION_GID]:     { label: "New Segmentation",         format: "json" },
+  [PRODUCTS_INFO_GID]:        { label: "Products Info",            format: "json" },
+  [BEGIN_INV_GID]:            { label: "Beginning Inventory",      format: "json" },
+  [SELLTHROUGH_NEEDED_GID]:   { label: "Sell-through Needed",      format: "json" },
+  [PRODUCTS_DEBUNDLE_MAP_GID]:{ label: "Products Debundle Map",    format: "json" },
+  [AVAILABILITY_LOCKING_GID]: { label: "Availability Locking",     format: "json" },
+  [MERCHANT_SKU_DAILY_GID]:   { label: "Merchant SKU Daily",       format: "json" },
+  [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json" },
+  [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json" }
 };
 const METABASE_TIMEOUT_MS = 180000;
 const METABASE_CACHE_TTL_MS = 60 * 1000;
@@ -431,7 +431,7 @@ async function loadMetabaseSheetOnce(gid) {
   // dashboard origin -> every Metabase read goes through the Worker proxy (allow-listed on the worker side).
   if (!SYNC_CDN_URL) throw new Error("Worker URL (SYNC_CDN_URL) is not configured — cannot reach Metabase.");
   const text = await metabaseFetchText(
-    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + "&url=" + encodeURIComponent(src.url), gid);
+    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid), gid); // v1.16.0: the link itself lives on the Worker
   if (src.format === "csv") return metabaseCsvToGviz(text, gid);
   let parsed;
   try { parsed = JSON.parse(text); }
@@ -574,24 +574,15 @@ const state = {
   merchantSegHistoryRows: [], // أرشيف شهور سابقة (MERCHANT_SEG_HISTORY_GIDS) — مصدر Incentive Merchants للشهور الفاتت فقط
   supplyRepackRows: [], // شيت SUPPLY_REPACK_GID — [{ts, sku, qty, status}]
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
-  purchasePlanData: [], purchasePlanFiltered: [], purchasePlanSearch: "", purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
+  purchasePlanData: [], purchasePlanFiltered: [],  purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
   acmSalesPlanData: [], // شيت التارجت اليومي بتاع Sales Plan-ACM (ACM_SALES_PLAN_GID) — الأداء الفعلي بتاعه بيتحسب لايف من allParsedRows (MAIN_GID)
   acmKpis: { gmv: { target: 100, weight: 40 }, ndr: { target: 31, weight: 20 }, cm3: { target: 10, weight: 30 }, retention: { target: 100, weight: 10 } }, // KPI's Account Manager (Targets Upload) — الافتراضي من جدول الـ KPIs
   inventoryMap: {}, productsMap: {}, categoryTargets: {},
   commercialTargets: {}, tcCategory: "grand total",
   debundleMap: [], singleSkuTargets: {}, cogsMap: new Map(), // Commercial Plan (PRODUCTS_DEBUNDLE_MAP_GID / SINGLE_SKU_TARGETS_GID / COGS_GID)
   availabilityLockingRows: [], // Availability Locking (تحت Poor Matches) — AVAILABILITY_LOCKING_GID
-  productsMatchesRows: [], // Recommended Tracker (تحت Over View) — PRODUCTS_MATCHES_GID
-  merchantSkuDailyRows: [], // Recommended Tracker (Day0..Day5) — MERCHANT_SKU_DAILY_GID
-  recTrackerDataPrepared: [], recTrackerSortKey: "skuPlacedToday", recTrackerSortDir: "desc",
-  recTrackerFiltered: [], recTrackerPage: 0,
-  // Match Feedback (Recommended Tracker) — كل عمود من K فأكتر في شيت الماتشات
-  // (1298408207) هو تاريخ (يوم واحد)، وكل صف فيه فيدباك الأكاونت مانجر بتاع
-  // الماتش ده في اليوم ده. matchesFeedbackDateLabels = ترتيب أعمدة التواريخ
-  // زي ما هي في الشيت (من قديم لجديد، نفس ترتيب الأعمدة نفسها).
-  matchesFeedbackDateLabels: [],
-  rtAcmFilter: "", // فلتر عمود ACM في Recommended Tracker
-  rtFeedbackDateFilter: "", // "" = النهاردة، غير كده = تاريخ من matchesFeedbackDateLabels
+  productsMatchesRows: [], // PRODUCTS_MATCHES_GID
+  merchantSkuDailyRows: [], // MERCHANT_SKU_DAILY_GID
   availabilityLockingSkuRows: [], availabilityLockingCategoryRows: [], availabilityLockingTotals: null,
   cdzDataPrepared: [], cdzSortKey: "totalConfirmed", cdzSortDir: "desc",
   cdzFiltered: [], cdzPage: 0,
@@ -832,17 +823,6 @@ function getMonthOrRangeRows(mainRowsAll, currentMonthYear, sectionKey) {
   if (dateFilter) return (mainRowsAll || []).filter(r => r.timestamp >= dateFilter.startTs && r.timestamp <= dateFilter.endTs);
   return (mainRowsAll || []).filter(r => r.monthYear === currentMonthYear);
 }
-// بيبني HTML لفلتر Start/End Date + Clear خاص بسكشن معين — بينحط جوه
-// panel-head-modern/table-controls بتاعة نفس السكشن. dateFilterSectionsInit
-// (تحت، بعد DOMContentLoaded logic) بتوصّل الأحداث لكل عنصر اتعمله من الدالة دي.
-function dateRangeFilterHtml(sectionKey, title) {
-  return `<div class="filter-group section-date-filter" data-section-date="${sectionKey}" title="${title || 'Pick both dates to use an exact custom range for this section only, with cutoffs disabled — numbers become raw totals for that range. Clear either date to go back to normal.'}">
-    <input id="startDate_${sectionKey}" type="date" class="date-filter-input" aria-label="Start Date" />
-    <span class="text-dim" style="padding:0 4px;">→</span>
-    <input id="endDate_${sectionKey}" type="date" class="date-filter-input" aria-label="End Date" />
-    <button id="clearDate_${sectionKey}" class="btn btn-outline small hidden" data-clear-date="${sectionKey}">Clear</button>
-  </div>`;
-}
 let jsonpCounter = 0;
 
 // ---------------------------------------------------------------------
@@ -894,7 +874,6 @@ document.addEventListener("mousemove", (e) => {
 });
 
 const navOverview = $("navOverview");
-const navRecommendedTracker = $("navRecommendedTracker");
 const navInventory = $("navInventory");
 const navAcmToggle = $("navAcmToggle");
 const acmSubmenu = $("acmSubmenu");
@@ -918,13 +897,11 @@ const navPurchasePlan = $("navPurchasePlan");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
 const navPpmAnalystSingle = $("navPpmAnalystSingle");
-const navProductsAnalyst = $("navProductsAnalyst");
 const navProductsMatchesAnalyst = $("navProductsMatchesAnalyst");
 const navCm3Analyst = $("navCm3Analyst");
 const navPoorMatches = $("navPoorMatches");
 const navAvailabilityLocking = $("navAvailabilityLocking");
 const navAllocationLocking = $("navAllocationLocking");
-const navHealthyLocking = $("navHealthyLocking");
 const navHealthyUnlocking = $("navHealthyUnlocking");
 const navMpSalesPlan = $("navMpSalesPlan");
 const navSpFeedback = $("navSpFeedback");
@@ -1255,7 +1232,6 @@ if (syncStatusModal) {
 function switchView(viewName) {
   document.querySelectorAll('.view-section').forEach(el => { el.classList.remove('active-view'); el.classList.add('hidden'); });
   if(navOverview) navOverview.classList.remove("active");
-  if(navRecommendedTracker) navRecommendedTracker.classList.remove("active");
   if(navInventory) navInventory.classList.remove("active");
   if(navAcmPerf) navAcmPerf.classList.remove("active");
   if(navMerchantPerf) navMerchantPerf.classList.remove("active");
@@ -1267,13 +1243,11 @@ function switchView(viewName) {
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
   if(navPpmAnalystSingle) navPpmAnalystSingle.classList.remove("active");
-  if(navProductsAnalyst) navProductsAnalyst.classList.remove("active");
   if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.remove("active");
   if(navCm3Analyst) navCm3Analyst.classList.remove("active");
   if(navPoorMatches) navPoorMatches.classList.remove("active");
   if(navAvailabilityLocking) navAvailabilityLocking.classList.remove("active");
   if(navAllocationLocking) navAllocationLocking.classList.remove("active");
-  if(navHealthyLocking) navHealthyLocking.classList.remove("active");
   if(navHealthyUnlocking) navHealthyUnlocking.classList.remove("active");
   if(navMpSalesPlan) navMpSalesPlan.classList.remove("active");
   if(navSpFeedback) navSpFeedback.classList.remove("active");
@@ -1289,7 +1263,6 @@ function switchView(viewName) {
 
   let activeSection = null;
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); }
-  else if (viewName === "recommendedTracker") { activeSection = $("viewRecommendedTracker"); if(navRecommendedTracker) navRecommendedTracker.classList.add("active"); prepareRecommendedTrackerData(); }
   else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); }
   else if (viewName === "acmPerformance") { activeSection = $("viewAcmPerformance"); if(navAcmPerf) navAcmPerf.classList.add("active"); } 
   else if (viewName === "acmTargets") { activeSection = $("viewAcmTargets"); if(navAcmTargets) navAcmTargets.classList.add("active"); renderAcmTargetsView(); }
@@ -1308,7 +1281,6 @@ function switchView(viewName) {
   else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
   else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
   else if (viewName === "allocationLocking") { activeSection = $("viewAllocationLocking"); if(navAllocationLocking) navAllocationLocking.classList.add("active"); prepareAllocationLockingData(); }
-  else if (viewName === "healthyLocking") { activeSection = $("viewHealthyLocking"); if(navHealthyLocking) navHealthyLocking.classList.add("active"); prepareHealthyLockingData(); }
   else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); prepareHealthyUnlockingData(); }
   else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
   else if (viewName === "spFeedback") { activeSection = $("viewSpFeedback"); if(navSpFeedback) navSpFeedback.classList.add("active"); prepareSpFeedbackData(); }
@@ -1349,7 +1321,6 @@ function switchView(viewName) {
 }
 
 if(navOverview) navOverview.addEventListener("click", () => switchView("overview"));
-if(navRecommendedTracker) navRecommendedTracker.addEventListener("click", () => switchView("recommendedTracker"));
 if(navInventory) navInventory.addEventListener("click", () => switchView("inventory"));
 if(navAcmPerf) navAcmPerf.addEventListener("click", () => switchView("acmPerformance"));
 if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("merchantPerformance"));
@@ -1366,7 +1337,6 @@ if(navCm3Analyst) navCm3Analyst.addEventListener("click", () => switchView("cm3A
 if(navPoorMatches) navPoorMatches.addEventListener("click", () => switchView("poorMatches"));
 if(navAvailabilityLocking) navAvailabilityLocking.addEventListener("click", () => switchView("availabilityLocking"));
 if(navAllocationLocking) navAllocationLocking.addEventListener("click", () => switchView("allocationLocking"));
-if(navHealthyLocking) navHealthyLocking.addEventListener("click", () => switchView("healthyLocking"));
 if(navHealthyUnlocking) navHealthyUnlocking.addEventListener("click", () => switchView("healthyUnlocking"));
 if(navMpSalesPlan) navMpSalesPlan.addEventListener("click", () => switchView("mpSalesPlan"));
 if(navSpFeedback) navSpFeedback.addEventListener("click", () => switchView("spFeedback"));
@@ -1430,22 +1400,11 @@ if ($("adminPasswordInput")) $("adminPasswordInput").addEventListener("keydown",
 // -------------------------------------------------------------------------
 // SEGMENTATION PANEL — render (الجدول + كروت الـ KPI بتاعة يوليو)
 // -------------------------------------------------------------------------
-function segAchColor(ratio) {
-  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "text-dim";
-  if (ratio >= 1) return "text-green";
-  if (ratio >= 0.8) return "text-orange";
-  return "text-red";
-}
 function fmtSegValue(unit, value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   if (unit === "money") return fmtMoneyCompactCell(value);
   if (unit === "percent") return fmtPctCell(value * 100);
   return fmtIntCell(Math.round(value));
-}
-function fmtSegAch(ach) {
-  if (!ach || ach.kind === "dash") return `<span class="text-dim">-</span>`;
-  if (ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
-  return `<span class="font-bold ${segAchColor(ach.ratio)}">${fmtPctCell(ach.ratio * 100)}</span>`;
 }
 function segAchPill(ach) {
   if (!ach || ach.kind === "dash" || ach.ratio === null || ach.ratio === undefined || !Number.isFinite(ach.ratio)) return `<span class="text-dim">-</span>`;
@@ -1572,12 +1531,6 @@ if (searchAllocationLockingInput) searchAllocationLockingInput.addEventListener(
 if($("prevPageAllocationLocking")) $("prevPageAllocationLocking").addEventListener("click", () => { if (allocationLockingState.page > 0) { allocationLockingState.page -= 1; renderPaginatedAllocationLockingTable(); } });
 if($("nextPageAllocationLocking")) $("nextPageAllocationLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((allocationLockingState.filtered || []).length / PAGE_SIZE)); if (allocationLockingState.page < totalPages - 1) { allocationLockingState.page += 1; renderPaginatedAllocationLockingTable(); } });
 
-const searchHealthyLockingInput = $("searchHealthyLockingInput");
-if (searchHealthyLockingInput) searchHealthyLockingInput.addEventListener("input", applyHealthyLockingSearchAndSort);
-if($("prevPageHealthyLocking")) $("prevPageHealthyLocking").addEventListener("click", () => { if (healthyLockingState.page > 0) { healthyLockingState.page -= 1; renderPaginatedHealthyLockingTable(); } });
-if($("nextPageHealthyLocking")) $("nextPageHealthyLocking").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((healthyLockingState.filtered || []).length / PAGE_SIZE)); if (healthyLockingState.page < totalPages - 1) { healthyLockingState.page += 1; renderPaginatedHealthyLockingTable(); } });
-if($("prevPageHlMerchant")) $("prevPageHlMerchant").addEventListener("click", () => { if (healthyLockingState.merchantPage > 0) { healthyLockingState.merchantPage -= 1; renderHealthyLockingMerchantTable(); } });
-if($("nextPageHlMerchant")) $("nextPageHlMerchant").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil((state.healthyLockingMerchantRows || []).length / PAGE_SIZE)); if (healthyLockingState.merchantPage < totalPages - 1) { healthyLockingState.merchantPage += 1; renderHealthyLockingMerchantTable(); } });
 const searchHealthyUnlockingInput = $("searchHealthyUnlockingInput");
 if (searchHealthyUnlockingInput) searchHealthyUnlockingInput.addEventListener("input", applyHealthyUnlockingSearchAndSort);
 if($("prevPageHealthyUnlocking")) $("prevPageHealthyUnlocking").addEventListener("click", () => { if (healthyUnlockingState.page > 0) { healthyUnlockingState.page -= 1; renderPaginatedHealthyUnlockingTable(); } });
@@ -2011,6 +1964,9 @@ function yieldToMainThread() { return new Promise(resolve => setTimeout(resolve,
 
 async function publishComputedSnapshots() {
   if (!PUBLISH_COMPUTED_API_URL) return; // disabled (لو الرابط فاضي)
+  // v1.16.0: النشر بقى محتاج الـ admin key — بيحصل بس من متصفح أدمن (ومش بيتقل على باقي الناس)
+  let publishKey = ""; try { publishKey = localStorage.getItem("towerAdminKey") || ""; } catch (e) {}
+  if (!publishKey) return;
   if (!state.allParsedRows || state.allParsedRows.length === 0) return; // لسه مفيش داتا خام اتحملت
 
   // بطلب صريح: الشاشة كانت بتجمد (Freeze) وقت تحميل الداتا الجديدة، بسبب إن
@@ -2047,7 +2003,7 @@ async function publishComputedSnapshots() {
     try {
       const pubRes = await fetch(PUBLISH_COMPUTED_API_URL, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // بدون preflight — الـ Worker بيرجّع CORS headers فنقدر نقرا الرد
+        headers: { "Content-Type": "text/plain;charset=utf-8", "X-Admin-Key": publishKey },
         body: JSON.stringify({ sections: [s] })
       });
       if (pubRes.ok) sentCount++; else console.warn(`[Computed API publish] ${s.section}/${s.table} rejected (HTTP ${pubRes.status})`);
@@ -2820,75 +2776,6 @@ function merchantSkuDailyPercent(cell) {
 }
 
 // -------------------------------------------------------------------------
-// RECOMMENDED TRACKER — بيثري كل صف من parseProductsMatchesSheet() بأرقام
-// لايف محسوبة من MAIN_GID و PRODUCTS_DEBUNDLE_MAP_GID، بنفس المعادلات
-// المستخدمة في باقي الداشبورد (Commercial Debundlized / Availability
-// Locking) عشان الأرقام تفضل متسقة مع أي سكشن تاني:
-//
-//  • "النهاردة" هنا معناها التاريخ الفعلي الحقيقي (تاريخ الجهاز وقت ما
-//    الصفحة بتتحسب) — مش آخر تاريخ موجود في MAIN_GID زي باقي سكاشن
-//    الداشبورد. لو الشيت لسه ما اتحدثش لليوم الحقيقي ده، الأعمدة دي بترجع 0
-//    لنهارده بدل ما تدّي بيانات يوم قديم وتعتبرها غلط إنها "النهاردة".
-//  • SKU Placed today  = مجموع Placed Pieces لكل التجار على نفس الـ SKU في
-//    تاريخ النهاردة الحقيقي بالظبط — لو مفيش صفوف بتاريخ النهاردة أصلاً في
-//    MAIN_GID، القيمة بترجع 0.
-//  • SKU Placed Yesterday = نفس الحاجة بس بتاريخ (النهاردة الحقيقي - يوم).
-//  • SKU Current AVG   = متوسط Placed Pieces اليومي لنفس الـ SKU (كل
-//    التجار مع بعض) آخر 3 أيام قبل النهاردة (يعني امبارح + يومين قبله،
-//    من غير النهاردة نفسه لأن يومه لسه ماخلصش) — بيتقارن بعمود "SKU
-//    Starting AVG" الجاي من الشيت.
-//  • Merchant Current AVG = نفس الفكرة بس على مستوى (Merchant × SKU) —
-//    متوسط Placed Pieces اليومي بتاع التاجر ده بالذات على الـ SKU ده بالذات
-//    آخر 3 أيام قبل النهاردة (بنفس منطق avg3dPlacedMerchant المستخدم في
-//    Availability/Healthy Locking) — بيتقارن بعمود "Merchant Starting AVG".
-//  • Current Inventory  = عمود H (STOCK) في شيت الديبندلايز
-//    (PRODUCTS_DEBUNDLE_MAP_GID)، بمطابقة مباشرة على عمود A (PRODUCT_ID) في
-//    نفس الشيت — القيمة بتتقرا زي ما هي من غير أي جمع/طرح أو أي عملية
-//    حسابية عليها. لو الـ PRODUCT_ID ده مش موجود في شيت الديبندلايز أصلاً،
-//    fallback لعمود Stock الموجود في نفس شيت الماتشات (1298408207) نفسه.
-//  • Current Inventory DOH = "SKU TOTAL DEMAND OVERALL" (Debundled):
-//      - لو الـ PRODUCT_ID Single (مش بندل): Stock (عمود H بتاعه) ÷ متوسط
-//        آخر 3 أيام Confirmed المجمّع من *كل* المنتجات (سنجل أو بندل) اللي
-//        بتحتوي عليه — يعني بنشوف كل البندلات اللي فيها نفس الـ Single ده
-//        (من شيت الديبندلايز 1409034448) ونجمع TOTAL DEMAND بتاعها كلها
-//        (Confirmed × PRODUCT_QUANTITY) فوق الديماند المباشر بتاعه، مش بس
-//        الطلب اللي جاي عليه هو لوحده كـ PRODUCT_ID مباشر.
-//      - لو الـ PRODUCT_ID أصلاً Bundle (IS_BUNDLE=TRUE في نفس الشيت):
-//        بياخد أقل DOH (Minimum) بين كل الـ Singles اللي جوه البندل ده —
-//        أضعف Single هو اللي بيتحكم في توفر البندل ككل.
-//      - لو مفيش Confirmed خالص آخر 3 أيام لأي Single، الـ DOH بيرجع
-//        لـ Stock بتاعه نفسه (زي ما بيحصل بالظبط في باقي السكشنز).
-//  • Avg SKU Last 3D = متوسط الـ Confirmed آخر 3 أيام اللي هو أصلاً مقام
-//    معادلة الـ Current Inventory DOH (نفس "SKU TOTAL DEMAND OVERALL"
-//    Debundled فوق) — لو الـ PRODUCT_ID Single، الرقم ده بتاعه هو نفسه؛
-//    ولو Bundle، بيبقى بتاع نفس الـ Single اللي هو "عنق الزجاجة" (صاحب أقل
-//    DOH) المستخدم في حساب Current Inventory DOH بتاع البندل، عشان الرقمين
-//    (DOH والـ Avg) يفضلوا متسقين مع بعض ودايمًا بيتكلموا عن نفس الـ Single.
-//
-// الأعمدة دي كلها بتتحسب على مستوى الماتش (Merchant × PRODUCT_ID) بالتحديد،
-// كل واحد بلاج مختلف (زي ما اتطلب بالظبط، مبني على "النهاردة الحقيقي"):
-//  • CR%  = Confirmed Pieces ÷ Placed Pieces، بس للصفوف اللي عدى عليها
-//    يومين (lag يومين، عشان الـ Confirm ياخد وقت يستقر).
-//  • DR%  = Delivered Pieces ÷ Confirmed Pieces، بس للصفوف اللي عدى عليها
-//    5 أيام (lag 5 أيام).
-//  • NDR% = CR% × DR% (زي ما هما، من غير أي تعديل إضافي).
-//  • PPM/Piece = متوسط PPM_PER_PIECE (عمود AD في MAIN_GID) موزون بالـ
-//    Delivered Pieces، بس للصفوف اللي عدى عليها 4 أيام (lag 4 أيام، نفس
-//    كات أوف الـ CM3).
-//  • Placed ASP = Placed GMV ÷ Placed Pieces لآخر 3 أيام "فيهم داتا فعلاً"
-//    لنفس الماتش (مش آخر 3 أيام تقويم عمياني) — لو آخر 3 أيام تقويم
-//    (النهاردة-3 لحد امبارح) مفيهمش Placed خالص، بيرجع تلقائيًا يدوّر
-//    لأقرب 3 أيام قبلهم فيهم داتا (هيستوريكل) ويحسب منهم.
-//  • CM3 Per Merchant = مجموع CM3 لنفس الماتش، بس للصفوف اللي عدى عليها
-//    4 أيام (lag 4 أيام).
-//  • CM3% = CM3 Per Merchant ÷ Delivered GMV لنفس الماتش، بنفس كات أوف الـ
-//    4 أيام (نفس الصفوف بالظبط المستخدمة في CM3 Per Merchant).
-//  • Priceing_PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID/1779314157) -
-//    Cost (شيت COGS، COGS_GID/1724469150) — القيم الثلاثة بتتقرا زي ما هي
-//    من الشيتين، مفيش أي حسبة عليهم غير الطرح المذكور.
-// -------------------------------------------------------------------------
-
-// -------------------------------------------------------------------------
 // SHARED HELPER — بنفس معادلة Stock/DOH المستخدمة في Recommended Tracker
 // بالظبط ("SKU TOTAL DEMAND OVERALL" Debundled)، مستخرجة هنا في فانكشن
 // منفصلة عشان أي سكشن تاني (زي PPM Analyst / Products) يقدر يستخدمها من
@@ -2971,364 +2858,6 @@ function buildDebundledStockDohIndex(mainRows, windowDays) {
 
   return { stockByProductId, bundleProductMap, isBundleByProductId, singleOverallStats, getStockDoh };
 }
-// opts.sync (افتراضي true): لو false، الفانكشن بتحسب وترجّع نفس الصفوف
-// بالظبط (شاملة أي ماتشات "New Locked" جديدة) لكن من غير ما تكتب/تبعت أي
-// حاجة لل backend (syncNewLockedMatchesToSheet تحت). بنستخدم false بس لما
-// الفانكشن دي بتتنادى من غير ما اليوزر فعليًا فاتح سكشن Recommended Tracker
-// (زي getRows بتاع الـ Computed Data API اللي بيشتغل في الخلفية كل تحميل
-// صفحة) — عشان الكتابة دي متتكررش من غير داعي وتزوّد الضغط على الـ backend
-// (اللي كان بيسبب 404/HTML بدل JSON لما بيتضرب مع نشر الـ Computed API
-// والـ Drive backup في نفس اللحظة). لما اليوزر فعلاً يفتح السكشن أو يغيّر
-// فلتر التاريخ بتاعه، الكتابة بتفضل شغالة عادي زي ما هي.
-function prepareRecommendedTrackerData(opts) {
-  const allowSync = !opts || opts.sync !== false;
-  const mainRows = state.allParsedRows || [];
-
-  // Placed Pieces اليومية لآخر 6 أيام (DAY0..DAY5) من MERCHANT_SKU_DAILY_GID
-  // — بمفتاح (TAGER_ID||SKU_ID) نفس ترتيب matchKey (merchantId||sku) تحت.
-  const dailyByMatch = new Map();
-  (state.merchantSkuDailyRows || []).forEach(r => {
-    if (!r.skuId || !r.tagerId) return;
-    dailyByMatch.set(r.tagerId + "||" + r.skuId, r);
-  });
-
-  // النهاردة هنا = التاريخ الحقيقي الفعلي (تاريخ الجهاز)، مش آخر تاريخ
-  // موجود في MAIN_GID — طلب صريح عشان Placed Today/Yesterday و Current
-  // AVG يتقاسوا على التاريخ الحقيقي مش على آخر يوم اتحدثت فيه الداتا.
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-  const ydayMs = todayMs - 86400000;
-  // نطاق "آخر 3 أيام" لحساب الـ Current AVG = 3 أيام كاملة قبل النهاردة
-  // (امبارح + يومين قبله) — من غير النهاردة نفسه، لأن يومه لسه ماخلصش.
-  const d3Start = todayMs - (3 * 86400000);
-
-  // كات أوف الـ CR%/DR%/CM3% — كل واحد له لاج مختلف بالظبط زي ما اتطلب:
-  // CR% (Confirmed/Placed) بيرجع يومين، DR% (Delivered/Confirmed) بيرجع 5
-  // أيام، CM3%/PPM/Piece بيرجعوا 4 أيام (نفس منطق الـ lag cutoff المستخدم
-  // في Commercial Debundlized/Targets Commercial، بس بأرقام لاج مختلفة هنا
-  // ومبنية على "النهاردة الحقيقي" بدل آخر تاريخ في MAIN_GID).
-  const crCutoffMs = todayMs - (2 * 86400000);
-  const drCutoffMs = todayMs - (5 * 86400000);
-  const cm3CutoffMs = todayMs - (4 * 86400000);
-
-  // Current Inventory: بيتقرا مباشرة من شيت الديبندلايز (1409034448) — عمود A
-  // (PRODUCT_ID) وعمود H (STOCK) لنفس الصف، مباشرة زي ما هو من غير أي جمع/طرح
-  // أو أي عملية حسابية عليه. الـ join هنا لازم يبقى بعمود A (PRODUCT_ID) مش
-  // SINGLE_ID (عمود D) — دا اللي كان بيطلّع Current Inventory غلط قبل كده.
-  // لو نفس PRODUCT_ID اتكرر أكتر من صف، بناخد أول قيمة H نلاقيها بس (من غير
-  // جمع القيم مع بعض).
-  const stockByProductId = new Map();
-  (state.debundleMap || []).forEach(r => {
-    if (r.productId && !stockByProductId.has(r.productId)) stockByProductId.set(r.productId, r.stock);
-  });
-
-  // -----------------------------------------------------------------------
-  // Current Inventory DOH — "SKU TOTAL DEMAND OVERALL" (Debundled):
-  //   • bundleProductMap: PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity}]
-  //     من شيت الديبندلايز نفسه (1409034448) — نفس الماب المستخدم في
-  //     Commercial Debundlized/Availability Locking.
-  //   • isBundleByProductId: PRODUCT_ID -> IS_BUNDLE (عمود C) زي ما هو في الشيت.
-  //   • conf3dBySingleOverall: لكل SINGLE_ID، مجموع الـ Confirmed Pieces آخر
-  //     3 أيام الجايه من *كل* المنتجات (سنجل أو بندل) اللي بتحتوي عليه —
-  //     يعني بنوزع ديماند أي بندل اتباع على كل Single جواه (× PRODUCT_QUANTITY)
-  //     بدل ما نقرا بس الطلب المباشر على الـ Single ID نفسه.
-  // -----------------------------------------------------------------------
-  const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-  const isBundleByProductId = new Map();
-  (state.debundleMap || []).forEach(r => {
-    if (!r.productId || isBundleByProductId.has(r.productId)) return;
-    isBundleByProductId.set(r.productId, /^(true|yes|1)$/i.test(String(r.isBundle || "").trim()));
-  });
-  const conf3dBySingleOverall = new Map();
-
-  // -----------------------------------------------------------------------
-  // Allocated Qty / Used Qty / Remaining Pieces — من شيت Availability
-  // Locking (AVAILABILITY_LOCKING_GID)، على مستوى (Merchant × Single SKU)
-  // بالظبط — يعني قفل التاجر بتاع الصف ده تحديدًا على الـ Single، مش
-  // إجمالي كل التجار مع بعض على نفس الـ SKU (زي TAGER_ID في الشيت =
-  // merchantId هنا). بنجمع القفلات النشطة (Active) بس لنفس (تاجر × Single)
-  // (عادة قفل واحد، بس بنجمع للاحتياط لو فيه أكتر من صف):
-  //   • لو الـ PRODUCT_ID في Recommended Tracker Single (مش بندل): بناخد
-  //     الأرقام دي بتاعة (التاجر × الـ Single) نفسه مباشرة.
-  //   • لو الـ PRODUCT_ID Bundle: بندور على كل الـ Singles اللي جواه (من
-  //     شيت الديبندلايز، زي بالظبط الـ Current Inventory DOH فوق)، لنفس
-  //     التاجر بتاع الصف ده، وناخد الـ Single صاحب أقل Remaining Pieces
-  //     (أضعف حلقة/الأكتر تقييدًا)، والـ 3 أعمدة (Allocated/Used/Remaining)
-  //     بتطلع كلها بتاعة نفس الـ Single ده بالتحديد عشان الأرقام تفضل
-  //     متسقة مع بعض.
-  // -----------------------------------------------------------------------
-  const lockingByMerchantSingle = new Map();
-  (state.availabilityLockingRows || []).forEach(l => {
-    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
-    const key = l.tagerId + "||" + l.singleId;
-    const agg = lockingByMerchantSingle.get(key) || { allocatedQty: 0, usedQty: 0, remainingPieces: 0 };
-    agg.allocatedQty += (l.allocatedQty || 0);
-    agg.usedQty += (l.usedQty || 0);
-    agg.remainingPieces += (l.remainingPieces || 0);
-    lockingByMerchantSingle.set(key, agg);
-  });
-  const lockingForMerchantSingle = (merchantId, singleId) => lockingByMerchantSingle.get(merchantId + "||" + singleId) || { allocatedQty: 0, usedQty: 0, remainingPieces: 0 };
-
-  // خرائط تجميع لكل SKU: Placed Pieces اليوم/امبارح/آخر 3 أيام (overall)،
-  // وآخر 3 أيام على مستوى (Merchant × SKU). (Confirmed Pieces آخر 3 أيام
-  // بقت conf3dBySingleOverall فوق — مبنية Debundled مش مباشرة زي هنا.)
-  const placedTodayBySku = new Map();
-  const placedYdayBySku = new Map();
-  const placed3dBySku = new Map();
-  const placed3dByMerchantSku = new Map(); // "merchantId||sku" -> pieces
-
-  // تجميع على مستوى (Merchant × SKU) — نفس مفتاح صفوف الـ Recommended
-  // Tracker (كل صف = ماتش Merchant×PRODUCT_ID) — للـ CR%/DR%/NDR%/PPM/
-  // Placed ASP/CM3 Per Merchant/CM3%.
-  const byMatch = new Map(); // "merchantId||sku" -> bucket
-  const getMatchBucket = (key) => {
-    let b = byMatch.get(key);
-    if (!b) {
-      b = {
-        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
-        cm3: 0, cm3Gmv: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0,
-        placedByDate: new Map() // rTime -> { gmv, pieces } — للـ Placed ASP (آخر 3 أيام فيهم داتا فعلاً)
-      };
-      byMatch.set(key, b);
-    }
-    return b;
-  };
-
-  mainRows.forEach(r => {
-    if (!r.sku) return;
-    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-    const rTime = rDate.getTime();
-
-    if (rTime === todayMs) placedTodayBySku.set(r.sku, (placedTodayBySku.get(r.sku) || 0) + (r.placedPieces || 0));
-    if (rTime === ydayMs) placedYdayBySku.set(r.sku, (placedYdayBySku.get(r.sku) || 0) + (r.placedPieces || 0));
-    if (rTime >= d3Start && rTime < todayMs) {
-      placed3dBySku.set(r.sku, (placed3dBySku.get(r.sku) || 0) + (r.placedPieces || 0));
-      if (r.merchantId) {
-        const key = r.merchantId + "||" + r.sku;
-        placed3dByMerchantSku.set(key, (placed3dByMerchantSku.get(key) || 0) + (r.placedPieces || 0));
-      }
-      // SKU TOTAL DEMAND OVERALL (Debundled) — نفس صف الـ MAIN_GID ده ممكن
-      // يكون بندل، فبنوزع الـ Confirmed Pieces بتاعه على كل Single جواه
-      // (× PRODUCT_QUANTITY) بدل ما نحطها بس تحت الـ PRODUCT_ID الأصلي.
-      const mappings = bundleProductMap.get(r.sku);
-      if (mappings && mappings.length) {
-        mappings.forEach(mp => {
-          conf3dBySingleOverall.set(mp.singleId, (conf3dBySingleOverall.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
-        });
-      } else {
-        // مش موجود في شيت الديبندلايز خالص — نعتبره Single لوحده بكمية 1.
-        conf3dBySingleOverall.set(r.sku, (conf3dBySingleOverall.get(r.sku) || 0) + (r.confirmedPieces || 0));
-      }
-    }
-
-    if (!r.merchantId) return;
-    const matchKey = r.merchantId + "||" + r.sku;
-    const b = getMatchBucket(matchKey);
-    // Placed ASP — بنسجل كل يوم بيانات Placed فيه لوحده (تاريخ -> gmv/pieces)
-    // لنفس الماتش، عشان بعدين ناخد آخر 3 أيام "فيهم داتا فعلاً" مش آخر 3
-    // أيام تقويم عمياني — لو آخر 3 أيام تقويم مفيهمش داتا، بيرجع تلقائيًا
-    // لأقرب 3 أيام قبلهم فيهم داتا (تفاصيل الاختيار في نهاية الفانكشن).
-    if (r.placedPieces > 0) {
-      const dEntry = b.placedByDate.get(rTime) || { gmv: 0, pieces: 0 };
-      dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
-      b.placedByDate.set(rTime, dEntry);
-    }
-    // CR% — Confirmed ÷ Placed، بس للصفوف اللي عدى عليها يومين (CR lag). لو
-    // فلتر الديت رينج بتاع recTracker شغال، بيتلغي الكات أوف ده تمامًا.
-    const recTrackerDateFilterActive = isDateRangeFilterActive("recTracker");
-    if (recTrackerDateFilterActive || rTime <= crCutoffMs) { b.crPlaced += (r.placedPieces || 0); b.crConfirmed += (r.confirmedPieces || 0); }
-    // DR% — Delivered ÷ Confirmed، بس للصفوف اللي عدى عليها 5 أيام (DR lag).
-    if (recTrackerDateFilterActive || rTime <= drCutoffMs) { b.drConfirmed += (r.confirmedPieces || 0); b.drDelivered += (r.deliveredPieces || 0); }
-    // CM3 Per Merchant / CM3% — بس للصفوف اللي عدى عليها 4 أيام (CM3 lag).
-    if (recTrackerDateFilterActive || rTime <= cm3CutoffMs) {
-      b.cm3 += (r.cm3 || 0); b.cm3Gmv += (r.deliveredGmv || 0);
-    }
-    // PPM/Piece — من غير أي كات أوف خالص (بطلب صريح)، بعكس CM3 اللي لسه
-    // بياخد كات أوف الـ 4 أيام فوق.
-    b.ppmPerPieceWeighted += (r.ppmPerPiece || 0) * (r.deliveredPieces || 0);
-    b.ppmPerPieceWeight += (r.deliveredPieces || 0);
-  });
-
-  // Avg/DOH بتاع Single واحد (Overall/Debundled): avg = متوسط آخر 3 أيام
-  // Confirmed المجمّع من *كل* المنتجات (سنجل أو بندل) اللي بتحتوي عليه
-  // (conf3dBySingleOverall) — نفس الرقم ده هو مقام معادلة الـ DOH (Stock ÷
-  // avg، من عمود H بتاع نفس صف الـ Single في شيت الديبندلايز).
-  const singleOverallStats = (singleId) => {
-    const stock = stockByProductId.has(singleId) ? stockByProductId.get(singleId) : 0;
-    // بنقرّب الـ Avg Confirmed لأقرب رقم صحيح قبل معادلة الـ DOH، بنفس منطق
-    // buildDebundledStockDohIndex بالظبط — عشان الـ DOH متطلعش رقم كسور.
-    const avg = Math.round((conf3dBySingleOverall.get(singleId) || 0) / 3);
-    const doh = avg > 0 ? (stock / avg) : (stock || 0);
-    return { avg, doh };
-  };
-
-  // ---------------------------------------------------------------------
-  // NEW LOCKED MATCHES — بطلب صريح: بنقتصر بس على الـ SKUs (PRODUCT_ID)
-  // الموجودين أصلاً في شيت الماتشات (PRODUCTS_MATCHES_GID) — يعني منتجات
-  // متتبعة فعلاً في الـ Recommended Tracker لتاجر واحد أو أكتر. مش أي SKU
-  // عليه قفل في الدنيا، بس اللي هو أصلاً موجود في الشيت ده. من جوه الـ SKUs
-  // دي بس، بندور على أي (تاجر × نفس الـ SKU) عليه قفل نشط (Availability
-  // Locking) بس مفيش ليه صف في الشيت لنفس التاجر ده تحديدًا — يعني SKU
-  // متتبع، بس التاجر ده بالذات ناقص منه. بنلاقيهم هنا (مقارنة على مستوى
-  // Merchant ID + PRODUCT_ID)، وبنضمهم لنفس الـ array اللي بيتعمله .map()
-  // تحت — يعني بياخدوا بالظبط نفس حسبة الأداء (Stock/DOH/CR%/DR%/NDR%/PPM/
-  // CM3/ASP/Allocated/Used/Remaining Pieces) اللي أي ماتش عادي بياخدها، من
-  // غير ما نكرر أي منطق. وبعدين syncNewLockedMatchesToSheet بتبعتهم لل
-  // backend عشان يتكتبوا فعليًا كصفوف جديدة في الشيت نفسه (Type = "New
-  // Locked")، فالمرة الجاية هيوصلوا عادي من الشيت زي أي ماتش تاني ومش
-  // هيتكرر إضافتهم تاني (مفيش تكرار للداتا خالص).
-  // ---------------------------------------------------------------------
-  const existingMatchKeys = new Set((state.productsMatchesRows || []).map(m => m.merchantId + "||" + m.productId));
-  const existingProductIds = new Set((state.productsMatchesRows || []).map(m => m.productId));
-  const seenMissingLockedKeys = new Set();
-  const missingLockedMatches = [];
-  (state.availabilityLockingRows || []).forEach(l => {
-    if (!l.singleId || !l.tagerId || !alIsLockActive(l, todayMs)) return;
-    // الشرط الجديد: الـ SKU (Single ID) لازم يكون أصلاً موجود كـ PRODUCT_ID
-    // في شيت الماتشات — مش أي SKU عليه قفل في أي مكان.
-    if (!existingProductIds.has(l.singleId)) return;
-    const key = l.tagerId + "||" + l.singleId;
-    if (existingMatchKeys.has(key) || seenMissingLockedKeys.has(key)) return;
-    seenMissingLockedKeys.add(key);
-    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(l.singleId) || 0) : 0;
-    // Starting AVGs لماتش جديد = نفس الـ Current AVG بتاعه دلوقتي (أول لحظة
-    // بيتضاف فيها للتراكر بيبقى هو نفسه نقطة البداية بطبيعة الحال).
-    const skuAvgStart = (placed3dBySku.get(l.singleId) || 0) / 3;
-    const merchantAvgStart = (placed3dByMerchantSku.get(key) || 0) / 3;
-    missingLockedMatches.push({
-      type: "New Locked",
-      productId: l.singleId,
-      productName: l.skuName || l.singleId,
-      merchantId: l.tagerId,
-      merchant: l.merchantName || l.tagerId,
-      stock: stockByProductId.has(l.singleId) ? stockByProductId.get(l.singleId) : 0,
-      action: "",
-      startingCogs: cogsCost,
-      merchantStartingAvg: merchantAvgStart,
-      skuStartingAvg: skuAvgStart,
-      feedbackByDate: {}
-    });
-  });
-  if (missingLockedMatches.length && allowSync) syncNewLockedMatchesToSheet(missingLockedMatches);
-
-  const rows = (state.productsMatchesRows || []).concat(missingLockedMatches).map(m => {
-    const sku = m.productId;
-    const matchKey = m.merchantId + "||" + sku;
-    const skuCurrentAvg = (placed3dBySku.get(sku) || 0) / 3;
-    const merchantCurrentAvg = (placed3dByMerchantSku.get(matchKey) || 0) / 3;
-    const currentInventory = stockByProductId.has(sku) ? stockByProductId.get(sku) : (m.stock || 0);
-
-    // Current Inventory DOH + Avg SKU Last 3D:
-    //  • لو الـ SKU ده Single (مش بندل) → الـ DOH والـ Avg بتوع
-    //    "SKU TOTAL DEMAND OVERALL" هما بتوع نفسه (singleOverallStats(sku)).
-    //  • لو الـ SKU ده Bundle → أضعف حلقة بتتحكم في التوفر: بناخد الـ Single
-    //    صاحب أقل DOH (Minimum) بين كل الـ Singles اللي جوه البندل ده، وكل
-    //    من الـ DOH والـ Avg SKU Last 3D بيطلعوا بتوع نفس الـ Single ده
-    //    بالتحديد (مش بس الـ DOH لوحده) — عشان الرقمين يفضلوا متسقين مع
-    //    بعض ويوضحوا مين فعلاً هو عنق الزجاجة جوه البندل.
-    const mappings = bundleProductMap.get(sku) || [];
-    const isBundleSku = isBundleByProductId.get(sku) || mappings.length > 1;
-    let currentInventoryDoh, avgSkuLast3d;
-    if (isBundleSku && mappings.length) {
-      const singleStats = mappings.map(mp => singleOverallStats(mp.singleId));
-      // معيار الـ Minimum DOH بيتطبق بس على الـ Singles اللي عندها طلب فعلي
-      // (avg > 0) — لو 2 اسكيو مختلفين وعندهم طلب، بناخد أقل DOH بينهم زي
-      // ما هو مطلوب بالظبط. لو كل مكونات البندل مالهاش طلب خالص، يبقى
-      // الـ DOH = الـ Stock بتاع الصف/الماتش نفسه (currentInventory).
-      const withDemand = singleStats.filter(s => s.avg > 0);
-      if (withDemand.length) {
-        const bottleneck = withDemand.reduce((min, s) => (s.doh < min.doh ? s : min), withDemand[0]);
-        currentInventoryDoh = bottleneck.doh; avgSkuLast3d = bottleneck.avg;
-      } else {
-        currentInventoryDoh = currentInventory || 0; avgSkuLast3d = 0;
-      }
-    } else {
-      const stats = singleOverallStats(sku);
-      currentInventoryDoh = stats.doh;
-      avgSkuLast3d = stats.avg;
-    }
-
-    const b = byMatch.get(matchKey) || { crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0, cm3: 0, cm3Gmv: 0, ppmPerPieceWeighted: 0, ppmPerPieceWeight: 0, placedByDate: new Map() };
-    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
-    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
-    const ndrPct = (crPct * drPct) / 100;
-    const ppmPerPiece = b.ppmPerPieceWeight > 0 ? (b.ppmPerPieceWeighted / b.ppmPerPieceWeight) : 0;
-
-    // Placed ASP — آخر 3 أيام "فيهم داتا فعلاً" لنفس الماتش (مش آخر 3 أيام
-    // تقويم عمياني): بنرتب كل الأيام اللي فيها Placed لنفس الماتش من الأحدث
-    // للأقدم، وناخد أول 3 أيام بس. لو آخر 3 أيام تقويم (النهاردة-3 لحد
-    // امبارح) مفيهمش داتا، الترتيب ده بيرجع تلقائيًا لأقرب 3 أيام قبلهم
-    // فيهم داتا (زي ما اتطلب بالظبط: "هات الداتا اللي قبليها هيستوريكل").
-    const sortedPlacedDates = Array.from(b.placedByDate.entries()).sort((x, y) => y[0] - x[0]).slice(0, 3);
-    let placedAspGmv = 0, placedAspPieces = 0;
-    sortedPlacedDates.forEach(([, entry]) => { placedAspGmv += entry.gmv; placedAspPieces += entry.pieces; });
-    const placedAsp = placedAspPieces > 0 ? (placedAspGmv / placedAspPieces) : 0;
-
-    // Last Placed ASP — يوم واحد بس (أحدث يوم فيه Placed فعلاً لنفس الماتش،
-    // مش متوسط آخر 3 أيام زي Placed ASP فوق) — أول عنصر في sortedPlacedDates
-    // أصلاً هو أحدث يوم (مرتبين من الأحدث للأقدم).
-    const lastPlacedAsp = sortedPlacedDates.length ? (sortedPlacedDates[0][1].pieces > 0 ? (sortedPlacedDates[0][1].gmv / sortedPlacedDates[0][1].pieces) : 0) : 0;
-
-    const cm3PerMerchant = b.cm3;
-    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
-
-    // Priceing_PPM = PRICE - PROFIT (شيت Products، PRODUCTS_GID 1779314157) -
-    // Cost (شيت COGS، COGS_GID 1724469150) لنفس الـ PRODUCT_ID — القيم دي
-    // بتتقرا زي ما هي من الشيتين من غير أي حسبة تانية عليها.
-    const prodInfo = state.productsMap[sku] || { price: 0, profit: 0 };
-    const cogsCost = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
-    const skuPpm = (prodInfo.price || 0) - (prodInfo.profit || 0) - cogsCost;
-    // PPM% (بعد Priceing_PPM مباشرة) = Priceing_PPM ÷ Last Placed ASP (آخر يوم فيه
-    // Placed فعلاً، مش المتوسط) — بيدي نسبة الـ PPM من آخر سعر بيع فعلي.
-    const skuPpmPct = lastPlacedAsp > 0 ? (skuPpm / lastPlacedAsp) * 100 : 0;
-
-    // Allocated Qty / Used Qty / Remaining Pieces (Availability Locking) —
-    // على مستوى (التاجر × SKU) بتاع الصف ده تحديدًا (m.merchantId)، مش كل
-    // التجار مع بعض. لو بندل: أقل Remaining Pieces بين كل الـ Singles جواه
-    // لنفس التاجر ده (bottleneck)، وناخد الـ Allocated/Used منه هو نفسه مش
-    // مجموع كل الـ Singles.
-    let lockAllocatedQty = 0, lockUsedQty = 0, lockRemainingPieces = 0;
-    if (isBundleSku && mappings.length) {
-      const singleLocks = mappings.map(mp => lockingForMerchantSingle(m.merchantId, mp.singleId));
-      const minLock = singleLocks.reduce((min, s) => (s.remainingPieces < min.remainingPieces ? s : min), singleLocks[0]);
-      lockAllocatedQty = minLock.allocatedQty; lockUsedQty = minLock.usedQty; lockRemainingPieces = minLock.remainingPieces;
-    } else {
-      const lock = lockingForMerchantSingle(m.merchantId, sku);
-      lockAllocatedQty = lock.allocatedQty; lockUsedQty = lock.usedQty; lockRemainingPieces = lock.remainingPieces;
-    }
-
-    // ACM بتاع التاجر ده — من merchantInfoMap (مبني من شيت الـ Main) —
-    // عشان الأكاونت مانجر يقدر يفلتر ويشوف بس الماتشات بتاعته.
-    const acmName = ((state.merchantInfoMap || new Map()).get(m.merchantId) || {}).acmName || "Unassigned";
-
-    // Placed Pieces اليومية آخر 6 أيام (DAY0..DAY5) لنفس الماتش، من
-    // MERCHANT_SKU_DAILY_GID — "-" (0) لو الماتش ده مش موجود في الشيت ده.
-    const daily = dailyByMatch.get(matchKey) || { day0: 0, day1: 0, day2: 0, day3: 0, day4: 0, day5: 0 };
-
-    return {
-      type: m.type, productId: m.productId, productName: m.productName,
-      merchantId: m.merchantId, merchant: m.merchant, stock: m.stock, action: m.action,
-      startingCogs: m.startingCogs,
-      merchantStartingAvg: m.merchantStartingAvg, merchantCurrentAvg,
-      skuStartingAvg: m.skuStartingAvg, skuCurrentAvg,
-      skuPlacedToday: placedTodayBySku.get(sku) || 0,
-      skuPlacedYday: placedYdayBySku.get(sku) || 0,
-      currentInventory: Math.round(currentInventory || 0),
-      currentInventoryDoh: Math.round(currentInventoryDoh),
-      avgSkuLast3d,
-      crPct, drPct, ndrPct, ppmPerPiece, placedAsp, cm3PerMerchant, cm3Pct, skuPpm, lastPlacedAsp, skuPpmPct,
-      lockAllocatedQty, lockUsedQty, lockRemainingPieces,
-      day0: daily.day0 || 0, day1: daily.day1 || 0, day2: daily.day2 || 0,
-      day3: daily.day3 || 0, day4: daily.day4 || 0, day5: daily.day5 || 0,
-      acm: acmName, matchKey, feedbackByDate: m.feedbackByDate || {}
-    };
-  });
-
-  state.recTrackerDataPrepared = rows;
-  populateRtFilterDropdowns(rows);
-  applyRecommendedTrackerSearchAndSort();
-  renderRecommendedTrackerSummary(rows);
-}
 
 // -------------------------------------------------------------------------
 // بيملأ الـ 2 Dropdown الجداد فوق جدول Recommended Tracker:
@@ -3337,38 +2866,7 @@ function prepareRecommendedTrackerData(opts) {
 //    الموجودة فعليًا في الشيت (state.matchesFeedbackDateLabels)، من الأحدث
 //    للأقدم، عشان المستخدم يقدر يرجع لأي يوم فات ويشوف/يعدل الفيدباك بتاعه.
 // -------------------------------------------------------------------------
-function populateRtFilterDropdowns(rows) {
-  const acmSelect = $("rtAcmFilterSelect");
-  if (acmSelect) {
-    const acms = Array.from(new Set(rows.map(r => r.acm).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-    const prevVal = state.rtAcmFilter || "";
-    acmSelect.innerHTML = `<option value="">All ACMs</option>` + acms.map(a => `<option value="${a}">${a}</option>`).join("");
-    acmSelect.value = acms.includes(prevVal) ? prevVal : "";
-    state.rtAcmFilter = acmSelect.value;
-  }
-  const dateSelect = $("rtFeedbackDateSelect");
-  if (dateSelect) {
-    const labels = (state.matchesFeedbackDateLabels || []).slice().reverse(); // الأحدث الأول
-    const todayLabel = rtTodayFeedbackLabel();
-    const prevVal = state.rtFeedbackDateFilter || "";
-    const options = labels.filter(l => l !== todayLabel).map(l => `<option value="${l}">${l}</option>`).join("");
-    // "All Feedback" — بيوري كل أعمدة التواريخ مع بعض كأعمدة منفصلة في آخر
-    // الجدول (15-Aug, 16-Aug, ...) بدل ما تختار يوم واحد بس.
-    dateSelect.innerHTML = `<option value="">Feedback: Today (${todayLabel})</option>` + options + `<option value="__ALL__">All Feedback (all dates)</option>`;
-    const validValues = labels.concat(["__ALL__"]);
-    dateSelect.value = validValues.includes(prevVal) ? prevVal : "";
-    state.rtFeedbackDateFilter = dateSelect.value;
-  }
-}
 
-// عنوان عمود فيدباك "النهاردة" بنفس فورمات الأعمدة الموجودة في الشيت (زي
-// "16-Aug") — عشان لو مفيش عمود بالتاريخ ده لسه، هيتضاف تلقائيًا في
-// backend/Code.gs أول ما حد يبعت فيدباك جديد النهاردة.
-function rtTodayFeedbackLabel() {
-  const d = new Date();
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${d.getDate()}-${months[d.getMonth()]}`;
-}
 
 // المستخدم اللي عامل login حاليًا (من نفس session بتاعة auth.js) — بيرجع
 // null لو مفيش حد عامل login عشان نمنع بعت فيدباك من غير اسم معروف.
@@ -3389,296 +2887,6 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-// -------------------------------------------------------------------------
-// بتبعت أي match جديد لقيناه Locked (Availability Locking) بس مش موجود في
-// شيت الماتشات لسه (missingLockedMatches جوه prepareRecommendedTrackerData
-// فوق) لل backend، عشان يتضاف كصف جديد فعلي في الشيت (PRODUCTS_MATCHES_GID)،
-// Type = "New Locked"، وباقي الأعمدة (Stock/Starting Cogs/Merchant & SKU
-// Starting AVG) بالقيم المحسوبة دلوقتي زي ما هي.
-//
-// state.addedNewLockedMatchKeys بيمنع إعادة إرسال نفس الماتش أكتر من مرة في
-// نفس الجلسة (مثلاً لو الـ Refresh التلقائي نادى prepareRecommendedTrackerData
-// تاني قبل ما الشيت يتحدّث فعليًا) — لحد ما الريفريش الجاي يجيب الماتش ده من
-// الشيت نفسه بعد ما يتضاف، فوقتها هيبقى موجود في existingMatchKeys تلقائيًا
-// ومش هيتحسب "missing" تاني من الأساس.
-// -------------------------------------------------------------------------
-async function syncNewLockedMatchesToSheet(missingMatches) {
-  if (!MATCHES_FEEDBACK_API_URL || !missingMatches || !missingMatches.length) return;
-  if (!state.addedNewLockedMatchKeys) state.addedNewLockedMatchKeys = new Set();
-
-  const toSend = missingMatches.filter(m => !state.addedNewLockedMatchKeys.has(m.merchantId + "||" + m.productId));
-  if (!toSend.length) return;
-  // بنعلّمهم كـ "اتبعتوا" فورًا (متفائل) قبل ما نستنى رد الـ backend، عشان لو
-  // الفانكشن دي اتنادت تاني بسرعة (Refresh تلقائي مثلاً) قبل ما الأول يخلص،
-  // منبعتش نفس الماتشات مرتين مع بعض.
-  toSend.forEach(m => state.addedNewLockedMatchKeys.add(m.merchantId + "||" + m.productId));
-
-  try {
-    const resp = await fbFetch(MATCHES_FEEDBACK_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي submitMatchFeedback بالظبط — نتفادى CORS preflight مع Apps Script
-      body: JSON.stringify({
-        action: "add_new_locked_matches",
-        rows: toSend.map(m => ({
-          productId: m.productId, productName: m.productName,
-          merchantId: m.merchantId, merchant: m.merchant,
-          stock: m.stock, startingCogs: m.startingCogs,
-          merchantStartingAvg: m.merchantStartingAvg, skuStartingAvg: m.skuStartingAvg
-        }))
-      })
-    });
-    const data = await resp.json();
-    if (!data || data.success === false) throw new Error((data && data.error) || "Failed to add new locked matches");
-  } catch (err) {
-    // فشل البعت — نشيلهم من set الـ "اتبعتوا" عشان يتحاول تاني في أقرب فرصة
-    // (مرة جاية يتنادى فيها prepareRecommendedTrackerData) بدل ما يفضلوا
-    // ناقصين من الشيت للأبد.
-    toSend.forEach(m => state.addedNewLockedMatchKeys.delete(m.merchantId + "||" + m.productId));
-    console.error("syncNewLockedMatchesToSheet error:", err);
-  }
-}
-
-// -------------------------------------------------------------------------
-// بيبعت فيدباك الأكاونت مانجر على ماتش معين (Merchant × PRODUCT_ID) لل
-// backend (Code.gs) عشان يتكتب لايف في شيت الماتشات (PRODUCTS_MATCHES_GID)،
-// في عمود تاريخ النهاردة (K فأكتر) — لو حصل أكتر من فيدباك في نفس اليوم
-// لنفس الماتش، آخر واحد بيكتب فوق اللي قبله (Overwrite، مفيش هيستوري).
-// الاسم اللي بيتسجل مع الفيدباك بياخده تلقائيًا من المستخدم Login حاليًا.
-// -------------------------------------------------------------------------
-async function submitMatchFeedback(merchantId, productId, text, rowEl) {
-  const statusEl = rowEl ? rowEl.querySelector(".rt-feedback-status") : null;
-  const sendBtn = rowEl ? rowEl.querySelector(".rt-feedback-send") : null;
-  const setStatus = (msg, cls) => { if (statusEl) { statusEl.textContent = msg; statusEl.className = "rt-feedback-status " + (cls || ""); } };
-
-  const trimmed = (text || "").trim();
-  if (!trimmed) { setStatus("اكتب فيدباك الأول", "err"); return; }
-
-  const user = getLoggedInUser();
-  if (!user) { setStatus("لازم تعمل Login الأول", "err"); return; }
-
-  if (!MATCHES_FEEDBACK_API_URL) { setStatus("Backend مش متظبط", "err"); return; }
-
-  if (sendBtn) { sendBtn.classList.add("is-saving"); sendBtn.disabled = true; }
-  setStatus("بيتبعت...", "");
-
-  try {
-    const resp = await fbFetch(FEEDBACK_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // زي auth.js بالظبط — عشان نتفادى CORS preflight مع Apps Script
-      body: JSON.stringify({
-        action: "save_match_feedback",
-        merchantId: merchantId,
-        productId: productId,
-        feedback: trimmed,
-        acmName: user.name
-      })
-    });
-    const data = await resp.json();
-    if (!data || data.success === false) throw new Error((data && data.error) || "فشل الحفظ");
-
-    // نحدّث الداتا المحلية فورًا (من غير ما نستنى Refresh كامل للداشبورد)
-    // عشان المستخدم يشوف الفيدباك اتحفظ في نفس اللحظة.
-    const todayLabel = rtTodayFeedbackLabel();
-    const matchKey = merchantId + "||" + productId;
-    (state.productsMatchesRows || []).forEach(m => {
-      if (m.merchantId === merchantId && m.productId === productId) { m.feedbackByDate = m.feedbackByDate || {}; m.feedbackByDate[todayLabel] = trimmed; }
-    });
-    (state.recTrackerDataPrepared || []).forEach(m => {
-      if (m.matchKey === matchKey) { m.feedbackByDate = m.feedbackByDate || {}; m.feedbackByDate[todayLabel] = trimmed; }
-    });
-    if (!state.matchesFeedbackDateLabels) state.matchesFeedbackDateLabels = [];
-    if (!state.matchesFeedbackDateLabels.includes(todayLabel)) state.matchesFeedbackDateLabels.push(todayLabel);
-
-    setStatus("اتحفظ ✓", "ok");
-    renderPaginatedRecommendedTrackerTable();
-  } catch (err) {
-    console.error("submitMatchFeedback error:", err);
-    setStatus("حصل خطأ، جرب تاني", "err");
-    if (sendBtn) { sendBtn.classList.remove("is-saving"); sendBtn.disabled = false; }
-  }
-}
-
-function renderRecommendedTrackerSummary(rows) {
-  const skuSet = new Set(rows.map(r => r.productId));
-  const totalInventory = rows.reduce((s, r) => s + (r.currentInventory || 0), 0);
-  const dohRows = rows.filter(r => r.currentInventoryDoh > 0);
-  const avgDoh = dohRows.length ? dohRows.reduce((s, r) => s + r.currentInventoryDoh, 0) / dohRows.length : 0;
-  if ($("rtTotalRows")) $("rtTotalRows").textContent = fmtInt.format(rows.length);
-  if ($("rtTotalSkus")) $("rtTotalSkus").textContent = fmtInt.format(skuSet.size);
-  if ($("rtTotalInventory")) $("rtTotalInventory").textContent = fmtInt.format(Math.round(totalInventory));
-  if ($("rtAvgDoh")) $("rtAvgDoh").textContent = Math.round(avgDoh);
-}
-
-function sortRecommendedTracker(key) {
-  if (state.recTrackerSortKey === key) { state.recTrackerSortDir = state.recTrackerSortDir === "asc" ? "desc" : "asc"; }
-  else { state.recTrackerSortKey = key; state.recTrackerSortDir = "desc"; }
-  applyRecommendedTrackerSearchAndSort();
-}
-
-function applyRecommendedTrackerSearchAndSort() {
-  const term = $("searchRecommendedTrackerInput") ? $("searchRecommendedTrackerInput").value.trim().toLowerCase() : "";
-  const acmFilter = state.rtAcmFilter || "";
-  state.recTrackerFiltered = (state.recTrackerDataPrepared || []).filter(m => {
-    if (acmFilter && m.acm !== acmFilter) return false;
-    if (!term) return true;
-    return (m.productName && m.productName.toLowerCase().includes(term)) || (m.productId && String(m.productId).toLowerCase().includes(term)) ||
-      (m.merchant && m.merchant.toLowerCase().includes(term)) || (m.merchantId && String(m.merchantId).toLowerCase().includes(term)) ||
-      (m.action && m.action.toLowerCase().includes(term)) || (m.type && m.type.toLowerCase().includes(term)) ||
-      (m.acm && m.acm.toLowerCase().includes(term));
-  });
-  const { recTrackerSortKey, recTrackerSortDir } = state; const dir = recTrackerSortDir === "asc" ? 1 : -1;
-  state.recTrackerFiltered.sort((a, b) => {
-    const av = a[recTrackerSortKey]; const bv = b[recTrackerSortKey];
-    if (typeof av === "string") return av.localeCompare(bv) * dir;
-    return ((av || 0) - (bv || 0)) * dir;
-  });
-  state.recTrackerPage = 0;
-  renderPaginatedRecommendedTrackerTable();
-}
-
-// كل تواريخ أعمدة الفيدباك الموجودة فعليًا في الشيت + النهاردة (حتى لو
-// عمود النهاردة لسه مش موجود في الشيت لأنه محدش بعت فيدباك النهاردة لسه) —
-// بترتيب الشيت نفسه (من الأقدم للأحدث)، مستخدمة في وضع "All Feedback".
-function rtAllFeedbackLabelsIncludingToday() {
-  const todayLabel = rtTodayFeedbackLabel();
-  const labels = (state.matchesFeedbackDateLabels || []).slice();
-  if (!labels.includes(todayLabel)) labels.push(todayLabel);
-  return labels;
-}
-
-// بيزود/بيشيل أعمدة الهيدر الإضافية بتاعة "All Feedback" (عمود لكل تاريخ)
-// جمب عمود "Feedback" الأساسي (بتاع النهاردة، قابل للكتابة). بيتنفذ قبل ما
-// نبني صفوف الـ tbody عشان عدد الأعمدة يفضل متطابق بين thead وtbody.
-function syncRtFeedbackHeaders(isAllMode) {
-  const headerRow = $("rtTableHeaderRow");
-  if (!headerRow) return;
-  headerRow.querySelectorAll(".rt-feedback-date-th").forEach(el => el.remove());
-  if (!isAllMode) return;
-  const todayLabel = rtTodayFeedbackLabel();
-  rtAllFeedbackLabelsIncludingToday().filter(l => l !== todayLabel).forEach(label => {
-    const th = document.createElement("th");
-    th.className = "rt-feedback-date-th";
-    th.style.minWidth = "180px";
-    th.textContent = label;
-    headerRow.appendChild(th);
-  });
-}
-
-function renderPaginatedRecommendedTrackerTable() {
-  const tbody = $("recommendedTrackerTableBody"); if (!tbody) return; tbody.innerHTML = "";
-  const start = state.recTrackerPage * PAGE_SIZE;
-  const pageRows = state.recTrackerFiltered.slice(start, start + PAGE_SIZE);
-  const todayLabel = rtTodayFeedbackLabel();
-  const isAllMode = state.rtFeedbackDateFilter === "__ALL__";
-  // في وضع "All Feedback"، عمود "Feedback" الأساسي بيفضل دايمًا عمود
-  // النهاردة (قابل للكتابة)، وباقي التواريخ بتتضاف كأعمدة إضافية للقراءة بس.
-  const selectedDateLabel = isAllMode ? todayLabel : (state.rtFeedbackDateFilter || todayLabel);
-  const isViewingToday = selectedDateLabel === todayLabel;
-  syncRtFeedbackHeaders(isAllMode);
-  const extraDateLabels = isAllMode ? rtAllFeedbackLabelsIncludingToday().filter(l => l !== todayLabel) : [];
-  pageRows.forEach(m => {
-    const tr = document.createElement("tr");
-    tr.dataset.matchKey = m.matchKey;
-    tr.dataset.merchantId = m.merchantId;
-    tr.dataset.productId = m.productId;
-    const feedbackText = (m.feedbackByDate && m.feedbackByDate[selectedDateLabel]) || "";
-    const feedbackCellHtml = isViewingToday
-      ? `<div class="rt-feedback-cell">
-           <div class="rt-feedback-view ${feedbackText ? '' : 'rt-feedback-empty'}">${feedbackText ? escapeHtml(feedbackText) : 'No feedback yet today'}</div>
-           <div class="rt-feedback-write">
-             <input type="text" class="rt-feedback-input" placeholder="Write feedback for ${todayLabel}..." value="${feedbackText ? escapeHtml(feedbackText) : ''}" />
-             <button type="button" class="btn btn-primary small rt-feedback-send">Send</button>
-           </div>
-           <div class="rt-feedback-status"></div>
-         </div>`
-      : `<div class="rt-feedback-cell">
-           <div class="rt-feedback-view ${feedbackText ? '' : 'rt-feedback-empty'}">${feedbackText ? escapeHtml(feedbackText) : `No feedback on ${selectedDateLabel}`}</div>
-         </div>`;
-    // في وضع "All Feedback" — عمود إضافي للقراءة بس لكل تاريخ تاني غير النهاردة.
-    const extraDateCellsHtml = extraDateLabels.map(label => {
-      const text = (m.feedbackByDate && m.feedbackByDate[label]) || "";
-      return `<td><div class="rt-feedback-cell"><div class="rt-feedback-view ${text ? '' : 'rt-feedback-empty'}">${text ? escapeHtml(text) : `No feedback on ${label}`}</div></div></td>`;
-    }).join("");
-    tr.innerHTML = `
-      <td class="${m.type === "New Locked" ? "text-orange font-bold" : "text-dim"}">${m.type || "-"}</td>
-      <td class="font-mono text-dim">${m.productId}</td>
-      <td class="truncate-cell" title="${m.productName}">${m.productName}</td>
-      <td class="font-mono text-dim">${m.merchantId}</td>
-      <td class="truncate-cell" title="${m.merchant}">${m.merchant}</td>
-      <td class="text-dim">${m.acm || "-"}</td>
-      <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(Math.round(m.stock))}</span></td>
-      <td class="text-dim">${m.action || "-"}</td>
-      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.startingCogs)}</td>
-      <td class="num text-dim">${m.merchantStartingAvg.toFixed(1)}</td>
-      <td class="num font-bold ${m.merchantCurrentAvg >= m.merchantStartingAvg ? 'text-green' : 'text-red'}">${m.merchantCurrentAvg.toFixed(1)}</td>
-      <td class="num text-dim">${m.skuStartingAvg.toFixed(1)}</td>
-      <td class="num font-bold ${m.skuCurrentAvg >= m.skuStartingAvg ? 'text-green' : 'text-red'}">${m.skuCurrentAvg.toFixed(1)}</td>
-      <td class="num text-light font-bold">${fmtIntCell(Math.round(m.skuPlacedToday))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.skuPlacedYday))}</td>
-      <td class="num font-bold text-orange">${fmtIntCell(m.currentInventory)}</td>
-      <td class="num font-bold text-purple">${fmtIntCell(m.currentInventoryDoh)}</td>
-      <td class="num text-dim">${m.avgSkuLast3d.toFixed(1)}</td>
-      <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
-      <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
-      <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
-      <td class="num text-dim">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
-      <td class="num text-dim">${fmtMoneyCompactCell(m.placedAsp)}</td>
-      <td class="num font-bold ${m.cm3PerMerchant >= 0 ? 'text-green' : 'text-red'}">${fmtMoneyCompactCell(m.cm3PerMerchant)}</td>
-      <td class="num font-bold">${fmtPctCell(m.cm3Pct)}</td>
-      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.skuPpm)}</td>
-      <td class="num font-bold text-purple">${fmtPctCell(m.skuPpmPct)}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.lockAllocatedQty))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.lockUsedQty))}</td>
-      <td class="num font-bold ${m.lockRemainingPieces > 0 ? 'text-green' : 'text-red'}">${fmtIntCell(Math.round(m.lockRemainingPieces))}</td>
-      <td class="num text-light font-bold">${fmtIntCell(Math.round(m.day0))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.day1))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.day2))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.day3))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.day4))}</td>
-      <td class="num text-dim">${fmtIntCell(Math.round(m.day5))}</td>
-      <td>${feedbackCellHtml}</td>
-      ${extraDateCellsHtml}
-    `;
-    tbody.appendChild(tr);
-  });
-  const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE));
-  if ($("rowCountRecommendedTracker")) $("rowCountRecommendedTracker").textContent = `${fmtInt.format(state.recTrackerFiltered.length)} Rows`;
-  if ($("pageIndicatorRecommendedTracker")) $("pageIndicatorRecommendedTracker").textContent = `Page ${state.recTrackerPage + 1} of ${totalPages}`;
-  if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").disabled = state.recTrackerPage === 0;
-  if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").disabled = state.recTrackerPage >= totalPages - 1;
-}
-
-if ($("searchRecommendedTrackerInput")) $("searchRecommendedTrackerInput").addEventListener("input", applyRecommendedTrackerSearchAndSort);
-if ($("prevPageRecommendedTracker")) $("prevPageRecommendedTracker").addEventListener("click", () => { if (state.recTrackerPage > 0) { state.recTrackerPage -= 1; renderPaginatedRecommendedTrackerTable(); } });
-if ($("nextPageRecommendedTracker")) $("nextPageRecommendedTracker").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(state.recTrackerFiltered.length / PAGE_SIZE)); if (state.recTrackerPage < totalPages - 1) { state.recTrackerPage += 1; renderPaginatedRecommendedTrackerTable(); } });
-if ($("rtAcmFilterSelect")) $("rtAcmFilterSelect").addEventListener("change", (e) => { state.rtAcmFilter = e.target.value; applyRecommendedTrackerSearchAndSort(); });
-if ($("rtFeedbackDateSelect")) $("rtFeedbackDateSelect").addEventListener("change", (e) => { state.rtFeedbackDateFilter = e.target.value; renderPaginatedRecommendedTrackerTable(); });
-
-// Event delegation لزراير "Send" بتاعة الفيدباك — الصفوف بتتعمل ديناميكيًا
-// (innerHTML) في renderPaginatedRecommendedTrackerTable، فمينفعش نربط
-// listener مباشر على كل زرار وقت الإنشاء؛ بنسمع على الـ tbody نفسه بدل كده.
-const recTrackerTbodyEl = $("recommendedTrackerTableBody");
-if (recTrackerTbodyEl) {
-  recTrackerTbodyEl.addEventListener("click", (e) => {
-    const btn = e.target.closest(".rt-feedback-send");
-    if (!btn) return;
-    const tr = btn.closest("tr");
-    if (!tr) return;
-    const input = tr.querySelector(".rt-feedback-input");
-    if (!input) return;
-    submitMatchFeedback(tr.dataset.merchantId, tr.dataset.productId, input.value, tr);
-  });
-  // Enter جوه input الفيدباك = نفس تأثير دوس على Send.
-  recTrackerTbodyEl.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    const input = e.target.closest(".rt-feedback-input");
-    if (!input) return;
-    const tr = input.closest("tr");
-    if (!tr) return;
-    submitMatchFeedback(tr.dataset.merchantId, tr.dataset.productId, input.value, tr);
-  });
 }
 
 // =========================================================================
@@ -4440,288 +3648,7 @@ async function publishAnalystSingleDaily() {
 //    في أي سكشن تاني مصدره MAIN_GID (زي CM3 Analyst / Products بالظبط)،
 //    وبرضو OVERALL على كل البندلز بوزن الـ COGS.
 // -------------------------------------------------------------------------
-const prodAnState = { data: [], filtered: [], sortKey: "totalDeliveredPpm", sortDir: "desc", page: 0 };
 
-function prepareProductsAnalystData() {
-  const mainRowsAll = state.allParsedRows || [];
-
-  const now = new Date();
-  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const currentYear = now.getFullYear();
-
-  // آخر 3 شهور (الشهر الحالي + اتنين اللي فاتوا) — يعني شهر 8، 7، 6 دلوقتي —
-  // مع إجمالي عدد أيام الـ 3 شهور دول (لحساب AVG Confirmed Daily).
-  let last3TotalDays = 0;
-  const last3MonthYears = [0, 1, 2].map(back => {
-    const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
-    last3TotalDays += new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  });
-  const last3Set = new Set(last3MonthYears);
-
-  // كل الـ SINGLE SKUs اللي اتعملهم Inbound في أي شهر من السنة الحالية، +
-  // Last Inbound Date بتاع كل SKU (آخر تاريخ استلام فعلي ليه — من كل
-  // صفوف الـ Inbound مش بس السنة الحالية، عشان لو نفس الـ SKU اتستلم قبل
-  // كده وبعدين تاني السنة دي، يفضل ياخد أحدث تاريخ استلام حقيقي عنده).
-  const inboundThisYearSkus = new Set();
-  const lastInboundTsBySku = new Map();
-  (state.inboundRows || []).forEach(r => {
-    if (!r.sku || !r.receivingMonthKey) return;
-    const d = new Date(r.receivingMonthKey);
-    if (!isNaN(d.getTime()) && d.getFullYear() === currentYear) inboundThisYearSkus.add(r.sku);
-    if (r.rcvTs && r.rcvTs > (lastInboundTsBySku.get(r.sku) || 0)) lastInboundTsBySku.set(r.sku, r.rcvTs);
-  });
-
-  // خريطة PRODUCT_ID (سنجل أو بندل) -> [{singleId, quantity, cogsWeight}] —
-  // نفس الماب المستخدم في Commercial Plan/Healthy Locking بالظبط.
-  const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
-
-  // بيرجع mappings الصف ده: لو الـ PRODUCT_ID (r.sku) موجود في شيت الديبندلايز
-  // بيرجع mappings بتاعته زي ما هي (بوزن COGS/الكمية الحقيقية)؛ غير كده
-  // (SKU مش موجود في الديبندلايز خالص) بيترجع Fallback: الـ SKU ده نفسه
-  // "Single" لوحده بوزن/كمية = 1 (زي fallback الأصلي في conf3dBySingleOverall).
-  const mappingsFor = (sku) => {
-    const m = bundleProductMap.get(sku);
-    return (m && m.length) ? m : [{ singleId: sku, quantity: 1, cogsWeight: 1 }];
-  };
-
-  // Demand Confirmed (آخر 3 شهور) — من شيت "EGY Sell-through rate needed
-  // data #2941" (SELLTHROUGH_NEEDED_GID / 548859670)، نفس المصدر اللي
-  // بتستخدمه لوحة الـ Sellthrough Rate Panel بالظبط (state.metabaseSellthroughNeeded)
-  // — عمود CNF_QTY، مجموع لكل الصفوف اللي MONTH بتاعها من آخر 3 شهور
-  // (شهر 8 + 7 + 6)، لكل PRODUCT_ID (ده أصلاً سنجل SKU في الشيت ده، مفيش
-  // بندلات هنا، فمفيش داعي لأي توزيع/ديبندلايز).
-  const demandBySingle = new Map();
-  (state.metabaseSellthroughNeeded || []).forEach(row => {
-    const sku = row.PRODUCT_ID;
-    const mk = stMonthKeyFromValue(row.MONTH);
-    if (!sku || !mk || !last3Set.has(mk)) return;
-    demandBySingle.set(sku, (demandBySingle.get(sku) || 0) + (row.CNF_QTY || 0));
-  });
-
-  // PPM / CM3 الشهر الحالي OVERALL — نفس منطق PPM Analyst / Products بالظبط
-  // (Delivered GMV/PPM من غير كات أوف)، والـ CM3 بياخد كات أوف الـ CM3_LAG_DAYS.
-  // GMV/PPM/CM3 (فلوس) بيتوزعوا بوزن الـ COGS، والـ Pieces بيتوزعوا بضرب الكمية.
-  const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "productsAnalyst");
-  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
-  // CR% (Confirmed/Placed) بيرجع يومين (CR_LAG_DAYS)، DR% (Delivered/
-  // Confirmed) بيرجع نفس كات أوف الـ CM3 (CM3_LAG_DAYS) — بالظبط زي باقي
-  // الداشبورد كله (computeCommercialActuals/Products Matches Analyst).
-  const crCutoffTs = getLagCutoffTimestamp(monthRows, CR_LAG_DAYS);
-
-  // AVG CONFIRMED DAILY (LAST 2D / 5D / 15D) — DEMAND SINGLE OVERALL: مجموع
-  // Confirmed Pieces (لكل الصفوف اللي مصدرها المنتج ده نفسه سنجل، أو أي بندل
-  // الـ Single ده عضو فيه، بضرب الكمية) لآخر N يوم *كامل قبل النهارده* —
-  // النهارده نفسه مستبعد دايماً لأن يومه لسه ماخلصش (زي ما اتطلب صراحةً)،
-  // مقسومة على N. نفس اتفاقية buildDebundledStockDohIndex بالظبط
-  // (rTime < start || rTime >= todayMs يبقى مستبعد من النطاق).
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-  const buildConfNDaysBySingleOverall = (days) => {
-    const dStartMs = todayMs - (days * 86400000);
-    const map = new Map();
-    mainRowsAll.forEach(r => {
-      if (!r.sku) return;
-      const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
-      const rTime = rDate.getTime();
-      if (rTime < dStartMs || rTime >= todayMs) return; // النهارده مستبعد
-      mappingsFor(r.sku).forEach(mp => {
-        map.set(mp.singleId, (map.get(mp.singleId) || 0) + (r.confirmedPieces || 0) * (mp.quantity || 1));
-      });
-    });
-    return map;
-  };
-  const conf2dBySingleOverall = buildConfNDaysBySingleOverall(2);
-  const conf5dBySingleOverall = buildConfNDaysBySingleOverall(5);
-  const conf15dBySingleOverall = buildConfNDaysBySingleOverall(15);
-
-  const bySingle = new Map();
-  const getBucket = (singleId) => {
-    let b = bySingle.get(singleId);
-    if (!b) {
-      b = {
-        ppm: 0, deliveredGmv: 0, deliveredPieces: 0, cm3: 0, cm3Gmv: 0, cm3DeliveredPieces: 0,
-        crPlaced: 0, crConfirmed: 0, drConfirmed: 0, drDelivered: 0,
-        currentPlacedPieces: 0, currentConfirmedPieces: 0, currentDeliveredPieces: 0
-      };
-      bySingle.set(singleId, b);
-    }
-    return b;
-  };
-  monthRows.forEach(r => {
-    if (!r.sku) return;
-    const cm3Eligible = isCm3RowEligible(r, cm3CutoffTs, "productsAnalyst");
-    const crEligible = isRowEligibleForLag(r, crCutoffTs, "productsAnalyst");
-    const drEligible = isRowEligibleForLag(r, cm3CutoffTs, "productsAnalyst");
-    mappingsFor(r.sku).forEach(mp => {
-      if (!inboundThisYearSkus.has(mp.singleId)) return;
-      const b = getBucket(mp.singleId);
-      const weight = mp.cogsWeight != null ? mp.cogsWeight : 1;
-      const qty = mp.quantity || 1;
-      // TOTAL DELIVERED PCS (العمود المستقل) — من غير كات أوف خالص، زي الـ PPM.
-      b.deliveredPieces += (r.deliveredPieces || 0) * qty;
-      b.ppm += (r.ppm || 0) * weight;
-      b.deliveredGmv += (r.deliveredGmv || 0) * weight;
-      // CURRENT — Placed/Confirmed/Delivered Pieces الشهر الحالي، DEMAND
-      // SINGLE OVERALL (كل البندلات اللي الـ Single ده عضو فيها)، من غير
-      // أي كات أوف.
-      b.currentPlacedPieces += (r.placedPieces || 0) * qty;
-      b.currentConfirmedPieces += (r.confirmedPieces || 0) * qty;
-      b.currentDeliveredPieces += (r.deliveredPieces || 0) * qty;
-      // CM3 (وCM3/Piece وCM3% اللي مبنيين عليها) — بس من الصفوف اللي عدت
-      // كات أوف الـ CM3، بما فيها Delivered Pieces المستخدمة كمقام لـ CM3/Piece
-      // (cm3DeliveredPieces) — مش إجمالي Delivered Pieces الكامل فوق.
-      if (cm3Eligible) {
-        b.cm3 += (r.cm3 || 0) * weight;
-        b.cm3Gmv += (r.deliveredGmv || 0) * weight;
-        b.cm3DeliveredPieces += (r.deliveredPieces || 0) * qty;
-      }
-      // CR%/DR%/NDR% — Overall على مستوى الـ Single (مجموع كل البندلات
-      // اللي بتحتويه + طلبه المباشر لو Single أصلاً)، بالكمية الفعلية
-      // (qty) نفس منطق Placed/Delivered Pieces فوق.
-      if (crEligible) { b.crPlaced += (r.placedPieces || 0) * qty; b.crConfirmed += (r.confirmedPieces || 0) * qty; }
-      if (drEligible) { b.drConfirmed += (r.confirmedPieces || 0) * qty; b.drDelivered += (r.deliveredPieces || 0) * qty; }
-    });
-  });
-
-  // كل Single inbound السنة دي لازم يظهر في الجدول حتى لو مالوش صفوف في شهر
-  // الـ Main الحالي (PPM/CM3 هيبقوا صفر وقتها، مش هيتشال من الجدول).
-  inboundThisYearSkus.forEach(sku => getBucket(sku));
-
-  let grandDeliveredGmv = 0, grandPpm = 0, grandCm3 = 0, grandCm3Gmv = 0;
-  bySingle.forEach(b => { grandDeliveredGmv += b.deliveredGmv; grandPpm += b.ppm; grandCm3 += b.cm3; grandCm3Gmv += b.cm3Gmv; });
-  const overallPpmPct = grandDeliveredGmv > 0 ? (grandPpm / grandDeliveredGmv) * 100 : 0;
-  const overallCm3Pct = grandCm3Gmv > 0 ? (grandCm3 / grandCm3Gmv) * 100 : 0;
-
-  const rows = [];
-  bySingle.forEach((b, singleId) => {
-    const inv = state.inventoryMap[singleId] || {};
-    const prod = state.productsMap[singleId] || {};
-    const debundleName = singlesList.get(singleId);
-    const ppmPerPiece = b.deliveredPieces > 0 ? (b.ppm / b.deliveredPieces) : 0;
-    const ppmPct = b.deliveredGmv > 0 ? (b.ppm / b.deliveredGmv) * 100 : 0;
-    const cm3PerPiece = b.cm3DeliveredPieces > 0 ? (b.cm3 / b.cm3DeliveredPieces) : 0;
-    const cm3Pct = b.cm3Gmv > 0 ? (b.cm3 / b.cm3Gmv) * 100 : 0;
-    const demandConfirmed3m = demandBySingle.get(singleId) || 0;
-    const avgConfirmedDaily = last3TotalDays > 0 ? (demandConfirmed3m / last3TotalDays) : 0;
-    // DEMAND (2D) — إجمالي (خام، قبل القسمة) الـ Confirmed Pieces بتاعة الـ
-    // Demand Single Overall آخر يومين كاملين قبل النهارده (نفس البسط اللي
-    // AVG CONFIRMED DAILY (LAST 2D) بيتقسم منه على 2) — زي demandConfirmed3m
-    // جمب avgConfirmedDaily بالظبط.
-    const demandConfirmedLast2d = Math.round(conf2dBySingleOverall.get(singleId) || 0);
-    // AVG CONFIRMED DAILY (LAST 2D / 5D / 15D) — DEMAND SINGLE OVERALL ÷ N،
-    // كل واحدة مبنية على نطاق مستبعد منه النهارده (شوف buildConfNDaysBySingleOverall فوق).
-    const avgConfirmedDailyLast2d = (conf2dBySingleOverall.get(singleId) || 0) / 2;
-    const avgConfirmedDailyLast5d = (conf5dBySingleOverall.get(singleId) || 0) / 5;
-    const avgConfirmedDailyLast15d = (conf15dBySingleOverall.get(singleId) || 0) / 15;
-    const lastInboundTs = lastInboundTsBySku.get(singleId) || 0;
-    const crPct = b.crPlaced > 0 ? (b.crConfirmed / b.crPlaced) * 100 : 0;
-    const drPct = b.drConfirmed > 0 ? (b.drDelivered / b.drConfirmed) * 100 : 0;
-    const ndrPct = (crPct * drPct) / 100;
-
-    rows.push({
-      skuId: singleId, skuName: debundleName || inv.skuName || prod.name || singleId, category: inv.category || prod.category || "Uncategorized",
-      lastInboundTs, lastInboundDate: lastInboundTs ? new Date(lastInboundTs).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : "-",
-      currentPlacedPieces: Math.round(b.currentPlacedPieces || 0), currentConfirmedPieces: Math.round(b.currentConfirmedPieces || 0), currentDeliveredPieces: Math.round(b.currentDeliveredPieces || 0),
-      demandConfirmedLast2d, avgConfirmedDailyLast2d, avgConfirmedDailyLast5d, avgConfirmedDailyLast15d,
-      demandConfirmed3m: Math.round(demandConfirmed3m), avgConfirmedDaily,
-      totalDeliveredPpm: b.ppm, totalDeliveredPcs: Math.round(b.deliveredPieces || 0),
-      crPct, drPct, ndrPct,
-      ppmPerPiece, ppmPct,
-      cm3: b.cm3, cm3PerPiece, cm3Pct
-    });
-  });
-
-  prodAnState.data = rows;
-  applyProdAnSearchAndSort();
-  renderProdAnSummary(rows, grandPpm, currentMonthYear, overallPpmPct, grandCm3, overallCm3Pct);
-}
-
-function renderProdAnSummary(rows, grandPpm, monthLabel, overallPpmPct, grandCm3, overallCm3Pct) {
-  if ($("prodAnTotalSkus")) $("prodAnTotalSkus").textContent = fmtInt.format(rows.length);
-  if ($("prodAnMonthLabel")) $("prodAnMonthLabel").textContent = monthLabel || "-";
-  if ($("prodAnTotalPpm")) $("prodAnTotalPpm").textContent = fmtMoneyCompact(grandPpm);
-  if ($("prodAnOverallPpmPct")) $("prodAnOverallPpmPct").textContent = fmtPct(overallPpmPct || 0);
-  if ($("prodAnTotalCm3")) $("prodAnTotalCm3").textContent = fmtMoneyCompact(grandCm3);
-  if ($("prodAnOverallCm3Pct")) $("prodAnOverallCm3Pct").textContent = fmtPct(overallCm3Pct || 0);
-}
-
-function sortProdAn(key) {
-  if (prodAnState.sortKey === key) { prodAnState.sortDir = prodAnState.sortDir === "asc" ? "desc" : "asc"; }
-  else { prodAnState.sortKey = key; prodAnState.sortDir = "desc"; }
-  applyProdAnSearchAndSort();
-}
-
-function applyProdAnSearchAndSort() {
-  const term = $("searchProdAnInput") ? $("searchProdAnInput").value.trim().toLowerCase() : "";
-  prodAnState.filtered = (prodAnState.data || []).filter(m => {
-    if (term && !((m.skuName && m.skuName.toLowerCase().includes(term)) || (m.skuId && String(m.skuId).toLowerCase().includes(term)) ||
-      (m.category && m.category.toLowerCase().includes(term)))) return false;
-    return true;
-  });
-
-  const { sortKey, sortDir } = prodAnState; const dir = sortDir === "asc" ? 1 : -1;
-  prodAnState.filtered.sort((a, b) => {
-    let av = a[sortKey]; let bv = b[sortKey];
-    if (av === null || av === undefined) av = -Infinity;
-    if (bv === null || bv === undefined) bv = -Infinity;
-    if (typeof av === "string") return av.localeCompare(bv) * dir;
-    return (av - bv) * dir;
-  });
-
-  prodAnState.page = 0;
-  renderPaginatedProdAnTable();
-}
-
-function renderPaginatedProdAnTable() {
-  const tbody = $("prodAnTableBody"); if (!tbody) return; tbody.innerHTML = "";
-  const start = prodAnState.page * PAGE_SIZE;
-  const pageRows = prodAnState.filtered.slice(start, start + PAGE_SIZE);
-
-  if (!pageRows.length) {
-    tbody.innerHTML = `<tr><td colspan="23" class="text-dim center">No products match this filter.</td></tr>`;
-  } else {
-    pageRows.forEach(m => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td class="font-mono text-light font-bold">${m.skuId}</td>
-        <td class="truncate-cell text-dim" title="${m.skuName || ""}">${m.skuName || '<span class="text-dim">-</span>'}</td>
-        <td class="truncate-cell text-dim">${m.category}</td>
-        <td class="text-dim">${m.lastInboundDate || "-"}</td>
-        <td class="num text-blue">${fmtIntCell(m.currentPlacedPieces)}</td>
-        <td class="num text-orange">${fmtIntCell(m.currentConfirmedPieces)}</td>
-        <td class="num text-dim">${fmtIntCell(m.currentDeliveredPieces)}</td>
-        <td class="num text-dim">${fmtIntCell(m.demandConfirmedLast2d)}</td>
-        <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast2d))}</td>
-        <td class="num font-bold text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast5d))}</td>
-        <td class="num text-purple">${fmtIntCell(Math.round(m.avgConfirmedDailyLast15d))}</td>
-        <td class="num">${fmtIntCell(m.demandConfirmed3m)}</td>
-        <td class="num text-dim">${fmtIntCell(Math.round(m.avgConfirmedDaily))}</td>
-        <td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPct)}">${fmtPctCell(m.crPct)}</span></td>
-        <td class="num text-dim">${fmtPctCell(m.drPct)}</td>
-        <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPct)}">${fmtPctCell(m.ndrPct)}</span></td>
-        <td class="num text-blue">${fmtMoneyCompactCell(m.totalDeliveredPpm)}</td>
-        <td class="num">${fmtIntCell(m.totalDeliveredPcs)}</td>
-        <td class="num">${fmtMoneyCompactCell(m.ppmPerPiece)}</td>
-        <td class="num font-bold text-purple">${fmtPctCell(m.ppmPct)}</td>
-        <td class="num text-orange">${fmtMoneyCompactCell(m.cm3)}</td>
-        <td class="num">${fmtMoneyCompactCell(m.cm3PerPiece)}</td>
-        <td class="num font-bold text-green">${fmtPctCell(m.cm3Pct)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  const totalPages = Math.max(1, Math.ceil(prodAnState.filtered.length / PAGE_SIZE));
-  if ($("rowCountProdAn")) $("rowCountProdAn").textContent = `${fmtInt.format(prodAnState.filtered.length)} SKUs`;
-  if ($("pageIndicatorProdAn")) $("pageIndicatorProdAn").textContent = `Page ${prodAnState.page + 1} of ${totalPages}`;
-  if ($("prevPageProdAn")) $("prevPageProdAn").disabled = prodAnState.page === 0;
-  if ($("nextPageProdAn")) $("nextPageProdAn").disabled = prodAnState.page >= totalPages - 1;
-}
-
-if ($("searchProdAnInput")) $("searchProdAnInput").addEventListener("input", applyProdAnSearchAndSort);
-if ($("prevPageProdAn")) $("prevPageProdAn").addEventListener("click", () => { if (prodAnState.page > 0) { prodAnState.page -= 1; renderPaginatedProdAnTable(); } });
-if ($("nextPageProdAn")) $("nextPageProdAn").addEventListener("click", () => { const totalPages = Math.max(1, Math.ceil(prodAnState.filtered.length / PAGE_SIZE)); if (prodAnState.page < totalPages - 1) { prodAnState.page += 1; renderPaginatedProdAnTable(); } });
 
 // =========================================================================
 // PRODUCTS MATCHES / ANALYST — جوه Products / Analyst بالظبط: بدل ما نجمع
@@ -5665,7 +4592,6 @@ async function updateDashboard(rows) {
   if (!state._ovStTrendDone && $("ovStTrendChart")) { state._ovStTrendDone = true; setTimeout(() => renderSellthroughTrendChart(OV_ST_TREND_CFG), 60); }
   await yieldToMainThread();
   prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
-  renderOverallAcmTargetsSummary();
   await yieldToMainThread();
   if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
   if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
@@ -5681,19 +4607,17 @@ async function updateDashboard(rows) {
   if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
   if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) prepareMpDeclineWatchData();
   if ($("viewSpFeedback") && $("viewSpFeedback").classList.contains("active-view")) prepareSpFeedbackData();
-  if ($("viewRecommendedTracker") && $("viewRecommendedTracker").classList.contains("active-view")) prepareRecommendedTrackerData();
   // الأقسام دي مكنتش بترندر تلقائي مع باقي الفلاتر (كانت بس بترندر أول ما
   // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
   // تاني فوق الصفحة) يفضل شغال عليها لايف لو كانت هي التاب المفتوح دلوقتي.
   if ($("viewAvailabilityLocking") && $("viewAvailabilityLocking").classList.contains("active-view")) prepareAvailabilityLockingData();
   if ($("viewAllocationLocking") && $("viewAllocationLocking").classList.contains("active-view")) prepareAllocationLockingData();
-  if ($("viewHealthyLocking") && $("viewHealthyLocking").classList.contains("active-view")) prepareHealthyLockingData();
   if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
   if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
   if ($("viewIncMerchants") && $("viewIncMerchants").classList.contains("active-view")) renderIncentiveMerchantsPanel();
   await yieldToMainThread();
-  applyTableSearchAndSort(); renderTrendTables(state.allParsedRows, $("acmSelect") ? $("acmSelect").value : "All");
-  renderTop10Merchants(); renderOverallTargetSummary(); try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) {} applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
+  applyTableSearchAndSort();
+  try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) {} applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
 
 function computeMetrics(rows) {
@@ -5998,17 +4922,6 @@ function tgtMetrics(targetGmv, targetPlaced, deliveredGmv, placed, t) {
   };
 }
 
-function renderOverallAcmTargetsSummary() {
-  let totalTarget = 0; let totalDelivered = 0; let totalRunRate = 0;
-  state.acmTableData.forEach(m => { if(m.targetGmv > 0) { totalTarget += m.targetGmv; totalDelivered += m.deliveredGmv; totalRunRate += m.runRate; } });
-  const pct = totalTarget > 0 ? (totalDelivered / totalTarget) * 100 : 0;
-  if($("overallAcmTargetGmv")) $("overallAcmTargetGmv").textContent = fmtMoneyCompact(totalTarget);
-  if($("overallAcmDeliveredGmv")) $("overallAcmDeliveredGmv").textContent = fmtMoneyCompact(totalDelivered);
-  if($("overallAcmRunRateGmv")) $("overallAcmRunRateGmv").textContent = fmtMoneyCompact(totalRunRate);
-  if($("overallAcmAchievedPct")) $("overallAcmAchievedPct").textContent = fmtPct(pct);
-  const bar = $("overallAcmProgressBar");
-  if(bar) { bar.style.width = `${Math.min(pct, 100)}%`; bar.className = "progress-fill"; if (pct >= 100) bar.classList.add("green"); else if (pct < 50) bar.classList.add("red"); else if (pct >= 50 && pct < 80) bar.classList.add("orange"); else bar.classList.add("blue"); }
-}
 
 function applyTableSearchAndSort() {
   const term = $("searchInput") ? $("searchInput").value.trim().toLowerCase() : "";
@@ -6166,13 +5079,6 @@ function acmMerchantRows(a) {
   if (!out.length) { const tr = document.createElement("tr"); tr.innerHTML = `<td></td><td colspan="21" class="text-dim" style="padding-left:26px">No merchants found for this account manager</td>`; out.push(tr); }
   return out;
 }
-function kpiCells(m) {
-  const K = state.acmKpis; const col = (v, t) => (t > 0 && v >= t ? "green" : (v >= t * 0.6 ? "orange" : "red"));
-  const fin = m.finalScorePct >= 70 ? "green" : (m.finalScorePct >= 40 ? "orange" : "red");
-  const cell = (v, t) => `<td class="num"><span class="badge-outline ${col(v, t)}">${fmtPctCell(v)}</span></td>`;
-  return `<td class="num font-bold"><div style="font-weight:600; font-size: 12px; color:var(--${fin})">${fmtPctCell(m.finalScorePct)}</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>` +
-    cell(m.ndr, K.ndr.target) + cell(m.cm3Pct, K.cm3.target) + cell(m.actualRetentionPct, K.retention.target);
-}
 function acmKpiCells(m) {
   const K = state.acmKpis; const B = ACM_GRP_BORDER;
   const hasG = m.targetGmv > 0;
@@ -6189,14 +5095,7 @@ function acmKpiCells(m) {
     + first(K.retention.target + "%") + lit(fmtPctCell(m.actualRetentionPct)) + ach(m.retAch, K.retention.target > 0) + score(m.retentionScore, K.retention.weight)
     + `<td class="num font-bold" style="${B}"><div style="font-weight:700; font-size: 13px; color:var(--${fin})">${m.finalScorePct.toFixed(1)}%</div><div class="progress-bar"><div class="progress-fill ${fin}" style="width: ${Math.min(m.finalScorePct, 100)}%"></div></div></td>`;
 }
-function renderAcmKpiTable() {
-  const K0 = state.acmKpis, nm = { gmv: "Delivered GMV", ndr: "Portfolio NDR %", cm3: "CM3 %", ret: "Segment Retention" }, wk = { gmv: K0.gmv, ndr: K0.ndr, cm3: K0.cm3, ret: K0.retention };
-  document.querySelectorAll("#acmTgtTable .acm-kpi-grp").forEach(th => { const g = th.dataset.kgrp; th.textContent = `${nm[g]} · weight ${wk[g].weight}%`; });
-  const host = $("acmKpiBody"); if (!host) return; const K = state.acmKpis;
-  const rows = [["Delivered GMV", K.gmv, "of the GMV target"], ["Portfolio NDR (Orders)%", K.ndr, ""], ["CM3 Per Merchant", K.cm3, "CM3 %"], ["Segment Retention", K.retention, "merchants moving up a segment"]];
-  host.innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1].target}%</td><td class="num">${r[1].weight}%</td></tr>`).join("") + `<tr><td></td><td></td><td class="num font-bold">${rows.reduce((a, r) => a + r[1].weight, 0)}%</td></tr>`;
-}
-function renderAcmTargetsView() { renderAcmTgtHead(); renderAcmKpiTable(); renderTgtView("acm"); }
+function renderAcmTargetsView() { renderAcmTgtHead(); renderTgtView("acm"); }
 function renderMerchantTargetsView() { renderTgtView("merchant"); }
 function wireTgtViews() {
   Object.keys(tgtViews).forEach(kind => {
@@ -6208,55 +5107,6 @@ function wireTgtViews() {
   });
 }
 
-function renderTrendTables(allRows, selectedAcm) {
-  const wowTbody = $("wowTableBody"); const avgTbody = $("avgDailyTableBody");
-  if (!wowTbody && !avgTbody) return; // v1.5.0: WoW/MoM اتشالوا من صفحة Performance ACM
-  if(wowTbody) wowTbody.innerHTML = ""; if(avgTbody) avgTbody.innerHTML = "";
-  if (!allRows || allRows.length === 0) return;
-  let latestTs = 0; for (const r of allRows) { if (r.timestamp > latestTs) latestTs = r.timestamp; } if(latestTs === 0) return;
-  const latestDate = new Date(latestTs); latestDate.setHours(0,0,0,0); const currentMonth = latestDate.getMonth(); const currentYear = latestDate.getFullYear(); const currentDay = latestDate.getDate();
-  const lastMonthDate = new Date(latestDate); lastMonthDate.setMonth(currentMonth - 1); const lastMonth = lastMonthDate.getMonth(); const lastMonthYear = lastMonthDate.getFullYear();
-  const startThisWeek = new Date(latestDate); startThisWeek.setDate(latestDate.getDate() - 6);
-  const startLastWeek = new Date(latestDate); startLastWeek.setDate(latestDate.getDate() - 13);
-  const endLastWeek = new Date(startThisWeek); endLastWeek.setDate(endLastWeek.getDate() - 1);
-  const trendMap = new Map();
-  allRows.forEach(r => {
-    if (!r.acmName || r.acmName === "Unassigned" || r.timestamp === 0) return;
-    if (selectedAcm !== "All" && r.acmName !== selectedAcm) return;
-    if (!trendMap.has(r.acmName)) { trendMap.set(r.acmName, { name: r.acmName, thisWeek: 0, lastWeek: 0, currentMonthTotal: 0, lastMonthTotal: 0 }); }
-    const entry = trendMap.get(r.acmName); const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0);
-    if (rDate >= startThisWeek && rDate <= latestDate) { entry.thisWeek += r.confirmedOrders; } else if (rDate >= startLastWeek && rDate <= endLastWeek) { entry.lastWeek += r.confirmedOrders; }
-    if (rDate.getMonth() === currentMonth && rDate.getFullYear() === currentYear && rDate.getDate() <= currentDay) { entry.currentMonthTotal += r.confirmedOrders; } else if (rDate.getMonth() === lastMonth && rDate.getFullYear() === lastMonthYear && rDate.getDate() <= currentDay) { entry.lastMonthTotal += r.confirmedOrders; }
-  });
-  const wowData = Array.from(trendMap.values()).map(m => {
-    const change = m.thisWeek - m.lastWeek; let pct = 0;
-    if (m.lastWeek > 0) pct = (change / m.lastWeek) * 100; else if (m.thisWeek > 0) pct = 100;
-    let status = 'Stable'; let icon = ' '; let colorClass = 'neutral';
-    if (pct > 10) { status = 'Spike'; icon = ' '; colorClass = 'positive'; } else if (pct < -10) { status = 'Decline'; icon = ' '; colorClass = 'negative'; }
-    return { ...m, change, pct, status, icon, colorClass };
-  }).sort((a, b) => b.pct - a.pct);
-  if(wowTbody) {
-    wowData.forEach((m, idx) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtIntCell(m.thisWeek)}</td><td class="num text-dim">${fmtIntCell(m.lastWeek)}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtIntCell(m.change) : fmtIntCell(m.change)}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
-      wowTbody.appendChild(tr);
-    });
-  }
-  const momData = Array.from(trendMap.values()).map(m => {
-    const activeDaysCount = currentDay || 1; const currentAvg = m.currentMonthTotal / activeDaysCount; const lastAvg = m.lastMonthTotal / activeDaysCount; const change = currentAvg - lastAvg; let pct = 0;
-    if (lastAvg > 0) pct = (change / lastAvg) * 100; else if (currentAvg > 0) pct = 100;
-    let status = 'Stable'; let icon = ' '; let colorClass = 'neutral';
-    if (pct > 10) { status = 'Spike'; icon = ' '; colorClass = 'positive'; } else if (pct < -10) { status = 'Decline'; icon = ' '; colorClass = 'negative'; }
-    return { ...m, currentAvg, lastAvg, change, pct, status, icon, colorClass };
-  }).sort((a, b) => b.pct - a.pct);
-  if(avgTbody) {
-    momData.forEach((m, idx) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-bold text-light">${m.name}</td><td class="num text-blue font-bold">${fmtIntCell(Math.round(m.currentAvg))}</td><td class="num text-dim">${fmtIntCell(Math.round(m.lastAvg))}</td><td class="num"><span class="text-change ${m.colorClass}">${m.icon} ${m.change > 0 ? '+'+fmtIntCell(Math.round(m.change)) : fmtIntCell(Math.round(m.change))}</span></td><td><span class="badge-status ${m.status.toLowerCase()}">${m.icon} ${m.status} ${m.pct > 0 ? '+'+m.pct.toFixed(1) : m.pct.toFixed(1)}%</span></td><td class="center" style="color: var(--${m.colorClass === 'positive' ? 'green' : m.colorClass === 'negative' ? 'red' : 'dim'}); font-size: 14px;">${m.colorClass === 'positive' ? ' ' : m.colorClass === 'negative' ? ' ' : ' '}</td>`;
-      avgTbody.appendChild(tr);
-    });
-  }
-}
 
 // -------------------------------------------------------------------------
 // Performance Merchant's (Top 10 Merchants / Overall Merchant Performance /
@@ -6633,30 +5483,6 @@ if (incMerchSearchInput) {
 if ($("prevPageIncMerch")) $("prevPageIncMerch").addEventListener("click", () => { if (state.incentiveMerchantsPage > 0) { state.incentiveMerchantsPage -= 1; renderIncentiveMerchantsPanel(); } });
 if ($("nextPageIncMerch")) $("nextPageIncMerch").addEventListener("click", () => { state.incentiveMerchantsPage += 1; renderIncentiveMerchantsPanel(); });
 
-function renderOverallTargetSummary() {
-  let totalTarget = 0; let totalDelivered = 0; let totalRunRate = 0;
-  state.merchantTableData.forEach(m => { if(m.targetGmv > 0) { totalTarget += m.targetGmv; totalDelivered += m.deliveredGmv; totalRunRate += m.runRate; } });
-  const pct = totalTarget > 0 ? (totalDelivered / totalTarget) * 100 : 0;
-  if($("overallTargetGmv")) $("overallTargetGmv").textContent = fmtMoneyCompact(totalTarget);
-  if($("overallDeliveredGmv")) $("overallDeliveredGmv").textContent = fmtMoneyCompact(totalDelivered);
-  if($("overallRunRateGmv")) $("overallRunRateGmv").textContent = fmtMoneyCompact(totalRunRate);
-  if($("overallAchievedPct")) $("overallAchievedPct").textContent = fmtPct(pct);
-  const bar = $("overallProgressBar");
-  if(bar) { bar.style.width = `${Math.min(pct, 100)}%`; bar.className = "progress-fill"; if (pct >= 100) bar.classList.add("green"); else if (pct < 50) bar.classList.add("red"); else if (pct >= 50 && pct < 80) bar.classList.add("orange"); else bar.classList.add("blue"); }
-}
-
-function renderTop10Merchants() {
-  const tbody = $("top10MerchantBody"); if(!tbody) return; tbody.innerHTML = "";
-  const top10 = [...state.merchantTableData].sort((a, b) => b.deliveredGmv - a.deliveredGmv).slice(0, 10);
-  // Confirmed/Placed/Delivered هنا Pieces (مش Orders) بطلب صريح، ومعاهم
-  // CR%/DR%/NDR% محسوبين على أساس نفس الـ Pieces دي (crPieces/drPieces/ndrPieces)
-  // عشان يتوافقوا مع الأرقام المعروضة جنبهم.
-  top10.forEach((m, idx) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="text-dim">#${idx + 1}</td><td class="font-mono text-dim">${m.id || '-'}</td><td class="font-bold text-light">${m.name}</td><td class="text-dim">${m.acm}</td><td class="num text-blue font-bold">${fmtIntCell(m.confirmedPieces)}</td><td class="num text-dim">${fmtIntCell(m.placedPieces)}</td><td class="num text-dim">${fmtIntCell(m.deliveredPieces)}</td><td class="num"><span class="badge-outline ${getCrBadgeColor(m.crPieces)}">${fmtPctCell(m.crPieces)}</span></td><td class="num text-dim">${fmtPctCell(m.drPieces)}</td><td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndrPieces)}">${fmtPctCell(m.ndrPieces)}</span></td><td class="num text-green font-bold">${fmtMoneyCompactCell(m.deliveredGmv)}</td><td class="num text-dim">${fmtMoneyCompactCell(m.confirmedGmv)}</td><td class="num text-dim">${fmtIntCell(m.skuCount)}</td>`;
-    tbody.appendChild(tr);
-  });
-}
 
 function applyMerchantSearchAndSort() {
   const term = $("searchMerchantInput") ? $("searchMerchantInput").value.trim().toLowerCase() : "";
@@ -10322,18 +9148,6 @@ function stLastInboundBucketLabel(bucket) {
   return bucket;
 }
 
-// نسخة مختصرة من نفس اللابل، من غير الشهور بين قوسين — عشان تتظهر كـ "فلاج"
-// (Badge) صغير جمب Last Receiving Date في جدول الـ Sellthrough من غير ما
-// تاخد مساحة كبيرة.
-function stLastInboundBucketShortLabel(bucket) {
-  const y = ST_LAST_INBOUND_YEAR;
-  if (bucket === "before") return `Before ${y}`;
-  if (bucket === "q1") return `Q1 ${y}`;
-  if (bucket === "q2") return `Q2 ${y}`;
-  if (bucket === "q3") return `Q3 ${y}`;
-  if (bucket === "q4") return `Q4 ${y}`;
-  return "-";
-}
 
 // بيبني صفوف الـ Sellthrough (نفس معادلات الشيت بالظبط) لشهر "بيجيننج
 // إنفنتوري" واحد (begInvKey) + رينج مبيعات (startKey..endKey) — دي نفس
@@ -13555,19 +12369,6 @@ function wiComputePurchasesDepletion(sku, weekStart, thisWeekPurchases, opts) {
   return { status: "remaining", remaining, asOf };
 }
 
-// كام قطعة فعلاً اتباعت من نفس دفعة المشتريات دي (thisWeekPurchases)، بنفس
-// منطق الـ FIFO الحقيقي بتاع wiComputePurchasesDepletion بالظبط — ده اللي
-// بيستخدمه "Confirmed From Purchase" و"Inbound vs Sold %" في جدول Weekly
-// Inventory (بدل الطريقة القديمة التقريبية اللي كانت بس بتفترض إن أي ديماند
-// فوق الـ Beginning Inventory اتغطى بالكامل من نفس دفعة المشتريات، من غير
-// متابعة يوم بيوم فعلية)، وبرضو نفس المنطق المستخدم في Purchase Cohort
-// Tracker وبادچ "Purchases Sold Out On" — عشان الثلاثة يفضلوا متطابقين.
-function wiSoldFromPurchasesQty(depletion, qty) {
-  if (!qty || qty <= 0) return 0;
-  if (depletion.status === "depleted") return qty;
-  if (depletion.status === "remaining") return Math.max(0, qty - depletion.remaining);
-  return 0; // "unknown" — مفيش بيانات ستوك كفاية نتابعها
-}
 
 // -------------------------------------------------------------------------
 // PURCHASE COHORT TRACKER — نفس فكرة buildWeeklyInventoryTrendData بالظبط
@@ -13711,20 +12512,12 @@ function renderPurchaseCohortChart() {
   }
 }
 
-function wiFmtPct(n) {
-  if (n === null || n === undefined || !Number.isFinite(n)) return `<span class="text-dim">-</span>`;
-  return `${n.toFixed(1)}%`;
-}
 // "Inbound vs Sold" متكبش يعدي الـ 100% في أي مكان بيتعرض فيه (كارت السامري
 // أو عمود الجدول) — أي زيادة فوق الـ 100% بتتحط في "Overachieve" لوحده بدل
 // ما تخلي النسبة الأساسية تعدي الحد ده.
 function wiCappedPct(n) {
   if (n === null || n === undefined || !Number.isFinite(n)) return `<span class="text-dim">-</span>`;
   return `${Math.min(n, 100).toFixed(1)}%`;
-}
-function wiOverachievePct(n) {
-  if (n === null || n === undefined || !Number.isFinite(n) || n <= 100) return `<span class="text-dim">-</span>`;
-  return `<span class="text-purple font-bold">+${(n - 100).toFixed(1)}%</span>`;
 }
 // v1.1.53: بديل الـ Overachieve للجدول ده تحديدًا — بعد ما "Confirmed From
 // Purchase" بقت مكبوتة عند حد Inbound Qty، النسبة القديمة (inboundVsSold)
@@ -15031,7 +13824,7 @@ const SPF_OPTIONS = [
   "Stock issue",
   "No Feedback"
 ];
-const SPF_STOCK = "Stock issue"; // مشكلة ستوك: مفيش تغيير في التارجت ولا في شيت الخطة
+// مشكلة ستوك: مفيش تغيير في التارجت ولا في شيت الخطة
 const SPF_NO_CHANGE = { "Stock issue": true, "No Feedback": true }; // v1.15.39: "No Feedback" بنفس معاملة Stock issue (مفيش تغيير في التارجت ولا في شيت الخطة)
 const spfNoChange = (fb) => !!SPF_NO_CHANGE[fb];
 const SPF_NEEDS_MERCHANT = { "Reduce merchant target - add new merchant": true, "Merchant will stop - add new merchant": true };
@@ -16650,198 +15443,9 @@ function prepareHealthyLockingData() {
   state.healthyLockingMerchantRows = merchantRows;
   healthyLockingState.merchantPage = 0;
 
-  const avgUtilizationPct = totalLocks ? (utilSum / totalLocks) : 0;
-  const healthScorePct = totalLocks ? (healthyCount / totalLocks) * 100 : 0;
-
-  if ($("hlTotalLocks")) $("hlTotalLocks").textContent = fmtInt.format(totalLocks);
-  if ($("hlHealthyLocks")) $("hlHealthyLocks").textContent = fmtInt.format(healthyCount);
-  if ($("hlHealthyPct")) $("hlHealthyPct").textContent = fmtPct(totalLocks ? (healthyCount / totalLocks) * 100 : 0);
-  if ($("hlRiskLocks")) $("hlRiskLocks").textContent = fmtInt.format(riskCount);
-  if ($("hlRiskPct")) $("hlRiskPct").textContent = fmtPct(totalLocks ? (riskCount / totalLocks) * 100 : 0);
-  if ($("hlUnhealthyLocks")) $("hlUnhealthyLocks").textContent = fmtInt.format(unhealthyCount);
-  if ($("hlUnhealthyPct")) $("hlUnhealthyPct").textContent = fmtPct(totalLocks ? (unhealthyCount / totalLocks) * 100 : 0);
-  if ($("hlAvgUtilization")) $("hlAvgUtilization").textContent = fmtPct(avgUtilizationPct);
-  if ($("hlIdlePieces")) $("hlIdlePieces").textContent = fmtInt.format(Math.round(idlePiecesTotal));
-  if ($("hlHealthyPieces")) $("hlHealthyPieces").textContent = fmtInt.format(Math.round(healthyPiecesTotal));
-  if ($("hlHealthScore")) $("hlHealthScore").textContent = fmtPct(healthScorePct);
-
-  renderHealthyLockingCategoryTable();
-  renderHealthyLockingMerchantTable();
-  renderHealthyLockingRecommendations();
-  applyHealthyLockingSearchAndSort();
+  // v1.16.0: صفحة Healthy Locking ملهاش تاب — الحساب فاضل بس عشان الـ Computed API (healthyLocking/main)
 }
 
-function renderHealthyLockingCategoryTable() {
-  const tbody = $("hlCategoryTableBody");
-  if (!tbody) return;
-  const rows = state.healthyLockingCategoryRows || [];
-  tbody.innerHTML = rows.map(c => `
-    <tr>
-      <td class="font-bold text-purple">${c.category}</td>
-      <td class="num font-bold">${fmtIntCell(c.activeLocks)}</td>
-      <td class="num text-green">${fmtIntCell(c.healthy)}</td>
-      <td class="num text-orange">${fmtIntCell(c.risk)}</td>
-      <td class="num text-red">${fmtIntCell(c.unhealthy)}</td>
-      <td class="num"><span class="badge-outline ${c.avgUtilizationPct >= 50 ? 'green' : (c.avgUtilizationPct >= 20 ? 'orange' : 'red')}">${fmtPctCell(c.avgUtilizationPct)}</span></td>
-      <td class="num">${fmtIntCell(Math.round(c.lockedPieces))}</td>
-      <td class="num text-red">${fmtIntCell(Math.round(c.idlePieces))}</td>
-    </tr>`).join("");
-}
-
-function renderHealthyLockingMerchantTable() {
-  const tbody = $("hlMerchantTableBody");
-  if (!tbody) return;
-  const rows = state.healthyLockingMerchantRows || [];
-  const page = healthyLockingState.merchantPage || 0;
-  const start = page * PAGE_SIZE;
-  const pageRows = rows.slice(start, start + PAGE_SIZE);
-  tbody.innerHTML = pageRows.map(m => `
-    <tr>
-      <td class="font-mono text-dim">${m.tagerId}</td>
-      <td class="font-bold truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
-      <td class="num font-bold">${fmtIntCell(m.activeLocks)}</td>
-      <td class="num text-green">${fmtIntCell(m.healthy)}</td>
-      <td class="num text-orange">${fmtIntCell(m.risk)}</td>
-      <td class="num text-red">${fmtIntCell(m.unhealthy)}</td>
-      <td class="num"><span class="badge-outline ${m.avgUtilizationPct >= 50 ? 'green' : (m.avgUtilizationPct >= 20 ? 'orange' : 'red')}">${fmtPctCell(m.avgUtilizationPct)}</span></td>
-      <td class="num">${fmtIntCell(Math.round(m.lockedPieces))}</td>
-      <td class="num text-red">${fmtIntCell(Math.round(m.idlePieces))}</td>
-    </tr>`).join("");
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  if ($("rowCountHlMerchant")) $("rowCountHlMerchant").textContent = `${fmtInt.format(rows.length)} Merchants`;
-  if ($("pageIndicatorHlMerchant")) $("pageIndicatorHlMerchant").textContent = `Page ${page + 1} of ${totalPages}`;
-  if ($("prevPageHlMerchant")) $("prevPageHlMerchant").disabled = page === 0;
-  if ($("nextPageHlMerchant")) $("nextPageHlMerchant").disabled = page >= totalPages - 1;
-}
-
-// Release Candidates: أعلى 10 قفلات Unhealthy (مفيهاش استخدام ولا ديماند)
-// مرتبة بأكبر Remaining Pieces — دي أكبر كتلة استوك محبوسة من غير أي فايدة.
-// مستبعد منها كاتيجوري "Taager Gomla" و"Fashion" بالذات.
-//
-// Renew Candidates: أي قفل (أي حالة صحية) قرب يخلص، سواء بتاريخ الانتهاء
-// (≤7 أيام) أو بالكمية (Remaining Pieces قربت من الصفر نسبة للـ Allocated،
-// أو رقم صغير جدًا) — مستبعد منها قفلات ميرشنت "admin-service". الترتيب
-// مش بس CONTR% لوحدها: بنجمع بين أعلى CONTR% (الأهم تجاريًا) وأقل DOH
-// (الأقرب يخلص) في score واحد (CONTR% ÷ DOH)، فاللي يطلع فوق هو اللي مهم
-// تجاريًا *و* قرب يخلص مع بعض — مش بس مهم، ولا بس قرب يخلص لوحده.
-const HL_RELEASE_EXCLUDED_CATEGORIES = ["taager gomla", "tager gomla", "fashion"];
-const HL_RENEW_EXCLUDED_MERCHANTS = ["admin-service", "admin service", "adminservice"];
-function renderHealthyLockingRecommendations() {
-  const data = healthyLockingState.data || [];
-  const releaseRows = data.filter(d => {
-    if (d.healthKey !== "unhealthy" || !((d.remainingPieces || 0) > 0)) return false;
-    const catNorm = (d.category || "").trim().toLowerCase();
-    return !HL_RELEASE_EXCLUDED_CATEGORIES.some(ex => catNorm.includes(ex));
-  }).sort((a, b) => (b.remainingPieces || 0) - (a.remainingPieces || 0)).slice(0, 10);
-
-  const renewRows = data.filter(d => {
-    const merchantNorm = (d.merchantName || "").trim().toLowerCase();
-    if (HL_RENEW_EXCLUDED_MERCHANTS.some(ex => merchantNorm.includes(ex))) return false;
-    const expiringSoon = d.daysToExpiry !== null && d.daysToExpiry !== undefined && d.daysToExpiry <= 7;
-    const qtyRunningOut = (d.allocatedQty > 0 && (d.remainingPieces / d.allocatedQty) <= 0.15) || ((d.remainingPieces || 0) <= 5);
-    return expiringSoon || qtyRunningOut;
-  }).map(d => {
-    const expiringSoon = d.daysToExpiry !== null && d.daysToExpiry !== undefined && d.daysToExpiry <= 7;
-    const qtyRunningOut = (d.allocatedQty > 0 && (d.remainingPieces / d.allocatedQty) <= 0.15) || ((d.remainingPieces || 0) <= 5);
-    const reason = expiringSoon && qtyRunningOut ? "Expiring & Low Qty" : expiringSoon ? "Expiring Soon" : "Low Quantity";
-    // dohForScore: لو مفيش ديماند آخر 3 أيام خالص (DOH = null) بنحطها 30 يوم
-    // بس لأغراض الترتيب (مش القيمة المعروضة) عشان ميتصدرش الترتيب غلط —
-    // مش معناها إنها مستعجلة، معناها إننا مش عارفين نتوقع بالإيقاع الحالي.
-    const dohForScore = (d.remainingDoh === null || d.remainingDoh === undefined) ? 30 : Math.max(1, d.remainingDoh);
-    const renewScore = (d.contrGmvPct || 0) / dohForScore;
-    return { ...d, reason, renewScore };
-  }).sort((a, b) => b.renewScore - a.renewScore).slice(0, 15);
-
-  const releaseTbody = $("hlReleaseTableBody");
-  if (releaseTbody) {
-    releaseTbody.innerHTML = releaseRows.length ? releaseRows.map(d => `
-      <tr>
-        <td class="font-mono text-dim">${d.singleId}</td>
-        <td class="font-bold truncate-cell" title="${d.singleName}">${d.singleName}</td>
-        <td class="text-dim">${d.category}</td>
-        <td class="truncate-cell" title="${d.merchantName}">${d.merchantName}</td>
-        <td class="num">${fmtIntCell(d.allocatedQty)}</td>
-        <td class="num text-dim">${fmtIntCell(d.usedQty)}</td>
-        <td class="num"><span class="badge-outline red">${fmtPctCell(d.utilizationPct)}</span></td>
-        <td class="num text-red font-bold">${fmtIntCell(d.remainingPieces)}</td>
-        <td class="num">${d.daysToExpiry === null || d.daysToExpiry === undefined ? "—" : d.daysToExpiry}</td>
-      </tr>`).join("") : `<tr><td colspan="9" class="text-dim center">No idle locks found — everything's being used 🎉</td></tr>`;
-  }
-
-  const renewTbody = $("hlRenewTableBody");
-  if (renewTbody) {
-    renewTbody.innerHTML = renewRows.length ? renewRows.map(d => `
-      <tr>
-        <td class="font-mono text-dim">${d.singleId}</td>
-        <td class="font-bold truncate-cell" title="${d.singleName}">${d.singleName}</td>
-        <td class="text-dim">${d.category}</td>
-        <td class="font-mono text-dim">${d.tagerId}</td>
-        <td class="truncate-cell" title="${d.merchantName}">${d.merchantName}</td>
-        <td class="num font-bold text-purple">${fmtPctCell(d.contrGmvPct)}</td>
-        <td class="num text-orange font-bold">${fmtIntCell(d.remainingPieces)}</td>
-        <td class="num text-dim">${fmtIntCell(d.allocatedQty)}</td>
-        <td class="num">${fmtIntCell(Math.round(d.placedYdayMerchant))}</td>
-        <td class="num">${d.remainingDoh === null ? "—" : `<span class="badge-outline ${d.remainingDoh <= 3 ? 'red' : (d.remainingDoh <= 7 ? 'orange' : 'green')}">${Math.round(d.remainingDoh)}d</span>`}</td>
-        <td class="num">${d.daysToExpiry === null || d.daysToExpiry === undefined ? "—" : d.daysToExpiry}</td>
-        <td class="num"><span class="badge-outline ${d.stock > 0 ? 'green' : 'red'}">${fmtIntCell(Math.round(d.stock))}</span></td>
-        <td class="center"><span class="badge-outline ${d.reason === 'Low Quantity' ? 'red' : (d.reason === 'Expiring Soon' ? 'orange' : 'purple')}">${d.reason}</span></td>
-      </tr>`).join("") : `<tr><td colspan="13" class="text-dim center">No locks about to end right now</td></tr>`;
-  }
-}
-
-function sortHealthyLocking(key) {
-  if (healthyLockingState.sortKey === key) { healthyLockingState.sortDir = healthyLockingState.sortDir === "asc" ? "desc" : "asc"; } else { healthyLockingState.sortKey = key; healthyLockingState.sortDir = "desc"; }
-  applyHealthyLockingSearchAndSort();
-}
-
-function applyHealthyLockingSearchAndSort() {
-  const term = $("searchHealthyLockingInput") ? $("searchHealthyLockingInput").value.trim().toLowerCase() : "";
-  let data = (healthyLockingState.data || []).filter(d => {
-    if (!term) return true;
-    return (d.singleId && String(d.singleId).toLowerCase().includes(term)) || (d.singleName && d.singleName.toLowerCase().includes(term)) ||
-      (d.merchantName && d.merchantName.toLowerCase().includes(term)) || (d.tagerId && String(d.tagerId).toLowerCase().includes(term)) ||
-      (d.category && d.category.toLowerCase().includes(term)) || (d.lockingType && d.lockingType.toLowerCase().includes(term));
-  });
-  const { sortKey, sortDir } = healthyLockingState; const dir = sortDir === "asc" ? 1 : -1;
-  data.sort((a, b) => { const av = a[sortKey]; const bv = b[sortKey]; if (typeof av === "string") return av.localeCompare(bv) * dir; return ((av || 0) - (bv || 0)) * dir; });
-  healthyLockingState.filtered = data;
-  healthyLockingState.page = 0;
-  renderPaginatedHealthyLockingTable();
-}
-
-function renderPaginatedHealthyLockingTable() {
-  const tbody = $("hlMatchesTableBody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  const data = healthyLockingState.filtered || [];
-  const start = healthyLockingState.page * PAGE_SIZE;
-  const pageRows = data.slice(start, start + PAGE_SIZE);
-  pageRows.forEach(l => {
-    const tr = document.createElement("tr");
-    const typeCls = (l.lockingType || "").toLowerCase().includes("solo") ? "red" : "blue";
-    tr.innerHTML = `
-      <td class="font-mono text-dim">${l.singleId}</td>
-      <td class="font-bold truncate-cell" title="${l.singleName}">${l.singleName}</td>
-      <td class="text-dim">${l.category}</td>
-      <td class="font-mono text-dim">${l.tagerId}</td>
-      <td class="truncate-cell" title="${l.merchantName}">${l.merchantName}</td>
-      <td class="center"><span class="badge-outline ${typeCls}">${l.lockingType}</span></td>
-      <td class="num font-bold">${fmtIntCell(l.allocatedQty)}</td>
-      <td class="num text-dim">${fmtIntCell(l.usedQty)}</td>
-      <td class="num">${fmtPctCell(l.utilizationPct)}</td>
-      <td class="num text-orange font-bold">${fmtIntCell(l.remainingPieces)}</td>
-      <td class="num font-bold text-purple">${fmtIntCell(Math.round(l.placedYdayMerchant))}</td>
-      <td class="num">${l.daysToExpiry === null || l.daysToExpiry === undefined ? "—" : l.daysToExpiry}</td>
-      <td class="center"><span class="badge-outline ${l.healthCls}">${l.healthText}</span></td>
-    `;
-    tbody.appendChild(tr);
-  });
-  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE));
-  if ($("rowCountHealthyLocking")) $("rowCountHealthyLocking").textContent = `${fmtInt.format(data.length)} Matches`;
-  if ($("pageIndicatorHealthyLocking")) $("pageIndicatorHealthyLocking").textContent = `Page ${healthyLockingState.page + 1} of ${totalPages}`;
-  if ($("prevPageHealthyLocking")) $("prevPageHealthyLocking").disabled = healthyLockingState.page === 0;
-  if ($("nextPageHealthyLocking")) $("nextPageHealthyLocking").disabled = healthyLockingState.page >= totalPages - 1;
-}
 
 // =========================================================================
 // HEALTHY UNLOCKING (تحت Healthy Locking) — عكس فكرة Healthy Locking: مش
@@ -17524,20 +16128,6 @@ function computeSegmentationPerformance() {
   return results;
 }
 
-// All GIDs the dashboard needs, deduped/filtered — sent as one query string
-// to the backend endpoint so it can read all of them in a single request.
-const ALL_SHEET_GIDS = [
-  MAIN_GID,
-  TARGETS_GID && TARGETS_GID !== " " ? TARGETS_GID : null,
-  TARGETS_ACM_GID && TARGETS_ACM_GID !== " _Targets_ACM_ " ? TARGETS_ACM_GID : null,
-  INVENTORY_GID, PRODUCTS_GID, CAT_TARGETS_GID, ACM_SALES_PLAN_GID,
-  NEW_SEGMENTATION_GID, INBOUND_GID,
-  PRODUCTS_INFO_GID, BEGIN_INV_GID, SELLTHROUGH_NEEDED_GID,
-  PRODUCTS_DEBUNDLE_MAP_GID, SINGLE_SKU_TARGETS_GID, COGS_GID, AVAILABILITY_LOCKING_GID,
-  PRODUCTS_MATCHES_GID, MERCHANT_SKU_DAILY_GID, MERCHANT_SEGMENTATION_GID,
-  WEEKLY_INVENTORY_GID, WAREHOUSE_REPACK_GID, SUPPLY_REPACK_GID, CONFIRMED_BY_DAY_GID, INCENTIVE_MERCHANTS_GID,
-  IRQ_SELLTHROUGH_NEEDED_GID, IRQ_INBOUND_GID, IRQ_BEGIN_INV_GID, IRQ_COGS_GID, IRQ_INVENTORY_GID
-].filter(Boolean);
 
 // آخر توقيت مزامنة مركزية معروف من السيرفر (نفسه بالظبط لكل اليوزرز اللي
 // فاتحين الداشبورد) — بيتحدث في كل fetchAllSheetsViaBackend() ناجحة، وبيتقرا
@@ -17777,7 +16367,7 @@ const GID_LABELS = {
   [NEW_SEGMENTATION_GID]: "New Segmentation",
   [INBOUND_GID]: "Inbound", [PRODUCTS_INFO_GID]: "Products Info",
   [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
-  [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "Single SKU Targets",
+  [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "SKU Targets (Bundle & Single)",
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
@@ -18189,9 +16779,6 @@ function applySnapshotToState(snapshot) {
     state.weeklyInventoryDateCols = wi.dateCols || [];
     if (changed) state.weeklyInvWeeks = []; // يتحسب تاني أول ما البانل يتفتح
   }
-  // ترتيب أعمدة تواريخ الفيدباك (K فأكتر) زي ما هي في شيت الماتشات — معلقة
-  // على الـ array نفسه من parseProductsMatchesSheet (rows.feedbackDateLabels).
-  state.matchesFeedbackDateLabels = state.productsMatchesRows.feedbackDateLabels || state.matchesFeedbackDateLabels || [];
   // الداتا الخام اتحدثت (فتح أول مرة / ريفريش) — بس مش كل مرة اليوزر يفتح
   // اللوحة أو يرجعلها لازم نعمل reset. نقارن بصمة مصادر الـ Sellthrough بس:
   // لو نفسها زي قبل (يعني مفيش تحديث حقيقي وصل من الشيت)، نسيب
@@ -18395,14 +16982,12 @@ if($("retryBtn")) $("retryBtn").addEventListener("click", () => loadData(true));
 // بترندر السكشن ده تاني لما الفلتر بتاعه يتغيّر.
 // -------------------------------------------------------------------------
 const SECTION_DATE_FILTER_REFRESH = {
-  recTracker: () => prepareRecommendedTrackerData(),
   ppmProducts: () => preparePpmAnalystProductsData(),
   ppmSingle: () => preparePpmAnalystSingleData(),
   cm3Analyst: () => { renderCm3TargetView(); renderCm3AnalystView(); },
   productsMatchesAnalyst: () => prepareProductsMatchesAnalystData(),
   poorMatches: () => preparePoorMatchesData(),
   availabilityLocking: () => prepareAvailabilityLockingData(),
-  healthyLocking: () => prepareHealthyLockingData(),
   healthyUnlocking: () => prepareHealthyUnlockingData(),
   mpMatches: () => prepareMpMatchesData(),
   mpNewMatches: () => prepareMpNewMatchesData(),
@@ -18513,14 +17098,11 @@ confirmDownloadBtn.addEventListener("click", () => {
         mpSalesPlan: state.mpSalesPlanPage,
         cdz: state.cdzPage,
         cm3ap: cm3apState.page,
-        recTracker: state.recTrackerPage,
         ppmAnalyst: ppmAnalystState.page,
         ppmAnalystSingle: ppmAnalystSingleState.page,
-        prodAn: prodAnState.page,
         pma: pmaState.page,
         incMerch: state.incentiveMerchantsPage,
         purchasePlan: state.purchasePlanPage,
-        hlMerchant: healthyLockingState.merchantPage,
         fc: fcState.page
     };
     const originalIncMerchPageSize = state.incentiveMerchantsPageSize;
@@ -18529,11 +17111,11 @@ confirmDownloadBtn.addEventListener("click", () => {
     state.page = 0; state.pageMerchant = 0; state.pageSeg = 0; state.pageInventory = 0; analystState.page = 0;
     state.sellthroughPage = 0; mpMatchesState.page = 0; mpNewMatchesState.page = 0; mpStoppedState.page = 0; state.cdzPage = 0; cm3apState.page = 0; poorMatchesState.page = 0; state.mpSalesPlanPage = 0; availabilityLockingState.page = 0;
     allocationLockingState.page = 0;
-    healthyLockingState.page = 0; healthyUnlockingState.page = 0;
-    state.recTrackerPage = 0; ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; prodAnState.page = 0; pmaState.page = 0;
+    healthyUnlockingState.page = 0;
+    ppmAnalystState.page = 0; ppmAnalystSingleState.page = 0; pmaState.page = 0;
     state.incentiveMerchantsPage = 0; state.incentiveMerchantsPageSize = 999999;
     PAGE_SIZE = 999999;
-    state.purchasePlanPage = 0; healthyLockingState.merchantPage = 0; fcState.page = 0;
+    state.purchasePlanPage = 0; fcState.page = 0;
     // أي ملف تاني (زي supply.js) عنده Pagination خاص بيه يسمع للحدث ده ويعرض الداتا كلها وقت الداونلود.
     window.__dashExport = true; window.dispatchEvent(new Event("dash:export-start"));
     const originalSpfPage = (typeof spfState !== "undefined") ? spfState.page : 0;
@@ -18541,13 +17123,10 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof spfRender === "function") spfRender();
 
     if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
-    if (typeof renderHealthyLockingMerchantTable === 'function') renderHealthyLockingMerchantTable();
     if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
     if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
-    if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
     if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
     if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
-    if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
     if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
     if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
     if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
@@ -18561,7 +17140,6 @@ confirmDownloadBtn.addEventListener("click", () => {
     if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
     if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
     if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
-    if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
     if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
     if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
     if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
@@ -18576,7 +17154,7 @@ confirmDownloadBtn.addEventListener("click", () => {
         // Restore pagination
         PAGE_SIZE = 10;
         window.__dashExport = false; window.dispatchEvent(new Event("dash:export-end"));
-        state.purchasePlanPage = originalPage.purchasePlan; healthyLockingState.merchantPage = originalPage.hlMerchant; fcState.page = originalPage.fc;
+        state.purchasePlanPage = originalPage.purchasePlan; fcState.page = originalPage.fc;
         SPF_PAGE_SIZE = 25; if (typeof spfState !== "undefined") spfState.page = originalSpfPage; if (typeof spfRender === "function") spfRender();
         state.page = originalPage.acm;
         state.pageMerchant = originalPage.merchant;
@@ -18595,16 +17173,13 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.mpSalesPlanPage = originalPage.mpSalesPlan;
         state.cdzPage = originalPage.cdz;
         cm3apState.page = originalPage.cm3ap;
-        state.recTrackerPage = originalPage.recTracker;
         ppmAnalystState.page = originalPage.ppmAnalyst;
         ppmAnalystSingleState.page = originalPage.ppmAnalystSingle;
-        prodAnState.page = originalPage.prodAn;
         pmaState.page = originalPage.pma;
         state.incentiveMerchantsPage = originalPage.incMerch;
         state.incentiveMerchantsPageSize = originalIncMerchPageSize;
 
         if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
-        if (typeof renderHealthyLockingMerchantTable === 'function') renderHealthyLockingMerchantTable();
         if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
         if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
         if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
@@ -18619,15 +17194,12 @@ confirmDownloadBtn.addEventListener("click", () => {
         if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
         if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
         if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
-        if (typeof renderPaginatedHealthyLockingTable === 'function') renderPaginatedHealthyLockingTable();
         if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
         if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
         if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
         if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
-        if (typeof renderPaginatedRecommendedTrackerTable === 'function') renderPaginatedRecommendedTrackerTable();
         if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
         if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
-        if (typeof renderPaginatedProdAnTable === 'function') renderPaginatedProdAnTable();
         if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
         if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
         if (typeof renderIncentiveMerchantsPanel === 'function') renderIncentiveMerchantsPanel();

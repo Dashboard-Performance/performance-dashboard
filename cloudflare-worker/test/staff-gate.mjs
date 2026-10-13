@@ -1,0 +1,42 @@
+const mod = await import("../worker.js"); const worker = mod.default;
+const kv = new Map();
+const KV = { async get(k, o) { const v = kv.get(k); if (v == null) return null; return (o && o.type === "arrayBuffer") ? v : v; }, async put(k, v) { kv.set(k, v); }, async delete(k) { kv.delete(k); }, async list() { return { keys: [], list_complete: true }; } };
+const cfg = { requireApproval: false, roles: { Admin: { views: "*", admin: true }, Merchant: { views: ["navOverview"] }, Commercial: { views: ["navX"] } }, users: { "m@shop.com": { role: "Merchant", merchantId: "1" }, "ext@agency.com": { role: "Commercial" }, "boss@taager.com": { role: "Admin" } } };
+kv.set("access:config", JSON.stringify(cfg));
+globalThis.fetch = async (u, o) => {
+  u = String(u);
+  if (u.startsWith("https://apps.example")) { const b = JSON.parse(o.body); return new Response(JSON.stringify(b.password === "pw" ? { success: true, name: "N", email: b.email, role: "Commercial" } : { success: false, message: "Incorrect password." })); }
+  if (u.startsWith("https://metabase.taager.com/")) return new Response("C0,C1\n1,2\n", { status: 200, headers: { "Content-Type": "text/csv" } });
+  throw new Error("unexpected " + u);
+};
+const env = { SYNC_CACHE: KV, APPS_SCRIPT_URL: "https://apps.example/exec", STAFF_SESSION_SECRET: "x".repeat(40), ADMIN_KEY: "admin-key-123456", SERVICE_KEY: "service-key-123456" };
+const ctx = { waitUntil() {} };
+const W = "https://w.example/";
+const call = async (q, { method = "GET", body, tok, hdr = {} } = {}) => { const h = Object.assign({}, hdr); if (tok) h["X-Staff-Token"] = tok; const r = await worker.fetch(new Request(W + "?" + q, { method, headers: h, body: body ? JSON.stringify(body) : undefined }), env, ctx); let j; const t = await r.text(); try { j = JSON.parse(t); } catch (e) { j = t; } return { s: r.status, j }; };
+let pass = 0, fail = 0; const ok = (c, n) => { c ? pass++ : fail++; console.log((c ? "  ✓ " : "  ✗ ") + n); };
+const login = (email, password = "pw") => call("action=staffLogin", { method: "POST", body: { email, password } });
+
+ok((await call("action=metabase&gid=2099497960")).s === 401, "Main query without a staff session → 401");
+ok((await call("action=getLastSync")).s === 401, "sheet snapshot without a staff session → 401");
+ok((await call("action=getMain")).s === 401, "getMain without a staff session → 401");
+let r = await login("m@shop.com"); ok(r.s === 403 && !r.j.token, "merchant account cannot sign in to the staff dashboard");
+r = await login("someone@gmail.com"); ok(r.s === 403, "unknown non-Taager email refused");
+r = await login("a@taager.com", "bad"); ok(r.j.success === false && !r.j.token, "wrong password → no token");
+r = await login("a@taager.com"); const tok = r.j.token; ok(r.j.success && tok, "@taager.com staff gets a token");
+r = await call("action=metabase&gid=2099497960", { tok }); ok(r.s === 200 && r.j.startsWith("C0"), "with the token the query works");
+r = await call("action=metabase&gid=999&url=" + encodeURIComponent("https://metabase.taager.com/public/question/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.json"), { tok }); ok(r.s === 404, "proxy no longer forwards arbitrary links");
+const [p0, s0] = tok.split("."); const forged = Buffer.from(JSON.stringify({ e: "boss@taager.com", exp: Date.now() + 1e9 })).toString("base64url") + "." + s0;
+ok((await call("action=metabase&gid=2099497960", { tok: forged })).s === 401, "forged token refused");
+r = await login("ext@agency.com"); ok(r.j.success && r.j.token, "non-Taager staff listed by an admin can sign in");
+r = await call("action=getAccess", { hdr: { "X-Service-Key": "service-key-123456" } }); ok(r.s === 200, "getAccess with the service key (Apps Script / portal import)");
+const tb = (await login("boss@taager.com")).j.token;
+ok((await call("action=putAccess", { method: "POST", hdr: { "X-Admin-Key": "admin-key-123456" }, body: cfg })).s === 401, "admin key alone is not enough — a staff session is needed too");
+r = await call("action=putAccess", { method: "POST", tok: tb, hdr: { "X-Admin-Key": "admin-key-123456" }, body: Object.assign({}, cfg, { users: { "x@gmail.com": { role: "Admin" } } }) });
+ok(r.s === 400 && /taager\.com/.test(r.j.message), "Admin role refused for a non-@taager.com email");
+cfg.requireApproval = true; kv.set("access:config", JSON.stringify(cfg));
+await new Promise((res) => setTimeout(res, 10));
+r = await call("action=putAccess", { method: "POST", tok: tb, hdr: { "X-Admin-Key": "admin-key-123456" }, body: cfg }); ok(r.s === 200, "valid config saved (cache reset)");
+r = await login("new@taager.com"); const t2 = r.j.token; ok(r.j.success && t2, "unapproved @taager.com can sign in…");
+ok((await call("action=metabase&gid=2099497960", { tok: t2 })).s === 403, "…but cannot read data until approved (403 pending)");
+ok((await call("action=getAccess", { tok: t2 })).s === 200, "…and can still check whether they were approved");
+console.log(`\n${pass} passed, ${fail} failed`); if (fail) process.exit(1);

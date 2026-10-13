@@ -198,7 +198,6 @@
   }
 
   var COLS = [["id", "SKU ID", ""], ["name", "SKU name", ""], ["cat", "Category", ""], ["lpd", "Last inbound", ""], ["aging", "Aging", ""], ["avg3", "Avg 3D", "num"], ["avg15", "Avg 15D", "num"], ["stock", "Stock", "num"], ["doh", "DOH", "num"], ["wac", "WAC", "num"], ["inv", "Inv. value", "num"], ["exRet", "Exp. returns", "num"], ["tag", "Stock tag", ""], ["segA", "Segment", ""], ["segL", "Last month", ""], ["segP", "Projected", ""], ["fms", "Movement", ""], ["abc", "ABC", ""], ["action", "Proposed action", ""]];
-  function uniq(k) { var s = {}; SC.rows.forEach(function (r) { if (r[k]) s[r[k]] = 1; }); return Object.keys(s).sort(); }
   function sel(id, label, opts, v) { return '<select data-sk="' + id + '"><option value="">' + label + '</option>' + opts.map(function (o) { return '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + '>' + esc(CATL[o] || o) + '</option>'; }).join("") + '</select>'; }
   function skuFiltered() {
     var f = SC.sk, q = f.q.toLowerCase();

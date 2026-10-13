@@ -82,7 +82,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .font-mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.5px; }
 .center { text-align: center !important; }
 .charts-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; margin-bottom: 16px; }
-.leaderboard-section { display: grid; grid-template-columns: 1fr; }
 .panel { padding: 20px; }
 .panel-head-modern { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
 .panel-title-wrapper { border-left: 3px solid var(--blue); padding-left: 14px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
@@ -93,19 +92,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .panel-title-wrapper h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
 .panel-title-wrapper p { margin: 0; font-size: 12px; color: var(--text-dim); }
 .chart-container { position: relative; height: 280px; width: 100%; }
-.summary-panel { background: linear-gradient(135deg, rgba(15,23,42,0.8) 0%, rgba(30,41,59,0.8) 100%); padding: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
-.summary-info h2 { margin: 0 0 6px 0; font-size: 18px; font-weight: 700; color: var(--text); }
-.summary-info p { margin: 0; font-size: 12px; color: var(--text-dim); }
-.summary-metrics { display: flex; gap: 32px; }
-.sm-box { display: flex; flex-direction: column; gap: 6px; }
-.sm-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
-.sm-value { font-size: 22px; font-weight: 800; color: var(--text); }
-.summary-progress-wrapper { flex: 1; min-width: 250px; background: rgba(0,0,0,0.2); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
-.sp-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 10px; color: var(--text); font-weight: 600; text-transform: uppercase; }
 .table-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; justify-content: flex-end; margin-left: auto; }
 .table-controls input { font-family: inherit; font-size: 12px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: var(--text); min-width: 220px; transition: border-color 0.2s, box-shadow 0.2s; }
 .table-controls input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
-.table-controls input.filter-number { min-width: 90px; }
 .table-controls select.filter-select {
   appearance: none; -webkit-appearance: none; -moz-appearance: none;
   background: rgba(0,0,0,0.2) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23a1a1aa' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 10px center;
@@ -115,32 +104,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 }
 .table-controls select.filter-select:hover { border-color: var(--line-light); }
 .table-controls select.filter-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
-.rt-feedback-cell { display: flex; flex-direction: column; gap: 6px; min-width: 210px; }
-.rt-feedback-view { font-size: 11px; color: var(--text-dim); line-height: 1.4; max-height: 48px; overflow-y: auto; white-space: pre-wrap; }
-.rt-feedback-view.rt-feedback-empty { font-style: italic; opacity: 0.6; }
-.rt-feedback-write { display: flex; gap: 6px; }
-.rt-feedback-input { flex: 1; font-family: inherit; font-size: 11px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: var(--text); min-width: 0; }
-.rt-feedback-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
-.rt-feedback-send { white-space: nowrap; }
-.rt-feedback-send.is-saving { opacity: 0.6; pointer-events: none; }
-.rt-feedback-status { font-size: 10px; }
-.rt-feedback-status.ok { color: var(--green); }
-.rt-feedback-status.err { color: var(--red); }
 .table-footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 6px 0; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--line); margin-top: 16px; font-weight: 500; }
 .pager { display: flex; align-items: center; gap: 12px; }
-.leaderboard-list { list-style: none; padding: 0; margin: 0; }
-.leaderboard-item { display: flex; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--line); transition: background 0.2s; border-radius: 6px; }
-.leaderboard-item:hover { background: rgba(255,255,255,0.03); }
-.leaderboard-item:last-child { border-bottom: none; }
-.lb-rank { width: 24px; height: 24px; background: rgba(255,255,255,0.1); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-right: 12px; color: var(--text); }
-.lb-rank.gold { background: rgba(250, 204, 21, 0.2); color: #facc15; box-shadow: 0 0 10px rgba(250, 204, 21, 0.1); border: 1px solid rgba(250, 204, 21, 0.3); }
-.lb-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); }
-.lb-stats { text-align: right; }
-.lb-ndr { font-weight: 800; color: var(--green); font-size: 14px; }
-.lb-orders { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
 .table-responsive { overflow-x: auto; margin-top: 8px; }
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; }
-.seg-section-row td { background: rgba(139,92,246,0.08); color: #a78bfa; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; padding: 10px 14px; border-bottom: 1px solid var(--line-light); }
 .seg-sections-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .seg-section-card { min-width: 0; }
 .seg-section-card .data-table th, .seg-section-card .data-table td { padding: 8px 10px; font-size: 11.5px; }
@@ -196,9 +163,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .badge-status.spike { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
 .badge-status.stable { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.1); }
 .badge-status.decline { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
-.text-change.positive { color: #34d399; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-.text-change.negative { color: #f87171; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-.text-change.neutral { color: var(--text-dim); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 .seg-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
 .seg-champions { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); box-shadow: 0 0 10px rgba(245,158,11,0.1); }
 .seg-loyal { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
@@ -361,7 +325,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .cm3ap-mover-col h4 { margin: 0 0 12px; font-size: 12px; letter-spacing: 0.2px; }
 .cm3ap-mover-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .cm3ap-mover-row:last-child { border-bottom: none; }
-.cm3ap-mover-rank { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; width: 16px; flex-shrink: 0; }
 .cm3ap-mover-info { flex: 1; min-width: 0; }
 .cm3ap-mover-sku { font-size: 12px; font-weight: 700; font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm3ap-mover-name { font-size: 11px; font-weight: 500; font-family: "Inter", -apple-system, sans-serif; color: var(--text-dim); opacity: 0.85; }

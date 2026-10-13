@@ -1,0 +1,11 @@
+{
+  "name": "taager-merchant-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/smoke.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}
