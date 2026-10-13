@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.15.34";
+const APP_VERSION = "1.15.35";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -7504,6 +7504,14 @@ function prepareMpSalesPlanData() {
         });
     }
 
+    // Delivered GMV بيتجمع بس من الصفوف اللي عدّت كات أوف الـ CM3 (CM3_LAG_DAYS = 5 أيام) —
+    // نفس طريقة Commercial Plan بالظبط: الـ Actual لحد "آخر يوم عدّى عليه 5 أيام"، والـ MTD
+    // Target بيتحسب على نفس الأيام (elapsedDays - 5) مش لحد امبارح. باقي المقاييس
+    // (Placed/Confirmed/Delivered Pieces) زي ما هي لحد امبارح.
+    const cm3CutoffTs = getCm3LagCutoffTimestamp(perfRows);
+    const gmvMatureDays = Math.max(0, elapsedDays - CM3_LAG_DAYS);
+    const gmvRunRateDays = Math.max(1, gmvMatureDays);
+
     const mergedData = planRows.map(plan => {
         let raw = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0 };
 
@@ -7520,7 +7528,7 @@ function prepareMpSalesPlanData() {
                     raw.placed += r.placedPieces;
                     raw.confirmed += r.confirmedPieces;
                     raw.delivered += r.deliveredPieces;
-                    raw.deliveredGmv += r.deliveredGmv;
+                    if (isCm3RowEligible(r, cm3CutoffTs, "mpSalesPlan")) raw.deliveredGmv += r.deliveredGmv;
                 }
                 if (rTime >= startThisWeek) raw.thisWeekConfirmed += r.confirmedPieces;
                 else if (rTime >= startLastWeek && rTime < startThisWeek) raw.lastWeekConfirmed += r.confirmedPieces;
@@ -7545,18 +7553,18 @@ function prepareMpSalesPlanData() {
         //  - Match قديم اتغيّر New Target بتاعه: الأيام قبل يوم التغيير بالتارجت الأصلي
         //    (Target Placed Daily) والأيام من يوم التغيير بالتارجت الجديد.
         //  - لو Last Target Update فاضي أو قبل الشهر: من أول الشهر بالتارجت الفعّال، زي الأول.
-        let placedMtdOverride = null;
         const upd = plan.lastTargetUpdate;
-        if (upd && upd.getFullYear() === today.getFullYear() && upd.getMonth() === today.getMonth()) {
+        const targetDaysFor = (nDays) => {
+            if (!(upd && upd.getFullYear() === today.getFullYear() && upd.getMonth() === today.getMonth())) return null;
             const updDay = upd.getDate();
-            const daysBefore = Math.max(0, Math.min(daysUntilYesterday, updDay - 1));
-            const daysAfter = Math.max(0, daysUntilYesterday - (updDay - 1));
-            if (/new/i.test(plan.matchFlag || "")) {
-                placedMtdOverride = plan.dailyPlacedTarget * daysAfter;
-            } else if (plan.newTargetDaily !== null && plan.newTargetDaily !== undefined) {
-                placedMtdOverride = (plan.originalDailyTarget || 0) * daysBefore + plan.newTargetDaily * daysAfter;
-            }
-        }
+            const daysBefore = Math.max(0, Math.min(nDays, updDay - 1));
+            const daysAfter = Math.max(0, nDays - (updDay - 1));
+            if (/new/i.test(plan.matchFlag || "")) return plan.dailyPlacedTarget * daysAfter;
+            if (plan.newTargetDaily !== null && plan.newTargetDaily !== undefined) return (plan.originalDailyTarget || 0) * daysBefore + plan.newTargetDaily * daysAfter;
+            return null;
+        };
+        const placedMtdOverride = targetDaysFor(daysUntilYesterday);
+        const gmvMtdOverrideBase = targetDaysFor(gmvMatureDays);
         const matchStats = matchStatsMap.get(plan.productId + "||" + plan.tagerId) || { cr: 0, dr: 0, asp: 0 };
         const confirmedDailyTarget = plan.dailyPlacedTarget * (matchStats.cr / 100);
         const deliveredDailyTarget = confirmedDailyTarget * (matchStats.dr / 100);
@@ -7567,7 +7575,9 @@ function prepareMpSalesPlanData() {
         const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(1));
         const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF));
         const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF));
-        const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF * matchStats.asp));
+        // Delivered GMV: MTD Target على الأيام الناضجة (elapsedDays - 5) والـ Run Rate على gmvRunRateDays — زي Commercial Plan.
+        const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, gmvMatureDays, gmvRunRateDays, currentMonthDays,
+            gmvMtdOverrideBase === null ? null : gmvMtdOverrideBase * crF * drF * matchStats.asp);
 
         // Confirmed Pieces هو المقياس الأساسي اللي بيحدد "الحالة العامة" للصف
         // وكروت الملخص فوق (زي ما كان قبل كده، ده أساس عمود "Rounded Daily Confirmed").
