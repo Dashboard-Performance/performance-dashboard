@@ -48,81 +48,6 @@ export const PORTAL_HTML = HEAD("Taager · Merchant portal", "portal.js") + `
   </div>
 </main>
 
-<div id="app" class="app hidden">
-  <header class="top">
-    <div class="brand"><span class="logo">T</span><div><b id="mName">Your store</b><small id="mIds"></small></div></div>
-    <div class="top-r">
-      <select id="monthSel" aria-label="Month"></select>
-      <button class="btn icon" id="themeBtn" type="button" title="Light / dark" aria-label="Switch theme">◐</button>
-      <div class="menu">
-        <button class="btn" id="menuBtn" type="button" aria-haspopup="true">Account ▾</button>
-        <div class="menu-list hidden" id="menuList">
-          <div class="menu-who" id="whoEmail"></div>
-          <button type="button" id="chgBtn">Change password</button>
-          <button type="button" id="outBtn">Sign out</button>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <div class="content">
-    <div class="note hidden" id="dataNote"></div>
-
-    <section class="hero card">
-      <div class="hero-l">
-        <div id="ring" class="ring"></div>
-        <div class="eq">
-          <div class="chip"><span>CR</span><b id="crVal">0%</b><small>Confirmed ÷ Placed</small></div>
-          <i>×</i>
-          <div class="chip"><span>DR</span><b id="drVal">0%</b><small>Delivered ÷ Confirmed</small></div>
-        </div>
-      </div>
-      <div class="hero-r">
-        <div class="tile"><span class="lbl">Placed Pieces</span><b class="val" id="vPlaced">0</b><div class="sub" id="oPlaced"></div><div class="sub" id="rPlaced">Run Rate: —</div><div class="spark" id="sPlaced"></div></div>
-        <div class="tile"><span class="lbl">Confirmed Pieces</span><b class="val" id="vConfirmed">0</b><div class="sub" id="oConfirmed"></div><div class="sub" id="rConfirmed">Run Rate: —</div><div class="spark" id="sConfirmed"></div></div>
-        <div class="tile"><span class="lbl">Delivered Pieces</span><b class="val" id="vDelivered">0</b><div class="sub" id="oDelivered"></div><div class="sub" id="rDelivered">Run Rate: —</div><div class="spark" id="sDelivered"></div></div>
-        <div class="tile"><span class="lbl">Delivered GMV</span><b class="val green" id="vGmv">EGP 0</b><div class="sub">&nbsp;</div><div class="sub" id="rGmv">Run Rate: —</div><div class="spark" id="sGmv"></div></div>
-      </div>
-    </section>
-
-    <div class="row2">
-      <section class="card">
-        <div class="card-h">
-          <div><h2>Monthly Pipeline</h2><p id="pipeSub">Confirmed Pieces (bars) vs Placed Pieces (line) per month</p></div>
-          <div class="seg" id="pipeToggle"><button type="button" data-m="orders">Orders</button><button type="button" data-m="pieces" class="on">Pieces</button></div>
-        </div>
-        <div class="chart" id="pipeChart"></div>
-      </section>
-      <section class="card">
-        <div class="card-h"><div><h2>Avg Placed Pcs</h2><p id="avgSub">Placed pieces ÷ days in the month</p></div></div>
-        <div class="avg">
-          <div class="avg-v" id="avgVal">0</div><div class="sub">pieces per day</div>
-          <div class="spark wide" id="avgSpark"></div>
-          <div class="avg-rows">
-            <div><span>Placed pieces</span><b id="avgPcs">—</b></div>
-            <div><span>Days counted</span><b id="avgDays">—</b></div>
-            <div><span>Previous month</span><b id="avgPrev">—</b></div>
-            <div><span>Change vs previous month</span><b id="avgChg">—</b></div>
-            <div><span>Best month</span><b id="avgBest">—</b></div>
-          </div>
-        </div>
-      </section>
-    </div>
-    <p class="foot dim" id="foot"></p>
-  </div>
-  <div class="tip hidden" id="tip"></div>
-</div>
-
-<div class="modal hidden" id="chgModal" role="dialog" aria-modal="true" aria-labelledby="chgTitle">
-  <form class="modal-box form" id="chgForm" novalidate>
-    <h1 id="chgTitle">Change password</h1>
-    <label>Current password<input id="cCur" type="password" autocomplete="current-password" required></label>
-    <label>New password<input id="cNew" type="password" autocomplete="new-password" required></label>
-    <label>Repeat new password<input id="cNew2" type="password" autocomplete="new-password" required></label>
-    <div class="msg" id="cMsg" role="alert"></div>
-    <div class="row-btns"><button class="btn" type="button" id="chgCancel">Cancel</button><button class="btn primary" type="submit">Save</button></div>
-  </form>
-</div>
 </body></html>`;
 
 export const ADMIN_HTML = HEAD("Taager · Merchant portal admin", "admin.js") + `
@@ -292,10 +217,34 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-m
 
 @media (max-width:1000px){.hero{grid-template-columns:1fr}.hero-l{border-right:0;border-bottom:1px solid var(--line)}.row2{grid-template-columns:1fr}}
 @media (max-width:620px){.hero-r{grid-template-columns:1fr}.tile{border-right:0!important}.tile:nth-last-child(2){border-bottom:1px solid var(--line)}.top{padding:10px 14px;flex-wrap:wrap}.top .brand{flex:1 1 100%}.top-r{flex:1 1 100%;justify-content:flex-end}#monthSel{flex:1}.content{padding:16px 14px 40px}.val{font-size:26px}.top .menu .btn{padding:0 10px}}
+
+/* merchant targets table (same look as the staff dashboard's Merchant Targets view) */
+.table-card{padding:0;overflow:hidden}
+.table-card .card-h{padding:18px 18px 0}
+.table-card .ttl{border-left:3px solid var(--blue);padding-left:12px}
+.table-controls input{width:260px;max-width:100%}
+.table-card .table-wrap{border:0;border-radius:0;border-top:1px solid var(--line);margin-top:6px}
+.data{min-width:1500px}
+.data th{white-space:nowrap;cursor:pointer;user-select:none}
+.data th.sorted{color:var(--accent)}
+.data td.num,.data th.num{text-align:right}
+.data td{white-space:nowrap}
+.data td.nm{font-weight:700;color:var(--text);white-space:normal;min-width:160px}
+.data .mono{font-family:ui-monospace,"JetBrains Mono",Consolas,monospace;color:var(--dim)}
+.data .b{font-weight:700}
+.c-blue{color:var(--blue)} .c-green{color:var(--green)} .c-red{color:var(--red)} .c-orange{color:var(--orange)}
+.pv{font-weight:600;font-size:11px}
+.pbar{height:4px;border-radius:99px;background:var(--line2);margin-top:4px;min-width:64px;overflow:hidden}
+.pfill{height:100%;border-radius:99px}
+.f-green{background:var(--green)} .f-red{background:var(--red)} .f-orange{background:var(--orange)} .f-blue{background:var(--blue)}
+.table-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--dim);flex-wrap:wrap}
+.pager{display:flex;align-items:center;gap:10px}
+.emptyrow td{text-align:center;color:var(--dim);padding:28px 12px;white-space:normal}
+.w0{width:0%}.w1{width:1%}.w2{width:2%}.w3{width:3%}.w4{width:4%}.w5{width:5%}.w6{width:6%}.w7{width:7%}.w8{width:8%}.w9{width:9%}.w10{width:10%}.w11{width:11%}.w12{width:12%}.w13{width:13%}.w14{width:14%}.w15{width:15%}.w16{width:16%}.w17{width:17%}.w18{width:18%}.w19{width:19%}.w20{width:20%}.w21{width:21%}.w22{width:22%}.w23{width:23%}.w24{width:24%}.w25{width:25%}.w26{width:26%}.w27{width:27%}.w28{width:28%}.w29{width:29%}.w30{width:30%}.w31{width:31%}.w32{width:32%}.w33{width:33%}.w34{width:34%}.w35{width:35%}.w36{width:36%}.w37{width:37%}.w38{width:38%}.w39{width:39%}.w40{width:40%}.w41{width:41%}.w42{width:42%}.w43{width:43%}.w44{width:44%}.w45{width:45%}.w46{width:46%}.w47{width:47%}.w48{width:48%}.w49{width:49%}.w50{width:50%}.w51{width:51%}.w52{width:52%}.w53{width:53%}.w54{width:54%}.w55{width:55%}.w56{width:56%}.w57{width:57%}.w58{width:58%}.w59{width:59%}.w60{width:60%}.w61{width:61%}.w62{width:62%}.w63{width:63%}.w64{width:64%}.w65{width:65%}.w66{width:66%}.w67{width:67%}.w68{width:68%}.w69{width:69%}.w70{width:70%}.w71{width:71%}.w72{width:72%}.w73{width:73%}.w74{width:74%}.w75{width:75%}.w76{width:76%}.w77{width:77%}.w78{width:78%}.w79{width:79%}.w80{width:80%}.w81{width:81%}.w82{width:82%}.w83{width:83%}.w84{width:84%}.w85{width:85%}.w86{width:86%}.w87{width:87%}.w88{width:88%}.w89{width:89%}.w90{width:90%}.w91{width:91%}.w92{width:92%}.w93{width:93%}.w94{width:94%}.w95{width:95%}.w96{width:96%}.w97{width:97%}.w98{width:98%}.w99{width:99%}.w100{width:100%}
 `;
 
 // ---------------------------------------------------------------------------------------- shared helpers
-const SHARED_JS = `
+export const SHARED_JS = `
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -328,160 +277,21 @@ function msg(id, text, cls) { var e = $(id); if (!e) return; e.textContent = tex
 // The numbers below follow js/app.js of the staff dashboard line for line (computeMetrics, renderOverviewHero,
 // renderPipelineChart, renderCategoryChart) so a merchant sees exactly what the Over View shows for them.
 export const PORTAL_JS = SHARED_JS + `
-var D = { rows: [], merchants: [], updatedAt: "" }, pipeMetric = "pieces", cfg = { emailEnabled: false };
-var fmtInt = new Intl.NumberFormat("en-US");
-function fmtPct(n) { return (n || 0).toFixed(1) + "%"; }
-function fmtMoney(n) { if (!n) return "EGP 0"; var s = n < 0 ? "-" : "", a = Math.abs(n); if (a >= 1e6) return s + "EGP " + (a / 1e6).toFixed(2) + "M"; if (a >= 1e3) return s + "EGP " + Math.round(a / 1e3) + "K"; return s + "EGP " + Math.round(a); }
-var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-function monthTitle(k) { var p = k.split("-"); return MONTHS[+p[1] - 1] + " " + p[0]; }
-
-// ---- views
-function show(id) { ["boot", "auth", "app"].forEach(function (x) { $(x).classList.toggle("hidden", x !== id); }); }
+// Sign-in / password pages. Once signed in, the merchant lands on /dashboard (the staff dashboard's design, see dash.js).
+var cfg = { emailEnabled: false };
+function show(id) { ["boot", "auth"].forEach(function (x) { $(x).classList.toggle("hidden", x !== id); }); }
 function authForm(id) { ["loginForm", "forgotForm", "setForm"].forEach(function (x) { $(x).classList.toggle("hidden", x !== id); }); show("auth"); var f = $(id).querySelector("input"); if (f) f.focus(); }
 function linkToken() { var m = /[#&]t=([A-Za-z0-9_-]{20,100})/.exec(location.hash || ""); return m ? m[1] : ""; }
-
+function enter() { location.replace("/dashboard"); }
 function start() {
   api("/api/config").then(function (c) { cfg = c; $("toForgot").classList.toggle("hidden", !c.emailEnabled); }).catch(function () {});
   if (location.pathname === "/set-password" && linkToken()) { authForm("setForm"); return; }
   api("/api/me").then(enter).catch(function () { authForm("loginForm"); });
 }
-function enter(me) {
-  $("whoEmail").textContent = me.email;
-  show("app"); $("boot").classList.add("hidden");
-  loadData();
-}
-function loadData() {
-  $("dataNote").classList.add("hidden");
-  return api("/api/data").then(function (d) {
-    D = d;
-    var names = d.merchants.map(function (m) { return m.name; }).filter(Boolean);
-    $("mName").textContent = names.length ? names.join(" · ") : "Your store";
-    $("mIds").textContent = "Merchant ID " + d.merchants.map(function (m) { return m.id; }).join(", ");
-    fillMonths();
-    render();
-    $("foot").textContent = "Numbers updated " + new Date(d.updatedAt).toLocaleString();
-    if (!d.rows.length) note("No orders yet for your Merchant ID. If this looks wrong, contact your Taager account manager.");
-  }).catch(function (e) {
-    if (e.status === 401) { authForm("loginForm"); return; }
-    note(e.message);
-  });
-}
-function note(t) { var n = $("dataNote"); n.textContent = t; n.classList.remove("hidden"); }
-function fillMonths() {
-  var set = {}; D.rows.forEach(function (r) { set[r[0]] = 1; });
-  var cur = ymd(new Date()).slice(0, 7); var keys = Object.keys(set).sort().reverse();
-  var sel = $("monthSel"), first = !sel.options.length, keep = sel.value;
-  sel.innerHTML = '<option value="">All Months</option>' + keys.map(function (k) { return '<option value="' + k + '">' + monthTitle(k) + "</option>"; }).join("");
-  sel.value = !first && (keep === "" || set[keep]) ? keep : (set[cur] ? cur : (keys[0] || ""));
-}
-function rowsOfMonth() { var k = $("monthSel").value; return k ? D.rows.filter(function (r) { return r[0] === k; }) : D.rows.slice(); }
-
-// ---- calculations (row = [month "YYYY-MM", placedOrders, confirmedOrders, deliveredOrders, placedPcs, confirmedPcs, deliveredPcs, deliveredGmv])
-// Same definitions as the staff dashboard: CR = Confirmed ÷ Placed, DR = Delivered ÷ Confirmed, NDR = CR × DR,
-// Run Rate = month-to-date ÷ days passed × days in the month (the current month runs up to yesterday).
-function sumRows(rows) { var T = { po: 0, co: 0, do: 0, pp: 0, cp: 0, dp: 0, gmv: 0 }; rows.forEach(function (r) { T.po += r[1]; T.co += r[2]; T.do += r[3]; T.pp += r[4]; T.cp += r[5]; T.dp += r[6]; T.gmv += r[7]; }); return T; }
-function daysIn(k) { var p = k.split("-"); return new Date(+p[0], +p[1], 0).getDate(); }
-function daysCounted(k) { var now = new Date(), cur = ymd(now).slice(0, 7); if (k !== cur) return daysIn(k); return Math.max(1, now.getDate() - 1); }
-function byMonth() { var o = {}; D.rows.forEach(function (r) { var t = o[r[0]] || (o[r[0]] = []); t.push(r); }); return o; }
-function monthsUpTo(k, n) { var all = Object.keys(byMonth()).sort(); if (k) all = all.filter(function (m) { return m <= k; }); return all.slice(-n); }
-
-// ---- svg helpers (classes only: the CSP blocks inline styles)
-function spark(values, cls, w, h) {
-  if (!values || values.length < 2) return "";
-  var max = Math.max.apply(null, values), min = Math.min.apply(null, values), span = (max - min) || 1;
-  var pts = values.map(function (v, i) { return [(i * (w - 2) / (values.length - 1)) + 1, h - 3 - ((v - min) / span) * (h - 6)]; });
-  var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join("");
-  return '<svg viewBox="0 0 ' + w + " " + h + '" height="' + h + '" preserveAspectRatio="none" aria-hidden="true"><path class="s-area ' + cls + '" stroke="none" d="' + line + "L" + (w - 1) + " " + h + "L1 " + h + 'Z"/><path class="s-line ' + cls + '" d="' + line + '"/></svg>';
-}
-function ring(pct) {
-  var S = 200, r = 82, cx = S / 2, c = 2 * Math.PI * r, len = c * 0.75, v = Math.max(0, Math.min(100, pct || 0)) / 100, rot = "rotate(135 " + cx + " " + cx + ")";
-  return '<svg viewBox="0 0 ' + S + " " + S + '" width="' + S + '" height="' + S + '" role="img" aria-label="Net delivery rate ' + pct.toFixed(1) + '%">' +
-    '<circle class="track" cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + len + " " + c + '" transform="' + rot + '"/>' +
-    '<circle class="bar" cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + Math.max(2, len * v) + " " + c + '" transform="' + rot + '"/>' +
-    '<text class="big" x="' + cx + '" y="' + (cx + 6) + '" text-anchor="middle">' + pct.toFixed(1) + '%</text><text class="cap" x="' + cx + '" y="' + (cx + 30) + '" text-anchor="middle">Net delivery rate</text></svg>';
-}
-function niceMax(v) { if (v <= 0) return 1; var p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
-function shortMonth(k) { var p = k.split("-"); return MONTHS[+p[1] - 1].slice(0, 3) + " " + p[0].slice(2); }
-
-function render() {
-  var k = $("monthSel").value, rows = rowsOfMonth(), T = sumRows(rows), set = function (id, v) { $(id).textContent = v; };
-  var cr = T.po ? T.co / T.po : 0, dr = T.co ? T.do / T.co : 0;
-  $("ring").innerHTML = ring(cr * dr * 100);
-  set("crVal", fmtPct(cr * 100)); set("drVal", fmtPct(dr * 100));
-  set("vPlaced", fmtInt.format(Math.round(T.pp))); set("vConfirmed", fmtInt.format(Math.round(T.cp))); set("vDelivered", fmtInt.format(Math.round(T.dp)));
-  set("oPlaced", fmtInt.format(Math.round(T.po)) + " orders"); set("oConfirmed", fmtInt.format(Math.round(T.co)) + " orders"); set("oDelivered", fmtInt.format(Math.round(T.do)) + " orders");
-  set("vGmv", fmtMoney(T.gmv));
-  var cur = ymd(new Date()).slice(0, 7);
-  if (k === cur) {
-    var f = daysIn(k) / daysCounted(k);
-    set("rPlaced", "Run Rate: " + fmtInt.format(Math.round(T.pp * f)) + " by EOM"); set("rConfirmed", "Run Rate: " + fmtInt.format(Math.round(T.cp * f)) + " by EOM");
-    set("rDelivered", "Run Rate: " + fmtInt.format(Math.round(T.dp * f)) + " by EOM"); set("rGmv", "Run Rate: " + fmtMoney(T.gmv * f) + " by EOM");
-  } else { ["rPlaced", "rConfirmed", "rDelivered", "rGmv"].forEach(function (id) { set(id, k ? "Full month" : "All months"); }); }
-
-  // sparklines + charts: the 12 months up to the selected one
-  var BM = byMonth(), months = monthsUpTo(k, 12), M = months.map(function (m) { var t = sumRows(BM[m]); t.k = m; return t; });
-  $("sPlaced").innerHTML = spark(M.map(function (x) { return x.pp; }), "k-placed", 150, 30);
-  $("sConfirmed").innerHTML = spark(M.map(function (x) { return x.cp; }), "k-confirmed", 150, 30);
-  $("sDelivered").innerHTML = spark(M.map(function (x) { return x.dp; }), "k-delivered", 150, 30);
-  $("sGmv").innerHTML = spark(M.map(function (x) { return x.gmv; }), "k-gmv", 150, 30);
-
-  // Avg placed pieces per day
-  var avgOf = function (x) { return x.pp / daysCounted(x.k); };
-  if (k) {
-    var days = daysCounted(k), avg = T.pp / days, i = months.indexOf(k), prev = i > 0 ? M[i - 1] : null, pa = prev ? avgOf(prev) : 0;
-    set("avgSub", k === cur ? "Placed pieces ÷ days passed this month (up to yesterday)" : "Placed pieces ÷ days in the month");
-    set("avgVal", fmtInt.format(Math.round(avg))); set("avgPcs", fmtInt.format(Math.round(T.pp))); set("avgDays", fmtInt.format(days));
-    set("avgPrev", prev ? fmtInt.format(Math.round(pa)) + " · " + shortMonth(prev.k) : "—");
-    set("avgChg", prev && pa ? (avg >= pa ? "+" : "") + fmtPct((avg / pa - 1) * 100) : "—");
-  } else {
-    var dTot = M.reduce(function (a, x) { return a + daysCounted(x.k); }, 0);
-    set("avgSub", "Placed pieces ÷ days, last 12 months"); set("avgVal", fmtInt.format(Math.round(dTot ? M.reduce(function (a, x) { return a + x.pp; }, 0) / dTot : 0)));
-    set("avgPcs", fmtInt.format(Math.round(T.pp))); set("avgDays", fmtInt.format(dTot)); set("avgPrev", "—"); set("avgChg", "—");
-  }
-  var best = M.slice().sort(function (a, b) { return avgOf(b) - avgOf(a); })[0];
-  set("avgBest", best ? fmtInt.format(Math.round(avgOf(best))) + " · " + shortMonth(best.k) : "—");
-  $("avgSpark").innerHTML = spark(M.map(avgOf), "k-avg", 400, 70);
-  renderPipe(M);
-}
-
-function renderPipe(M) {
-  var pieces = pipeMetric === "pieces", box = $("pipeChart");
-  $("pipeSub").textContent = (pieces ? "Confirmed Pieces" : "Confirmed Orders") + " (bars) vs " + (pieces ? "Placed Pieces" : "Placed Orders") + " (line) per month";
-  if (!M.length) { box.innerHTML = '<div class="empty">No orders yet</div>'; return; }
-  var W = Math.max(300, box.clientWidth || 760), H = 270, L = 50, R = 10, Tp = 10, B = 28, iw = W - L - R, ih = H - Tp - B;
-  var cv = M.map(function (x) { return pieces ? x.cp : x.co; }), pv = M.map(function (x) { return pieces ? x.pp : x.po; });
-  var max = niceMax(Math.max.apply(null, cv.concat(pv))), n = M.length, step = iw / n, bw = Math.max(4, Math.min(40, step * 0.55));
-  var y = function (v) { return Tp + ih - (v / max) * ih; }, s = "";
-  for (var g = 0; g <= 4; g++) { var gv = max * g / 4, gy = y(gv); s += '<line class="grid-l" x1="' + L + '" x2="' + (W - R) + '" y1="' + gy + '" y2="' + gy + '"/><text class="ax" x="' + (L - 6) + '" y="' + (gy + 3.5) + '" text-anchor="end">' + fmtInt.format(Math.round(gv)) + "</text>"; }
-  var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 56))));
-  M.forEach(function (x, i) {
-    var cx = L + step * i + step / 2;
-    s += '<rect class="bar-c" x="' + (cx - bw / 2) + '" y="' + y(cv[i]) + '" width="' + bw + '" height="' + Math.max(0, Tp + ih - y(cv[i])) + '" rx="3"/>';
-    if (i % every === 0 || i === n - 1) s += '<text class="ax" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + shortMonth(x.k) + "</text>";
-  });
-  if (n > 1) s += '<path class="line-p" d="' + pv.map(function (v, i) { return (i ? "L" : "M") + (L + step * i + step / 2).toFixed(1) + " " + y(v).toFixed(1); }).join("") + '"/>';
-  pv.forEach(function (v, i) { s += '<circle class="dot-p" cx="' + (L + step * i + step / 2) + '" cy="' + y(v) + '" r="3"/>'; });
-  M.forEach(function (x, i) { s += '<rect class="hov" data-i="' + i + '" x="' + (L + step * i) + '" y="' + Tp + '" width="' + step + '" height="' + ih + '"/>'; });
-  box.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '">' + s + '</svg><div class="legend"><span><i class="lc"></i>' + (pieces ? "Confirmed Pieces" : "Confirmed Orders") + '</span><span><i class="lp"></i>' + (pieces ? "Placed Pieces" : "Placed Orders") + "</span></div>";
-  box.querySelectorAll(".hov").forEach(function (r) {
-    r.addEventListener("mousemove", function (e) { var i = +r.getAttribute("data-i"); tip(e, monthTitle(M[i].k), [[pieces ? "Placed Pieces" : "Placed Orders", pv[i]], [pieces ? "Confirmed Pieces" : "Confirmed Orders", cv[i]], ["Delivered GMV (EGP)", M[i].gmv]]); });
-    r.addEventListener("mouseleave", hideTip);
-  });
-}
-function tip(e, title, lines) {
-  var t = $("tip"); t.innerHTML = "<b>" + esc(title) + "</b>" + lines.map(function (l) { return esc(l[0]) + ": " + fmtInt.format(Math.round(l[1])); }).join("<br>");
-  t.classList.remove("hidden");
-  var x = e.clientX + 14, yy = e.clientY + 14; if (x + t.offsetWidth > innerWidth - 8) x = e.clientX - t.offsetWidth - 14;
-  t.style.left = x + "px"; t.style.top = yy + "px";
-}
-function hideTip() { $("tip").classList.add("hidden"); }
-
-// ---- wiring
 $("loginForm").addEventListener("submit", function (e) {
   e.preventDefault(); msg("lMsg", "Signing in…");
   api("/api/login", { body: { email: $("lEmail").value, password: $("lPass").value } })
-    .then(function () { $("lPass").value = ""; msg("lMsg", ""); return api("/api/me").then(enter); })
+    .then(function () { $("lPass").value = ""; msg("lMsg", ""); enter(); })
     .catch(function (er) { msg("lMsg", er.message, "err"); });
 });
 $("toForgot").addEventListener("click", function () { $("fEmail").value = $("lEmail").value; authForm("forgotForm"); });
@@ -497,31 +307,9 @@ $("setForm").addEventListener("submit", function (e) {
   if ($("sPass").value !== $("sPass2").value) { msg("sMsg", "The two passwords are different.", "err"); return; }
   msg("sMsg", "Saving…");
   api("/api/password/set", { body: { token: linkToken(), password: $("sPass").value } })
-    .then(function () { history.replaceState(null, "", "/"); return api("/api/me").then(enter); })
+    .then(function () { history.replaceState(null, "", "/"); enter(); })
     .catch(function (er) { msg("sMsg", er.message, "err"); });
 });
-$("monthSel").addEventListener("change", render);
-var rsT = 0; window.addEventListener("resize", function () { clearTimeout(rsT); rsT = setTimeout(function () { if (!$("app").classList.contains("hidden") && D.rows) render(); }, 150); });
-$("pipeToggle").addEventListener("click", function (e) {
-  var b = e.target.closest("button"); if (!b) return;
-  pipeMetric = b.getAttribute("data-m");
-  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  render();
-});
-$("menuBtn").addEventListener("click", function (e) { e.stopPropagation(); $("menuList").classList.toggle("hidden"); });
-document.addEventListener("click", function () { $("menuList").classList.add("hidden"); });
-$("outBtn").addEventListener("click", function () { api("/api/logout", { body: {} }).finally(function () { location.replace("/"); }); });
-$("chgBtn").addEventListener("click", function () { ["cCur", "cNew", "cNew2"].forEach(function (i) { $(i).value = ""; }); msg("cMsg", ""); $("chgModal").classList.remove("hidden"); $("cCur").focus(); });
-$("chgCancel").addEventListener("click", function () { $("chgModal").classList.add("hidden"); });
-$("chgForm").addEventListener("submit", function (e) {
-  e.preventDefault();
-  if ($("cNew").value !== $("cNew2").value) { msg("cMsg", "The two new passwords are different.", "err"); return; }
-  msg("cMsg", "Saving…");
-  api("/api/password/change", { body: { current: $("cCur").value, next: $("cNew").value } })
-    .then(function () { msg("cMsg", "Password changed ✓", "ok"); setTimeout(function () { $("chgModal").classList.add("hidden"); }, 900); })
-    .catch(function (er) { msg("cMsg", er.message, "err"); });
-});
-document.addEventListener("visibilitychange", function () { if (!document.hidden && !$("app").classList.contains("hidden")) loadData(); });
 start();
 `;
 

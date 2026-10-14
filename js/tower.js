@@ -6,7 +6,7 @@
   function workerUrl() { return (typeof SYNC_CDN_URL !== "undefined" && SYNC_CDN_URL) || ""; }
   var MANAGER_EMAIL = "youssef.hanafy@taager.com";
   // v1.16.0: لينك بورتال الميرشنتس (merchant-portal/) — حطه هنا بعد ما تعمله Deploy
-  var MERCHANT_PORTAL_URL = "https://taager-merchant-portal.youssef-hanafy.workers.dev";
+  var MERCHANT_PORTAL_URL = "https://merchants.taager.app";
   var KEY_LS = "towerAdminKey", ACCESS_LS = "towerAccessCache", PREVIEW_SS = "towerPreviewRole", PREVIEW_MID = "towerPreviewMerchantId", SESSION_LS = "taagerDashboardSession";
 
   // view name (switchView) -> nav element id

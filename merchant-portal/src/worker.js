@@ -19,8 +19,10 @@
  *     no inline script anywhere (script-src 'self').
  */
 import { PORTAL_HTML, ADMIN_HTML, APP_CSS, PORTAL_JS, ADMIN_JS, FAVICON_SVG } from "./ui.js";
+import { DASH_HTML, DASH_JS } from "./dash.js";
+import { DASH_CSS } from "./dash-css.js";
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const COOKIE = "__Host-mp_s";
 const SESSION_HOURS = 12;
 const LINK_HOURS = 72;
@@ -30,7 +32,7 @@ const DEFAULT_SHARDS = 32;
 const DEFAULT_MAX_AGE_MIN = 90;
 // Column positions of the merchant query — the same positions js/app.js (parseMerchantSegmentationSheet) reads.
 // Override with the QUERY_COLUMNS variable (JSON) if the Metabase question ever changes.
-const DEFAULT_COLS = { month: 0, merchantId: 2, merchantName: 3, deliveredGmv: 5, placedOrders: 6, confirmedOrders: 7, deliveredOrders: 8, placedPieces: 14, confirmedPieces: 15, deliveredPieces: 16 };
+const DEFAULT_COLS = { month: 0, merchantId: 2, merchantName: 3, deliveredGmv: 5, segmentation: 12, placedOrders: 6, confirmedOrders: 7, deliveredOrders: 8, placedPieces: 14, confirmedPieces: 15, deliveredPieces: 16 };
 
 // ============================================================================ entry
 export default {
@@ -55,6 +57,9 @@ async function route(request, env, ctx) {
   // ---- static (no secrets in any of these)
   if (m === "GET" && (p === "/" || p === "/set-password")) return page(PORTAL_HTML);
   if (m === "GET" && p === "/admin") return page(ADMIN_HTML);
+  if (m === "GET" && p === "/dashboard") return page(DASH_HTML);
+  if (m === "GET" && p === "/static/dash.css") return asset(DASH_CSS, "text/css; charset=utf-8");
+  if (m === "GET" && p === "/static/dash.js") return asset(DASH_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/app.css") return asset(APP_CSS, "text/css; charset=utf-8");
   if (m === "GET" && p === "/static/portal.js") return asset(PORTAL_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/admin.js") return asset(ADMIN_JS, "text/javascript; charset=utf-8");
@@ -89,12 +94,13 @@ async function route(request, env, ctx) {
   if (!who) return json({ error: "Please sign in." }, 401, { "Set-Cookie": clearCookie() });
   if (p === "/api/me" && m === "GET") return json({ email: who.email, name: who.name || "", merchantIds: who.merchantIds });
   if (p === "/api/data" && m === "GET") return merchantData(who, env, ctx);
+  if (p === "/api/targets" && m === "GET") return merchantTargets(who, env, url);
   if (p === "/api/password/change" && m === "POST") return changePassword(request, env, who);
   return json({ error: "Not found" }, 404);
 }
 
 // ============================================================================ responses
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self'; font-src 'self' https://fonts.gstatic.com; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 function secHeaders(extra) {
   return Object.assign({
     "Content-Security-Policy": CSP,
@@ -393,15 +399,70 @@ async function merchantData(a, env, ctx) {
   const maxAge = (parseInt(env.DATA_MAX_AGE_MIN || "", 10) || DEFAULT_MAX_AGE_MIN) * 60e3;
   if (!meta || Date.now() - Date.parse(meta.builtAt) > maxAge) ctx.waitUntil(refreshData(env, "stale").catch((e) => console.error("refresh failed", e)));
   if (!meta) return json({ error: "Your numbers are being prepared. Please try again in a few minutes." }, 503);
-  const merchants = [], rows = [];
+  const merchants = [], rows = [], byId = [];
   for (const id of a.merchantIds || []) {
     const sh = await readShard(env, meta, shardOf(id, meta.shards));
     const m = sh[id];
     merchants.push({ id, name: (m && m.n) || "" });
+    byId.push({ id, name: (m && m.n) || "", rows: m ? m.r : [] });
     if (m) m.r.forEach((r) => rows.push(r));
   }
   rows.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-  return json({ updatedAt: meta.builtAt, latestMonth: meta.latestMonth, merchants, rows });
+  return json({ updatedAt: meta.builtAt, latestMonth: meta.latestMonth, merchants, rows, byId });
+}
+
+// ============================================================================ Merchant Targets
+// The staff dashboard's Merchant Targets upload (TAGER_ID | name | Target GMV | Target Placed) is read from the dashboard Worker
+// with the service key, parsed like js/app.js parseTargetsSheet, and only the signed-in merchant's own IDs are returned.
+const targetsCache = new Map(); // "YYYY-MM" -> { at, map }   (isolate memory only; the full map is never sent to a browser)
+const tText = (c) => (c == null ? "" : String(c.f != null ? c.f : (c.v != null ? c.v : "")));
+const tNum = (c) => { if (!c) return 0; if (typeof c.v === "number") return c.v; const n = parseFloat(String(c.f != null ? c.f : (c.v != null ? c.v : "0")).replace(/[%,]/g, "")); return Number.isFinite(n) ? n : 0; };
+function parseTargets(payload) {
+  const rows = (payload && payload.table && payload.table.rows) || [], out = {};
+  let col = null;
+  const norm = (c) => tText(c).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  for (const r of rows) {
+    const c = (r && r.c) || [];
+    if (!c.length) continue;
+    const id = tText(c[0]).trim();
+    if (!id) continue;
+    const key = id.toLowerCase().replace(/[\s_]+/g, "");
+    if (key === "tagerid" || key === "merchantid" || key === "id") {
+      const m = { gmv: -1, placed: -1 };
+      c.forEach((cell, i) => { const h = norm(cell); if (h.includes("gmv")) m.gmv = i; else if (h.includes("placed")) m.placed = i; });
+      if (m.gmv >= 0 && m.placed >= 0) col = m;
+      continue;
+    }
+    let g, pl;
+    if (col) { g = col.gmv; pl = col.placed; } else if (c.length >= 5) { g = 3; pl = 4; } else { g = 2; pl = 3; }
+    out[id] = { gmv: tNum(c[g]), placed: tNum(c[pl]), name: tText(c[1]).trim() };
+  }
+  return out;
+}
+async function loadTargetsMap(env, month) {
+  const hit = targetsCache.get(month);
+  if (hit && Date.now() - hit.at < 5 * 60e3) return hit.map;
+  const base = String(env.DASHBOARD_WORKER_URL || "").replace(/\/+$/, "");
+  if (!/^https:\/\//.test(base)) throw new Error("DASHBOARD_WORKER_URL is not set.");
+  if (!env.DASHBOARD_SERVICE_KEY) throw new Error("DASHBOARD_SERVICE_KEY secret is not set.");
+  const res = await fetch(base + "?action=getPortalTargets&month=" + encodeURIComponent(month), { headers: { "X-Service-Key": env.DASHBOARD_SERVICE_KEY } });
+  if (res.status === 403) throw new Error("The dashboard did not accept DASHBOARD_SERVICE_KEY.");
+  if (!res.ok) throw new Error("The dashboard answered HTTP " + res.status + ".");
+  let payload = null;
+  try { payload = JSON.parse(await res.text()); } catch (e) { payload = null; }
+  const map = parseTargets(payload);
+  if (targetsCache.size > 24) targetsCache.clear();
+  targetsCache.set(month, { at: Date.now(), map });
+  return map;
+}
+async function merchantTargets(a, env, url) {
+  const month = url.searchParams.get("month") || "";
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ error: "Bad month." }, 400);
+  let map;
+  try { map = await loadTargetsMap(env, month); } catch (e) { console.error("targets failed", e && e.message); return json({ month, targets: {}, note: "Targets are not available right now. Please try again later." }); }
+  const targets = {};
+  for (const id of a.merchantIds || []) if (map[id]) targets[id] = { gmv: map[id].gmv, placed: map[id].placed, name: map[id].name };
+  return json({ month, targets });
 }
 
 // The one and only data source of the portal: the merchant query.
@@ -475,7 +536,8 @@ async function refreshData(env, why) {
       if (!month || !mid || mid === "TAGER_ID") return;
       let m = by.get(mid); if (!m) { m = { n: "", g: new Map() }; by.set(mid, m); }
       if (c[C.merchantName]) m.n = String(c[C.merchantName]).slice(0, 120);
-      let r = m.g.get(month); if (!r) { r = [month, 0, 0, 0, 0, 0, 0, 0]; m.g.set(month, r); }
+      let r = m.g.get(month); if (!r) { r = [month, 0, 0, 0, 0, 0, 0, 0, ""]; m.g.set(month, r); }
+      if (C.segmentation >= 0 && c[C.segmentation]) r[8] = String(c[C.segmentation]).trim().slice(0, 40);
       r[1] += num(c[C.placedOrders]); r[2] += num(c[C.confirmedOrders]); r[3] += num(c[C.deliveredOrders]);
       r[4] += num(c[C.placedPieces]); r[5] += num(c[C.confirmedPieces]); r[6] += num(c[C.deliveredPieces]); r[7] += num(c[C.deliveredGmv]);
       if (month > latest) latest = month; kept++;
