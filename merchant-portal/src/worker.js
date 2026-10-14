@@ -21,8 +21,10 @@
 import { PORTAL_HTML, ADMIN_HTML, APP_CSS, PORTAL_JS, ADMIN_JS, FAVICON_SVG } from "./ui.js";
 import { DASH_HTML, DASH_JS } from "./dash.js";
 import { DASH_CSS, DASH_CSS_EXTRA } from "./dash-css.js";
+import { createNotify } from "./notify.js";
+import { CPA_JS, CPA_CSS } from "./cpa-core.js";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const COOKIE = "__Host-mp_s";
 const SESSION_HOURS = 12;
 const LINK_HOURS = 72;
@@ -58,7 +60,8 @@ async function route(request, env, ctx) {
   if (m === "GET" && (p === "/" || p === "/set-password")) return page(PORTAL_HTML);
   if (m === "GET" && p === "/admin") return page(ADMIN_HTML);
   if (m === "GET" && p === "/dashboard") return page(DASH_HTML);
-  if (m === "GET" && p === "/static/dash.css") return asset(DASH_CSS + DASH_CSS_EXTRA, "text/css; charset=utf-8");
+  if (m === "GET" && p === "/static/dash.css") return asset(DASH_CSS + DASH_CSS_EXTRA + "\n" + CPA_CSS, "text/css; charset=utf-8");
+  if (m === "GET" && p === "/static/cpa.js") return asset(CPA_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/dash.js") return asset(DASH_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/app.css") return asset(APP_CSS, "text/css; charset=utf-8");
   if (m === "GET" && p === "/static/portal.js") return asset(PORTAL_JS, "text/javascript; charset=utf-8");
@@ -99,6 +102,24 @@ async function route(request, env, ctx) {
   if (p === "/api/inventory" && m === "GET") return merchantInventory(who, env);
   if (p === "/api/incentives" && m === "GET") return merchantIncentives(who, env);
   if (p === "/api/alerts" && m === "GET") return merchantAlerts(who, env);
+  // v1.17.0 — automatic notifications (Command Loop) + lock requests (see notify.js)
+  if (p === "/api/cpa" || p.startsWith("/api/cpa/")) {
+    try {
+      if (p === "/api/cpa" && m === "GET") return await NOTIFY.cpaGet(env, who);
+      if (p === "/api/cpa" && m === "POST") return await NOTIFY.cpaSave(request, env, who);
+      if (p === "/api/cpa/sku" && m === "GET") return await NOTIFY.cpaSku(url, env, who);
+      if (p === "/api/cpa/lookup" && m === "GET") return await NOTIFY.cpaLookup(url, env, who);
+    } catch (e) { if (e instanceof HttpError) return json({ error: e.message }, e.status); return json({ error: String(e && e.message || e) }, 502); }
+  }
+  if (p.startsWith("/api/notifications") || p === "/api/sku" || p === "/api/lock-request") {
+    try {
+      if (p === "/api/notifications" && m === "GET") return json(await NOTIFY.list(who, env, await merchantAlertsData(who, env)));
+      if (p === "/api/notifications/read" && m === "POST") return await NOTIFY.markRead(request, env, who);
+      if (p === "/api/notifications/mute" && m === "POST") return await NOTIFY.mute(request, env, who);
+      if (p === "/api/sku" && m === "GET") return await NOTIFY.sku(url, env, who);
+      if (p === "/api/lock-request" && m === "POST") return await NOTIFY.lockRequest(request, env, who);
+    } catch (e) { if (e instanceof HttpError) return json({ error: e.message }, e.status); return json({ error: String(e && e.message || e) }, 502); }
+  }
   if (p === "/api/password/change" && m === "POST") return changePassword(request, env, who);
   return json({ error: "Not found" }, 404);
 }
@@ -389,11 +410,12 @@ async function dataStatus(env) {
   let err = err0 || (derr ? { at: derr.at, message: "Daily numbers: " + derr.message } : null);
   const spE = JSON.parse((await env.PORTAL_KV.get("data:spError")) || "null"), spM = await readSpMeta(env); if (spE && !err) { err = { at: spE.at, message: "Sales Plan: " + spE.message }; }
   const incE = JSON.parse((await env.PORTAL_KV.get("data:incError")) || "null"), invE = JSON.parse((await env.PORTAL_KV.get("data:invError")) || "null");
+  const ntfE = JSON.parse((await env.PORTAL_KV.get("data:ntfError")) || "null"), ntfM = JSON.parse((await env.PORTAL_KV.get("ntf:meta")) || "null");
   if (incE && !err) err = { at: incE.at, message: "Incentives: " + incE.message };
   if (invE && !err) err = { at: invE.at, message: "Inventory: " + invE.message };
   const invM = JSON.parse((await env.PORTAL_KV.get("inv:meta")) || "null"), incD = JSON.parse((await env.PORTAL_KV.get("inc:data")) || "null");
   const perr = (x) => (x ? { at: x.at, message: x.message } : null);
-  return { errors: { daily: perr(derr), salesPlan: perr(spE), incentives: perr(incE), inventory: perr(invE) }, inventory: invM ? { builtAt: invM.builtAt, latest: invM.latest, merchants: invM.merchants, rows: invM.rows } : null, incentives: incD ? { builtAt: incD.builtAt, month: incD.month, merchants: Object.keys(incD.rows || {}).length } : null, meta, salesPlan: spM ? { builtAt: spM.builtAt, latest: spM.latest, merchants: spM.merchants, planRows: spM.planRows, actRows: spM.actRows } : null, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
+  return { notifications: ntfM ? { builtAt: ntfM.builtAt, asOf: ntfM.asOf, merchants: ntfM.merchants, changed: ntfM.changed } : null, errors: { daily: perr(derr), salesPlan: perr(spE), incentives: perr(incE), inventory: perr(invE), notifications: perr(ntfE) }, inventory: invM ? { builtAt: invM.builtAt, latest: invM.latest, merchants: invM.merchants, rows: invM.rows } : null, incentives: incD ? { builtAt: incD.builtAt, month: incD.month, merchants: Object.keys(incD.rows || {}).length } : null, meta, salesPlan: spM ? { builtAt: spM.builtAt, latest: spM.latest, merchants: spM.merchants, planRows: spM.planRows, actRows: spM.actRows } : null, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
 }
 
 const shardCache = new Map(); // isolate memory: "<builtAt>:<n>" -> parsed shard
@@ -591,7 +613,8 @@ const PART_JOBS = {
   daily: [refreshDailyJob, "data:dailyError"],
   salesplan: [refreshSalesPlan, "data:spError"],
   incentives: [refreshIncentives, "data:incError"],
-  inventory: [refreshInventory, "data:invError"]
+  inventory: [refreshInventory, "data:invError"],
+  notifications: [(env) => NOTIFY.refreshNotifications(env), "data:ntfError"]  // v1.17.0 — after inventory
 };
 async function refreshDailyJob(env) { return refreshDaily(env); }
 async function runPart(env, name) {
@@ -975,9 +998,10 @@ async function merchantIncentives(a, env) {
 
 // ============================================================================ Alert Center (alerts sent from the staff dashboard to the Merchant role or to this merchant's e-mail)
 const alertsCache = new Map();
-async function merchantAlerts(a, env) {
+async function merchantAlerts(a, env) { return json(await merchantAlertsData(a, env)); }
+async function merchantAlertsData(a, env) {
   const email = normEmail(a.email), hit = alertsCache.get(email);
-  if (hit && Date.now() - hit.at < 60e3) return json(hit.v);
+  if (hit && Date.now() - hit.at < 60e3) return hit.v;
   const base = String(env.DASHBOARD_WORKER_URL || "").replace(/\/+$/, "");
   let v;
   try {
@@ -986,11 +1010,12 @@ async function merchantAlerts(a, env) {
     const j = r.ok ? JSON.parse(await r.text()) : null;
     if (!j || !Array.isArray(j.alerts)) throw new Error("bad answer");
     v = { alerts: j.alerts.map((x) => ({ id: String(x.id || ""), at: String(x.at || ""), title: String(x.title || "").slice(0, 160), body: String(x.body || "").slice(0, 2000), severity: ["info", "warning", "critical"].indexOf(x.severity) >= 0 ? x.severity : "info", link: String(x.link || "").slice(0, 20) })) };
-  } catch (e) { return json({ alerts: [], unavailable: true }); }
+  } catch (e) { return { alerts: [], unavailable: true }; }
   if (alertsCache.size > 200) alertsCache.clear();
   alertsCache.set(email, { at: Date.now(), v });
-  return json(v);
+  return v;
 }
+const NOTIFY = createNotify({ json, body, HttpError, accountMerchantIds, normEmail, hit, shardOf });
 
 // exported for the local test (test/smoke.mjs)
-export const __test = { refreshInventory, refreshIncentives, merchantInventory, merchantIncentives, merchantAlerts, incDerive, refreshSalesPlan, merchantSalesPlan, refreshDaily, readDaily, csvParser, normMonth, shardOf, refreshData, passwordProblem };
+export const __test = { NOTIFY, refreshInventory, refreshIncentives, merchantInventory, merchantIncentives, merchantAlerts, incDerive, refreshSalesPlan, merchantSalesPlan, refreshDaily, readDaily, csvParser, normMonth, shardOf, refreshData, passwordProblem };

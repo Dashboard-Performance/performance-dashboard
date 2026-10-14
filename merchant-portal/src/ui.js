@@ -348,7 +348,7 @@ function loadStatus() {
       Object.keys(s.columns).map(function (k) { return "<tr><td>" + esc(k) + "</td><td>" + s.columns[k] + "</td><td>" + (hdr.length ? esc(hdr[s.columns[k]] || "— missing —") : "build first") + "</td></tr>"; }).join("") + "</tbody></table></div>";
   }).catch(function (e) { $("dataBox").innerHTML = kv("Error", e.message, true); });
 }
-var PARTS = [["daily", "Daily numbers"], ["salesplan", "Sales Plan"], ["incentives", "Incentives"], ["inventory", "Inventory"]];
+var PARTS = [["daily", "Daily numbers"], ["salesplan", "Sales Plan"], ["incentives", "Incentives"], ["inventory", "Inventory"], ["notifications", "Notifications (Command Loop)"]];
 $("refreshBtn").addEventListener("click", function () {
   var b = this, label = b.textContent; b.disabled = true; b.textContent = "Refreshing: main data…";
   var fails = [];

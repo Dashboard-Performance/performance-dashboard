@@ -74,17 +74,19 @@
    *  0) Immediately hide the dashboard until we know the auth state
    * ------------------------------------------------------------------ */
   const existingSession = readSession();
+  // v1.17.0 — the link in the "reset your password" email opens the dashboard with #reset=<token>
+  const RESET_TOKEN = (function () { const m = /[#&]reset=([0-9a-f]{64})/.exec(location.hash || ""); return m ? m[1] : ""; })();
 
   const gateStyle = document.createElement("style");
   gateStyle.id = "authGateStyle";
-  if (!existingSession) {
+  if (!existingSession || RESET_TOKEN) {
     gateStyle.textContent = `body > *:not(#authOverlay){display:none !important;}`;
   }
   document.head.appendChild(gateStyle);
 
   injectAuthStyles();
 
-  if (!existingSession) {
+  if (!existingSession || RESET_TOKEN) {
     buildOverlay();
   } else {
     // Already logged in on this device — just wire up the logout control
@@ -259,6 +261,22 @@
     .auth-tab:hover{color:var(--text,#f6f8fb);}
     .auth-tab.active{background:var(--panel3,#141e2c);color:var(--text,#f6f8fb);box-shadow:0 1px 3px rgba(0,0,0,.25);}
     .auth-form{display:none;flex-direction:column;gap:6px;}
+    .auth-link{background:none;border:0;padding:6px 0 0;margin-top:6px;color:var(--accent,#2dd4a8);font:inherit;font-size:13px;font-weight:600;cursor:pointer;align-self:center;}
+    .auth-link:hover{text-decoration:underline;}
+    .auth-ok{font-size:13px;color:var(--green,#34d399);line-height:1.5;min-height:0;}
+    .auth-ok:empty{display:none;}
+    .auth-steps{list-style:none;margin:10px 0 2px;padding:0;display:flex;flex-direction:column;gap:6px;}
+    .auth-steps:empty{display:none;}
+    .auth-step{display:flex;gap:10px;align-items:flex-start;font-size:13px;padding:8px 10px;border:1px solid var(--line-light,#223044);border-radius:10px;background:var(--panel2,#0f1722);}
+    .auth-step b{font-weight:600;display:block;color:var(--text,#f6f8fb);}
+    .auth-step em{font-style:normal;color:var(--text-dim,#74839a);font-size:12px;}
+    .auth-step-ic{width:20px;height:20px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--line-light,#223044);color:var(--text-dim,#74839a);}
+    .auth-step.ok .auth-step-ic{background:color-mix(in srgb,var(--green,#34d399) 20%,transparent);color:var(--green,#34d399);}
+    .auth-step.fail .auth-step-ic{background:color-mix(in srgb,var(--red,#fb7185) 20%,transparent);color:var(--red,#fb7185);}
+    .auth-step.skip{opacity:.55;}
+    .auth-step-ic .auth-spin{margin:0;width:12px;height:12px;}
+    .auth-tries{font-size:12px;color:var(--text-dim,#74839a);}
+    .auth-tries:empty{display:none;}
     .auth-form.active{display:flex;}
     .auth-form label{font-size:12px;font-weight:600;color:var(--text2,#aab6c6);margin-top:12px;}
     .auth-form input,.auth-form select{width:100%;height:44px;padding:0 14px;background:var(--panel2,#0f1722);border:1px solid var(--line-light,#223044);
@@ -354,7 +372,33 @@
             </div>
             <div class="auth-error" id="authLoginError" role="alert"></div>
             <button type="submit" class="auth-submit" id="authLoginSubmit">Login</button>
+            <button type="button" class="auth-link" id="authForgotLink">Forgot your password?</button>
+            <div class="auth-ok" id="authLoginOk" role="status"></div>
             <div class="auth-hint" id="authLoginHint"></div>
+          </form>
+
+          <form id="authForgotForm" class="auth-form" autocomplete="on">
+            <label for="authForgotEmail">Work email</label>
+            <input type="email" id="authForgotEmail" placeholder="name@${CONFIG.ALLOWED_DOMAIN}" autocomplete="username" required />
+            <ul class="auth-steps" id="authForgotSteps" aria-live="polite"></ul>
+            <div class="auth-error" id="authForgotError" role="alert"></div>
+            <div class="auth-ok" id="authForgotOk" role="status"></div>
+            <div class="auth-tries" id="authForgotTries"></div>
+            <button type="submit" class="auth-submit" id="authForgotSubmit">Send reset link</button>
+            <button type="button" class="auth-link" data-back="1">Back to sign in</button>
+          </form>
+
+          <form id="authResetForm" class="auth-form" autocomplete="off">
+            <label for="authResetPassword">New password</label>
+            <div class="auth-password-wrap">
+              <input type="password" id="authResetPassword" placeholder="At least 8 characters, letters + numbers" autocomplete="new-password" required />
+              <span class="auth-toggle-pass" data-target="authResetPassword" role="button" tabindex="0">Show</span>
+            </div>
+            <label for="authResetConfirm">Repeat the new password</label>
+            <input type="password" id="authResetConfirm" placeholder="Repeat the password" autocomplete="new-password" required />
+            <div class="auth-error" id="authResetError" role="alert"></div>
+            <button type="submit" class="auth-submit" id="authResetSubmit">Save new password</button>
+            <button type="button" class="auth-link" data-back="1">Back to sign in</button>
           </form>
 
           <form id="authSignupForm" class="auth-form" autocomplete="on">
@@ -423,6 +467,7 @@
 
     wireLoginForm(overlay);
     wireSignupForm(overlay);
+    wireResetForms(overlay);
 
     function cap(s) {
       return s.charAt(0).toUpperCase() + s.slice(1);
@@ -454,6 +499,89 @@
     localStorage.setItem("taagerDashboardLastEmail", user.email);
     if (mode === "signup") localStorage.setItem("twWelcomeSignup", user.email);
     unlockDashboard(user);
+  }
+
+  // v1.17.0 — Forgot password → email with a one-time link → new password
+  function showPanel(overlay, which) {
+    overlay.querySelectorAll(".auth-form").forEach((f) => f.classList.remove("active"));
+    overlay.querySelector("#auth" + which + "Form").classList.add("active");
+    const tabs = overlay.querySelector(".auth-tabs");
+    if (tabs) tabs.style.display = which === "Login" || which === "Signup" ? "" : "none";
+    overlay.querySelectorAll(".auth-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === which.toLowerCase()));
+    const T = { Login: ["Welcome back", "Sign in to open the dashboard."], Forgot: ["Forgot your password?", "Type your work email — we'll send you a link to choose a new password."], Reset: ["Choose a new password", "This link works once. After saving, sign in with the new password."] }[which];
+    if (T) { overlay.querySelector("#authTitle").textContent = T[0]; overlay.querySelector("#authSub").textContent = T[1]; }
+  }
+  function postWorker(action, body) {
+    return fetch(CONFIG.WORKER_URL + "?action=" + action, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) })
+      .then((r) => r.json().catch(() => ({ success: false, message: "Server error " + r.status })));
+  }
+  function wireResetForms(overlay) {
+    overlay.querySelector("#authForgotLink").addEventListener("click", () => {
+      overlay.querySelector("#authForgotEmail").value = overlay.querySelector("#authLoginEmail").value.trim();
+      overlay.querySelector("#authForgotError").textContent = ""; overlay.querySelector("#authForgotOk").textContent = "";
+      showPanel(overlay, "Forgot"); setTimeout(() => overlay.querySelector("#authForgotEmail").focus(), 30);
+    });
+    overlay.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => {
+      if (RESET_TOKEN) history.replaceState(null, "", location.pathname + location.search);
+      showPanel(overlay, "Login");
+    }));
+    let forgotTimer = null;
+    function forgotCountdown(btn, triesEl, sec) {
+      clearInterval(forgotTimer);
+      const end = Date.now() + sec * 1000;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        if (!left) { clearInterval(forgotTimer); btn.disabled = false; btn.textContent = "Send reset link"; triesEl.textContent = "You can request a new reset email now."; return; }
+        btn.disabled = true; btn.textContent = "Try again in " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+      };
+      tick(); forgotTimer = setInterval(tick, 1000);
+    }
+    overlay.querySelector("#authForgotForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const err = overlay.querySelector("#authForgotError"), ok = overlay.querySelector("#authForgotOk"), btn = overlay.querySelector("#authForgotSubmit");
+      const stepsEl = overlay.querySelector("#authForgotSteps"), triesEl = overlay.querySelector("#authForgotTries");
+      err.textContent = ""; ok.textContent = ""; triesEl.textContent = "";
+      const email = overlay.querySelector("#authForgotEmail").value.trim();
+      if (!email) { err.textContent = "Enter your work email."; return; }
+      const ICON = { ok: "✓", fail: "✕", skip: "–", run: "" };
+      const draw = (steps) => { stepsEl.innerHTML = steps.map((s) => '<li class="auth-step ' + s.status + '"><span class="auth-step-ic">' + (s.status === "run" ? '<span class="auth-spin"></span>' : ICON[s.status] || "") + '</span><span><b>' + escapeHtml(s.label) + '</b>' + (s.detail ? '<em>' + escapeHtml(s.detail) + '</em>' : "") + "</span></li>").join(""); };
+      draw([{ label: "Account check", status: "run" }, { label: "Reset email", status: "skip" }]);
+      btn.disabled = true; btn.innerHTML = '<span class="auth-spin"></span>Checking…';
+      let wait = 0;
+      postWorker("staffForgot", { email: email })
+        .then((r) => {
+          r = r || {};
+          if (r.steps && r.steps.length) draw(r.steps); else stepsEl.innerHTML = "";
+          if (r.success) ok.textContent = r.message; else err.textContent = r.message || "Something went wrong. Please try again.";
+          if (typeof r.triesLeft === "number") triesEl.textContent = r.triesLeft > 0 ? "Reset emails left this hour: " + r.triesLeft + " of 3." : "No reset emails left this hour.";
+          if (r.code === "rate_limited" || (r.success && r.triesLeft === 0)) wait = r.retryAfterSec || 900;
+        })
+        .catch(() => { stepsEl.innerHTML = ""; err.textContent = "Could not reach the server. Please try again."; })
+        .finally(() => { if (wait) forgotCountdown(btn, triesEl, wait); else { btn.disabled = false; btn.textContent = "Send reset link"; } });
+    });
+    overlay.querySelector("#authResetForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const err = overlay.querySelector("#authResetError"), btn = overlay.querySelector("#authResetSubmit");
+      const p1 = overlay.querySelector("#authResetPassword").value, p2 = overlay.querySelector("#authResetConfirm").value;
+      err.textContent = "";
+      if (p1.length < 8) { err.textContent = "The password needs at least 8 characters."; return; }
+      if (!/[A-Za-z]/.test(p1) || !/[0-9]/.test(p1)) { err.textContent = "Use letters and numbers in the password."; return; }
+      if (p1 !== p2) { err.textContent = "The two passwords are different."; return; }
+      btn.disabled = true; btn.innerHTML = '<span class="auth-spin"></span>Saving…';
+      postWorker("staffReset", { token: RESET_TOKEN, password: p1 })
+        .then((r) => {
+          if (!r || !r.success) { err.textContent = (r && r.message) || "Could not save the password."; return; }
+          clearSession(); // every old session is signed out after a reset
+          history.replaceState(null, "", location.pathname + location.search);
+          if (r.email) overlay.querySelector("#authLoginEmail").value = r.email;
+          overlay.querySelector("#authLoginPassword").value = "";
+          overlay.querySelector("#authLoginOk").textContent = "Password changed ✓ Sign in with your new password.";
+          showPanel(overlay, "Login"); setTimeout(() => overlay.querySelector("#authLoginPassword").focus(), 30);
+        })
+        .catch(() => { err.textContent = "Could not reach the server. Please try again."; })
+        .finally(() => { btn.disabled = false; btn.textContent = "Save new password"; });
+    });
+    if (RESET_TOKEN) { showPanel(overlay, "Reset"); setTimeout(() => overlay.querySelector("#authResetPassword").focus(), 60); }
   }
 
   function wireLoginForm(overlay) {

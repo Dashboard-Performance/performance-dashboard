@@ -1,0 +1,32 @@
+/* v1.17.0 RE-CPA calculator (js/cpa-core.js) — shared by the staff dashboard and the merchant portal (copied by tools/sync-cpa.mjs) */
+.cpa .cpa-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.cpa .cpa-head h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cpa .cpa-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cpa .cpa-actions select, .cpa .cpa-actions input { min-height: 36px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-light, var(--line)); background: var(--panel2, var(--panel)); color: var(--text); font: inherit; min-width: 240px; }
+.cpa .cpa-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.cpa .cpa-in-sku { min-height: 38px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line-light, var(--line)); background: var(--panel2, var(--panel)); color: var(--text); font: inherit; min-width: 260px; }
+.cpa .cpa-grow { flex: 1; }
+.cpa .cpa-table td, .cpa .cpa-table th { white-space: nowrap; padding: 7px 8px; }
+.cpa .cpa-table .r { text-align: right; }
+.cpa .cpa-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.cpa .cpa-in { min-height: 30px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--line-light, var(--line)); background: var(--panel2, var(--panel)); color: var(--text); font: inherit; font-size: 13px; text-align: right; }
+.cpa .cpa-in:focus { outline: none; border-color: var(--accent); }
+.cpa .cpa-w5 { width: 62px; } .cpa .cpa-w6 { width: 78px; } .cpa .cpa-w8 { width: 96px; }
+.cpa .cpa-row { cursor: pointer; }
+.cpa .cpa-row.on td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cpa .cpa-max { font-weight: 700; color: var(--accent); }
+.cpa .cpa-net.neg, .cpa .cpa-neg { color: var(--red, #ef4444); font-weight: 700; }
+.cpa .cpa-net.pos, .cpa .cpa-pos { color: var(--green, #10b981); font-weight: 700; }
+.cpa .cpa-empty { text-align: center; padding: 26px 10px; white-space: normal; }
+.cpa .cpa-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.cpa .cpa-kv div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel2, var(--panel)); }
+.cpa .cpa-kv span { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 3px; }
+.cpa .cpa-kv b { font-size: 16px; }
+.cpa .cpa-sug { margin: 6px 0 12px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.5; }
+.cpa .cpa-sug li.good { color: var(--green, #10b981); } .cpa .cpa-sug li.warn { color: var(--orange, #f59e0b); } .cpa .cpa-sug li.bad { color: var(--red, #ef4444); }
+.cpa h4 { margin: 8px 0; font-size: 13px; color: var(--text2, var(--text-dim)); }
+.cpa .cpa-sens { max-width: 520px; }
+.cpa .cpa-foot { margin-top: 10px; font-size: 12px; }
+@media (max-width: 640px) { .cpa .cpa-in-sku, .cpa .cpa-actions select, .cpa .cpa-actions input { min-width: 0; width: 100%; } }
+.cpa .tw-stats.cpa-kpis { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 900px) { .cpa .tw-stats.cpa-kpis { grid-template-columns: repeat(2, 1fr); } }

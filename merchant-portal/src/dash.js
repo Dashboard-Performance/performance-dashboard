@@ -15,6 +15,7 @@ export const DASH_HTML = `<!doctype html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/dash.css">
+<script src="/static/cpa.js" defer></script>
 <script src="/static/dash.js" defer></script>
 </head>
 <body>
@@ -27,6 +28,7 @@ export const DASH_HTML = `<!doctype html>
       <a class="nav-item" id="navSp" data-view="sp"><span class="nav-icon"></span>Sales Plan</a>
       <a class="nav-item" id="navInv" data-view="inv"><span class="nav-icon"></span>Inventory</a>
       <a class="nav-item hidden" id="navInc" data-view="inc"><span class="nav-icon"></span>Incentives Tracker</a>
+      <a class="nav-item" id="navCpa" data-view="cpa"><span class="nav-icon"></span>RE-CPA</a>
       <a class="nav-item" id="navAl" data-view="al"><span class="nav-icon"></span>Alert Center<span class="mp-badge hidden" id="alBadge">0</span></a>
     </nav>
     <div class="sidebar-footer">
@@ -274,15 +276,34 @@ export const DASH_HTML = `<!doctype html>
         </section>
       </div>
 
+      <div id="viewCpa" class="view-section hidden"></div>
+
       <div id="viewAl" class="view-section hidden">
         <section class="mb-4">
-          <div class="panel-head-modern mp-mb12"><div class="panel-title-wrapper border-orange"><h2>Alert Center</h2><p>Updates and alerts from your Taager team</p></div><div class="table-controls"><button class="btn btn-outline small" id="alRead" type="button">Mark all as read</button></div></div>
+          <div class="panel-head-modern mp-mb12"><div class="panel-title-wrapper border-orange"><h2>Alert Center</h2><p>What needs your attention on your SKUs, stock and locks — and updates from your Taager team</p></div><div class="table-controls"><button class="btn btn-outline small" id="alRead" type="button">Mark all as read</button></div></div>
+          <div class="mp-tabs" role="tablist"><button type="button" class="mp-tab on" id="alTabA" role="tab">Needs your action</button><button type="button" class="mp-tab" id="alTabU" role="tab">Updates</button></div>
           <div id="alList" class="mp-alerts"></div>
         </section>
       </div>
       <p class="mp-foot" id="foot"></p>
     </main>
   </div>
+</div>
+
+<div class="mp-drawer hidden" id="skuDrawer" role="dialog" aria-modal="true" aria-labelledby="skuTitle">
+  <div class="mp-dback" id="skuBack"></div>
+  <aside class="mp-dpanel"><div class="mp-dhead"><h2 id="skuTitle">SKU</h2><button type="button" class="mp-x" id="skuClose" aria-label="Close">✕</button></div><div class="mp-dbody" id="skuBody"></div></aside>
+</div>
+
+<div class="mp-modal hidden" id="lkModal" role="dialog" aria-modal="true" aria-labelledby="lkTitle">
+  <form id="lkForm" novalidate>
+    <h2 id="lkTitle">Lock request · <span id="lkSku"></span></h2>
+    <label>What do you need?<select id="lkKind"><option value="increase">More pieces in my lock</option><option value="extend">Extend the lock end date</option></select></label>
+    <label>Pieces<input id="lkQty" type="number" min="0" inputmode="numeric"></label>
+    <label>Note (optional)<input id="lkNote" maxlength="300"></label>
+    <div class="mp-msg" id="lkMsg" role="alert"></div>
+    <div class="mp-btns"><button class="btn btn-outline" type="button" id="lkCancel">Cancel</button><button class="btn btn-primary" type="submit">Send request</button></div>
+  </form>
 </div>
 
 <div class="mp-modal hidden" id="chgModal" role="dialog" aria-modal="true" aria-labelledby="chgTitle">
@@ -330,8 +351,13 @@ function loadData() {
     fillMonths();
     if (!d.rows.length) note("No orders yet for your Merchant ID. If this looks wrong, contact your Taager account manager.");
     loadExtras();
+    if (!window.__mpHash) { window.__mpHash = 1; setTimeout(openFromHash, 50); }
     return refresh();
-  }).catch(function (e) { if (e.status === 401) { location.replace("/"); return; } note(e.message); });
+  }).catch(function (e) {
+    if (e.status === 401) { location.replace("/"); return; } note(e.message);
+    // the notifications, inventory and alerts do not depend on the merchant query — show them anyway
+    if (!window.__mpExtras) { window.__mpExtras = 1; loadExtras(); if (!window.__mpHash) { window.__mpHash = 1; setTimeout(openFromHash, 50); } }
+  });
 }
 function fillMonths() {
   var set = {}; D.rows.forEach(function (r) { set[r[0]] = 1; });
@@ -354,16 +380,17 @@ function refresh() {
 }
 
 // ---- tabs
-var TITLES = { ov: ["Over View", "Your demand, pipeline & delivery numbers"], tg: ["Merchant Target", "Targets vs actuals, and segment projections"], sp: ["Sales Plan", "Your SKU targets vs actuals, run rate and status"], inv: ["Inventory", "Stock and days of cover for your SKUs"], inc: ["Incentives Tracker", "Your monthly confirmed-orders target and bonus"], al: ["Alert Center", "Updates and alerts from your Taager team"] };
+var TITLES = { ov: ["Over View", "Your demand, pipeline & delivery numbers"], tg: ["Merchant Target", "Targets vs actuals, and segment projections"], sp: ["Sales Plan", "Your SKU targets vs actuals, run rate and status"], inv: ["Inventory", "Stock and days of cover for your SKUs"], inc: ["Incentives Tracker", "Your monthly confirmed-orders target and bonus"], al: ["Alert Center", "Updates and alerts from your Taager team"], cpa: ["RE-CPA", "Max CPA calculator — never pay more per order than you earn"] };
 function go(v) {
   if (curView === "al" && v !== "al") markAlertsRead();
   curView = v;
   document.querySelectorAll(".sidebar-nav .nav-item").forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-view") === v); });
-  ["ov", "tg", "sp", "inv", "inc", "al"].forEach(function (x) { var e = $("view" + x[0].toUpperCase() + x.slice(1)); e.classList.toggle("hidden", x !== v); e.classList.toggle("active-view", x === v); });
-  $("monthWrap").classList.toggle("hidden", v === "inv" || v === "inc" || v === "al");
+  ["ov", "tg", "sp", "inv", "inc", "al", "cpa"].forEach(function (x) { var e = $("view" + x[0].toUpperCase() + x.slice(1)); e.classList.toggle("hidden", x !== v); e.classList.toggle("active-view", x === v); });
+  $("monthWrap").classList.toggle("hidden", v === "inv" || v === "inc" || v === "al" || v === "cpa");
   $("pgTitle").textContent = TITLES[v][0]; $("pgSub").textContent = TITLES[v][1];
   if (v === "ov") renderOverview();
   if (v === "al") renderAlerts();
+  if (v === "cpa") renderCpa();
 }
 document.querySelector(".sidebar-nav").addEventListener("click", function (e) { var a = e.target.closest(".nav-item"); if (a) go(a.getAttribute("data-view")); });
 
@@ -654,7 +681,7 @@ function invRows() {
 function invOut(m) { return m.stock <= 0 || m.availability === "Out of Stock"; }
 function invRowHtml(m) {
   var tc = m.trend === "Hot" ? "spike" : m.trend === "Cooling" ? "decline" : "stable";
-  return "<tr><td class='font-mono text-dim'>" + esc(m.skuId) + "</td><td class='truncate-cell font-bold text-light' title='" + esc(m.skuName) + "'>" + esc(m.skuName) + "</td><td class='text-dim'>" + esc(m.category) + "</td>" +
+  return "<tr class='mp-click' data-row='" + esc(m.skuId) + "' title='Open SKU details'><td class='font-mono text-dim'>" + esc(m.skuId) + "</td><td class='truncate-cell font-bold text-light' title='" + esc(m.skuName) + "'>" + esc(m.skuName) + "</td><td class='text-dim'>" + esc(m.category) + "</td>" +
     "<td class='num'><span class='badge-outline " + (m.stock > 10 ? "green" : "red") + "'>" + cInt(m.stock) + "</span></td><td class='num font-bold text-dim'>" + cInt(m.doh) + "</td>" +
     "<td><span class='badge-outline " + (m.availability === "Out of Stock" ? "red" : "blue") + "'>" + esc(m.availability) + "</span></td>" +
     "<td class='num text-dim'>" + cInt(m.placedYday) + "</td><td class='num text-blue font-bold'>" + cInt(m.confYday) + "</td><td class='num text-orange font-bold'>" + m.avg3d.toFixed(1) + "</td><td class='num text-purple font-bold'>" + m.avg15d.toFixed(1) + "</td>" +
@@ -692,41 +719,184 @@ function renderIncentives() {
   incT.render();
 }
 
-// ---- Alert Center (alerts the Taager team sent to merchants; read state is kept in this browser only)
-var AL_KEY = "mp_alerts_read";
-function alRead() { try { return JSON.parse(localStorage.getItem(AL_KEY) || "{}") || {}; } catch (e) { return {}; } }
-function markAlertsRead() { var r = alRead(); ((AL && AL.alerts) || []).forEach(function (a) { r[a.id] = 1; }); try { localStorage.setItem(AL_KEY, JSON.stringify(r)); } catch (e) {} updateBadge(); }
-function unreadCount() { var r = alRead(); return ((AL && AL.alerts) || []).filter(function (a) { return !r[a.id]; }).length; }
+// ---- Alert Center (v1.17.0): automatic notifications from the Command Loop + alerts the Taager team sent.
+// Read state is kept on the server (same on every device); this browser keeps a copy as a fallback.
+var AL_KEY = "mp_alerts_read", alTab = "action";
+function alRead() { var r = {}; try { r = JSON.parse(localStorage.getItem(AL_KEY) || "{}") || {}; } catch (e) {} ((AL && AL.read) || []).forEach(function (id) { r[id] = 1; }); return r; }
+function alAll() {
+  var out = [];
+  ((AL && AL.items) || []).forEach(function (x) { out.push({ id: x.id, at: x.updatedAt || x.createdAt, auto: x, severity: x.sev === "critical" ? "critical" : x.sev === "warning" ? "warning" : "info", kind: x.status === "active" ? "action" : "update" }); });
+  ((AL && AL.alerts) || []).forEach(function (a) { out.push({ id: a.id, at: a.at, manual: a, severity: a.severity, kind: "update" }); });
+  out.sort(function (p, q) { return (p.kind === "action" ? 0 : 1) - (q.kind === "action" ? 0 : 1) || ({ critical: 0, warning: 1, info: 2 }[p.severity] - { critical: 0, warning: 1, info: 2 }[q.severity]) || (Date.parse(q.at || 0) - Date.parse(p.at || 0)); });
+  return out;
+}
+function markAlertsRead() {
+  var ids = alAll().map(function (n) { return n.id; }), r = alRead(); ids.forEach(function (i) { r[i] = 1; });
+  try { localStorage.setItem(AL_KEY, JSON.stringify(r)); } catch (e) {}
+  if (AL) { AL.read = Object.keys(r); }
+  if (ids.length) api("/api/notifications/read", { body: { ids: ids } }).catch(function () {});
+  updateBadge();
+}
+function unreadCount() { var r = alRead(); return alAll().filter(function (n) { return !r[n.id]; }).length; }
 function updateBadge() { var n = unreadCount(), b = $("alBadge"); b.textContent = n > 9 ? "9+" : String(n); b.classList.toggle("hidden", n === 0); var t = $("twBadge"); if (t) { t.textContent = n > 9 ? "9+" : String(n); t.classList.toggle("tw-off", n === 0); } }
+function n1(v) { return v == null ? "—" : (Math.round(v * 10) / 10).toLocaleString("en-US"); }
+function ntfText(x) {
+  var d = x.data || {}, nm = x.name || x.sku, eta = x.eta ? " Restock expected on " + x.eta + "." : "";
+  switch (x.rule) {
+    case "N1": return ["Orders dropped on " + nm, "You placed " + n1(d.recent) + " pcs/day lately vs " + n1(d.usual) + " pcs/day usually (score " + n1(d.score) + "). Check your ads and the product page."];
+    case "N2": return ["Confirmation rate dropped on " + nm, n1(d.recent) + "% of your orders were confirmed lately vs " + n1(d.usual) + "% usually. Check the price you show, the offer and the audience."];
+    case "N3": return [nm + " is running out", "About " + n1(d.doh) + " days of stock left (" + cInt(d.stock) + " pcs)." + eta + " Plan ahead or switch part of your ads to an alternative."];
+    case "N4": return [nm + " is out of stock", "New orders on this SKU cannot be fulfilled." + eta + " Pause the ads or move them to an alternative."];
+    case "N5": return ["Your lock on " + nm + " is running low", cInt(d.rem) + " pcs left ≈ " + n1(d.cover) + " days at your " + n1(d.avg) + " confirmed pcs/day." + (d.suggest ? " Ask for about +" + cInt(d.suggest) + " pcs." : "")];
+    case "N6": return ["Your lock on " + nm + " ends on " + d.exp, cInt(d.rem) + " pcs left in the lock. Ask to extend it if you keep selling."];
+    case "N7": return [nm + " is back in stock", (d.doh != null ? n1(d.doh) + " days of cover. " : "") + "You can push it again."];
+    case "N8": return [nm + " is performing again", "Your " + (d.metric === "cr" ? "confirmation rate" : "orders") + " are back to normal (score " + n1(d.score) + ")."];
+    case "RQ": return ["Lock request on " + nm + ": " + d.decision, d.outcome || ("Your request to " + (d.kind || "update") + " the lock was handled.")];
+  }
+  return [nm, ""];
+}
+function ntfBtns(x) {
+  var b = "<button type='button' class='btn btn-outline small' data-sku='" + esc(x.sku) + "' data-mid='" + esc(x.mid) + "'>Open SKU</button>";
+  if ((x.rule === "N5" || x.rule === "N6") && x.status === "active" && AL && AL.lockRequests) b += x.req ? "<span class='mp-chip'>Request sent · " + esc(x.req.status === "open" ? "waiting" : x.req.status.replace("_", " ")) + "</span>" : " <button type='button' class='btn btn-primary small' data-lock='" + esc(x.sku) + "' data-mid='" + esc(x.mid) + "' data-qty='" + esc((x.data && x.data.suggest) || "") + "' data-kind='" + (x.rule === "N6" ? "extend" : "increase") + "'>" + (x.rule === "N6" ? "Ask to extend" : "Ask for more") + "</button>";
+  if ((x.rule === "N3" || x.rule === "N4") && x.status === "active") b += " <button type='button' class='btn btn-outline small' data-sku='" + esc(x.sku) + "' data-mid='" + esc(x.mid) + "' data-alts='1'>Show alternatives</button>";
+  if (x.status === "active") b += " <button type='button' class='btn btn-outline small mp-ghost' data-mute='" + esc(x.sku) + "' data-mid='" + esc(x.mid) + "'>Not interested in this SKU</button>";
+  return b;
+}
 function renderPop() {
-  var list = ((AL && AL.alerts) || []).slice(0, 8), r = alRead();
+  var list = alAll().slice(0, 8), r = alRead();
   $("twPop").innerHTML = "<div class='tw-pop-head'><b>Notifications</b><button type='button' class='btn small ghost' id='twAll'>Mark all read</button></div><div class='tw-pop-list'>" +
-    (list.length ? list.map(function (a) { var un = !r[a.id], sev = a.severity === "critical" ? " bad" : a.severity === "warning" ? " warn" : "";
-      return "<div class='tw-note" + (un ? " unread" : "") + "' data-al='1'><span class='dot" + sev + "'></span><div><div class='tw-note-title'>" + esc(a.title) + "</div><div class='tw-note-text'>" + esc(a.body) + "</div><div class='tw-note-meta'>" + esc(a.at ? new Date(a.at).toLocaleString() : "") + "</div></div></div>"; }).join("") : "<div class='tw-empty'>No notifications yet.</div>") +
-    "</div><div class='tw-pop-head' style='border-top:1px solid var(--line);border-bottom:0'><button type='button' class='btn small' id='twView'>View all in Alert Center</button></div>";
+    (list.length ? list.map(function (n) { var un = !r[n.id], sev = n.severity === "critical" ? " bad" : n.severity === "warning" ? " warn" : "", t = n.auto ? ntfText(n.auto) : [n.manual.title, n.manual.body];
+      return "<div class='tw-note" + (un ? " unread" : "") + "' data-al='1'" + (n.auto ? " data-sku='" + esc(n.auto.sku) + "' data-mid='" + esc(n.auto.mid) + "'" : "") + "><span class='dot" + sev + "'></span><div><div class='tw-note-title'>" + esc(t[0]) + "</div><div class='tw-note-text'>" + esc(t[1]) + "</div><div class='tw-note-meta'>" + esc(n.at ? new Date(n.at).toLocaleString() : "") + "</div></div></div>"; }).join("") : "<div class='tw-empty'>No notifications yet.</div>") +
+    "</div><div class='tw-pop-head mp-pop-foot'><button type='button' class='btn small' id='twView'>View all in Alert Center</button></div>";
   $("twAll").onclick = function (e) { e.stopPropagation(); markAlertsRead(); renderPop(); if (curView === "al") renderAlerts(); };
   $("twView").onclick = function () { $("twPop").classList.add("tw-off"); go("al"); };
-  $("twPop").querySelectorAll("[data-al]").forEach(function (n) { n.onclick = function () { $("twPop").classList.add("tw-off"); go("al"); }; });
+  $("twPop").querySelectorAll("[data-al]").forEach(function (n) { n.onclick = function () { $("twPop").classList.add("tw-off"); var s = n.getAttribute("data-sku"); if (s) { go("inv"); openSku(s, n.getAttribute("data-mid")); } else go("al"); }; });
 }
 $("twBell").addEventListener("click", function (e) { e.stopPropagation(); $("twPop").classList.toggle("tw-off"); renderPop(); });
 $("twPop").addEventListener("click", function (e) { e.stopPropagation(); });
 document.addEventListener("click", function () { $("twPop").classList.add("tw-off"); });
 var AL_LINKS = { ov: "Over View", tg: "Merchant Target", sp: "Sales Plan", inv: "Inventory", inc: "Incentives Tracker" };
 function renderAlerts() {
-  var list = (AL && AL.alerts) || [], r = alRead(), html = "";
-  list.forEach(function (a) {
-    var when = a.at ? new Date(a.at).toLocaleString() : "", un = !r[a.id];
-    html += "<div class='mp-alert " + esc(a.severity) + (un ? " unread" : "") + "'><div class='mp-alert-h'><span class='mp-alert-t'>" + esc(a.title) + "</span>" + (un ? "<span class='mp-alert-new'>New</span>" : "") + "<span class='mp-alert-d'>" + esc(when) + "</span></div><div class='mp-alert-b'>" + esc(a.body) + "</div>" +
-      (AL_LINKS[a.link] && (a.link !== "inc" || incRows().length) ? "<div class='mp-alert-go'><button type='button' class='btn btn-outline small' data-go='" + esc(a.link) + "'>Open " + esc(AL_LINKS[a.link]) + "</button></div>" : "") + "</div>";
+  var all = alAll(), r = alRead(), html = "";
+  var act = all.filter(function (n) { return n.kind === "action"; }), upd = all.filter(function (n) { return n.kind !== "action"; });
+  $("alTabA").textContent = "Needs your action · " + act.length; $("alTabU").textContent = "Updates · " + upd.length;
+  $("alTabA").classList.toggle("on", alTab === "action"); $("alTabU").classList.toggle("on", alTab !== "action");
+  (alTab === "action" ? act : upd).forEach(function (n) {
+    var when = n.at ? new Date(n.at).toLocaleString() : "", un = !r[n.id];
+    if (n.auto) {
+      var t = ntfText(n.auto);
+      html += "<div class='mp-alert " + esc(n.severity) + (un ? " unread" : "") + "'><div class='mp-alert-h'><span class='mp-alert-t'>" + esc(t[0]) + "</span>" + (un ? "<span class='mp-alert-new'>New</span>" : "") + "<span class='mp-alert-d'>" + esc(when) + "</span></div><div class='mp-alert-b'>" + esc(t[1]) + "</div><div class='mp-alert-go'>" + ntfBtns(n.auto) + "</div></div>";
+    } else {
+      var a = n.manual;
+      html += "<div class='mp-alert " + esc(a.severity) + (un ? " unread" : "") + "'><div class='mp-alert-h'><span class='mp-alert-t'>" + esc(a.title) + "</span>" + (un ? "<span class='mp-alert-new'>New</span>" : "") + "<span class='mp-alert-d'>" + esc(when) + "</span></div><div class='mp-alert-b'>" + esc(a.body) + "</div>" +
+        (AL_LINKS[a.link] && (a.link !== "inc" || incRows().length) ? "<div class='mp-alert-go'><button type='button' class='btn btn-outline small' data-go='" + esc(a.link) + "'>Open " + esc(AL_LINKS[a.link]) + "</button></div>" : "") + "</div>";
+    }
   });
-  if (!html) html = "<div class='mp-empty'>" + (AL && AL.unavailable ? "Alerts could not be loaded right now. Please try again in a few minutes." : AL ? "No alerts right now. Important updates from your Taager team will show up here." : "Loading…") + "</div>";
+  if (!html) html = "<div class='mp-empty'>" + (AL && AL.unavailable && !(AL.items || []).length ? "Alerts could not be loaded right now. Please try again in a few minutes." : !AL ? "Loading…" : alTab === "action" ? "Nothing needs your action right now. We watch your SKUs, stock and locks and tell you here when something changes." : "No updates yet. Important updates from your Taager team will show up here.") + "</div>";
   $("alList").innerHTML = html; updateBadge();
+}
+function loadAlerts() {
+  return api("/api/notifications").then(function (d) { AL = d; renderAlerts(); if (!$("twPop").classList.contains("tw-off")) renderPop(); })
+    .catch(function (e) { if (e && e.status === 401) { location.replace("/"); return; } api("/api/alerts").then(function (d) { AL = { alerts: d.alerts || [], items: [], read: [], unavailable: d.unavailable }; renderAlerts(); }).catch(function () { AL = { alerts: [], items: [], unavailable: true }; renderAlerts(); }); });
+}
+
+// ---- SKU drawer (from a notification, the bell, or a click on an Inventory row) — deep link: #inv?sku=…&mid=…
+var SKUD = null;
+function closeSku() { $("skuDrawer").classList.add("hidden"); SKUD = null; if (/^#inv\?/.test(location.hash)) history.replaceState(null, "", location.pathname + "#inv"); }
+function chart14(d, c) {
+  if (!d || !d.length) return "<div class='mp-empty'>No orders in the last 14 days.</div>";
+  var W = 560, H = 150, n = d.length, max = Math.max.apply(null, d.concat(c || [], [1])), bw = (W - 30) / n, html = "";
+  for (var i = 0; i < n; i++) {
+    var di = n - 1 - i, x = 26 + i * bw, hp = (d[di] / max) * (H - 26), hc = c ? (c[di] / max) * (H - 26) : 0;
+    html += "<rect class='mp-bar-p' x='" + (x + 2).toFixed(1) + "' y='" + (H - 18 - hp).toFixed(1) + "' width='" + Math.max(2, bw / 2 - 3).toFixed(1) + "' height='" + hp.toFixed(1) + "'><title>D" + (di + 1) + ": " + d[di] + " placed</title></rect>";
+    if (c) html += "<rect class='mp-bar-c' x='" + (x + bw / 2).toFixed(1) + "' y='" + (H - 18 - hc).toFixed(1) + "' width='" + Math.max(2, bw / 2 - 3).toFixed(1) + "' height='" + hc.toFixed(1) + "'><title>D" + (di + 1) + ": " + c[di] + " confirmed</title></rect>";
+    if (i % 2 === 0) html += "<text class='mp-ax' x='" + (x + bw / 2).toFixed(1) + "' y='" + (H - 4) + "' text-anchor='middle'>D" + (di + 1) + "</text>";
+  }
+  return "<svg class='mp-skchart' viewBox='0 0 " + W + " " + H + "' role='img' aria-label='Placed and confirmed pieces, last 14 days'><text class='mp-ax' x='2' y='12'>" + cInt(max) + "</text><line class='mp-grid' x1='24' x2='" + W + "' y1='" + (H - 18) + "' y2='" + (H - 18) + "'></line>" + html + "</svg><div class='mp-legend'><span class='mp-lg-p'></span>Placed <span class='mp-lg-c'></span>Confirmed · D1 = yesterday</div>";
+}
+function openSku(sku, mid, focus) {
+  SKUD = { sku: sku, mid: mid || "" };
+  $("skuDrawer").classList.remove("hidden"); $("skuTitle").textContent = sku; $("skuBody").innerHTML = "<div class='mp-empty'>Loading…</div>";
+  history.replaceState(null, "", location.pathname + "#inv?sku=" + encodeURIComponent(sku) + (mid ? "&mid=" + encodeURIComponent(mid) : ""));
+  var row = invRows().filter(function (m) { return m.skuId === sku; })[0];
+  api("/api/sku?sku=" + encodeURIComponent(sku) + (mid ? "&mid=" + encodeURIComponent(mid) : "")).then(function (j) {
+    if (!SKUD || SKUD.sku !== sku) return;
+    SKUD.mid = j.mid || mid || ""; var s = j.data || {}, L = s.lock, html = "";
+    $("skuTitle").textContent = s.n || (row && row.skuName) || sku;
+    var stock = s.stock != null ? s.stock : row ? row.stock : null, doh = s.doh != null ? s.doh : row ? row.doh : null;
+    html += "<div class='mp-kv'><div><span>SKU</span><b>" + esc(sku) + "</b></div><div><span>Stock</span><b>" + (stock == null ? "—" : cInt(stock)) + "</b></div><div><span>Days of cover</span><b>" + (doh == null ? "—" : n1(doh)) + "</b></div><div><span>Status</span><b>" + esc(s.avail || (row && row.availability) || "—") + "</b></div>" + (j.eta ? "<div><span>Restock expected</span><b>" + esc(j.eta) + "</b></div>" : "") + "</div>";
+    if (j.found) html += "<h3>Your last 14 days</h3>" + chart14(s.d, s.c);
+    if (s.sc && (s.sc.demand != null || s.sc.cr != null)) html += "<div class='mp-kv'><div><span>Orders vs your usual</span><b>" + (s.sc.demand == null ? "—" : n1(s.sc.demand)) + "</b></div><div><span>Confirmation vs your usual</span><b>" + (s.sc.cr == null ? "—" : n1(s.sc.cr)) + "</b></div></div><p class='mp-hint'>100 = the same as your own usual level. Below " + 70 + " = a drop.</p>";
+    if (L) {
+      html += "<h3 id='skuLock'>Your lock</h3><div class='mp-kv'><div><span>Locked for you</span><b>" + cInt(L.alloc) + "</b></div><div><span>Used</span><b>" + cInt(L.used) + "</b></div><div><span>Left</span><b>" + cInt(L.rem) + "</b></div><div><span>Covers</span><b>" + (L.cover == null ? "—" : n1(L.cover) + " days") + "</b></div>" + (L.exp ? "<div><span>Ends on</span><b>" + esc(L.exp) + "</b></div>" : "") + "<div><span>Your confirmed / day</span><b>" + n1(L.avg) + "</b></div></div>";
+    }
+    var reqs = j.requests || [];
+    if (reqs.length) html += "<h3>Your lock requests</h3>" + reqs.map(function (r) { return "<div class='mp-req'><b>" + esc((r.kind || "update") + (r.qty ? " · " + cInt(r.qty) + " pcs" : "")) + "</b><span class='mp-chip'>" + esc(r.status === "open" ? "waiting" : r.status === "resolved" ? (r.decision || "done") : r.status.replace("_", " ")) + "</span><span class='mp-dim'>" + esc(r.at ? new Date(r.at).toLocaleDateString() : "") + "</span>" + (r.outcome ? "<div class='mp-dim'>" + esc(r.outcome) + "</div>" : "") + "</div>"; }).join("");
+    var pending = reqs.some(function (r) { return ["open", "in_progress", "waiting"].indexOf(r.status) >= 0; });
+    if (j.lockRequests && L && !pending) html += "<div class='mp-row'><button type='button' class='btn btn-primary small' data-lock='" + esc(sku) + "' data-mid='" + esc(SKUD.mid) + "' data-qty='" + esc(L.suggest || "") + "' data-kind='increase'>Ask for more lock</button><button type='button' class='btn btn-outline small' data-lock='" + esc(sku) + "' data-mid='" + esc(SKUD.mid) + "' data-qty='' data-kind='extend'>Ask to extend</button></div>";
+    if ((j.alts || []).length) html += "<h3 id='skuAlts'>Alternatives in the same category</h3>" + j.alts.map(function (a) { return "<div class='mp-req'><b>" + esc(a.n) + "</b><span class='mp-dim'>" + esc(a.sku) + "</span><span class='mp-chip'>" + n1(a.doh) + " days of cover</span></div>"; }).join("") + "<p class='mp-hint'>Healthy stock and not locked to anyone. Ask your account manager to add one to your store.</p>";
+    var notes = j.notes || [];
+    if (notes.length) html += "<h3>Notifications on this SKU</h3>" + notes.map(function (x) { var t = ntfText(Object.assign({ mid: j.mid, eta: j.eta }, x)); return "<div class='mp-req'><b>" + esc(t[0]) + "</b><span class='mp-dim'>" + esc(x.status === "active" ? "now" : "closed " + new Date(x.resolvedAt || x.updatedAt).toLocaleDateString()) + "</span></div>"; }).join("");
+    if (j.found && !j.muted) html += "<div class='mp-row'><button type='button' class='btn btn-outline small mp-ghost' data-mute='" + esc(sku) + "' data-mid='" + esc(SKUD.mid) + "'>Not interested in this SKU</button></div>";
+    if (j.muted) html += "<p class='mp-hint'>You muted notifications for this SKU.</p>";
+    if (!j.found) html += "<p class='mp-hint'>No recent orders on this SKU, so there is no daily detail yet.</p>";
+    $("skuBody").innerHTML = html;
+    if (focus === "alts" && $("skuAlts")) $("skuAlts").scrollIntoView(); if (focus === "lock" && $("skuLock")) $("skuLock").scrollIntoView();
+  }).catch(function (e) { if (e.status === 401) { location.replace("/"); return; } $("skuBody").innerHTML = "<div class='mp-empty'>" + esc(e.message) + "</div>"; });
+}
+function openLockForm(sku, mid, qty, kind) {
+  $("lkSku").textContent = sku; $("lkKind").value = kind || "increase"; $("lkQty").value = qty || ""; $("lkNote").value = ""; msg("lkMsg", "");
+  $("lkModal").setAttribute("data-sku", sku); $("lkModal").setAttribute("data-mid", mid || ""); $("lkModal").classList.remove("hidden"); $("lkQty").focus();
+}
+document.addEventListener("click", function (e) {
+  var t = e.target.closest("[data-lock],[data-mute],[data-sku]"); if (!t || t.closest("#twPop")) return;
+  if (t.hasAttribute("data-lock")) { openLockForm(t.getAttribute("data-lock"), t.getAttribute("data-mid"), t.getAttribute("data-qty"), t.getAttribute("data-kind")); return; }
+  if (t.hasAttribute("data-mute")) {
+    if (!confirm("Stop notifications for this SKU for a while?")) return;
+    api("/api/notifications/mute", { body: { mid: t.getAttribute("data-mid"), sku: t.getAttribute("data-mute") } }).then(function () { loadAlerts(); if (SKUD) openSku(SKUD.sku, SKUD.mid); }).catch(function (er) { alert(er.message); });
+    return;
+  }
+  if (t.hasAttribute("data-sku") && !t.closest(".mp-drawer")) { go("inv"); openSku(t.getAttribute("data-sku"), t.getAttribute("data-mid"), t.getAttribute("data-alts") ? "alts" : ""); }
+});
+$("skuClose").addEventListener("click", closeSku); $("skuBack").addEventListener("click", closeSku);
+document.addEventListener("keydown", function (e) { if (e.key === "Escape" && SKUD) closeSku(); });
+$("lkCancel").addEventListener("click", function () { $("lkModal").classList.add("hidden"); });
+$("lkForm").addEventListener("submit", function (e) {
+  e.preventDefault(); msg("lkMsg", "Sending…");
+  var m = $("lkModal"), sku = m.getAttribute("data-sku"), mid = m.getAttribute("data-mid");
+  api("/api/lock-request", { body: { mid: mid, sku: sku, kind: $("lkKind").value, qty: +$("lkQty").value || 0, note: $("lkNote").value } })
+    .then(function () { msg("lkMsg", "Sent ✓ Your Taager team will answer here.", "ok"); setTimeout(function () { m.classList.add("hidden"); loadAlerts(); if (SKUD) openSku(SKUD.sku, SKUD.mid); }, 900); })
+    .catch(function (er) { msg("lkMsg", er.message, "err"); });
+});
+$("invBody").addEventListener("click", function (e) { var tr = e.target.closest("tr[data-row]"); if (tr) openSku(tr.getAttribute("data-row"), ""); });
+$("alTabA").addEventListener("click", function () { alTab = "action"; renderAlerts(); });
+$("alTabU").addEventListener("click", function () { alTab = "update"; renderAlerts(); });
+// ---- RE-CPA (v1.17.0): the same calculator as Merchants → RE-CPA in the Taager dashboard (core: /static/cpa.js)
+var CPA = { h: null, cfg: null };
+function renderCpa() {
+  if (CPA.h || !window.TaagerCpa) return;
+  CPA.h = window.TaagerCpa.mount($("viewCpa"), {
+    esc: esc, cfg: function () { return CPA.cfg; },
+    title: "RE-CPA · Max CPA calculator",
+    sub: "Add your SKUs, then type the AVE Market price you sell at, your actual CPA and the number of conversions. Max CPA is calculated for you — pay more than that per order and you lose money.",
+    load: function () { return api("/api/cpa").then(function (j) { CPA.cfg = j.cfg; return j.plan || { rows: [] }; }); },
+    save: function (rows) { return api("/api/cpa", { body: { rows: rows } }); },
+    lookup: function (q) { return api("/api/cpa/lookup?q=" + encodeURIComponent(q)).then(function (j) { return j.items || []; }); },
+    rates: function (sku) { return api("/api/cpa/sku?sku=" + encodeURIComponent(sku)).then(function (j) { return j.item; }); },
+    skuOptions: function () { return invRows().map(function (m) { return { sku: m.skuId, n: m.skuName }; }); }
+  });
+}
+window.addEventListener("hashchange", function () { openFromHash(); });
+function openFromHash() {
+  var m = /^#inv\?(.*)$/.exec(location.hash || ""); if (!m) { if (location.hash === "#al") go("al"); else if (location.hash === "#inv") go("inv"); else if (location.hash === "#cpa") go("cpa"); return; }
+  var q = {}; m[1].split("&").forEach(function (kv) { var p = kv.split("="); q[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || ""); });
+  if (q.sku) { go("inv"); openSku(q.sku, q.mid || "", q.tab || ""); }
 }
 function loadExtras() {
   var fail = function (e) { if (e && e.status === 401) { location.replace("/"); return true; } return false; };
   api("/api/inventory").then(function (d) { INV = d; renderInventory(); }).catch(function (e) { if (fail(e)) return; INV = { rows: [], note: "Inventory could not be loaded: " + e.message }; renderInventory(); });
   api("/api/incentives").then(function (d) { INC = d; renderIncentives(); }).catch(function (e) { fail(e); });
-  api("/api/alerts").then(function (d) { AL = d; renderAlerts(); }).catch(function (e) { if (fail(e)) return; AL = { alerts: [], unavailable: true }; renderAlerts(); });
+  loadAlerts();
 }
 
 // ---- wiring

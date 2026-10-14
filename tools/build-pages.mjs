@@ -4,7 +4,8 @@
 // Those files are full copies of index.html with the tab preselected. Older file names only redirect.
 import fs from "node:fs";
 import path from "node:path";
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+import { fileURLToPath } from "node:url"; // Windows-safe (C:\ paths, spaces)
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tower = fs.readFileSync(path.join(root, "js/tower.js"), "utf8");
 const grab = (name) => { const i = tower.indexOf("var " + name + " = {"); const j = tower.indexOf("};", i); return Function("return (" + tower.slice(i + ("var " + name + " = ").length, j + 1) + ")")(); };
 const VIEW_NAV = grab("VIEW_NAV"), VIEW_SLUG = grab("VIEW_SLUG");

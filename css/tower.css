@@ -682,3 +682,47 @@ body.tw-mscope .ov-row:has(#ovStTrendChart), body.tw-mscope .ov-row:has(#ovStock
 .tg-card.wide .tg-acts { padding-top: 6px; }
 .tg-card.wide .tg-acts .btn { flex: 0 0 auto; }
 @media (max-width: 760px) { .tg-kpi-wrap { overflow-x: auto; } .tg-kpi-t { min-width: 440px; } }
+
+/* ---------------------------------------------------------------- v1.17.0 Command Loop (js/loop.js) */
+.lp-grow { flex: 1; }
+.lp-late { color: var(--red); font-weight: 650; }
+.lp-list { display: flex; flex-direction: column; gap: 10px; }
+.lp-card { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line2); border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: border-color .15s var(--ease), transform .15s var(--ease); }
+.lp-card:hover { border-color: var(--line-light); transform: translateY(-1px); }
+.lp-card.warn { border-left-color: var(--orange); } .lp-card.bad { border-left-color: var(--red); }
+.lp-card-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.lp-card-t { font-size: 15px; font-weight: 650; margin: 6px 0 2px; overflow-wrap: anywhere; }
+.lp-card-m { font-size: 12.5px; color: var(--text2); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.lp-strip { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; padding: 10px 14px; margin: 0 0 16px; }
+.lp-strip-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lp-strip-l { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lp-strip-i { cursor: pointer; font-size: 13px; padding: 4px 6px; border-radius: 8px; overflow-wrap: anywhere; }
+.lp-strip-i:hover { background: var(--panel2); }
+.lp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: middle; }
+.lp-dot.warn { background: var(--orange); } .lp-dot.bad { background: var(--red); }
+.lp-links { display: flex; flex-direction: column; gap: 6px; }
+.lp-link { cursor: pointer; padding: 8px 10px; border: 1px dashed var(--line2); border-radius: 10px; font-size: 13px; }
+.lp-link:hover { border-color: var(--accent); }
+.lp-ok { padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--green) 12%, var(--panel)); color: var(--green); font-size: 13px; }
+.lp-warn { margin: 8px 0 0; padding-left: 18px; color: var(--orange); font-size: 13px; }
+.lp-def { color: var(--orange); }
+.lp-bool { flex-direction: row !important; align-items: flex-start; gap: 12px !important; }
+.lp-win { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--text2); }
+.lp-win input { width: 60px; min-height: 32px; padding: 0 6px; }
+.lp-nb { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 20px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; }
+#navLoopTasks { display: flex; align-items: center; }
+.lp-a { cursor: pointer; color: var(--text); font-weight: 600; }
+.lp-a:hover { color: var(--accent); }
+.lp-bulk { padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.lp-bulk select, .lp-bulk input, .tw-toolbar select, .tw-toolbar input[type=search] { min-height: 34px; padding: 0 8px; }
+.lp-route td { vertical-align: top; } .lp-route input:not([type=checkbox]) { min-width: 220px; }
+.lp-btns { flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.lp-ctabs { flex-direction: row !important; }
+@media (max-width: 640px) { .lp-card-t { font-size: 14px; } .lp-bulk { flex-direction: column; align-items: stretch; } }
+#lpDrawer .tw-chip, .lp-page .tw-chip, #viewLoopTasks .tw-chip, #viewLoopControl .tw-chip { color: var(--text); }
+#viewLoopControl .tw-field input:not([type=checkbox]), #viewLoopControl .tw-field select, #viewLoopControl .tw-field textarea, #lpDrawer .tw-field input, #lpDrawer .tw-field textarea, .tw-modal .tw-field input, .tw-modal .tw-field select, .tw-modal .tw-field textarea { min-height: 36px; padding: 6px 10px; border-radius: 9px; }
+#viewLoopControl .lp-win input { min-height: 32px; padding: 0 6px; }
+.lp-test { padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--orange) 50%, var(--line)); background: color-mix(in srgb, var(--orange) 12%, var(--panel)); color: var(--text); font-size: 13px; margin-bottom: 12px; }
+.lp-test b { color: var(--orange); margin-right: 6px; }
+.lp-testcard.on { border-color: color-mix(in srgb, var(--orange) 55%, var(--line)); }
+.lp-testcard .tw-row { display: flex; gap: 12px; align-items: flex-start; }

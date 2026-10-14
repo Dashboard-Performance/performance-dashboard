@@ -12,7 +12,7 @@
   // view name (switchView) -> nav element id
   var VIEW_NAV = {
     overview: "navOverview", inventory: "navInventory",
-    acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
+    acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", merchantCpa: "navMerchantCpa", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
     targetsCommercial: "navTargetsCommercial", commercialDebundlized: "navCommercialDebundlized", purchasePlan: "navPurchasePlan",
     cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle",
     productsMatchesAnalyst: "navProductsMatchesAnalyst", scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions",
@@ -95,7 +95,7 @@
     Object.keys(c.roles).forEach(function (n) {
       var r = c.roles[n]; if (!r || !Array.isArray(r.views)) return;
       var v = r.views, add = function (has, id) { if (v.indexOf(has) >= 0 && v.indexOf(id) < 0) v.push(id); };
-      add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets");
+      add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets"); add("navMerchantPerf", "navMerchantCpa"); // v1.17.0: RE-CPA
       if (v.indexOf("navMerchantPerf") >= 0 && v.indexOf("navMerchantsToggle") < 0) v.push("navMerchantsToggle");
     });
     if (!c.defaultRole || !c.roles[c.defaultRole]) c.defaultRole = "Merchant";
@@ -130,6 +130,7 @@
     if (navId === "navOverview") return true;
     if (navId === "navTowerInvite") return canInvite();
     if (navId === "navTowerAlerts") return !!session(); // everyone can open their own Inbox
+    if (navId === "navLoopTasks") return !!session(); // v1.17.0: everyone has their own My Tasks (Command Loop)
     var r = effRole();
     if (r.admin && isEffAdmin()) return true;
     if (r.views === "*") return true;
@@ -915,7 +916,9 @@
     { toggle: "navTowerToggle", title: "Control", tabs: [
       { nav: "navTowerRoles", view: "towerRoles", label: "Users & Roles" },
       { nav: "navTowerTargets", view: "towerTargets", label: "Targets Upload" },
+      { nav: "navLoopTasks", view: "loopTasks", label: "My Tasks" },
       { nav: "navTowerAlerts", view: "towerAlerts", label: "Alerts Centre" },
+      { nav: "navLoopControl", view: "loopControl", label: "Command Loop" },
       { nav: "navTowerSettings", view: "towerSettings", label: "Settings" },
       { nav: "navTowerActivity", view: "towerActivity", label: "Activity Log" },
       { nav: "navTowerInvite", view: "towerInvite", label: "Invite people" }
@@ -931,7 +934,8 @@
     ] },
     { toggle: "navMerchantsToggle", title: "Merchants", tabs: [
       { nav: "navMerchantTargets", view: "merchantTargets", label: "Merchant Targets" },
-      { nav: "navMerchantPerf", view: "merchantPerformance", label: "Merchant Performance" }
+      { nav: "navMerchantPerf", view: "merchantPerformance", label: "Merchant Performance" },
+      { nav: "navMerchantCpa", view: "merchantCpa", label: "RE-CPA" }
     ] },
     { toggle: "navAcmToggle", title: "Account Manager", tabs: [
       { nav: "navAcmTargets", view: "acmTargets", label: "Target ACM" },
@@ -1045,7 +1049,7 @@
   // File names follow the tab labels shown in the sidebar (Commercial Plan -> commercial-plan.html).
   var VIEW_SLUG = {
     inventory: "inventory",
-    acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
+    acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", merchantCpa: "re-cpa", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
     targetsCommercial: "targets", commercialDebundlized: "commercial-plan", purchasePlan: "purchase-plan",
     cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
     productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",
@@ -1123,6 +1127,7 @@
     merchantScope: merchantScope,
     wfetch: wfetch, logActivity: logActivity, getSettings: getSettings, loadSettings: loadSettings, saveSettings: saveSettings, esc: esc, ls: ls, session: session, adminKey: adminKey, getCfg: getCfg, navModel: navModel,
     realRoleName: realRoleName, isRealAdmin: isRealAdmin, isEffAdmin: isEffAdmin, allowed: allowed,
+    viewNav: VIEW_NAV, applyNav: function () { applyNav(); }, // v1.17.0 (js/loop.js)
     registerView: function (name, def) {
       EXTRA_VIEWS[name] = def;
       var main = document.querySelector("main.content");
