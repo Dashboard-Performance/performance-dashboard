@@ -2,6 +2,9 @@ name = "performance-dashboard-sync-cache"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
+# Keep plain-text variables that were set in the Cloudflare dashboard (otherwise `wrangler deploy` deletes them).
+keep_vars = true
+
 # v1.1.47: بعد ما شلنا الـ General Sync (21 شيت) من الـ Worker خالص، بقى
 # شغل الـ scheduled() handler خفيف جدًا (Main + Confirmed by Day + Incentive
 # Merchants بس، مفيش CPU error خالص عليهم) — فقدرنا نقلل الفاصل من 5 دقايق
@@ -22,6 +25,11 @@ binding = "SYNC_CACHE"
 id = "0352049f347a42f1823b5dd1425bd413"
 
 [vars]
+# Release upload (Control > Targets/Upload): the GitHub repo + branch the Worker pushes new versions to.
+# GITHUB_TOKEN and RELEASE_SECRET are secrets (set with `wrangler secret put`), not here.
+GITHUB_REPO = "Dashboard-Performance/performance-dashboard"
+GITHUB_BRANCH = "main"
+
 # رابط الـ Apps Script Web App بتاعك — نفسه المستخدم في js/app.js (DATA_API_URL)
 # وjs/auth.js (CONFIG.API_URL). لو غيرت الـ deployment بتاع الباك اند يوم من
 # الأيام، لازم تحدّث القيمة هنا كمان.
@@ -36,5 +44,5 @@ SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA"
 # no-reply address. Setup: 1) verify your sending domain in Resend,
 # 2) Worker secret RESEND_API_KEY, 3) set MAIL_FROM below, e.g.
 #    MAIL_FROM = "Taager Dashboard <no-reply@yourdomain.com>"
-# MAIL_FROM = ""
-# DASHBOARD_URL = "https://your-dashboard-link/"   # the link inside invite emails
+MAIL_FROM = "Taager Dashboard <no-reply@mail.taager.app>"
+DASHBOARD_URL = "https://center-control.taager.app/"   # the link inside invite emails
