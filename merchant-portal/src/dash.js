@@ -279,24 +279,30 @@ function dailyOf(k) {
 function renderPipe(k) {
   var box = $("pipeChart"), isP = pipeMetric === "pieces";
   $("pipeSub").textContent = isP ? "Confirmed Pieces (bars) vs Placed Pieces (line) per day" : "Confirmed Orders (bars) vs Placed Orders (line) per day";
-  var dm = dailyOf(k), n = daysIn(k), data = [], any = false;
+  var dm = dailyOf(k), tot = daysIn(k), n = tot, now = new Date(), cp = k.split("-");
+  if (+cp[0] === now.getFullYear() && +cp[1] - 1 === now.getMonth()) n = Math.min(tot, now.getDate());
+  else { n = 0; for (var q = 1; q <= tot; q++) if (dm[k + "-" + String(q).padStart(2, "0")]) n = q; }
+  var data = [], any = false;
   for (var d = 1; d <= n; d++) {
     var key = k + "-" + String(d).padStart(2, "0"), r = dm[key]; if (r) any = true;
     data.push({ d: d, key: key, c: r ? (isP ? r[5] : r[2]) : 0, p: r ? (isP ? r[4] : r[1]) : 0, has: !!r });
   }
   if (!any) { box.innerHTML = '<div class="mp-empty">' + (D.dailyOn ? "No daily numbers for " + monthTitle(k) + " yet." : "Daily numbers are not switched on yet.") + "</div>"; return; }
-  var W = Math.max(320, box.clientWidth || 640), H = 260, L = 46, R = 12, Tp = 14, B = 30, iw = W - L - R, ih = H - Tp - B;
-  var mx = niceMax(Math.max.apply(null, data.map(function (x) { return Math.max(x.c, x.p); })) || 1), bw = Math.max(3, Math.min(22, iw / n * 0.6)), svg = "";
-  for (var i = 0; i <= 4; i++) { var y = Tp + ih - (ih * i / 4); svg += '<line class="mp-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="mp-ax" x="' + (L - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + fmtInt.format(Math.round(mx * i / 4)) + "</text>"; }
-  var pts = [], step = n > 20 ? 2 : 1;
+  var W = Math.max(320, box.clientWidth || 640), H = 340, L = 52, R = 14, Tp = 26, B = 32, iw = W - L - R, ih = H - Tp - B;
+  var mx = niceMax(Math.max.apply(null, data.map(function (x) { return Math.max(x.c, x.p); })) || 1), bw = Math.max(6, Math.min(46, iw / n * 0.62)), svg = "";
+  var fs = iw / n >= 30 ? 11 : iw / n >= 22 ? 10 : 9, showVal = iw / n >= 20;
+  function cmp(v) { v = Math.round(v); return v >= 10000 ? (v / 1000).toFixed(0) + "K" : v >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "K" : String(v); }
+  for (var i = 0; i <= 4; i++) { var y = Tp + ih - (ih * i / 4); svg += '<line class="mp-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="mp-ax" x="' + (L - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + fmtInt.format(Math.round(mx * i / 4)) + "</text>"; }
+  var pts = [], step = iw / n >= 18 ? 1 : 2;
   data.forEach(function (x, i) {
     var cx = L + iw * (i + 0.5) / n, hc = ih * x.c / mx;
-    svg += '<rect class="mp-bar" x="' + (cx - bw / 2) + '" y="' + (Tp + ih - hc) + '" width="' + bw + '" height="' + Math.max(0, hc) + '" rx="2"/>';
-    if (x.d === 1 || x.d % step === 0) svg += '<text class="mp-ax" x="' + cx + '" y="' + (H - 10) + '" text-anchor="middle">' + x.d + "</text>";
-    if (x.has) pts.push([cx, Tp + ih - ih * x.p / mx]);
+    svg += '<rect class="mp-bar" x="' + (cx - bw / 2) + '" y="' + (Tp + ih - hc) + '" width="' + bw + '" height="' + Math.max(0, hc) + '" rx="3"/>';
+    if (showVal && x.has && hc > fs + 8) svg += '<text x="' + cx + '" y="' + (Tp + ih - hc + fs + 4) + '" text-anchor="middle" font-size="' + fs + '" font-weight="700" fill="#06231a">' + cmp(x.c) + "</text>";
+    if (x.d === 1 || x.d % step === 0 || x.d === n) svg += '<text class="mp-ax" x="' + cx + '" y="' + (H - 10) + '" text-anchor="middle">' + x.d + "</text>";
+    if (x.has) pts.push([cx, Tp + ih - ih * x.p / mx, x.p]);
   });
   svg += '<path class="mp-line" d="' + pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join("") + '"/>';
-  if (n <= 31) pts.forEach(function (p) { svg += '<circle class="mp-dot" cx="' + p[0] + '" cy="' + p[1] + '" r="2.5"/>'; });
+  pts.forEach(function (p) { svg += '<circle class="mp-dot" cx="' + p[0] + '" cy="' + p[1] + '" r="3.5"/>'; if (showVal) svg += '<text class="mp-ax" x="' + p[0] + '" y="' + (p[1] - 9) + '" text-anchor="middle" font-size="' + fs + '" font-weight="700">' + cmp(p[2]) + "</text>"; });
   data.forEach(function (x, i) { var x0 = L + iw * i / n; svg += '<rect class="mp-hov" x="' + x0 + '" y="' + Tp + '" width="' + (iw / n) + '" height="' + ih + '"><title>' + x.key + " — Confirmed " + fmtInt.format(Math.round(x.c)) + " · Placed " + fmtInt.format(Math.round(x.p)) + "</title></rect>"; });
   box.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img">' + svg + '</svg><div class="mp-legend"><span><i></i>Confirmed</span><span><i class="l"></i>Placed</span></div>';
 }
