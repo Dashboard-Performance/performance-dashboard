@@ -75,7 +75,7 @@ ok(meta.latestMonth === "2026-10", "latest month (ISO and 'October, 2026' both r
 ok(meta.rows === 3, "3 merchant-month rows");
 const metaKeys = [...env.PORTAL_KV._m.keys()];
 const shardText = await (async () => { const b = await env.PORTAL_KV.get("data:shard:" + __test.shardOf("1001", 32), { type: "arrayBuffer" }); return new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); })();
-ok(!/Secret ACM|Gold|Platinum|Silver|"EG"/.test(shardText), "no ACM, segment or country stored");
+ok(!/Secret ACM|"EG"/.test(shardText), "no ACM or country stored (the merchant's own segment label is kept for Segmentation & Projections)");
 
 console.log("Security basics");
 let r = await call("/api/data");
@@ -109,7 +109,7 @@ console.log("Merchant data is filtered on the server");
 r = await call("/api/data", { cookie });
 ok(r.status === 200 && r.j.merchants.length === 1 && r.j.merchants[0].id === "1001", "only own Merchant ID");
 ok(r.j.merchants[0].name === 'Store "A", Cairo', "merchant name");
-ok(r.j.rows.length === 2 && r.j.rows.every((x) => x.length === 8) && !JSON.stringify(r.j).includes("Other Store") && !JSON.stringify(r.j).includes("9000"), "no rows of the other merchant");
+ok(r.j.rows.length === 2 && r.j.rows.every((x) => x.length === 9) && !JSON.stringify(r.j).includes("Other Store") && !JSON.stringify(r.j).includes("9000"), "no rows of the other merchant");
 const oct = r.j.rows.find((x) => x[0] === "2026-10"), sep = r.j.rows.find((x) => x[0] === "2026-09");
 ok(oct && oct[4] === 320 && oct[7] === 31010 && sep && sep[7] === 20000.25, "numbers match (Oct: 320 placed pcs, EGP 31,010)");
 ok(r.headers.get("Cache-Control") === "no-store", "API responses are not cached");

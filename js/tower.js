@@ -554,7 +554,7 @@
   }
   // Invite email for users added by hand (not for self-registered ones). Runs after a successful save.
   function sendInvitesAfterSave() {
-    var list = Object.keys(pendingInvites).filter(function (em) { return draft && draft.users[em]; }).map(function (em) { return { email: em, role: (typeof draft.users[em] === "object" ? draft.users[em].role : draft.users[em]) || pendingInvites[em] }; });
+    var list = Object.keys(pendingInvites).filter(function (em) { return draft && draft.users[em]; }).map(function (em) { var du = draft.users[em], uo = typeof du === "object" ? du : {}; var it = { email: em, role: (typeof du === "object" ? du.role : du) || pendingInvites[em] }; if (it.role === "Merchant") { it.merchantId = uo.merchantId || ""; it.name = uo.name || ""; } return it; });
     if (!list.length) return Promise.resolve("");
     return wfetch("sendInvites", { body: JSON.stringify({ invites: list, url: location.origin + "/" }) }).then(function (j) {
       pendingInvites = {};

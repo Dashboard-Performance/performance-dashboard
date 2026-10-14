@@ -20,9 +20,9 @@
  */
 import { PORTAL_HTML, ADMIN_HTML, APP_CSS, PORTAL_JS, ADMIN_JS, FAVICON_SVG } from "./ui.js";
 import { DASH_HTML, DASH_JS } from "./dash.js";
-import { DASH_CSS } from "./dash-css.js";
+import { DASH_CSS, DASH_CSS_EXTRA } from "./dash-css.js";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const COOKIE = "__Host-mp_s";
 const SESSION_HOURS = 12;
 const LINK_HOURS = 72;
@@ -58,7 +58,7 @@ async function route(request, env, ctx) {
   if (m === "GET" && (p === "/" || p === "/set-password")) return page(PORTAL_HTML);
   if (m === "GET" && p === "/admin") return page(ADMIN_HTML);
   if (m === "GET" && p === "/dashboard") return page(DASH_HTML);
-  if (m === "GET" && p === "/static/dash.css") return asset(DASH_CSS, "text/css; charset=utf-8");
+  if (m === "GET" && p === "/static/dash.css") return asset(DASH_CSS + DASH_CSS_EXTRA, "text/css; charset=utf-8");
   if (m === "GET" && p === "/static/dash.js") return asset(DASH_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/app.css") return asset(APP_CSS, "text/css; charset=utf-8");
   if (m === "GET" && p === "/static/portal.js") return asset(PORTAL_JS, "text/javascript; charset=utf-8");
@@ -95,6 +95,10 @@ async function route(request, env, ctx) {
   if (p === "/api/me" && m === "GET") return json({ email: who.email, name: who.name || "", merchantIds: who.merchantIds });
   if (p === "/api/data" && m === "GET") return merchantData(who, env, ctx);
   if (p === "/api/targets" && m === "GET") return merchantTargets(who, env, url);
+  if (p === "/api/salesplan" && m === "GET") return merchantSalesPlan(who, env, url);
+  if (p === "/api/inventory" && m === "GET") return merchantInventory(who, env);
+  if (p === "/api/incentives" && m === "GET") return merchantIncentives(who, env);
+  if (p === "/api/alerts" && m === "GET") return merchantAlerts(who, env);
   if (p === "/api/password/change" && m === "POST") return changePassword(request, env, who);
   return json({ error: "Not found" }, 404);
 }
@@ -118,7 +122,7 @@ function json(obj, status, extra) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: secHeaders(Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, extra || {})) });
 }
 function page(html) { return new Response(html, { headers: secHeaders({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }) }); }
-function asset(body, type) { return new Response(body, { headers: secHeaders({ "Content-Type": type, "Cache-Control": "public, max-age=300" }) }); }
+function asset(body, type) { return new Response(body, { headers: secHeaders({ "Content-Type": type, "Cache-Control": "no-cache" }) }); }
 async function body(request) {
   const t = await request.text();
   if (t.length > 20000) throw new HttpError(413, "Request too large.");
@@ -381,8 +385,13 @@ function columns(env) {
 async function readMeta(env) { const t = await env.PORTAL_KV.get("data:meta"); return t ? JSON.parse(t) : null; }
 async function dataStatus(env) {
   const meta = await readMeta(env), err0 = JSON.parse((await env.PORTAL_KV.get("data:error")) || "null"), derr = JSON.parse((await env.PORTAL_KV.get("data:dailyError")) || "null");
-  const err = err0 || (derr ? { at: derr.at, message: "Daily numbers: " + derr.message } : null);
-  return { meta, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
+  let err = err0 || (derr ? { at: derr.at, message: "Daily numbers: " + derr.message } : null);
+  const spE = JSON.parse((await env.PORTAL_KV.get("data:spError")) || "null"), spM = await readSpMeta(env); if (spE && !err) { err = { at: spE.at, message: "Sales Plan: " + spE.message }; }
+  const incE = JSON.parse((await env.PORTAL_KV.get("data:incError")) || "null"), invE = JSON.parse((await env.PORTAL_KV.get("data:invError")) || "null");
+  if (incE && !err) err = { at: incE.at, message: "Incentives: " + incE.message };
+  if (invE && !err) err = { at: invE.at, message: "Inventory: " + invE.message };
+  const invM = JSON.parse((await env.PORTAL_KV.get("inv:meta")) || "null"), incD = JSON.parse((await env.PORTAL_KV.get("inc:data")) || "null");
+  return { inventory: invM ? { builtAt: invM.builtAt, latest: invM.latest, merchants: invM.merchants, rows: invM.rows } : null, incentives: incD ? { builtAt: incD.builtAt, month: incD.month, merchants: Object.keys(incD.rows || {}).length } : null, meta, salesPlan: spM ? { builtAt: spM.builtAt, latest: spM.latest, merchants: spM.merchants, planRows: spM.planRows, actRows: spM.actRows } : null, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
 }
 
 const shardCache = new Map(); // isolate memory: "<builtAt>:<n>" -> parsed shard
@@ -567,6 +576,10 @@ async function refreshData(env, why) {
     shardCache.clear();
     // Daily numbers (Daily Pipeline): optional second source, never allowed to break the monthly data above.
     try { await refreshDaily(env); } catch (e) { await env.PORTAL_KV.put("data:dailyError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
+    // Sales Plan: Google Sheet tabs (targets + actuals), also never allowed to break the data above.
+    try { await refreshSalesPlan(env); } catch (e) { await env.PORTAL_KV.put("data:spError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
+    try { await refreshIncentives(env); } catch (e) { await env.PORTAL_KV.put("data:incError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
+    try { await refreshInventory(env); } catch (e) { await env.PORTAL_KV.put("data:invError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
     return meta;
   } catch (e) {
     await env.PORTAL_KV.put("data:error", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e), why }));
@@ -600,13 +613,15 @@ async function refreshDaily(env) {
   const want = await accountMerchantIds(env), today = cairoToday();
   const res = await fetch(m0[1] + "/api/public/card/" + m0[2] + "/query/csv", { headers: { Accept: "text/csv" } });
   if (!res.ok) throw new Error("Daily source answered HTTP " + res.status);
-  const by = new Map(); let header = null, rowCount = 0, kept = 0;
+  const by = new Map(), statsBy = new Map(); let header = null, rowCount = 0, kept = 0;
   const parser = csvParser((c) => {
     if (!header) { header = c.slice(0, 80); return; }
     if (c.length === 1 && c[0] === "") return;
     rowCount++;
     const mid = String(c[DAILY.merchantId] || "").trim();
     if (!mid || !want.has(mid)) return;
+    const sku0 = String(c[0] || "").trim();
+    if (sku0) { let sm = statsBy.get(mid); if (!sm) { sm = {}; statsBy.set(mid, sm); } sm[sku0] = [Math.round(pctOf(c[8]) * 100) / 100, Math.round(pctOf(c[9]) * 100) / 100, Math.round(num(c[12]) * 100) / 100]; }
     let m = by.get(mid); if (!m) { m = new Map(); by.set(mid, m); }
     for (let n = 0; n < DAILY.days; n++) {
       const pp = num(c[DAILY.placed0 + n]), cp = num(c[DAILY.confirmed0 + n]);
@@ -630,12 +645,27 @@ async function refreshDaily(env) {
     if (by.has(id)) by.get(id).forEach((r, day) => { for (let i = 4; i < 6; i++) r[i] = Math.round(r[i] * 100) / 100; merged.set(day, r); });
     out[id] = Array.from(merged.values()).filter((r) => r[0] >= cutoff).sort((x, y) => (x[0] < y[0] ? -1 : 1));
   });
+  // per-match CR_2_DAY / DR_5_DAYS / ASP (columns 8, 9, 12 — js/app.js parseMerchantSkuDailySheet) for Sales Plan; skipped if the header is not what we expect
+  if (/cr/i.test(header[8] || "") && /dr/i.test(header[9] || "") && /asp/i.test(header[12] || "")) {
+    const so = {}; statsBy.forEach((v, id) => { so[id] = v; });
+    await env.PORTAL_KV.put("data:stats", await gzip(JSON.stringify({ builtAt: new Date().toISOString(), byId: so }))); statsCache = null;
+  } else await env.PORTAL_KV.put("data:spError", JSON.stringify({ at: new Date().toISOString(), message: "Merchant SKU Daily columns 8/9/12 are not CR / DR / ASP (" + [header[8], header[9], header[12]].join(" | ") + ") — CR/DR/ASP not updated." }));
   await env.PORTAL_KV.put("data:daily", await gzip(JSON.stringify({ builtAt: new Date().toISOString(), rows: kept, sourceRows: rowCount, merchants: by.size, byId: out })));
   await env.PORTAL_KV.delete("data:dailyError");
   dailyCache = null;
   return { rows: kept };
 }
 let dailyCache = null; // { at, obj }
+let statsCache = null;
+async function readStats(env) {
+  if (statsCache && Date.now() - statsCache.at < 60e3) return statsCache.obj;
+  const buf = await env.PORTAL_KV.get("data:stats", { type: "arrayBuffer" });
+  const obj = buf ? JSON.parse(await gunzip(buf)) : null;
+  statsCache = { at: Date.now(), obj };
+  return obj;
+}
+// same rule as js/app.js merchantSkuDailyPercent: always on a 0-100 scale ("0.6" and "60%" both mean 60)
+function pctOf(v) { const t = String(v == null ? "" : v).trim(); if (!t) return 0; const n = parseFloat(t.replace(/[%,]/g, "")); if (!Number.isFinite(n)) return 0; if (t.indexOf("%") >= 0) return n; return n > 0 && n <= 1 ? n * 100 : n; }
 async function readDaily(env) {
   if (dailyCache && Date.now() - dailyCache.at < 60e3) return dailyCache.obj;
   const buf = await env.PORTAL_KV.get("data:daily", { type: "arrayBuffer" });
@@ -646,5 +676,307 @@ async function readDaily(env) {
 async function gzip(text) { return new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); }
 async function gunzip(buf) { return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
 
+
+// ============================================================================ Sales Plan
+// Targets: Google Sheet tab "Sales Plan-ACM (daily)" (js/app.js ACM_SALES_PLAN_GID / parseAcmSalesPlanSheet): SKU ID | Name | Category | Merchant ID | Merchant | Target Placed Daily (F) | New Target Daily (G) | Match Flag (H) | Last Target Update (I).
+// Actuals: the Google Sheet tab that mirrors the Main query (CREATION_DATE | TAGER_ID | ... | PRODUCT_ID (D) | ... | PLACED_PIECES (P) | CONFIRMED_PIECES (Q) | DELIVERED_PIECES (R) | ... | DELIVERED_GMV (W)).
+// Both tabs are read on the server with a gviz query that only asks for the merchants that have a portal account; nothing here is ever sent to a browser except the signed-in merchant's own matches.
+// CR% / DR% / ASP per match come from the Merchant SKU Daily query (stored by refreshDaily as data:stats).
+const SP_DEFAULT = { sheet: "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA", actuals: "444785453", targets: "892918900" };
+function spCfg(env) { return { sheet: String(env.SHEET_ID || SP_DEFAULT.sheet), actuals: String(env.SP_ACTUALS_GID || SP_DEFAULT.actuals), targets: String(env.SP_TARGETS_GID || SP_DEFAULT.targets) }; }
+async function gvizCsv(cfg, gid, q) {
+  const res = await fetch("https://docs.google.com/spreadsheets/d/" + encodeURIComponent(cfg.sheet) + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&tqx=out:csv&tq=" + encodeURIComponent(q), { headers: { Accept: "text/csv" } });
+  if (!res.ok) throw new Error("Google Sheets answered HTTP " + res.status + " for tab " + gid + " (is it shared with 'anyone with the link'?)");
+  return res;
+}
+async function eachCsvRow(res, cb) {
+  let header = null;
+  const parser = csvParser((c) => { if (!header) { header = c; return; } if (c.length === 1 && c[0] === "") return; cb(c); });
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parser.push(value); }
+  parser.end();
+  if (!header) throw new Error("Google Sheets returned nothing.");
+  if (/^\s*</.test(String(header[0]))) throw new Error("Google Sheets did not return CSV (tab not shared?).");
+  return header;
+}
+const spShardCache = new Map();
+let spMetaCache = null;
+async function readSpMeta(env) {
+  if (spMetaCache && Date.now() - spMetaCache.at < 30e3) return spMetaCache.v;
+  const t = await env.PORTAL_KV.get("sp:meta"); const v = t ? JSON.parse(t) : null;
+  spMetaCache = { at: Date.now(), v };
+  return v;
+}
+async function readSpShard(env, meta, n) {
+  const key = meta.builtAt + ":" + n, hit = spShardCache.get(key); if (hit) return hit;
+  const buf = await env.PORTAL_KV.get("sp:shard:" + n, { type: "arrayBuffer" });
+  const obj = buf ? JSON.parse(await gunzip(buf)) : {};
+  if (spShardCache.size > 16) spShardCache.clear();
+  spShardCache.set(key, obj);
+  return obj;
+}
+async function refreshSalesPlan(env) {
+  const cfg = spCfg(env), t0 = Date.now(), want = await accountMerchantIds(env);
+  if (!want.size) return null;
+  // 1) targets (small tab: read it all, keep only the merchants with an account)
+  const plans = new Map(), skuSet = new Map(); let planRows = 0;
+  await eachCsvRow(await gvizCsv(cfg, cfg.targets, "select *"), (c) => {
+    const sku = String(c[0] || "").trim(), mid = String(c[3] || "").trim();
+    if (!sku || !mid || !want.has(mid) || sku === "Product ID" || sku === "SKU ID") return;
+    const nr = String(c[6] == null ? "" : c[6]).trim(), nn = nr === "" ? null : parseFloat(nr.replace(/,/g, ""));
+    const dm = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(c[8] || ""));
+    const upd = dm ? dm[1] + "-" + dm[2].padStart(2, "0") + "-" + dm[3].padStart(2, "0") : "";
+    let a = plans.get(mid); if (!a) { a = []; plans.set(mid, a); }
+    a.push([sku, String(c[1] || "").slice(0, 200), String(c[2] || "").trim().slice(0, 60) || "Uncategorized", mid, String(c[4] || "").slice(0, 120), num(c[5]), nn !== null && Number.isFinite(nn) ? nn : null, String(c[7] || "").trim().slice(0, 30), upd]);
+    let st = skuSet.get(mid); if (!st) { st = new Set(); skuSet.set(mid, st); } st.add(sku); planRows++;
+  });
+  // 2) latest data day (the dashboard's "today" = the newest day in the data)
+  let latest = "";
+  await eachCsvRow(await gvizCsv(cfg, cfg.actuals, "select max(A)"), (c) => { const m = /(\d{4}-\d{2}-\d{2})/.exec(String(c[0] || "")); if (m) latest = m[1]; });
+  if (!latest) latest = cairoToday();
+  // 3) actuals for the merchants that have a plan: last 3 months, only the SKUs that are in their plan
+  const lp = latest.split("-"); let y = +lp[0], mo = +lp[1] - 2; while (mo < 1) { mo += 12; y--; }
+  const since = y + "-" + String(mo).padStart(2, "0") + "-01";
+  const ids = Array.from(skuSet.keys()).filter((x) => /^\d+$/.test(x)), act = new Map(), seen = new Set(); let actRows = 0, read = 0;
+  for (let i = 0; i < ids.length; i += 30) {
+    const cond = ids.slice(i, i + 30).map((x) => "B = " + x).join(" or ");
+    await eachCsvRow(await gvizCsv(cfg, cfg.actuals, "select A,B,D,P,Q,R,W where (" + cond + ") and A >= date '" + since + "'"), (c) => {
+      read++;
+      const dm = /(\d{4}-\d{2}-\d{2})/.exec(String(c[0] || "")); if (!dm) return;
+      const mid = String(c[1] || "").trim(), sku = String(c[2] || "").trim(), st = skuSet.get(mid);
+      if (!st || !st.has(sku)) return;
+      const key = dm[1] + "|" + mid + "|" + sku; if (seen.has(key)) return; seen.add(key); // same de-dup as parseMainSheet (first row wins)
+      const pp = num(c[3]), cp = num(c[4]), dp = num(c[5]), gm = num(c[6]);
+      if (!pp && !cp && !dp && !gm) return;
+      let a = act.get(mid); if (!a) { a = []; act.set(mid, a); }
+      a.push([dm[1], sku, Math.round(pp * 100) / 100, Math.round(cp * 100) / 100, Math.round(dp * 100) / 100, Math.round(gm * 100) / 100]); actRows++;
+    });
+  }
+  if (!planRows) throw new Error("No Sales Plan rows found for the merchants that have an account (tab " + cfg.targets + ").");
+  // 4) store (sharded by merchant; a shard is only rewritten when it changed)
+  const S = 8, shards = Array.from({ length: S }, () => ({})), prev = await readSpMeta(env), fps = [];
+  ids.forEach((id) => { shards[shardOf(id, S)][id] = { p: plans.get(id) || [], a: act.get(id) || [] }; });
+  for (let i = 0; i < S; i++) {
+    const json = JSON.stringify(shards[i]), fp = await sha256Hex(json); fps.push(fp);
+    if (!prev || !prev.fps || prev.fps[i] !== fp || prev.shards !== S) await env.PORTAL_KV.put("sp:shard:" + i, await gzip(json));
+  }
+  const meta = { builtAt: new Date().toISOString(), latest, since, shards: S, merchants: ids.length, planRows, actRows, sheetRows: read, ms: Date.now() - t0, fps };
+  await env.PORTAL_KV.put("sp:meta", JSON.stringify(meta));
+  await env.PORTAL_KV.delete("data:spError");
+  spMetaCache = null; spShardCache.clear();
+  return meta;
+}
+async function merchantSalesPlan(a, env, url) {
+  const month = url.searchParams.get("month") || "";
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ error: "Bad month." }, 400);
+  const meta = await readSpMeta(env);
+  if (!meta) return json({ month, today: null, plans: [], act: [], stats: {}, note: "Sales Plan is being prepared. Please try again in a few minutes." });
+  const stats = (await readStats(env).catch(() => null)) || { byId: {} };
+  const plans = [], act = [], st = {};
+  for (const id of a.merchantIds || []) {
+    const e = (await readSpShard(env, meta, shardOf(id, meta.shards)))[id]; if (!e) continue;
+    e.p.forEach((p) => { plans.push(p); const s = stats.byId && stats.byId[id] && stats.byId[id][p[0]]; if (s) st[p[0] + "|" + id] = s; });
+    e.a.forEach((r) => { if (r[0].slice(0, 7) === month) act.push([r[0], r[1], id, r[2], r[3], r[4], r[5]]); });
+  }
+  let today = null; const lm = meta.latest.slice(0, 7);
+  if (month === lm) today = meta.latest; else if (month < lm) { const p = month.split("-"); today = month + "-" + String(new Date(Date.UTC(+p[0], +p[1], 0)).getUTCDate()).padStart(2, "0"); }
+  return json({ month, today, builtAt: meta.builtAt, plans, act, stats: st });
+}
+
+// ============================================================================ shared helpers for the sheet-based tabs
+const dayOf = (v) => { const m = /(\d{4}-\d{2}-\d{2})/.exec(String(v || "")); return m ? m[1] : ""; };
+function monthKeyOf(v) {
+  const t = String(v || "").trim(); if (!t) return "";
+  let m = /^(\d{4})-(\d{1,2})/.exec(t); if (m) return m[1] + "-" + m[2].padStart(2, "0");
+  const d = new Date(t); return isNaN(d.getTime()) ? "" : d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
+function daysInMonthKey(k) { const p = k.split("-"); return new Date(Date.UTC(+p[0], +p[1], 0)).getUTCDate(); }
+async function latestDataDay(env, cfg) {
+  let latest = "";
+  await eachCsvRow(await gvizCsv(cfg, cfg.actuals, "select max(A)"), (c) => { const d = dayOf(c[0]); if (d) latest = d; });
+  return latest || cairoToday();
+}
+// Stores merchant-keyed objects in gz shards (rewriting only the shards that changed) + a small meta record. prefix = "inv" -> inv:shard:i / inv:meta.
+async function putShards(env, prefix, S, byId, extraMeta) {
+  const shards = Array.from({ length: S }, () => ({}));
+  Object.keys(byId).forEach((id) => { shards[shardOf(id, S)][id] = byId[id]; });
+  const pt = await env.PORTAL_KV.get(prefix + ":meta"), prev = pt ? JSON.parse(pt) : null, fps = [];
+  for (let i = 0; i < S; i++) {
+    const js = JSON.stringify(shards[i]), fp = await sha256Hex(js); fps.push(fp);
+    if (!prev || !prev.fps || prev.fps[i] !== fp || prev.shards !== S) await env.PORTAL_KV.put(prefix + ":shard:" + i, await gzip(js));
+  }
+  const meta = Object.assign({ builtAt: new Date().toISOString(), shards: S, fps }, extraMeta || {});
+  await env.PORTAL_KV.put(prefix + ":meta", JSON.stringify(meta));
+  return meta;
+}
+const shardMemo = new Map();
+async function getShardedFor(env, prefix, ids) {
+  const mt = await env.PORTAL_KV.get(prefix + ":meta"); if (!mt) return null;
+  const meta = JSON.parse(mt), out = {};
+  for (const id of ids) {
+    const n = shardOf(id, meta.shards), ck = prefix + ":" + meta.builtAt + ":" + n;
+    let sh = shardMemo.get(ck);
+    if (!sh) { const buf = await env.PORTAL_KV.get(prefix + ":shard:" + n, { type: "arrayBuffer" }); sh = buf ? JSON.parse(await gunzip(buf)) : {}; if (shardMemo.size > 48) shardMemo.clear(); shardMemo.set(ck, sh); }
+    if (sh[id]) out[id] = sh[id];
+  }
+  return { meta, byId: out };
+}
+
+// ============================================================================ Inventory (only the SKUs the merchant works on)
+// A merchant's SKUs = SKUs with placed orders in the last 30 days of the Main tab + the SKUs of their Sales Plan.
+// Stock/name/category/availability: "Inventory" tab (js/app.js parseInventorySheet: SKU_ID | name | stock | doh | category | availability | locked).
+// DOH: exactly buildDebundledStockDohIndex — stock of the single from the Products Debundle Map (col H), demand = confirmed PIECES of ALL merchants over the 3 days
+// before today (one aggregated number per SKU; bundles are split into their singles x quantity; a bundle uses its weakest single). Only that DOH number leaves the Worker, never another merchant's figures.
+// Per-SKU activity (placed / confirmed orders) is the merchant's OWN rows only.
+const INV_GIDS = { inventory: "1780730573", debundle: "1409034448" };
+async function refreshInventory(env) {
+  const cfg = spCfg(env), t0 = Date.now(), want = await accountMerchantIds(env);
+  if (!want.size) return null;
+  const today = cairoToday(), latest = await latestDataDay(env, cfg);
+  // 1) Sales Plan SKUs (names used when the SKU is not in the Inventory tab)
+  const plan = new Map(), planName = new Map();
+  await eachCsvRow(await gvizCsv(cfg, cfg.targets, "select *"), (c) => {
+    const sku = String(c[0] || "").trim(), mid = String(c[3] || "").trim();
+    if (!sku || !mid || !want.has(mid) || sku === "Product ID" || sku === "SKU ID") return;
+    let s = plan.get(mid); if (!s) { s = new Set(); plan.set(mid, s); } s.add(sku); planName.set(sku, String(c[1] || "").slice(0, 200));
+  });
+  // 2) the merchant's own activity, last 30 days
+  const since = addDays(latest, -30), yday = addDays(latest, -1), d3 = addDays(latest, -3), d15 = addDays(latest, -15);
+  const act = new Map(), seen = new Set(), ids = Array.from(want).filter((x) => /^\d+$/.test(x)); let read = 0;
+  for (let i = 0; i < ids.length; i += 30) {
+    const cond = ids.slice(i, i + 30).map((x) => "B = " + x).join(" or ");
+    await eachCsvRow(await gvizCsv(cfg, cfg.actuals, "select A,B,D,J,K where (" + cond + ") and A >= date '" + since + "'"), (c) => {
+      read++;
+      const d = dayOf(c[0]); if (!d) return;
+      const mid = String(c[1] || "").trim(), sku = String(c[2] || "").trim(); if (!want.has(mid) || !sku) return;
+      const key = d + "|" + mid + "|" + sku; if (seen.has(key)) return; seen.add(key);
+      const po = num(c[3]), co = num(c[4]);
+      let m = act.get(mid); if (!m) { m = new Map(); act.set(mid, m); }
+      let e = m.get(sku); if (!e) { e = { placed: 0, py: 0, cy: 0, c3: 0, c15: 0 }; m.set(sku, e); }
+      e.placed += po;
+      if (d === yday) { e.py += po; e.cy += co; }
+      if (d >= d3) e.c3 += co;
+      if (d >= d15) e.c15 += co;
+    });
+  }
+  // 3) Inventory tab (only the SKUs we need) + Debundle map + overall demand
+  const need = new Set(); plan.forEach((s) => s.forEach((x) => need.add(x))); act.forEach((m) => m.forEach((e, sku) => { if (e.placed > 0) need.add(sku); }));
+  const invMap = new Map();
+  await eachCsvRow(await gvizCsv(cfg, INV_GIDS.inventory, "select *"), (c) => {
+    const sku = String(c[0] || "").trim(); if (!sku || sku === "SKU_ID" || !need.has(sku)) return;
+    invMap.set(sku, { name: String(c[1] || "").slice(0, 200), stock: Math.round(num(c[2])), category: String(c[4] || "").trim().slice(0, 60), availability: String(c[5] || "").trim().slice(0, 40) });
+  });
+  const bundleMap = new Map(), stockBy = new Map(), isBundle = new Map();
+  await eachCsvRow(await gvizCsv(cfg, INV_GIDS.debundle, "select *"), (c) => {
+    const pid = String(c[0] || "").trim(), single = String(c[3] || "").trim(); if (!pid || pid === "PRODUCT_ID" || !single) return;
+    const q = num(c[5]) || 1, stock = num(c[7]) || 0;
+    if (!bundleMap.has(pid)) bundleMap.set(pid, []); bundleMap.get(pid).push({ singleId: single, quantity: q });
+    if (!stockBy.has(pid)) stockBy.set(pid, stock);
+    if (!isBundle.has(pid)) isBundle.set(pid, /^(true|yes|1)$/i.test(String(c[2] || "").trim()));
+  });
+  const W = 3, wFrom = addDays(today, -W), conf = new Map();
+  await eachCsvRow(await gvizCsv(cfg, cfg.actuals, "select D, sum(Q) where A >= date '" + wFrom + "' and A < date '" + today + "' group by D"), (c) => {
+    const sku = String(c[0] || "").trim(), v = num(c[1]); if (!sku || !v) return;
+    const maps = bundleMap.get(sku);
+    if (maps && maps.length) maps.forEach((mp) => conf.set(mp.singleId, (conf.get(mp.singleId) || 0) + v * (mp.quantity || 1)));
+    else conf.set(sku, (conf.get(sku) || 0) + v);
+  });
+  const single = (id) => { const stock = stockBy.has(id) ? stockBy.get(id) : 0, avg = Math.round((conf.get(id) || 0) / W); return { avg, doh: avg > 0 ? stock / avg : stock || 0 }; };
+  const getDoh = (sku) => {
+    const maps = bundleMap.get(sku) || [], bundle = isBundle.get(sku) || maps.length > 1;
+    if (bundle && maps.length) {
+      const w = maps.map((mp) => single(mp.singleId)).filter((s) => s.avg > 0);
+      if (w.length) { const b = w.reduce((mn, s) => (s.doh < mn.doh ? s : mn), w[0]); return { avg: b.avg, doh: b.doh }; }
+      return { avg: 0, doh: stockBy.has(sku) ? stockBy.get(sku) || 0 : 0 };
+    }
+    return single(sku);
+  };
+  // 4) rows per merchant: [sku, name, category, stock, doh, availability, placedYday, confirmedYday, confirmed3d, confirmed15d, placed30d]
+  const byId = {}; let nRows = 0;
+  want.forEach((mid) => {
+    const skus = new Set(plan.get(mid) || []), m = act.get(mid);
+    if (m) m.forEach((e, sku) => { if (e.placed > 0) skus.add(sku); });
+    const rows = [];
+    skus.forEach((sku) => {
+      const inv = invMap.get(sku), e = (m && m.get(sku)) || { placed: 0, py: 0, cy: 0, c3: 0, c15: 0 }, di = getDoh(sku);
+      const stock = inv ? inv.stock : 0, doh = di.avg > 0 ? di.doh : Math.round(stock || 0);
+      rows.push([sku, (inv && inv.name) || planName.get(sku) || "Unknown", (inv && inv.category) || "Uncategorized", stock, Math.round(doh * 10) / 10, (inv && inv.availability) || "Unknown", e.py, e.cy, e.c3, e.c15, e.placed]);
+    });
+    if (rows.length) { byId[mid] = rows; nRows += rows.length; }
+  });
+  const meta = await putShards(env, "inv", 8, byId, { latest, today, merchants: Object.keys(byId).length, rows: nRows, sheetRows: read, ms: Date.now() - t0 });
+  await env.PORTAL_KV.delete("data:invError");
+  return meta;
+}
+async function merchantInventory(a, env) {
+  const got = await getShardedFor(env, "inv", a.merchantIds || []);
+  if (!got) return json({ rows: [], latest: null, note: "Inventory is being prepared. Please try again in a few minutes." });
+  const rows = []; Object.keys(got.byId).forEach((id) => got.byId[id].forEach((r) => rows.push(r)));
+  return json({ builtAt: got.meta.builtAt, latest: got.meta.latest, rows });
+}
+
+// ============================================================================ Incentives Tracker (only merchants that appear in the incentive config tab)
+// Config tab (js/app.js parseIncentiveMerchantsSheet, gid 1548963809): Merchant ID | Name | Status | Tier | Target Confirmed Orders | Bonus / Extra Order | Total Incentive.
+// Actuals: confirmed orders this month from the "Merchant Segmentation" tab (gid 620123165: A month, C TAGER_ID, H confirmed orders) - like prepareIncentiveMerchantsData.
+// The ACM column of the staff tracker is never sent.
+const INC_GIDS = { config: "1548963809", seg: "620123165" };
+async function refreshIncentives(env) {
+  const cfg = spCfg(env), want = await accountMerchantIds(env);
+  if (!want.size) return null;
+  const rows = {};
+  await eachCsvRow(await gvizCsv(cfg, INC_GIDS.config, "select *"), (c) => {
+    const mid = String(c[0] || "").trim(); if (!mid || /^merchant[ _]?id$/i.test(mid) || !want.has(mid)) return;
+    rows[mid] = { n: String(c[1] || "").slice(0, 120), status: String(c[2] || "").slice(0, 40), tier: String(c[3] || "").slice(0, 60), target: num(c[4]), bonus: num(c[5]), total: num(c[6]) };
+  });
+  const month = cairoToday().slice(0, 7), mtd = {};
+  if (Object.keys(rows).length) {
+    await eachCsvRow(await gvizCsv(cfg, INC_GIDS.seg, "select A,C,H"), (c) => {
+      const mid = String(c[1] || "").trim(); if (!rows[mid] || monthKeyOf(c[0]) !== month) return;
+      mtd[mid] = (mtd[mid] || 0) + num(c[2]);
+    });
+  }
+  Object.keys(rows).forEach((id) => { rows[id].mtd = mtd[id] || 0; });
+  await env.PORTAL_KV.put("inc:data", JSON.stringify({ builtAt: new Date().toISOString(), month, rows }));
+  await env.PORTAL_KV.delete("data:incError");
+  return { merchants: Object.keys(rows).length, month };
+}
+// Same formulas as prepareIncentiveMerchantsData for one merchant and one covered month (elapsed days = day of the month, run rate = MTD / elapsed x days in month).
+function incDerive(r, today) {
+  const month = today.slice(0, 7), totalDays = Math.max(1, daysInMonthKey(month)), elapsed = Math.max(1, parseInt(today.slice(8, 10), 10) || 1);
+  const target = r.target || 0, mtd = r.mtd || 0, runRate = (mtd / elapsed) * totalDays;
+  const targetMtd = (target / totalDays) * elapsed;
+  const attActual = target > 0 ? (mtd / target) * 100 : (mtd > 0 ? 100 : 0), attRun = target > 0 ? (runRate / target) * 100 : (runRate > 0 ? 100 : 0);
+  const achieved = mtd >= target, onTrack = !achieved && runRate >= target;
+  const extra = Math.max(0, mtd - target), earned = extra * (r.bonus || 0);
+  const bonusTarget = target > 0 && runRate >= target ? target * (r.bonus || 0) : 0;
+  return { tier: r.tier || "", status: achieved ? "achieved" : onTrack ? "on-track" : "at-risk", target, targetMtd, mtd, runRate, attActual, attRun, bonusPerOrder: r.bonus || 0, extra, earned, bonusTarget, totalBonus: bonusTarget + earned };
+}
+async function merchantIncentives(a, env) {
+  const t = await env.PORTAL_KV.get("inc:data");
+  if (!t) return json({ rows: [], month: null, ready: false });
+  const d = JSON.parse(t), today = cairoToday(), rows = [];
+  for (const id of a.merchantIds || []) { const r = d.rows && d.rows[id]; if (r) rows.push(Object.assign({ id, name: r.n }, incDerive(r, today))); }
+  return json({ ready: true, builtAt: d.builtAt, month: today.slice(0, 7), dataMonth: d.month, rows });
+}
+
+// ============================================================================ Alert Center (alerts sent from the staff dashboard to the Merchant role or to this merchant's e-mail)
+const alertsCache = new Map();
+async function merchantAlerts(a, env) {
+  const email = normEmail(a.email), hit = alertsCache.get(email);
+  if (hit && Date.now() - hit.at < 60e3) return json(hit.v);
+  const base = String(env.DASHBOARD_WORKER_URL || "").replace(/\/+$/, "");
+  let v;
+  try {
+    if (!/^https:\/\//.test(base) || !env.DASHBOARD_SERVICE_KEY) throw new Error("not configured");
+    const r = await fetch(base + "?action=getPortalAlerts&email=" + encodeURIComponent(email), { headers: { "X-Service-Key": env.DASHBOARD_SERVICE_KEY } });
+    const j = r.ok ? JSON.parse(await r.text()) : null;
+    if (!j || !Array.isArray(j.alerts)) throw new Error("bad answer");
+    v = { alerts: j.alerts.map((x) => ({ id: String(x.id || ""), at: String(x.at || ""), title: String(x.title || "").slice(0, 160), body: String(x.body || "").slice(0, 2000), severity: ["info", "warning", "critical"].indexOf(x.severity) >= 0 ? x.severity : "info", link: String(x.link || "").slice(0, 20) })) };
+  } catch (e) { return json({ alerts: [], unavailable: true }); }
+  if (alertsCache.size > 200) alertsCache.clear();
+  alertsCache.set(email, { at: Date.now(), v });
+  return json(v);
+}
+
 // exported for the local test (test/smoke.mjs)
-export const __test = { refreshDaily, readDaily, csvParser, normMonth, shardOf, refreshData, passwordProblem };
+export const __test = { refreshInventory, refreshIncentives, merchantInventory, merchantIncentives, merchantAlerts, incDerive, refreshSalesPlan, merchantSalesPlan, refreshDaily, readDaily, csvParser, normMonth, shardOf, refreshData, passwordProblem };
