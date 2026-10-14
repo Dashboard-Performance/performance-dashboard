@@ -66,8 +66,8 @@ export const DASH_HTML = `<!doctype html>
         <div class="ov-row">
           <div class="panel chart-panel hover-glow">
             <div class="panel-head-modern">
-              <div class="panel-title-wrapper border-blue"><h2>Monthly Pipeline</h2><p id="pipeSub">Confirmed Pieces (bars) vs Placed Pieces (line) per month</p></div>
-              <div class="table-controls"><div class="segmented" id="pipeToggle"><button type="button" class="segmented-btn" data-metric="orders">Orders</button><button type="button" class="segmented-btn active" data-metric="pieces">Pieces</button></div></div>
+              <div class="panel-title-wrapper border-blue"><h2>Daily Pipeline</h2><p id="pipeSub">Confirmed Pieces (bars) vs Placed Pieces (line) per day</p></div>
+              
             </div>
             <div class="mp-chart" id="pipeChart"></div>
           </div>
@@ -186,7 +186,7 @@ function loadData() {
     var names = d.merchants.map(function (m) { return m.name; }).filter(Boolean);
     $("mName").firstChild.nodeValue = names.length ? names.join(" · ") : "Your store";
     $("mIds").textContent = "Merchant ID " + d.merchants.map(function (m) { return m.id; }).join(", ");
-    $("sbUpdated").textContent = "Updated " + new Date(d.updatedAt).toLocaleString();
+    $("sbUpdated").textContent = "Updated " + new Date(d.updatedAt).toLocaleString() + " · refreshes every 30 min";
     $("foot").textContent = "Numbers updated " + new Date(d.updatedAt).toLocaleString();
     fillMonths();
     if (!d.rows.length) note("No orders yet for your Merchant ID. If this looks wrong, contact your Taager account manager.");
@@ -271,32 +271,35 @@ function renderOverview() {
   set("avgBest", bi >= 0 ? shortMonth(all[bi]) + " · " + cInt(bv) + "/day" : "—");
   $("avgSpark").innerHTML = spark(per, "#f59e0b");
 }
+function dailyOf(k) {
+  var out = {};
+  (D.byId || []).forEach(function (m) { (m.daily || []).forEach(function (r) { if (r[0].slice(0, 7) === k) { var o = out[r[0]] || (out[r[0]] = [r[0], 0, 0, 0, 0, 0, 0, 0]); for (var i = 1; i < 8; i++) o[i] += r[i]; } }); });
+  return out;
+}
 function renderPipe(k) {
-  var box = $("pipeChart"), ms = monthsUpTo(k, 12);
-  var isP = pipeMetric === "pieces";
-  $("pipeSub").textContent = isP ? "Confirmed Pieces (bars) vs Placed Pieces (line) per month" : "Confirmed Orders (bars) vs Placed Orders (line) per month";
-  if (!ms.length) { box.innerHTML = '<div class="mp-empty">No data yet</div>'; return; }
-  var data = ms.map(function (m) { var s = monthSum(m); return { m: m, c: isP ? s.cp : s.co, p: isP ? s.pp : s.po }; });
+  var box = $("pipeChart"), isP = pipeMetric === "pieces";
+  $("pipeSub").textContent = isP ? "Confirmed Pieces (bars) vs Placed Pieces (line) per day" : "Confirmed Orders (bars) vs Placed Orders (line) per day";
+  var dm = dailyOf(k), n = daysIn(k), data = [], any = false;
+  for (var d = 1; d <= n; d++) {
+    var key = k + "-" + String(d).padStart(2, "0"), r = dm[key]; if (r) any = true;
+    data.push({ d: d, key: key, c: r ? (isP ? r[5] : r[2]) : 0, p: r ? (isP ? r[4] : r[1]) : 0, has: !!r });
+  }
+  if (!any) { box.innerHTML = '<div class="mp-empty">' + (D.dailyOn ? "No daily numbers for " + monthTitle(k) + " yet." : "Daily numbers are not switched on yet.") + "</div>"; return; }
   var W = Math.max(320, box.clientWidth || 640), H = 260, L = 46, R = 12, Tp = 14, B = 30, iw = W - L - R, ih = H - Tp - B;
-  var mx = niceMax(Math.max.apply(null, data.map(function (d) { return Math.max(d.c, d.p); })) || 1), bw = Math.min(46, iw / data.length * 0.55), svg = "";
+  var mx = niceMax(Math.max.apply(null, data.map(function (x) { return Math.max(x.c, x.p); })) || 1), bw = Math.max(3, Math.min(22, iw / n * 0.6)), svg = "";
   for (var i = 0; i <= 4; i++) { var y = Tp + ih - (ih * i / 4); svg += '<line class="mp-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="mp-ax" x="' + (L - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + fmtInt.format(Math.round(mx * i / 4)) + "</text>"; }
-  var pts = [];
-  data.forEach(function (d, i) {
-    var cx = L + iw * (i + 0.5) / data.length, hc = ih * d.c / mx, yp = Tp + ih - ih * d.p / mx;
-    svg += '<rect class="mp-bar" x="' + (cx - bw / 2) + '" y="' + (Tp + ih - hc) + '" width="' + bw + '" height="' + Math.max(0, hc) + '" rx="3"/><text class="mp-ax" x="' + cx + '" y="' + (H - 10) + '" text-anchor="middle">' + shortMonth(d.m) + "</text>";
-    pts.push([cx, yp]);
+  var pts = [], step = n > 20 ? 2 : 1;
+  data.forEach(function (x, i) {
+    var cx = L + iw * (i + 0.5) / n, hc = ih * x.c / mx;
+    svg += '<rect class="mp-bar" x="' + (cx - bw / 2) + '" y="' + (Tp + ih - hc) + '" width="' + bw + '" height="' + Math.max(0, hc) + '" rx="2"/>';
+    if (x.d === 1 || x.d % step === 0) svg += '<text class="mp-ax" x="' + cx + '" y="' + (H - 10) + '" text-anchor="middle">' + x.d + "</text>";
+    if (x.has) pts.push([cx, Tp + ih - ih * x.p / mx]);
   });
   svg += '<path class="mp-line" d="' + pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join("") + '"/>';
-  pts.forEach(function (p) { svg += '<circle class="mp-dot" cx="' + p[0] + '" cy="' + p[1] + '" r="3.5"/>'; });
-  data.forEach(function (d, i) { var x0 = L + iw * i / data.length; svg += '<rect class="mp-hov" x="' + x0 + '" y="' + Tp + '" width="' + (iw / data.length) + '" height="' + ih + '"><title>' + monthTitle(d.m) + " — Confirmed " + fmtInt.format(Math.round(d.c)) + " · Placed " + fmtInt.format(Math.round(d.p)) + "</title></rect>"; });
+  if (n <= 31) pts.forEach(function (p) { svg += '<circle class="mp-dot" cx="' + p[0] + '" cy="' + p[1] + '" r="2.5"/>'; });
+  data.forEach(function (x, i) { var x0 = L + iw * i / n; svg += '<rect class="mp-hov" x="' + x0 + '" y="' + Tp + '" width="' + (iw / n) + '" height="' + ih + '"><title>' + x.key + " — Confirmed " + fmtInt.format(Math.round(x.c)) + " · Placed " + fmtInt.format(Math.round(x.p)) + "</title></rect>"; });
   box.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img">' + svg + '</svg><div class="mp-legend"><span><i></i>Confirmed</span><span><i class="l"></i>Placed</span></div>';
 }
-$("pipeToggle").addEventListener("click", function (e) {
-  var b = e.target.closest("button"); if (!b) return;
-  pipeMetric = b.getAttribute("data-metric");
-  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("active", x === b); });
-  renderPipe($("monthSel").value);
-});
 
 // ---- Merchant Targets (js/app.js tgtTiming / tgtMetrics / renderTgtView)
 function tgtTiming(k) {
@@ -410,5 +413,7 @@ $("chgForm").addEventListener("submit", function (e) {
 });
 function msg(id, text, cls) { var e = $(id); if (!e) return; e.textContent = text || ""; e.className = "mp-msg" + (cls ? " " + cls : ""); }
 document.addEventListener("visibilitychange", function () { if (!document.hidden) loadData(); });
+// the numbers are rebuilt on the server every 30 minutes — pick them up automatically while the page stays open
+setInterval(function () { if (!document.hidden) loadData(); }, 30 * 60 * 1000);
 start();
 `;

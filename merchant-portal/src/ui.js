@@ -337,7 +337,7 @@ function loadStatus() {
   adm("/api/admin/status").then(function (s) {
     var m = s.meta || {};
     $("dataBox").innerHTML = kv("Source", s.source, s.source === "not configured") + kv("Last build", m.builtAt ? new Date(m.builtAt).toLocaleString() : "never", !m.builtAt) +
-      kv("Latest month in data", m.latestMonth || "—") + kv("Merchants", m.merchants != null ? m.merchants : "—") + kv("Rows kept", m.rows != null ? m.rows : "—") +
+      kv("Daily source", s.daily || "—", s.daily === "not configured") + kv("Latest month in data", m.latestMonth || "—") + kv("Merchants", m.merchants != null ? m.merchants : "—") + kv("Rows kept", m.rows != null ? m.rows : "—") +
       kv("Build time", m.ms ? Math.round(m.ms / 1000) + " s" : "—") + (s.refreshing ? kv("Status", "Refreshing now…") : "") +
       (s.lastError ? kv("Last error · " + new Date(s.lastError.at).toLocaleString(), s.lastError.message, true) : "");
     var hdr = m.header || [];

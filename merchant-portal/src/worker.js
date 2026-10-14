@@ -29,7 +29,7 @@ const LINK_HOURS = 72;
 const PBKDF2_ITER = 100000; // the Workers runtime caps PBKDF2 at 100k iterations
 const MIN_PASSWORD = 10;
 const DEFAULT_SHARDS = 32;
-const DEFAULT_MAX_AGE_MIN = 90;
+const DEFAULT_MAX_AGE_MIN = 40;
 // Column positions of the merchant query — the same positions js/app.js (parseMerchantSegmentationSheet) reads.
 // Override with the QUERY_COLUMNS variable (JSON) if the Metabase question ever changes.
 const DEFAULT_COLS = { month: 0, merchantId: 2, merchantName: 3, deliveredGmv: 5, segmentation: 12, placedOrders: 6, confirmedOrders: 7, deliveredOrders: 8, placedPieces: 14, confirmedPieces: 15, deliveredPieces: 16 };
@@ -380,8 +380,9 @@ function columns(env) {
 }
 async function readMeta(env) { const t = await env.PORTAL_KV.get("data:meta"); return t ? JSON.parse(t) : null; }
 async function dataStatus(env) {
-  const meta = await readMeta(env), err = JSON.parse((await env.PORTAL_KV.get("data:error")) || "null");
-  return { meta, lastError: err, source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
+  const meta = await readMeta(env), err0 = JSON.parse((await env.PORTAL_KV.get("data:error")) || "null"), derr = JSON.parse((await env.PORTAL_KV.get("data:dailyError")) || "null");
+  const err = err0 || (derr ? { at: derr.at, message: "Daily numbers: " + derr.message } : null);
+  return { meta, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
 }
 
 const shardCache = new Map(); // isolate memory: "<builtAt>:<n>" -> parsed shard
@@ -400,15 +401,16 @@ async function merchantData(a, env, ctx) {
   if (!meta || Date.now() - Date.parse(meta.builtAt) > maxAge) ctx.waitUntil(refreshData(env, "stale").catch((e) => console.error("refresh failed", e)));
   if (!meta) return json({ error: "Your numbers are being prepared. Please try again in a few minutes." }, 503);
   const merchants = [], rows = [], byId = [];
+  const daily = await readDaily(env).catch(() => null);
   for (const id of a.merchantIds || []) {
     const sh = await readShard(env, meta, shardOf(id, meta.shards));
     const m = sh[id];
     merchants.push({ id, name: (m && m.n) || "" });
-    byId.push({ id, name: (m && m.n) || "", rows: m ? m.r : [] });
+    byId.push({ id, name: (m && m.n) || "", rows: m ? m.r : [], daily: (daily && daily.byId && daily.byId[id]) || [] });
     if (m) m.r.forEach((r) => rows.push(r));
   }
   rows.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-  return json({ updatedAt: meta.builtAt, latestMonth: meta.latestMonth, merchants, rows, byId });
+  return json({ updatedAt: meta.builtAt, dailyAt: daily ? daily.builtAt : null, dailyOn: !!env.DAILY_QUERY_URL, latestMonth: meta.latestMonth, merchants, rows, byId });
 }
 
 // ============================================================================ Merchant Targets
@@ -563,6 +565,8 @@ async function refreshData(env, why) {
     await env.PORTAL_KV.put("data:meta", JSON.stringify(meta));
     await env.PORTAL_KV.delete("data:error");
     shardCache.clear();
+    // Daily numbers (Daily Pipeline): optional second source, never allowed to break the monthly data above.
+    try { await refreshDaily(env); } catch (e) { await env.PORTAL_KV.put("data:dailyError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
     return meta;
   } catch (e) {
     await env.PORTAL_KV.put("data:error", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e), why }));
@@ -571,8 +575,76 @@ async function refreshData(env, why) {
     await env.PORTAL_KV.delete("data:lock");
   }
 }
+// ============================================================================ daily numbers
+// Source: the DAILY_QUERY_URL secret = the "Merchant SKU Daily" Metabase question (one row per SKU × merchant).
+// Columns (js/app.js parseMerchantSkuDailySheet): 2 TAGER_ID, 13..44 DAY0..DAY31 placed pieces (DAY0 = today, DAY1 = yesterday ...),
+// 45..76 DAY_0_CONFIRMED..DAY_31_CONFIRMED confirmed pieces. Only the merchants that have a portal account are kept, summed per day;
+// every other column (ACM, SKU, other merchants) is dropped while streaming. Days are merged into what is already stored,
+// so the history grows past the 32-day window of the query (kept for 93 days).
+const DAILY = { merchantId: 2, placed0: 13, confirmed0: 45, days: 32 };
+function cairoToday() { const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); return p; } // YYYY-MM-DD
+function addDays(ymd, n) { const t = Date.parse(ymd + "T00:00:00Z") + n * 864e5; const d = new Date(t); return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0"); }
+async function accountMerchantIds(env) {
+  const ids = new Set(); let cursor;
+  do {
+    const page = await env.PORTAL_KV.list({ prefix: "acct:", cursor });
+    for (const k of page.keys) { const t = await env.PORTAL_KV.get(k.name); if (!t) continue; try { (JSON.parse(t).merchantIds || []).forEach((i) => ids.add(String(i))); } catch (e) {} }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return ids;
+}
+async function refreshDaily(env) {
+  if (!env.DAILY_QUERY_URL) return null;
+  const m0 = /^(https:\/\/[^/]+)\/(?:public\/question|api\/public\/card)\/([0-9a-f-]{36})/i.exec(String(env.DAILY_QUERY_URL));
+  if (!m0) throw new Error("DAILY_QUERY_URL is not a Metabase public question link.");
+  const want = await accountMerchantIds(env), today = cairoToday();
+  const res = await fetch(m0[1] + "/api/public/card/" + m0[2] + "/query/csv", { headers: { Accept: "text/csv" } });
+  if (!res.ok) throw new Error("Daily source answered HTTP " + res.status);
+  const by = new Map(); let header = null, rowCount = 0, kept = 0;
+  const parser = csvParser((c) => {
+    if (!header) { header = c.slice(0, 80); return; }
+    if (c.length === 1 && c[0] === "") return;
+    rowCount++;
+    const mid = String(c[DAILY.merchantId] || "").trim();
+    if (!mid || !want.has(mid)) return;
+    let m = by.get(mid); if (!m) { m = new Map(); by.set(mid, m); }
+    for (let n = 0; n < DAILY.days; n++) {
+      const pp = num(c[DAILY.placed0 + n]), cp = num(c[DAILY.confirmed0 + n]);
+      const day = addDays(today, -n);
+      let r = m.get(day); if (!r) { r = [day, 0, 0, 0, 0, 0, 0, 0]; m.set(day, r); }
+      r[4] += pp; r[5] += cp;
+    }
+    kept++;
+  });
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parser.push(value); }
+  parser.end();
+  if (!header) throw new Error("The daily source returned nothing.");
+  if (/^\s*[{<]/.test(header.join(","))) throw new Error("The daily source did not return CSV.");
+  if (header.length < 70) throw new Error("The daily source has " + header.length + " columns, expected 77 (Merchant SKU Daily).");
+  // merge into the stored history (new days overwrite, older days stay), keep 93 days
+  const prev = await readDaily(env).catch(() => null), out = {}, cutoff = addDays(today, -93);
+  const ids = new Set([...Object.keys((prev && prev.byId) || {}), ...by.keys()]);
+  ids.forEach((id) => {
+    const merged = new Map(); (((prev && prev.byId && prev.byId[id]) || [])).forEach((r) => merged.set(r[0], r));
+    if (by.has(id)) by.get(id).forEach((r, day) => { for (let i = 4; i < 6; i++) r[i] = Math.round(r[i] * 100) / 100; merged.set(day, r); });
+    out[id] = Array.from(merged.values()).filter((r) => r[0] >= cutoff).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  });
+  await env.PORTAL_KV.put("data:daily", await gzip(JSON.stringify({ builtAt: new Date().toISOString(), rows: kept, sourceRows: rowCount, merchants: by.size, byId: out })));
+  await env.PORTAL_KV.delete("data:dailyError");
+  dailyCache = null;
+  return { rows: kept };
+}
+let dailyCache = null; // { at, obj }
+async function readDaily(env) {
+  if (dailyCache && Date.now() - dailyCache.at < 60e3) return dailyCache.obj;
+  const buf = await env.PORTAL_KV.get("data:daily", { type: "arrayBuffer" });
+  const obj = buf ? JSON.parse(await gunzip(buf)) : null;
+  dailyCache = { at: Date.now(), obj };
+  return obj;
+}
 async function gzip(text) { return new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); }
 async function gunzip(buf) { return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
 
 // exported for the local test (test/smoke.mjs)
-export const __test = { csvParser, normMonth, shardOf, refreshData, passwordProblem };
+export const __test = { refreshDaily, readDaily, csvParser, normMonth, shardOf, refreshData, passwordProblem };

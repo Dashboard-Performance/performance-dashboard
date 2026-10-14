@@ -14,9 +14,9 @@ routes = [
 binding = "PORTAL_KV"
 id = "2a9b3a456d6c4f558e55245ae9576b34"
 
-# 2) Refresh the merchants' numbers every hour from the merchant query (the ONLY query this Worker can read).
+# 2) Refresh the merchants' numbers every 30 minutes (merchant query + the optional daily source).
 [triggers]
-crons = ["0 * * * *"]
+crons = ["*/30 * * * *"]
 
 # Reading the whole merchant query on each refresh needs the Workers Paid plan.
 [limits]
@@ -28,7 +28,7 @@ PORTAL_URL = "https://merchants.taager.app"
 # The staff dashboard Worker — only used by "Import merchants from the dashboard" in /admin.
 DASHBOARD_WORKER_URL = "https://performance-dashboard-sync-cache.youssef-hanafy.workers.dev"
 # Data is considered stale after this many minutes (a refresh is started in the background).
-DATA_MAX_AGE_MIN = "90"
+DATA_MAX_AGE_MIN = "40"
 DATA_SHARDS = "32"
 MAIL_FROM = "Taager <no-reply@mail.taager.app>"   # with the RESEND_API_KEY secret, enables emails
 # QUERY_COLUMNS = '{"deliveredGmv":5}'           # optional: only if the merchant query's columns move
@@ -40,3 +40,4 @@ MAIL_FROM = "Taager <no-reply@mail.taager.app>"   # with the RESEND_API_KEY secr
 #     — or, better, once public sharing is switched off in Metabase:
 #   npx wrangler secret put METABASE_URL / METABASE_API_KEY / MERCHANT_CARD_ID
 #   npx wrangler secret put RESEND_API_KEY   (optional, for emails)
+#   npx wrangler secret put DAILY_QUERY_URL (optional: the dashboard's Main export link — enables the Daily Pipeline; only your merchants' daily sums are kept)
