@@ -339,15 +339,30 @@ function loadStatus() {
     $("dataBox").innerHTML = kv("Source", s.source, s.source === "not configured") + kv("Last build", m.builtAt ? new Date(m.builtAt).toLocaleString() : "never", !m.builtAt) +
       kv("Daily source", s.daily || "—", s.daily === "not configured") + kv("Latest month in data", m.latestMonth || "—") + kv("Merchants", m.merchants != null ? m.merchants : "—") + kv("Rows kept", m.rows != null ? m.rows : "—") +
       kv("Build time", m.ms ? Math.round(m.ms / 1000) + " s" : "—") + (s.refreshing ? kv("Status", "Refreshing now…") : "") +
+      kv("Sales Plan", s.salesPlan ? "built " + new Date(s.salesPlan.builtAt).toLocaleString() + " · " + s.salesPlan.planRows + " plan rows" : "not built yet", !s.salesPlan) +
+      kv("Incentives", s.incentives ? "built " + new Date(s.incentives.builtAt).toLocaleString() + " · " + s.incentives.merchants + " merchant(s) on an incentive plan" : "not built yet", !s.incentives) +
+      kv("Inventory", s.inventory ? "built " + new Date(s.inventory.builtAt).toLocaleString() + " · " + s.inventory.rows + " SKU rows" : "not built yet", !s.inventory) +
       (s.lastError ? kv("Last error · " + new Date(s.lastError.at).toLocaleString(), s.lastError.message, true) : "");
     var hdr = m.header || [];
     $("colBox").innerHTML = '<p class="dim">Each field must sit on the column whose header matches it. If one is wrong, set the QUERY_COLUMNS variable.</p><div class="table-wrap"><table class="tbl"><thead><tr><th>Field</th><th>Column #</th><th>Header in the export</th></tr></thead><tbody>' +
       Object.keys(s.columns).map(function (k) { return "<tr><td>" + esc(k) + "</td><td>" + s.columns[k] + "</td><td>" + (hdr.length ? esc(hdr[s.columns[k]] || "— missing —") : "build first") + "</td></tr>"; }).join("") + "</tbody></table></div>";
   }).catch(function (e) { $("dataBox").innerHTML = kv("Error", e.message, true); });
 }
+var PARTS = [["daily", "Daily numbers"], ["salesplan", "Sales Plan"], ["incentives", "Incentives"], ["inventory", "Inventory"]];
 $("refreshBtn").addEventListener("click", function () {
-  var b = this; b.disabled = true;
-  adm("/api/admin/refresh", {}).then(function () { setTimeout(loadStatus, 1500); }).catch(function (e) { alert(e.message); }).finally(function () { setTimeout(function () { b.disabled = false; loadStatus(); }, 8000); });
+  var b = this, label = b.textContent; b.disabled = true; b.textContent = "Refreshing: main data…";
+  var fails = [];
+  adm("/api/admin/refresh", { light: true }).then(function () { return new Promise(function (r) { setTimeout(r, 6000); }); }).then(function () {
+    return PARTS.reduce(function (p, part, i) {
+      return p.then(function () {
+        b.textContent = "Refreshing " + (i + 1) + "/" + PARTS.length + ": " + part[1] + "…";
+        return adm("/api/admin/refresh", { part: part[0] }).then(function (r) { if (r && r.ok === false) fails.push(part[1] + ": " + r.error); }).catch(function (e) { fails.push(part[1] + ": " + e.message); });
+      });
+    }, Promise.resolve());
+  }).catch(function (e) { fails.push(e.message); }).then(function () {
+    b.disabled = false; b.textContent = label; loadStatus();
+    if (fails.length) alert("Some parts failed: " + fails.join(" | ")); 
+  });
 });
 
 function loadAccounts() { adm("/api/admin/accounts").then(function (j) { ACC = j.accounts || []; drawAccounts(); }).catch(function (e) { msg("accMsg", e.message, "err"); }); }

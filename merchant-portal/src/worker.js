@@ -299,8 +299,9 @@ async function adminRoute(request, env, ctx, url) {
   let b = {}; if (m === "POST") { try { b = await body(request); } catch (e) { return json({ error: e.message }, e.status || 400); } }
   if (p === "/api/admin/check") return json({ ok: true, emailEnabled: emailEnabled(env) });
   if (p === "/api/admin/status" && m === "GET") return json(await dataStatus(env));
+  if (p === "/api/admin/refresh" && m === "POST" && b.part) return json(await runPart(env, String(b.part)));
   if (p === "/api/admin/refresh" && m === "POST") {
-    ctx.waitUntil(refreshData(env, "admin").catch((e) => console.error("admin refresh failed", e)));
+    ctx.waitUntil(refreshData(env, "admin", { light: !!b.light }).catch((e) => console.error("admin refresh failed", e)));
     return json({ ok: true, message: "Refresh started — it can take a few minutes." });
   }
   if (p === "/api/admin/accounts" && m === "GET") {
@@ -391,7 +392,8 @@ async function dataStatus(env) {
   if (incE && !err) err = { at: incE.at, message: "Incentives: " + incE.message };
   if (invE && !err) err = { at: invE.at, message: "Inventory: " + invE.message };
   const invM = JSON.parse((await env.PORTAL_KV.get("inv:meta")) || "null"), incD = JSON.parse((await env.PORTAL_KV.get("inc:data")) || "null");
-  return { inventory: invM ? { builtAt: invM.builtAt, latest: invM.latest, merchants: invM.merchants, rows: invM.rows } : null, incentives: incD ? { builtAt: incD.builtAt, month: incD.month, merchants: Object.keys(incD.rows || {}).length } : null, meta, salesPlan: spM ? { builtAt: spM.builtAt, latest: spM.latest, merchants: spM.merchants, planRows: spM.planRows, actRows: spM.actRows } : null, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
+  const perr = (x) => (x ? { at: x.at, message: x.message } : null);
+  return { errors: { daily: perr(derr), salesPlan: perr(spE), incentives: perr(incE), inventory: perr(invE) }, inventory: invM ? { builtAt: invM.builtAt, latest: invM.latest, merchants: invM.merchants, rows: invM.rows } : null, incentives: incD ? { builtAt: incD.builtAt, month: incD.month, merchants: Object.keys(incD.rows || {}).length } : null, meta, salesPlan: spM ? { builtAt: spM.builtAt, latest: spM.latest, merchants: spM.merchants, planRows: spM.planRows, actRows: spM.actRows } : null, lastError: err, daily: env.DAILY_QUERY_URL ? "DAILY_QUERY_URL" : "not configured", source: env.METABASE_API_KEY ? "Metabase API key (merchant query)" : (env.MERCHANT_QUERY_URL ? "MERCHANT_QUERY_URL" : "not configured"), columns: columns(env), refreshing: !!(await env.PORTAL_KV.get("data:lock")) };
 }
 
 const shardCache = new Map(); // isolate memory: "<builtAt>:<n>" -> parsed shard
@@ -530,7 +532,7 @@ function normMonth(v) {
   const d = new Date(t); return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0");
 }
 
-async function refreshData(env, why) {
+async function refreshData(env, why, opts) {
   if (await env.PORTAL_KV.get("data:lock")) return { skipped: "already running" };
   await env.PORTAL_KV.put("data:lock", why + " " + new Date().toISOString(), { expirationTtl: 600 });
   const t0 = Date.now();
@@ -574,12 +576,7 @@ async function refreshData(env, why) {
     await env.PORTAL_KV.put("data:meta", JSON.stringify(meta));
     await env.PORTAL_KV.delete("data:error");
     shardCache.clear();
-    // Daily numbers (Daily Pipeline): optional second source, never allowed to break the monthly data above.
-    try { await refreshDaily(env); } catch (e) { await env.PORTAL_KV.put("data:dailyError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
-    // Sales Plan: Google Sheet tabs (targets + actuals), also never allowed to break the data above.
-    try { await refreshSalesPlan(env); } catch (e) { await env.PORTAL_KV.put("data:spError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
-    try { await refreshIncentives(env); } catch (e) { await env.PORTAL_KV.put("data:incError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
-    try { await refreshInventory(env); } catch (e) { await env.PORTAL_KV.put("data:invError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) })); }
+    if (!(opts && opts.light)) await refreshParts(env);
     return meta;
   } catch (e) {
     await env.PORTAL_KV.put("data:error", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e), why }));
@@ -588,6 +585,22 @@ async function refreshData(env, why) {
     await env.PORTAL_KV.delete("data:lock");
   }
 }
+// Each optional source is its own job so one slow or failing sheet never blocks the others. The cron runs all of them in one go (15 min limit);
+// the admin page runs them one request at a time (a request that is waited for is not cut off after 30 s like waitUntil work).
+const PART_JOBS = {
+  daily: [refreshDailyJob, "data:dailyError"],
+  salesplan: [refreshSalesPlan, "data:spError"],
+  incentives: [refreshIncentives, "data:incError"],
+  inventory: [refreshInventory, "data:invError"]
+};
+async function refreshDailyJob(env) { return refreshDaily(env); }
+async function runPart(env, name) {
+  const job = PART_JOBS[name]; if (!job) throw new Error("Unknown part.");
+  const t0 = Date.now();
+  try { await job[0](env); return { ok: true, ms: Date.now() - t0 }; }
+  catch (e) { const message = String(e && e.message || e); await env.PORTAL_KV.put(job[1], JSON.stringify({ at: new Date().toISOString(), message })); return { ok: false, ms: Date.now() - t0, error: message }; }
+}
+async function refreshParts(env) { for (const n of Object.keys(PART_JOBS)) await runPart(env, n); }
 // ============================================================================ daily numbers
 // Source: the DAILY_QUERY_URL secret = the "Merchant SKU Daily" Metabase question (one row per SKU × merchant).
 // Columns (js/app.js parseMerchantSkuDailySheet): 2 TAGER_ID, 13..44 DAY0..DAY31 placed pieces (DAY0 = today, DAY1 = yesterday ...),
@@ -832,7 +845,8 @@ const INV_GIDS = { inventory: "1780730573", debundle: "1409034448" };
 async function refreshInventory(env) {
   const cfg = spCfg(env), t0 = Date.now(), want = await accountMerchantIds(env);
   if (!want.size) return null;
-  const today = cairoToday(), latest = await latestDataDay(env, cfg);
+  const today = cairoToday(), spm = await readSpMeta(env);
+  const latest = spm && spm.latest && Date.now() - Date.parse(spm.builtAt) < 6 * 3600e3 ? spm.latest : await latestDataDay(env, cfg);
   // 1) Sales Plan SKUs (names used when the SKU is not in the Inventory tab)
   const plan = new Map(), planName = new Map();
   await eachCsvRow(await gvizCsv(cfg, cfg.targets, "select *"), (c) => {
