@@ -39,6 +39,7 @@ export const DASH_HTML = `<!doctype html>
       <div class="topbar-title"><h1 id="pgTitle">Over View</h1><p id="pgSub">Your demand, pipeline &amp; delivery numbers</p></div>
       <div class="topbar-actions">
         <div class="filter-group" id="monthWrap"><select id="monthSel" aria-label="Month"></select></div>
+        <div class="tw-bellwrap"><button type="button" class="btn btn-outline tw-bell" id="twBell" title="Notifications" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="tw-badge tw-off" id="twBadge">0</span></button><div class="tw-pop tw-off" id="twPop"></div></div>
         <button class="btn btn-outline tw-iconbtn" id="themeBtn" type="button" title="Light / dark" aria-label="Switch theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></button>
         <div class="mp-menu">
           <button class="btn btn-outline" id="menuBtn" type="button" aria-haspopup="true">Account ▾</button>
@@ -696,7 +697,20 @@ var AL_KEY = "mp_alerts_read";
 function alRead() { try { return JSON.parse(localStorage.getItem(AL_KEY) || "{}") || {}; } catch (e) { return {}; } }
 function markAlertsRead() { var r = alRead(); ((AL && AL.alerts) || []).forEach(function (a) { r[a.id] = 1; }); try { localStorage.setItem(AL_KEY, JSON.stringify(r)); } catch (e) {} updateBadge(); }
 function unreadCount() { var r = alRead(); return ((AL && AL.alerts) || []).filter(function (a) { return !r[a.id]; }).length; }
-function updateBadge() { var n = unreadCount(), b = $("alBadge"); b.textContent = n > 9 ? "9+" : String(n); b.classList.toggle("hidden", n === 0); }
+function updateBadge() { var n = unreadCount(), b = $("alBadge"); b.textContent = n > 9 ? "9+" : String(n); b.classList.toggle("hidden", n === 0); var t = $("twBadge"); if (t) { t.textContent = n > 9 ? "9+" : String(n); t.classList.toggle("tw-off", n === 0); } }
+function renderPop() {
+  var list = ((AL && AL.alerts) || []).slice(0, 8), r = alRead();
+  $("twPop").innerHTML = "<div class='tw-pop-head'><b>Notifications</b><button type='button' class='btn small ghost' id='twAll'>Mark all read</button></div><div class='tw-pop-list'>" +
+    (list.length ? list.map(function (a) { var un = !r[a.id], sev = a.severity === "critical" ? " bad" : a.severity === "warning" ? " warn" : "";
+      return "<div class='tw-note" + (un ? " unread" : "") + "' data-al='1'><span class='dot" + sev + "'></span><div><div class='tw-note-title'>" + esc(a.title) + "</div><div class='tw-note-text'>" + esc(a.body) + "</div><div class='tw-note-meta'>" + esc(a.at ? new Date(a.at).toLocaleString() : "") + "</div></div></div>"; }).join("") : "<div class='tw-empty'>No notifications yet.</div>") +
+    "</div><div class='tw-pop-head' style='border-top:1px solid var(--line);border-bottom:0'><button type='button' class='btn small' id='twView'>View all in Alert Center</button></div>";
+  $("twAll").onclick = function (e) { e.stopPropagation(); markAlertsRead(); renderPop(); if (curView === "al") renderAlerts(); };
+  $("twView").onclick = function () { $("twPop").classList.add("tw-off"); go("al"); };
+  $("twPop").querySelectorAll("[data-al]").forEach(function (n) { n.onclick = function () { $("twPop").classList.add("tw-off"); go("al"); }; });
+}
+$("twBell").addEventListener("click", function (e) { e.stopPropagation(); $("twPop").classList.toggle("tw-off"); renderPop(); });
+$("twPop").addEventListener("click", function (e) { e.stopPropagation(); });
+document.addEventListener("click", function () { $("twPop").classList.add("tw-off"); });
 var AL_LINKS = { ov: "Over View", tg: "Merchant Target", sp: "Sales Plan", inv: "Inventory", inc: "Incentives Tracker" };
 function renderAlerts() {
   var list = (AL && AL.alerts) || [], r = alRead(), html = "";

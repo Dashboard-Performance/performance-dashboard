@@ -41,3 +41,6 @@ MAIL_FROM = "Taager <no-reply@mail.taager.app>"   # with the RESEND_API_KEY secr
 #   npx wrangler secret put METABASE_URL / METABASE_API_KEY / MERCHANT_CARD_ID
 #   npx wrangler secret put RESEND_API_KEY   (optional, for emails)
 #   npx wrangler secret put DAILY_QUERY_URL (optional: the dashboard's Main export link — enables the Daily Pipeline; only your merchants' daily sums are kept)
+
+[observability]
+enabled = true
