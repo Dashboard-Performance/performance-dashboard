@@ -27,6 +27,18 @@
   /* ---------------------------------------------------------------- data (computed from the dashboard's own data) */
   var SC = { rows: [], asOf: "", sig: "", cat: "all", sk: { q: "", cat: "", aging: "", tag: "", seg: "", action: "", instock: true, key: "inv", dir: "desc", page: 0 }, act: ACTIONS[0], empty: true, segMode: "segA" };
   var PAGE = 25, DAY = 86400000;
+  // v1.17.0 — ACTUAL returns (warehouse scans "Product is good", Return_Archive_YYYY-MM → Return_RCV) — used ONLY in the
+  // Supply conversion → Returns row below. Nothing else in the dashboard uses it.
+  var RET = { month: "", data: null, loading: false, err: "" };
+  function loadActualReturns(month) {
+    if (RET.loading || (RET.month === month && (RET.data || RET.err))) return;
+    RET.loading = true; RET.month = month;
+    C.wfetch("actualReturns", { timeout: 120000 }, "&month=" + encodeURIComponent(month)).then(function (j) {
+      if (!j || j.success === false) throw new Error((j && j.message) || "failed");
+      RET.data = j; RET.err = "";
+    }).catch(function (e) { RET.data = null; RET.err = (e && e.message) || "failed"; })
+      .then(function () { RET.loading = false; SC.sig = ""; rerender(); });
+  }
   function sigNow() { try { return [state.allParsedRows.length, (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length].join("|"); } catch (e) { return ""; } }
   function ageIdx(days) { return days == null ? 4 : days <= 60 ? 0 : days <= 120 ? 1 : days <= 180 ? 2 : days <= 364 ? 3 : 4; } // same bands as the Inventory Aging sheet; no purchase date = Unhealthy
   var RET_FACTOR = 0.75; // Returns = MAX(0, Confirmed − Delivered) × 75% (conservative haircut, same as the Purchase Plan sheet)
@@ -86,7 +98,10 @@
       // MTD confirmed is consumed from Beginning inventory first, then Purchases, then Returns, then Repack. Values = qty × WAC.
       var rep = {}; (state.supplyRepackRows || []).forEach(function (r) { if (r.status !== "APPLIED" || !r.ts) return; var d = new Date(r.ts); if (d.getFullYear() === cy && d.getMonth() === cmo) rep[r.sku] = (rep[r.sku] || 0) + (+r.qty || 0); });
       var rto = {}, mk = ref.toLocaleString("en-US", { month: "long", year: "numeric" });
-      try { var stx = getSellthroughIndices(); stx.needBySkuMonth.forEach(function (v, k) { var i = k.lastIndexOf("|"); if (k.slice(i + 1) === mk && v.rto) rto[k.slice(0, i)] = (rto[k.slice(0, i)] || 0) + v.rto; }); } catch (e2) {}
+      // Returns = ACTUAL returns received this month (warehouse scans, "Product is good"), like the Inventory Aging sheet.
+      var retMonth = cy + "-" + String(cmo + 1).padStart(2, "0"); loadActualReturns(retMonth);
+      if (RET.data && RET.data.month === retMonth) { var rs = RET.data.skus || {}; Object.keys(rs).forEach(function (k) { var id = String(k).trim(); rto[id] = (rto[id] || 0) + (+rs[k] || 0); }); }
+      SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
       var cids = {}; [beg, inM, rto, rep, mtd].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
       var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
@@ -116,7 +131,17 @@
       var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
       return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num"><input class="sc-plan" data-plan="' + k + '" value="' + int(p) + '" inputmode="numeric" title="Planned — click to edit (saved in this browser)"></td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="Planned value (editable).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned.</div></div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="Planned value (editable).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned.</div>' + retNote() + '</div>';
+  }
+  function retNote() {
+    var I = SC.retInfo, t;
+    if (I) {
+      var when = function (x) { try { return new Date(x).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch (e) { return x; } };
+      t = "Returns = actual returns scanned in the warehouse this month with condition \"Product is good\" (" + esc(I.file || "Return_Archive") + " → Return_RCV · " + int(I.total) + " pieces" + (I.lastScan ? " · last scan " + when(I.lastScan) : "") + ").";
+      if (I.source === "cache") t = "⚠ " + t + " Cached from " + when(I.cachedAt) + " — " + esc(I.reason || "source problem") + ".";
+    } else if (SC.retLoading) t = "Loading the actual returns (Return_Archive)…";
+    else t = "⚠ Actual returns could not be loaded" + (SC.retErr ? " (" + esc(SC.retErr) + ")" : "") + " — the Returns row is empty until it loads.";
+    return '<div class="sc-note" style="margin:0 16px 12px">' + t + '</div>';
   }
   function boot() { build(); }
 

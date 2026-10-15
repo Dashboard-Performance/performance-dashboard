@@ -201,6 +201,21 @@ Diagnose (السبب) ──► Route (السكشن → التيم من Users & 
 
 لو الإيميل موصلش، آخر غلطة بتتسجل في KV تحت `pwreset:lastError`.
 
+## Supply Chain: الـ Returns الفعلية (Supply conversion بس)
+
+صف **Returns** في Supply conversion (Supply Chain ← Inventory Aging) بقى بيتحسب من **المرتجع الفعلي** اللي اتسكان في المخزن، زي شيت EG - Inventory Aging بالظبط:
+```
+ملف Return_Archive_YYYY-MM ← تاب Return_RCV
+SUM(Quantity) لكل Product Code، للصفوف اللي Product Condition Return = "Product is good"
+```
+- **مفيش أي مكان تاني في الداشبورد بيستخدمه.** الـ Purchase Plan والـ Sellthrough وغيرهم زي ما هم.
+- **مين بيقراه:** الـ Apps Script backend (action `actual_returns`) بيدوّر على الملف **باسمه** للشهر الحالي، فمش محتاج تغيّر الـ URL كل شهر.
+  - لو عايز تحدد ملف معين لشهر: اعمل Script property اسمها `RETURNS_ARCHIVE_2026-10` وقيمتها الـ URL.
+- **الـ Worker** بيحتفظ بالنتيجة 20 دقيقة. لو الـ Apps Script فشل، أو المجموع نزل فجأة أكتر من 15%، بيعرض آخر نسخة سليمة ويكتب "Cached from …" تحت الجدول.
+- **مهم:**
+  1. ارفع Code.gs كـ **New version**. هيطلب **Authorize** جديد، لأنه بقى بيستخدم Drive عشان يدوّر على الملف.
+  2. الأكونت اللي الـ Script شغال بيه لازم يبقى عنده **View** على ملفات Return_Archive.
+
 ## حماية الأرقام من رفرش ناقص (Last good copy)
 
 كل مصادر Metabase بتعدّي على الـ Worker. الـ Worker بيحتفظ بآخر نسخة سليمة من كل مصدر. **لو حصلت حاجة من دول، الداشبورد يعرض آخر نسخة سليمة بدل الأرقام البايظة:**
