@@ -702,7 +702,7 @@
   }
 
   // ---------------------------------------------------------------- Targets page
-  var tgState = {}, tgMonth = "", tgMeta = {}, tgLegacy = {}, tgKpi = null;
+  var tgState = {}, tgMonth = "", tgMeta = {}, tgLegacy = {}, tgKpi = null, tgPlans = {}, tgDraft = {};
   var KPI_DEFAULT = [["Delivered GMV", 100, 40], ["Portfolio NDR ( Orders )%", 31, 20], ["CM3 Per Merchant", 10, 30], ["Segment Retention", 100, 10]];
   function kpiFromPayload(p) {
     var out = KPI_DEFAULT.map(function (r) { return r.slice(); });
@@ -718,6 +718,7 @@
       wfetch("getTargets", { timeout: 6000 }, "&type=meta").catch(function () { return null; }),
       wfetch("getTargets", { timeout: 6000 }, "&type=acm." + key).catch(function () { return null; }).then(function (p) { return p && p.table && (p.table.rows || []).length ? p : wfetch("getTargets", { timeout: 6000 }, "&type=acm").catch(function () { return null; }); })
     ]).then(function (r) { if (key !== tgMonth) return; tgMeta = r[0] || {}; tgLegacy = r[1] || {}; tgKpi = kpiFromPayload(r[2]); window.TowerTargets.meta = tgLegacy; drawTargets(); });
+    if (window.TaagerPlans) Promise.all([window.TaagerPlans.get("supplyplan", key, true), window.TaagerPlans.get("segplan", key, true)]).then(function (r) { if (key !== tgMonth) return; tgPlans = { supplyplan: r[0], segplan: r[1] }; tgDraft = {}; drawTargets(); });
     if (!host.firstChild) drawTargets();
   }
   // --- view helpers (v1.15.48 redesign) -------------------------------------
@@ -785,12 +786,12 @@
       '<span class="tg-chip"><i></i>' + counts.idle + ' on the Google Sheet</span>' +
       '<span class="tw-msg" id="twTgMsg"></span></div></div>' +
 
-      '<div class="tg-grid">' + cards + '</div></div>';
+      '<div class="tg-grid">' + cards + planCardsHtml() + '</div></div>';
 
-    $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; renderTargets(); } };
+    $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; tgPlans = {}; tgDraft = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
     $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.filter(function (x) { return !x.editor; }).length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.filter(function (x) { return !x.editor; })); };
-    kpiWire(host);
+    kpiWire(host); planWire(host);
     host.querySelectorAll("[data-file]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) pick(inp.dataset.file, inp.files[0]); inp.value = ""; }; });
     host.querySelectorAll("[data-drop]").forEach(function (d) {
       ["dragenter", "dragover"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.add("over"); }); });
@@ -833,6 +834,121 @@
       putTarget("acm", payload, "KPI editor", K.length).then(function () { tgKpi = K; tmsg("acm", "Saved ✓ — refreshing dashboard data…", "ok"); setTimeout(function () { renderTargets(); var rb = $("refreshBtn"); if (rb && tgMonth === selectedMonthKey()) rb.click(); }, 400); })
         .catch(function (e) { tmsg("acm", e.message, "err"); });
     };
+  }
+  // ---------------------------------------------------------------- v1.17.0 — monthly plans (Supply conversion · Segmentation)
+  // Saved on the Worker as targets:<type>.<YYYY-MM> = { values, at, by } and read by the whole dashboard (js/plans.js).
+  var PLAN_KIND = { rate: ["% of last month", "%"], count: ["merchants", ""], num: ["orders / merchant", ""], pct: ["DR %", "%"], money: ["EGP", "EGP"] };
+  function planVals(type) { var P = window.TaagerPlans; if (tgDraft[type]) return tgDraft[type]; var p = tgPlans[type]; return p ? Object.assign({}, p.values) : Object.assign({}, type === "supplyplan" ? P.SUPPLY_DEF : P.SEG_DEF); }
+  function planPill(type) {
+    var p = tgPlans[type];
+    if (tgDraft[type]) return '<span class="tg-pill warn">Not saved yet</span>';
+    if (!p) return '<span class="tg-pill">Loading…</span>';
+    if (p.source === "month") return '<span class="tg-pill ok">Saved · ' + esc(tgWhen(p.at)) + (p.by ? " · " + esc(p.by) : "") + '</span>';
+    if (p.source === "previous") return '<span class="tg-pill warn">Using ' + esc(monthTitle(p.month)) + ' plan</span>';
+    return '<span class="tg-pill">Default values</span>';
+  }
+  function showV(k, v) { v = +v || 0; return k === "rate" || k === "pct" ? +(v * 100).toFixed(2) : +v.toFixed(2); }
+  function readV(k, raw) { var n = parseFloat(String(raw).replace(/[,%\s]/g, "")); if (!isFinite(n)) return null; return k === "rate" || k === "pct" ? n / 100 : n; }
+  function planCardsHtml() {
+    var P = window.TaagerPlans; if (!P) return "";
+    // Supply conversion plan
+    var sv = planVals("supplyplan"), tot = 0;
+    var srows = P.SUPPLY_FIELDS.map(function (f) { tot += +sv[f.id] || 0; return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" inputmode="decimal" data-plan="supplyplan" data-pid="' + f.id + '" value="' + esc(Math.round(+sv[f.id] || 0).toLocaleString("en-US")) + '"><s>EGP</s></span></td></tr>'; }).join("");
+    var supply = '<div class="tg-card ' + (tgPlans.supplyplan && tgPlans.supplyplan.source === "month" ? "ok" : "idle") + '" data-t="supplyplan">' +
+      '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span><div class="tg-ht"><b>Supply conversion plan</b>' + planPill("supplyplan") + '</div></div>' +
+      '<p class="tg-desc">Planned COGS per source for ' + esc(monthTitle(tgMonth)) + ' — the "Planned" column of Supply Chain → Supply conversion.</p>' +
+      '<div class="tg-kpi-wrap"><table class="tg-kpi-t"><thead><tr><th>Source</th><th class="n">Planned (COGS)</th></tr></thead><tbody>' + srows +
+      '<tr class="tg-totr"><td>Total</td><td class="n"><b id="tgSupTot">' + Math.round(tot).toLocaleString("en-US") + '</b></td></tr></tbody></table></div>' +
+      '<div class="tw-msg" data-msg="supplyplan"></div>' +
+      '<div class="tg-acts"><button class="btn btn-primary small" data-psave="supplyplan">Save plan</button><button class="btn small" data-pcopy="supplyplan">Copy last month</button><button class="btn small" data-preset="supplyplan">Reset to default</button></div></div>';
+    // Segmentation plan
+    var vv = planVals("segplan"), secs = [];
+    P.SEG_INPUTS.forEach(function (x) { if (secs.indexOf(x.s) < 0) secs.push(x.s); });
+    var body = secs.map(function (sec) {
+      var ins = P.SEG_INPUTS.filter(function (x) { return x.s === sec; }).map(function (x) {
+        var K = PLAN_KIND[x.k];
+        return '<tr' + (x.sub ? ' class="tg-subrow"' : "") + '><td>' + esc(x.l) + '</td><td class="tg-kind">' + esc(K[0]) + '</td><td class="n"><span class="tg-num"><input type="text" inputmode="decimal" data-plan="segplan" data-pid="' + x.id + '" data-k="' + x.k + '" value="' + esc(showV(x.k, vv[x.id])) + '">' + (K[1] ? '<s>' + K[1] + '</s>' : "") + '</span></td></tr>';
+      }).join("");
+      var auto = (P.SEG_AUTO[sec] || []).map(function (a) { return '<li><b>' + esc(a[0]) + '</b> — ' + esc(a[1]) + '</li>'; }).join("");
+      return '<details class="tg-sec"' + (sec === secs[0] ? " open" : "") + '><summary>' + esc(sec) + '</summary>' +
+        '<table class="tg-kpi-t"><thead><tr><th>You set</th><th>How</th><th class="n">Target</th></tr></thead><tbody>' + ins + '</tbody></table>' +
+        (auto ? '<div class="tg-auto"><span>Calculated automatically</span><ul>' + auto + '</ul></div>' : "") + '</details>';
+    }).join("") + '<details class="tg-sec"><summary>Total</summary><div class="tg-auto"><ul>' + (P.SEG_AUTO.Total || []).map(function (a) { return '<li><b>' + esc(a[0]) + '</b> — ' + esc(a[1]) + '</li>'; }).join("") + '</ul></div></details>';
+    var seg = '<div class="tg-card wide ' + (tgPlans.segplan && tgPlans.segplan.source === "month" ? "ok" : "idle") + '" data-t="segplan">' +
+      '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span><div class="tg-ht"><b>Segmentation plan</b>' + planPill("segplan") + '</div></div>' +
+      '<p class="tg-desc">Targets of Admin Panel → Segmentation Panel for ' + esc(monthTitle(tgMonth)) + ' — same model as the "Egy-N" sheet. "% of last month" = ROUNDUP(last month merchants × %). Everything else is calculated from these.</p>' +
+      '<div class="tg-secs">' + body + '</div>' +
+      '<label class="tg-drop slim" data-pdrop="segplan">' + TG_ICONS.up + '<b>Upload the plan (.xlsx / .csv)</b><span>columns: Row · Section · Metric · Type · Target — download the template first</span><input type="file" accept=".xlsx,.xls,.csv" hidden data-pfile="segplan"></label>' +
+      '<div class="tw-msg" data-msg="segplan"></div>' +
+      '<div class="tg-acts"><button class="btn btn-primary small" data-psave="segplan">Save plan</button><button class="btn small" data-pcopy="segplan">Copy last month</button><button class="btn small" data-preset="segplan">Reset to default</button><button class="btn small" data-ptpl="segplan">Download template</button></div></div>';
+    return supply + seg;
+  }
+  function planRead(host, type) {
+    var P = window.TaagerPlans, out = Object.assign({}, planVals(type)), bad = [];
+    host.querySelectorAll('[data-plan="' + type + '"]').forEach(function (i) {
+      var id = i.getAttribute("data-pid"), k = i.getAttribute("data-k") || "money", v = readV(k, i.value);
+      if (v == null || v < 0) bad.push(id); else out[id] = v;
+    });
+    return { values: out, bad: bad };
+  }
+  function planSave(type, values) {
+    if (!adminKey()) { tmsg(type, "Enter and save the admin key first (top of this page).", "err"); return; }
+    var s = session(), body = { values: values, at: new Date().toISOString(), by: s ? s.email : "" }, key = tgMonth;
+    tmsg(type, "Saving…");
+    wfetch("putTargets", { body: JSON.stringify(body), timeout: 20000 }, "&type=" + type + "." + key).then(function () {
+      window.TaagerPlans.forget(type, key); tgDraft[type] = null; delete tgDraft[type];
+      tgPlans[type] = { values: values, month: key, source: "month", at: body.at, by: body.by };
+      drawTargets(); tmsg(type, "Saved ✓ — the dashboard uses it from now on.", "ok");
+    }).catch(function (e) { tmsg(type, e.message + (e.status === 403 ? " — wrong admin key." : ""), "err"); });
+  }
+  function planWire(host) {
+    var P = window.TaagerPlans; if (!P) return;
+    host.querySelectorAll("[data-plan]").forEach(function (i) {
+      i.addEventListener("input", function () {
+        var type = i.getAttribute("data-plan"); tgDraft[type] = planRead(host, type).values;
+        var pill = host.querySelector('[data-t="' + type + '"] .tg-ht .tg-pill'); if (pill) { pill.className = "tg-pill warn"; pill.textContent = "Not saved yet"; }
+        if (type === "supplyplan") { var t = 0; P.SUPPLY_FIELDS.forEach(function (f) { t += +tgDraft.supplyplan[f.id] || 0; }); var e = $("tgSupTot"); if (e) e.textContent = Math.round(t).toLocaleString("en-US"); }
+      });
+    });
+    host.querySelectorAll("[data-psave]").forEach(function (b) { b.onclick = function () { var type = b.getAttribute("data-psave"), r = planRead(host, type); if (r.bad.length) { tmsg(type, "Check the highlighted values (numbers 0 or more).", "err"); r.bad.forEach(function (id) { var i = host.querySelector('[data-plan="' + type + '"][data-pid="' + id + '"]'); if (i) i.parentNode.classList.add("bad"); }); return; } planSave(type, r.values); }; });
+    host.querySelectorAll("[data-pcopy]").forEach(function (b) { b.onclick = function () {
+      var type = b.getAttribute("data-pcopy"), pk = P.prevKey(tgMonth); tmsg(type, "Loading " + monthTitle(pk) + "…");
+      P.get(type, pk, true).then(function (p) { if (p.source === "default") { tmsg(type, "Nothing saved for " + monthTitle(pk) + " — kept the current values.", ""); return; } tgDraft[type] = Object.assign({}, p.values); drawTargets(); tmsg(type, "Copied from " + monthTitle(p.month) + " — review and press Save plan.", ""); });
+    }; });
+    host.querySelectorAll("[data-preset]").forEach(function (b) { b.onclick = function () { var type = b.getAttribute("data-preset"); tgDraft[type] = Object.assign({}, type === "supplyplan" ? P.SUPPLY_DEF : P.SEG_DEF); drawTargets(); tmsg(type, "Defaults loaded — press Save plan to keep them.", ""); }; });
+    host.querySelectorAll("[data-ptpl]").forEach(function (b) { b.onclick = function () {
+      var vv = planVals("segplan"), grid = [["Row", "Section", "Metric", "Type", "Target"]];
+      P.SEG_INPUTS.forEach(function (x) { grid.push([x.id, x.s, x.l, PLAN_KIND[x.k][0], x.k === "rate" || x.k === "pct" ? showV(x.k, vv[x.id]) + "%" : showV(x.k, vv[x.id])]); });
+      downloadGrid(grid, "segmentation_plan_" + tgMonth + ".xlsx").then(function () { tmsg("segplan", "Template downloaded — fill the Target column and upload it here.", "ok"); }).catch(function (e) { tmsg("segplan", e.message, "err"); });
+    }; });
+    var upl = function (file) {
+      tmsg("segplan", "Reading " + file.name + "…");
+      parseFile(file).then(function (p) {
+        var grid = payloadToGrid(p), vv = Object.assign({}, planVals("segplan")), n = 0, miss = [];
+        var head = (grid[0] || []).map(function (h) { return String(h).trim().toLowerCase(); });
+        var ci = head.indexOf("row"), ti = head.indexOf("target"), si = head.indexOf("section"), mi = head.indexOf("metric");
+        if (ti < 0) ti = head.length - 1;
+        grid.slice(1).forEach(function (r) {
+          var id = ci >= 0 ? String(r[ci] || "").trim() : "", x = P.SEG_INPUTS.filter(function (q) { return q.id === id; })[0];
+          if (!x && si >= 0 && mi >= 0) x = P.SEG_INPUTS.filter(function (q) { return q.s.toLowerCase() === String(r[si] || "").trim().toLowerCase() && q.l.toLowerCase() === String(r[mi] || "").trim().toLowerCase(); })[0];
+          if (!x) return;
+          var raw = r[ti], v;
+          if (typeof raw === "number" && (x.k === "rate" || x.k === "pct")) v = raw <= 1.5 ? raw : raw / 100; // 0.25 or 25
+          else v = readV(x.k, raw);
+          if (v == null || v < 0) { miss.push(x.l); return; }
+          vv[x.id] = v; n++;
+        });
+        if (!n) throw new Error("No plan rows found — use the template (columns Row · Section · Metric · Type · Target).");
+        tgDraft.segplan = vv; drawTargets();
+        tmsg("segplan", n + " targets loaded from " + file.name + (miss.length ? " · skipped: " + miss.slice(0, 4).join(", ") : "") + " — review and press Save plan.", miss.length ? "" : "ok");
+      }).catch(function (e) { tmsg("segplan", e.message, "err"); });
+    };
+    host.querySelectorAll("[data-pfile]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) upl(inp.files[0]); inp.value = ""; }; });
+    host.querySelectorAll("[data-pdrop]").forEach(function (d) {
+      ["dragenter", "dragover"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.add("over"); }); });
+      ["dragleave", "drop"].forEach(function (ev) { d.addEventListener(ev, function (e) { e.preventDefault(); d.classList.remove("over"); }); });
+      d.addEventListener("drop", function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) upl(f); });
+    });
   }
   function gmsg(t, c) { var e = $("twTgMsg"); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }
   function tmsg(type, t, c) { var e = document.querySelector('[data-msg="' + type + '"]'); if (e) { e.className = "tw-msg " + (c || ""); e.textContent = t; } }

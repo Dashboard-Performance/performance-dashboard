@@ -201,6 +201,33 @@ Diagnose (السبب) ──► Route (السكشن → التيم من Users & 
 
 لو الإيميل موصلش، آخر غلطة بتتسجل في KV تحت `pwreset:lastError`.
 
+## Targets جديدة: Supply conversion plan + Segmentation plan
+
+الاتنين بقوا في **Control ← Targets** تحت الملفات، لكل شهر لوحده، ومتخزنين على الـ Worker. يعني كل الناس بتشوف نفس الأرقام.
+
+**Supply conversion plan:**
+- 4 أرقام: Beg Inv وPurchases وReturns وRepack.
+- عمود **Planned** في Supply Chain ← Supply conversion بقى بيقرا منهم، ومبقاش بيتعدل من الجدول نفسه.
+
+**Segmentation plan:** نفس موديل تاب **Egy-N** في شيت Merchants New Segmentation.
+- **إنت بتحط:**
+  - النِسب كـ "% of last month"، يعني ROUNDUP(ميرشنتس الشهر اللي فات × %).
+  - أعداد الـ splits.
+  - Orders per merchant والـ DR%.
+  - Delivered AOV للـ Loyal والـ Potential Loyal.
+  - كل أرقام الـ LVM.
+- **بيتحسب لوحده:**
+  - Last month merchants: الـ Actual بتاع الشهر اللي فات.
+  - Totals وRetained، والصفوف المربوطة ببعض (Promoted to Champions = Champions Promoted…).
+  - الـ Confirmed AOV: Actual الشهر اللي فات.
+  - الـ Delivered AOV بتاع الـ HVM = AOV × 96%.
+  - الـ GMV والـ Delivered.
+- **تقدر:** تعدل يدوي، أو **Download template** وبعدين ترفعه، أو **Copy last month**، أو **Reset to default**.
+
+**أي شهر مفيهوش حاجة محفوظة** بياخد خطة الشهر اللي قبله، ولو مفيش بياخد الـ Defaults (أرقام أكتوبر من الشيت). والداشبورد بيكتب جنب العنوان الأرقام جاية منين.
+
+**الحفظ** محتاج الـ Admin key، زي باقي الـ Targets.
+
 ## Supply Chain: الـ Returns الفعلية (Supply conversion بس)
 
 صف **Returns** في Supply conversion (Supply Chain ← Inventory Aging) بقى بيتحسب من **المرتجع الفعلي** اللي اتسكان في المخزن، زي شيت EG - Inventory Aging بالظبط:

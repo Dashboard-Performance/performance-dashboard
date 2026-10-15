@@ -1433,11 +1433,17 @@ function renderSegmentationPanel() {
     return;
   }
   updateSegPanelMonths();
+  // monthly targets (Control → Targets → Segmentation plan); re-render once they arrive
+  if (window.TaagerPlans) {
+    const pk = window.TaagerPlans.keyOf(SEG_PANEL_MONTH), have = window.TaagerPlans.peek("segplan", pk);
+    if (have) SEG_PLAN = have;
+    else { SEG_PLAN = null; window.TaagerPlans.get("segplan", pk).then((p) => { SEG_PLAN = p; const v = $("viewSegmentationPanel"); if (v && !v.classList.contains("hidden")) renderSegmentationPanel(); }); }
+  }
   const rows = computeSegmentationPerformance();
 
   // كروت الـ KPI الإجمالية (Total merchants / confirmed orders / GMV / delivered GMV)
   const segMonthLabel = SEG_PANEL_MONTH.toLocaleString("en-US", { month: "long", year: "numeric" });
-  const segSub = $("segSubtitle"); if (segSub) segSub.textContent = "Target vs Actual and Achievement % per merchant segment — " + segMonthLabel;
+  const segSub = $("segSubtitle"); if (segSub) segSub.textContent = "Target vs Actual and Achievement % per merchant segment — " + segMonthLabel + " · " + (window.TaagerPlans ? window.TaagerPlans.sourceText(SEG_PLAN) : "");
   const kpiIds = ["r113", "r114", "r115", "r118"];
   const kpiGrid = $("segKpiGrid");
   if (kpiGrid) {
@@ -16073,6 +16079,80 @@ segDefRow({ id: "r118", section: "Total", label: "Total delivered GMV", unit: "m
   target: (ctx) => ctx.T("r24") + ctx.T("r49") + ctx.T("r74") + ctx.T("r108"),
   actual: (ctx) => ctx.A("r24") + ctx.A("r49") + ctx.A("r74") + ctx.A("r108"),
   ach: (ctx) => ({ kind: "pct", ratio: safeRatio(ctx.A("r118"), ctx.T("r118")) }) });
+
+// ---------------------------------------------------------------------------
+// v1.17.0 — Segmentation targets come from the monthly plan (Control → Targets → Segmentation plan),
+// same model as the "Egy-N" sheet: the inputs are typed there, everything else is calculated here.
+//   rate rows  → ROUNDUP(last month merchants × %)   ·   counts / per-merchant / DR% / AOV → as typed
+// Nothing saved for the month → the previous month's plan → built-in defaults (js/plans.js).
+// ---------------------------------------------------------------------------
+let SEG_PLAN = null; // { values, month, source, at, by } for SEG_PANEL_MONTH
+function segPlanV(id) { const v = SEG_PLAN && SEG_PLAN.values ? SEG_PLAN.values[id] : undefined; const d = window.TaagerPlans ? window.TaagerPlans.SEG_DEF[id] : 0; const n = Number(v); return v === "" || v == null || !Number.isFinite(n) ? (d || 0) : n; }
+function segRoundUp(x) { return Math.ceil((x || 0) - 1e-9); }
+function segPrevAov(filters, gmvField, ordField) {
+  const g = segSumBy(state.newSegRows, gmvField, filters, SEG_PANEL_PREV_MONTH), o = segSumBy(state.newSegRows, ordField, filters, SEG_PANEL_PREV_MONTH);
+  if (o > 0) return g / o;
+  const g2 = segSumBy(state.newSegRows, gmvField, filters, SEG_PANEL_MONTH), o2 = segSumBy(state.newSegRows, ordField, filters, SEG_PANEL_MONTH);
+  return o2 > 0 ? g2 / o2 : 0;
+}
+(function segApplyPlanModel() {
+  const T = (id, fn) => { if (SEG_ROWS_BY_ID[id]) SEG_ROWS_BY_ID[id].target = fn; };
+  const inp = (id) => () => segPlanV(id);
+  const rate = (id, base) => (ctx) => segRoundUp(ctx.T(base) * segPlanV(id));
+  const CH = { subSegment: "Champions" }, LO = { subSegment: "Loyal" }, PL = { subSegment: "Potential Loyal" }, LV = { segment: "LVM" };
+  // HVM (Champions)
+  T("r3", (ctx) => ctx.A("r3"));
+  ["r4", "r5", "r9", "r10", "r11", "r12"].forEach((id) => T(id, rate(id, "r3")));
+  ["r6", "r7", "r8", "r13", "r14", "r15", "r19", "r23"].forEach((id) => T(id, inp(id)));
+  T("r16", (c) => c.T("r3") + c.T("r10") + c.T("r11") + c.T("r12") - c.T("r4") - c.T("r5"));
+  T("r18", (c) => c.T("r19") * c.T("r16"));
+  T("r21", () => segPrevAov(CH, "cnfGmv", "orders"));
+  T("r20", (c) => c.T("r18") * c.T("r21"));
+  T("r22", (c) => c.T("r18") * c.T("r23"));
+  T("r25", (c) => c.T("r21") * 0.96);
+  T("r24", (c) => c.T("r22") * c.T("r25"));
+  // Loyal MVM
+  T("r28", (ctx) => ctx.A("r28"));
+  ["r29", "r30", "r36", "r37", "r38"].forEach((id) => T(id, rate(id, "r28")));
+  ["r31", "r32", "r39", "r40", "r44", "r48", "r50"].forEach((id) => T(id, inp(id)));
+  T("r33", (c) => c.T("r12"));
+  T("r35", (c) => c.T("r5"));
+  T("r34", (c) => c.T("r28") - c.T("r29") - c.T("r30") - c.T("r33"));
+  T("r41", (c) => c.T("r28") + c.T("r35") + c.T("r36") + c.T("r37") + c.T("r38") - c.T("r29") - c.T("r30") - c.T("r33"));
+  T("r43", (c) => c.T("r41") * c.T("r44"));
+  T("r46", () => segPrevAov(LO, "cnfGmv", "orders"));
+  T("r45", (c) => c.T("r43") * c.T("r46"));
+  T("r47", (c) => c.T("r43") * c.T("r48"));
+  T("r49", (c) => c.T("r47") * c.T("r50"));
+  // Potential Loyal MVM
+  T("r53", (ctx) => ctx.A("r53"));
+  ["r54", "r55", "r63", "r64", "r65"].forEach((id) => T(id, rate(id, "r53")));
+  ["r57", "r58", "r69", "r73", "r75"].forEach((id) => T(id, inp(id)));
+  T("r56", (c) => c.T("r38"));
+  T("r59", (c) => c.T("r53") - c.T("r54") - c.T("r55") - c.T("r56"));
+  T("r60", (c) => c.T("r30"));
+  T("r61", (c) => c.T("r7"));
+  T("r62", (c) => c.T("r31"));
+  T("r66", (c) => c.T("r53") + c.T("r60") + c.T("r63") + c.T("r64") + c.T("r65") - c.T("r54") - c.T("r55") - c.T("r56"));
+  T("r68", (c) => c.T("r69") * c.T("r66"));
+  T("r71", () => segPrevAov(PL, "cnfGmv", "orders"));
+  T("r70", (c) => c.T("r68") * c.T("r71"));
+  T("r72", (c) => c.T("r68") * c.T("r73"));
+  T("r74", (c) => c.T("r72") * c.T("r75"));
+  // LVM
+  ["r78", "r79", "r80", "r81"].forEach((id) => T(id, (ctx) => ctx.A(id)));
+  ["r82", "r84", "r85", "r86", "r87", "r88", "r90", "r91", "r92", "r94", "r95", "r96", "r98", "r99", "r100", "r103", "r107"].forEach((id) => T(id, inp(id)));
+  T("r83", (c) => c.T("r84") + c.T("r85") + c.T("r86") + c.T("r87") + c.T("r88"));
+  T("r89", (c) => c.T("r90") + c.T("r91") + c.T("r92"));
+  T("r93", (c) => c.T("r94") + c.T("r95") + c.T("r96"));
+  T("r97", (c) => c.T("r98") + c.T("r99") + c.T("r100"));
+  T("r102", (c) => c.T("r103") * c.T("r97"));
+  T("r105", () => segPrevAov(LV, "cnfGmv", "orders"));
+  T("r104", (c) => c.T("r102") * c.T("r105"));
+  T("r106", (c) => c.T("r102") * c.T("r107"));
+  T("r109", () => segPrevAov(LV, "dlvGmv", "dlvOrders"));
+  T("r108", (c) => c.T("r106") * c.T("r109"));
+})();
 
 const SEG_ROW_ORDER = ["r3","r4","r5","r6","r7","r8","r9","r10","r11","r12","r13","r14","r15","r16",
   "r18","r19","r20","r21","r22","r23","r24","r25",

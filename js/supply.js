@@ -112,7 +112,7 @@
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
         [["all"], [cat]].forEach(function (kk) { var a = conv[kk[0]] = conv[kk[0]] || mkAgg(); a.beg[0] += V * w; a.beg[1] += X * w; a.pur[0] += Z * w; a.pur[1] += AB * w; a.ret[0] += R * w; a.ret[1] += AF * w; a.rep[0] += B * w; a.rep[1] += BR * w; });
       });
-      SC.conv = conv; SC.convMonth = ref.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+      SC.convKey = cy + "-" + String(cmo + 1).padStart(2, "0"); SC.conv = conv; SC.convMonth = ref.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
       var tot = 0, cum = 0, sorted = rows.slice().sort(function (x, y) { return y.inv - x.inv; });
       rows.forEach(function (r) { tot += r.inv; });
       sorted.forEach(function (r) { cum += r.inv; r.abc = r.stock <= 0 ? "-" : cum / (tot || 1) <= 0.8 ? "A" : cum / (tot || 1) <= 0.95 ? "B" : "C"; var L = ACT_LOOKUP[r.abc + "_" + r.fms + "_" + r.quarter]; if (L) { r.action = L[0]; r.channel = L[1]; } });
@@ -121,17 +121,24 @@
   }
 
   /* ---------------------------------------------------------------- Targets page: Supply conversion */
-  var PLAN_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000 };
-  function planGet() { var p = {}; try { p = JSON.parse(localStorage.getItem("twScPlanned") || "{}"); } catch (e) {} var o = {}; Object.keys(PLAN_DEF).forEach(function (k) { o[k] = +p[k] > 0 ? +p[k] : PLAN_DEF[k]; }); return o; }
-  function planSet(k, v) { var p = {}; try { p = JSON.parse(localStorage.getItem("twScPlanned") || "{}"); } catch (e) {} p[k] = v; try { localStorage.setItem("twScPlanned", JSON.stringify(p)); } catch (e) {} }
+  // v1.17.0 — Planned comes from Control → Targets → "Supply conversion plan" (per month, saved on the Worker, same for everyone)
+  var PLAN = null;
+  function planKey() { return SC.convKey || (window.TaagerPlans ? window.TaagerPlans.keyOf(new Date()) : ""); }
+  function planGet() {
+    var P = window.TaagerPlans, key = planKey(); if (!P) return { beg: 0, pur: 0, ret: 0, rep: 0 };
+    var have = P.peek("supplyplan", key);
+    if (have) { PLAN = have; return have.values; }
+    P.get("supplyplan", key).then(function (p) { PLAN = p; rerender(); });
+    return P.SUPPLY_DEF;
+  }
   function convPanel() {
     var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat];
     var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["ret", "Returns"], ["rep", "Repack"]];
     var body = labs.map(function (l) {
       var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
-      return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num"><input class="sc-plan" data-plan="' + k + '" value="' + int(p) + '" inputmode="numeric" title="Planned — click to edit (saved in this browser)"></td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
+      return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num" title="Edit in Control → Targets → Supply conversion plan">' + int(p) + '</td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="Planned value (editable).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned.</div>' + retNote() + '</div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned.</div>' + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
   }
   function retNote() {
     var I = SC.retInfo, t;
@@ -324,7 +331,6 @@
   }
   function onInput(e) {
     var t = e.target; if (t.id === "scSkuQ") { SC.sk.q = t.value; SC.sk.page = 0; drawSkuBody(); return; }
-    var pk = t.getAttribute && t.getAttribute("data-plan"); if (pk) { var pv = parseFloat(String(t.value).replace(/,/g, "")); planSet(pk, pv > 0 ? pv : 0); rerender(); return; }
     var k = t.getAttribute && t.getAttribute("data-sk"); if (!k) return;
     SC.sk[k] = t.type === "checkbox" ? t.checked : t.value; SC.sk.page = 0; drawSkuBody();
   }
