@@ -26,11 +26,22 @@
   }
   function sevClass(t) { return t.escalation >= 2 ? "bad" : (t.slaHoursLeft != null && t.slaHoursLeft < 0 && ["open", "in_progress"].indexOf(t.status) >= 0) ? "bad" : t.status === "watch" ? "" : t.impact > 5000 ? "warn" : ""; }
   function sortTasks(a, b) { return (b.escalation || 0) - (a.escalation || 0) || ((a.slaHoursLeft == null ? 1e9 : a.slaHoursLeft) - (b.slaHoursLeft == null ? 1e9 : b.slaHoursLeft) < 0 && a.slaHoursLeft < 0 ? -1 : 0) || (b.priority || 0) - (a.priority || 0) || (b.impact || 0) - (a.impact || 0); }
-  var METRIC = { demand: "Placed demand", cr: "CR %", dr: "DR %", cm3: "CM3" };
+  var METRIC = { demand: "Placed demand", cr: "CR %", dr: "DR %", cm3: "CM3", ppm: "PPM / piece" };
+  // IDs at the top of the task: SKU, Merchant ID, ACM, category — click to copy
+  function idsHtml(t) {
+    var ids = [];
+    if (t.product_id) ids.push(["SKU", t.product_id]);
+    if (t.tager_id) ids.push(["Merchant ID", t.tager_id]);
+    if (t.merchant_name && t.tager_id) ids.push(["Merchant", t.merchant_name]);
+    if (t.acm) ids.push(["ACM", t.acm]);
+    if (t.category) ids.push(["Category", t.category]);
+    if (!ids.length) return "";
+    return '<div class="lp-ids">' + ids.map(function (x) { return '<button type="button" class="lp-id" data-copy="' + esc(x[1]) + '" title="Copy"><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></button>'; }).join("") + '</div>';
+  }
 
   // ---------------------------------------------------------------- task card + drawer (shared)
   function card(t) {
-    var who = t.level === "sku" ? (t.product_name || t.product_id) : t.level === "merchant" ? (t.merchant_name || t.tager_id) : t.level === "match" ? (t.merchant_name || t.tager_id) + " × " + (t.product_name || t.product_id) : (t.product_name || t.title);
+    var who = t.level === "sku" ? (t.product_name || t.product_id) : t.level === "merchant" ? (t.merchant_name || t.tager_id) : t.level === "match" ? (t.merchant_name || t.tager_id) + " × " + (t.product_name || t.product_id) : t.level === "category" ? "Category: " + (t.category || "") : t.level === "acmall" ? "ACM: " + (t.acm || "") : (t.product_name || t.title);
     return '<div class="lp-card ' + sevClass(t) + '" data-task="' + esc(t.id) + '"><div class="lp-card-h"><b>' + esc(t.reasonLabel || t.reason) + '</b>' + pill(t.status) + (t.cleared_at && ["open", "in_progress", "waiting"].indexOf(t.status) >= 0 ? '<span class="tw-pill good">condition cleared</span>' : "") + (t.blocked_by ? '<span class="tw-pill">blocked</span>' : "") + '<span class="lp-grow"></span>' + sla(t) + '</div>' +
       '<div class="lp-card-t">' + esc(who) + '</div><div class="lp-card-m">' + esc(navLabel(t.section)) + (t.acm ? " · ACM " + esc(t.acm) : "") + (t.impact ? " · <b>" + fmtEgp(t.impact) + "/day</b> at stake" : "") + (t.eta ? " · ETA " + esc(t.eta) : "") + (t.ownerless ? ' · <span class="lp-late">no owner</span>' : "") + " · " + esc(ago(t.created_at)) + '</div></div>';
   }
@@ -50,7 +61,21 @@
     if (ev.avgDemand != null) kv.push(["Demand (7d avg)", ev.avgDemand + " pcs/day"]);
     if (ev.share != null) kv.push(["Drop share", ev.share + "% of volume · " + ev.declinedMerchants + " / " + ev.merchants + " merchants"]);
     if (ev.lock) { var L = ev.lock; kv.push(["Lock left", fmtN(L.rem) + " of " + fmtN(L.alloc)]); kv.push(["Avg confirmed / day", L.avg]); kv.push(["Cover", L.cover == null ? "—" : L.cover + " days"]); if (L.exp) kv.push(["Lock expiry", L.exp]); }
-    if (ev.suggestedQty != null) kv.push(["Suggested increase", fmtN(ev.suggestedQty)]);
+    if (ev.ppm) { var Q = ev.ppm; kv.push(["PPM / piece (delivered, D6–D12)", fmtN(Q.actual)]); kv.push(["Category target", fmtN(Q.target) + " (" + esc(Q.category || "grand total") + ")"]); kv.push(["Reached", Q.pct + "% (fix below " + Q.fixAt + "%)"]); kv.push(["Delivered / day", Q.deliveredDay]); }
+    if (ev.target) { var TG = ev.target; if (TG.daily) kv.push(["Category daily target", fmtN(TG.daily)]); if (TG.cr) kv.push(["Target CR", TG.cr + "%"]); if (TG.dr) kv.push(["Target DR", TG.dr + "%"]); if (TG.ppmPiece) kv.push(["Target PPM / piece", fmtN(TG.ppmPiece)]); }
+    if (ev.merchants != null && t.level === "acmall") kv.push(["Active merchants", fmtN(ev.merchants)]);
+    if (ev.plan) {
+      var P = ev.plan;
+      if (ev.lock && ev.lock.avgPlaced != null) kv.push(["Avg placed / day", ev.lock.avgPlaced]);
+      kv.push(["Product CR", P.cr == null ? "—" : P.cr + "%"]);
+      kv.push(["Needed for " + P.days + " days", fmtN(P.need) + " (placed " + P.placedDay + "/day × " + P.days + " − " + fmtN(ev.lock ? ev.lock.rem : 0) + " left)"]);
+      if (P.stock != null) {
+        kv.push(["Stock (single)", fmtN(P.stock) + (P.doh != null ? " · DOH " + P.doh : "")]);
+        kv.push(["Kept for other sellers", fmtN(P.others) + " (" + P.othersN + " seller" + (P.othersN === 1 ? "" : "s") + ", " + P.days + " days)"]);
+        kv.push(["Free stock → max increase", fmtN(P.free) + " → " + fmtN(P.cap) + " placed"]);
+      } else kv.push(["Stock (single)", "not in Inventory — not capped"]);
+      kv.push(["Suggested increase", fmtN(P.suggest) + (P.capped ? (P.suggest > 0 ? " (capped by stock)" : " — no free stock: raise PO / transfer first") : "")]);
+    } else if (ev.suggestedQty != null) kv.push(["Suggested increase", fmtN(ev.suggestedQty)]);
     if (ev.askedQty != null) kv.push(["Merchant asked", (ev.kind || "") + " " + fmtN(ev.askedQty) + (ev.note ? " — " + ev.note : "")]);
     if (t.score_after != null) kv.push(["Score after follow-up", t.score_after]);
     if (t.recovered_gmv) kv.push(["Recovered", fmtEgp(t.recovered_gmv) + "/day"]);
@@ -80,7 +105,7 @@
     if (j.blocker) links += '<div class="lp-link" data-open="' + esc(j.blocker.id) + '">⏸ Waiting on: ' + esc(j.blocker.title) + ' ' + pill(j.blocker.status) + (j.blocker.eta ? " · ETA " + esc(j.blocker.eta) : "") + '</div>';
     (j.linked || []).forEach(function (k) { links += '<div class="lp-link" data-open="' + esc(k.id) + '">↓ Led to: ' + esc(k.title) + ' ' + pill(k.status) + '</div>'; });
     var acts = (t.actions || []).map(function (a) { return '<button class="tw-chip" data-act="' + esc(a) + '">' + esc(a) + '</button>'; }).join("");
-    var body = '<div class="tw-muted">' + esc(owners) + '</div>' + (t.cleared_at && live ? '<div class="lp-ok">The condition is gone since ' + day(t.cleared_at) + ' — close the task with what you did.</div>' : "") + (links ? '<div class="lp-links">' + links + '</div>' : "") +
+    var body = idsHtml(t) + '<div class="tw-muted">' + esc(owners) + '</div>' + (t.cleared_at && live ? '<div class="lp-ok">The condition is gone since ' + day(t.cleared_at) + ' — close the task with what you did.</div>' : "") + (links ? '<div class="lp-links">' + links + '</div>' : "") +
       '<div class="tw-card"><h3>Why this task</h3>' + evidenceHtml(t) + '</div>' +
       (t.children && t.children.length ? '<div class="tw-card"><h3>' + (t.children[0].sku ? "SKUs" : "Merchants") + ' (' + t.children.length + ')</h3><div class="tw-scroll">' + childrenHtml(t) + '</div></div>' : "") +
       (j.canEdit && (live || t.status === "done") ? '<div class="tw-card"><h3>Act</h3>' +
@@ -97,6 +122,7 @@
     d.querySelector(".tw-dhead").innerHTML = head; d.querySelector(".tw-dbody").innerHTML = body;
     d.querySelector("[data-x]").onclick = closeDrawer;
     d.querySelectorAll("[data-open]").forEach(function (n) { n.onclick = function () { openTask(n.getAttribute("data-open"), onChange); }; });
+    d.querySelectorAll("[data-copy]").forEach(function (n) { n.onclick = function () { var v = n.getAttribute("data-copy"); try { navigator.clipboard.writeText(v); n.classList.add("ok"); setTimeout(function () { n.classList.remove("ok"); }, 900); } catch (e) {} }; });
     var picked = t.action || "";
     d.querySelectorAll("[data-act]").forEach(function (b) { if (b.getAttribute("data-act") === picked) b.classList.add("on"); b.onclick = function () { picked = b.getAttribute("data-act"); d.querySelectorAll("[data-act]").forEach(function (x) { x.classList.toggle("on", x === b); }); send({ op: "action", action: picked, note: ($("lpOut") || {}).value || "" }, true); }; });
     function msg(t2, cls) { var m = $("lpMsg"); if (m) { m.className = "tw-msg " + (cls || ""); m.textContent = t2; } }
@@ -189,14 +215,14 @@
   }
 
   // ---------------------------------------------------------------- Command Loop control (Admin / Country Manager)
-  var ctab = "overview", CFG = null, DEF = null, REASONS = {}, adminRows = null, adminUsers = [], af = { status: "active", section: "", reason: "", owner: "", q: "", late: false, ownerless: false }, sel = {};
+  var ctab = "overview", CFG = null, DEF = null, REASONS = {}, TEAMS = [], SECTEAM = {}, adminRows = null, adminUsers = [], af = { status: "active", section: "", reason: "", owner: "", q: "", late: false, ownerless: false }, sel = {};
   var TABS = [["overview", "Overview"], ["tasks", "All tasks"], ["preview", "Merchant preview"], ["scores", "Scores"], ["scoring", "Scoring"], ["diagnose", "Diagnose & tasks"], ["routing", "Routing"], ["merchant", "Merchant notifications"], ["cpa", "RE-CPA"], ["exclusions", "Exclusions"], ["runs", "Engine"]];
   function renderControl(host) {
     host.innerHTML = '<div class="tw-page"><div class="tw-tabs lp-ctabs">' + TABS.map(function (t) { return '<button class="tw-tab' + (ctab === t[0] ? " on" : "") + '" data-ct="' + t[0] + '">' + t[1] + '</button>'; }).join("") + '</div><div id="lpCtl"><div class="tw-card tw-muted">Loading…</div></div></div>';
     host.querySelectorAll("[data-ct]").forEach(function (b) { b.onclick = function () { ctab = b.getAttribute("data-ct"); renderControl(host); }; });
     var box = $("lpCtl");
     var needCfg = ["scoring", "diagnose", "routing", "merchant", "cpa", "exclusions"].indexOf(ctab) >= 0;
-    (needCfg && !CFG ? api("loopConfig").then(function (j) { CFG = j.config; DEF = j.defaults; REASONS = j.reasons; }) : Promise.resolve()).then(function () {
+    (needCfg && !CFG ? api("loopConfig").then(function (j) { CFG = j.config; DEF = j.defaults; REASONS = j.reasons; TEAMS = j.teams || []; SECTEAM = j.sectionTeam || {}; }) : Promise.resolve()).then(function () {
       if (ctab === "overview") return ctlOverview(box);
       if (ctab === "tasks") return ctlTasks(box);
       if (ctab === "scores") return ctlScores(box);
@@ -208,7 +234,7 @@
   function kpi(label, v, cls) { return '<div class="tw-stat"><span>' + esc(label) + '</span><b class="' + (cls || "") + '">' + v + '</b></div>'; }
   function ctlOverview(box) {
     return Promise.all([api("loopStats"), api("loopRunInfo"), api("loopConfig")]).then(function (r) {
-      var s = r[0].stats, run = r[1]; CFG = r[2].config; DEF = r[2].defaults; REASONS = r[2].reasons;
+      var s = r[0].stats, run = r[1]; CFG = r[2].config; DEF = r[2].defaults; REASONS = r[2].reasons; TEAMS = r[2].teams || []; SECTEAM = r[2].sectionTeam || {};
       var secRows = Object.keys(s.bySection).sort(function (a, b) { return s.bySection[b].open - s.bySection[a].open; }).map(function (k) { var x = s.bySection[k]; return '<tr><td>' + esc(navLabel(k)) + '</td><td class="r">' + x.open + '</td><td class="r ' + (x.late ? "lp-late" : "") + '">' + x.late + '</td><td class="r">' + x.resolved + '</td><td class="r">' + fmtEgp(x.impact) + '</td></tr>'; }).join("");
       var ownRows = Object.keys(s.byOwner).sort(function (a, b) { return s.byOwner[b].late - s.byOwner[a].late || s.byOwner[b].open - s.byOwner[a].open; }).map(function (k) { var x = s.byOwner[k]; return '<tr><td>' + esc(k) + '</td><td class="r">' + x.open + '</td><td class="r ' + (x.late ? "lp-late" : "") + '">' + x.late + '</td></tr>'; }).join("");
       var RL = r[0].reasons || {}; var rsRows = Object.keys(s.byReason).map(function (k) { var x = s.byReason[k]; return '<tr><td>' + esc((RL[k] || {}).label || k) + '</td><td class="r">' + x.open + '</td><td class="r">' + x.resolved + '</td><td class="r">' + x.recovered + ' / ' + (x.recovered + x.notRecovered) + '</td></tr>'; }).join("");
@@ -219,7 +245,7 @@
         '<div class="tw-field"><label>Test recipients (comma separated)</label><input id="tmTo" value="' + esc((tm.recipients || []).join(", ")) + '"></div><div class="tw-row"><button class="btn btn-primary" id="tmSave">Save</button><span class="tw-msg" id="tmMsg"></span></div></div>' +
         '<div class="tw-stats">' + kpi("Open tasks", fmtN(s.open)) + kpi("Late", fmtN(s.late), s.late ? "lp-late" : "") + kpi("Escalated", fmtN(s.escalated), s.escalated ? "lp-late" : "") + kpi("No owner", fmtN(s.ownerless), s.ownerless ? "lp-late" : "") + '</div>' +
         '<div class="tw-stats">' + kpi("Resolved (30d)", fmtN(s.resolved30)) + kpi("Recovery rate", s.recoveryRate == null ? "—" : s.recoveryRate + "%") + kpi("GMV recovered / day", fmtEgp(s.gmvRecovered)) + kpi("Median time to act", s.medianHoursToAction == null ? "—" : s.medianHoursToAction + "h") + '</div>' +
-        '<div class="tw-card"><h3>Engine</h3><div class="tw-row"><span>' + (last.at ? (last.ok ? "Last run " : "Last run FAILED ") + esc(ago(last.at)) + " · " + (last.ms || 0) + "ms · " + fmtN(last.created) + " new · " + fmtN(last.cleared) + " cleared · " + fmtN(last.resolved) + " resolved" : "Not run yet") + '</span><span class="lp-grow"></span><button class="btn btn-primary" id="lpRun">Run now</button></div>' +
+        '<div class="tw-card"><h3>Engine</h3><div class="tw-row"><span>' + (last.at ? (last.ok ? "Last run " : "Last run FAILED ") + esc(ago(last.at)) + " · " + (last.ms || 0) + "ms · " + fmtN(last.created) + " new · " + fmtN(last.cleared) + " cleared · " + fmtN(last.resolved) + " resolved" + (last.stats && last.stats.gated ? " · filtered out: " + fmtN(last.stats.gated.unconfirmed) + " one-day blips, " + fmtN(last.stats.gated.small) + " too small" : "") + (last.heldBack ? " · " + fmtN(last.heldBack) + " waiting (daily cap)" : "") : "Not run yet") + '</span><span class="lp-grow"></span><button class="btn btn-primary" id="lpRun">Run now</button></div>' +
           (last.error ? '<div class="tw-msg err">' + esc(last.error) + '</div>' : "") + ((last.warnings || []).length ? '<ul class="lp-warn">' + last.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul>" : "") + (!run.d1 ? '<div class="tw-msg err">D1 database is not connected — tasks are not stored. See DEPLOY-v1.17.0.md.</div>' : "") + '<div class="tw-msg" id="lpRunMsg"></div></div>' +
         '<div class="tw-grid2"><div class="tw-card"><h3>By section</h3><table class="tw-table"><thead><tr><th>Section</th><th class="r">Open</th><th class="r">Late</th><th class="r">Resolved</th><th class="r">At stake</th></tr></thead><tbody>' + (secRows || '<tr><td colspan="5" class="tw-muted">No tasks yet</td></tr>') + '</tbody></table></div>' +
         '<div class="tw-card"><h3>By person</h3><table class="tw-table"><thead><tr><th>Owner</th><th class="r">Open</th><th class="r">Late</th></tr></thead><tbody>' + (ownRows || '<tr><td colspan="3" class="tw-muted">—</td></tr>') + '</tbody></table></div></div>' +
@@ -352,7 +378,7 @@
   function ctlScores(box) {
     return api("loopScores").then(function (j) {
       var S = j.scores; if (!S) { box.innerHTML = '<div class="tw-card tw-muted">No scores yet — run the engine first (Engine tab).</div>'; return; }
-      box.innerHTML = '<div class="tw-card"><div class="tw-toolbar"><div class="tw-chips">' + [["merchant", "Merchants"], ["sku", "SKUs"], ["match", "Matches (flagged)"]].map(function (x) { return '<button class="tw-chip' + (scLevel === x[0] ? " on" : "") + '" data-lv="' + x[0] + '">' + x[1] + ' · ' + fmtN((S[x[0]] || []).length) + '</button>'; }).join("") + '</div>' +
+      box.innerHTML = '<div class="tw-card"><div class="tw-toolbar"><div class="tw-chips">' + [["acm", "ACMs"], ["category", "Categories"], ["merchant", "Merchants"], ["sku", "SKUs"], ["match", "Matches (flagged)"]].map(function (x) { return '<button class="tw-chip' + (scLevel === x[0] ? " on" : "") + '" data-lv="' + x[0] + '">' + x[1] + ' · ' + fmtN((S[x[0]] || []).length) + '</button>'; }).join("") + '</div>' +
         '<input id="scQ" type="search" placeholder="Search" value="' + esc(scQ) + '"><label class="tw-check"><input type="checkbox" id="scDec"' + (scDec ? " checked" : "") + '> Declined only</label><span class="lp-grow"></span><span class="tw-muted">As of ' + esc(S.asOf) + ' (D0) · built ' + esc(ago(S.builtAt)) + '</span></div>' +
         '<div class="tw-scroll"><table class="tw-table"><thead><tr><th>Name</th><th>ACM</th><th class="r">Demand</th><th class="r">CR</th><th class="r">DR</th><th class="r">CM3</th><th class="r">Usual/day</th><th class="r">Recent</th><th>Flags</th><th class="r">EGP/day</th></tr></thead><tbody id="scBody"></tbody></table></div><div class="tw-muted" id="scFoot"></div></div>';
       function cell(v) { return v == null ? '<td class="r tw-muted">—</td>' : '<td class="r' + (v < (CFG ? CFG.scoring.threshold : 70) ? " lp-late" : "") + '">' + v + '</td>'; }
@@ -363,7 +389,7 @@
       }
       box.querySelectorAll("[data-lv]").forEach(function (b) { b.onclick = function () { scLevel = b.getAttribute("data-lv"); ctlScores(box); }; });
       $("scQ").oninput = function () { scQ = this.value; draw(); }; $("scDec").onchange = function () { scDec = this.checked; draw(); };
-      if (!CFG) api("loopConfig").then(function (j2) { CFG = j2.config; DEF = j2.defaults; REASONS = j2.reasons; draw(); });
+      if (!CFG) api("loopConfig").then(function (j2) { CFG = j2.config; DEF = j2.defaults; REASONS = j2.reasons; TEAMS = j2.teams || []; SECTEAM = j2.sectionTeam || {}; draw(); });
       draw();
     });
   }
@@ -398,14 +424,16 @@
       card2("Stock", numF("diagnose.dohLow", "Stock task when DOH is below (days)", "Supply Chain (Planner DOH) gets a task.") + numF("diagnose.dohWindowDays", "DOH = stock ÷ avg confirmed pieces of the last (days)", "Same method as the merchant portal Inventory page.") + numF("diagnose.dohRecovered", "Stock counts as back at DOH ≥", "Closes the stock task and starts the relaunch tasks.") + numF("diagnose.minActiveDemand", "Only SKUs with at least (pcs/day)", "") + boolF("diagnose.proactiveStock", "Raise stock tasks before any drop", "Off = only when the SKU already declined.")) +
       card2("Locks", numF("diagnose.lockCoverDays", "Lock task when the lock covers ≤ (days)", "Remaining ÷ merchant's avg CONFIRMED pieces/day.") + numF("diagnose.lockAvgDays", "Average confirmed pieces over (days)", "") + numF("diagnose.lockExpiryDays", "Lock expiring within (days)", "") + boolF("diagnose.proactiveLock", "Raise lock tasks before any drop", "")) +
       card2("Product overall vs partial (CR / DR / demand)", numF("diagnose.skuWideShare", "Product-wide when the drop covers ≥ (% of volume)", "→ Commercial (CR/DR) or Marketplace (demand). Below → each ACM gets their merchants.") + numF("diagnose.skuWideMinMerchants", "…and at least (merchants)", "") + boolF("diagnose.partialWatch", "Keep a watch for partial drops", "Shows to the product team without a task / SLA.") + numF("diagnose.priceLookbackDays", "Price change counts for (days)", "Needs Products Info with a PRICE column.")) +
+      card2("Fewer, more important tasks", numF("tasks.minImpact", "Minimum EGP/day at stake", "Below this → no task. Lock requests and manual tasks are always kept.") + numF("tasks.confirmDays", "Drop must show on (days in a row)", "2 = the same drop one day earlier too (ignores one bad day). 1 = off.") + numF("tasks.maxNewPerRun", "Max new tasks per run", "Biggest EGP/day first; the rest wait for the next run. 0 = no limit.") + numF("diagnose.merchantDropMinSkus", "Merchant drop needs (SKUs)", "1 = one task per merchant even if a single SKU explains it.")) +
+      card2("Overall tasks", numF("diagnose.ppmFixPct", "PPM / piece below (% of the category target)", "→ PPM task for Commercial. Target = 'Target PPM Pieces' in Category Targets.") + numF("diagnose.ppmMinDelivered", "…with at least (delivered pieces in 7 days)", "") + numF("diagnose.categoryMinMerchants", "Category task needs (active merchants)", "Category down overall → Commercial.") + numF("diagnose.acmMinMerchants", "ACM task needs (active merchants)", "ACM portfolio down overall → that ACM.")) +
       card2("Tasks", numF("tasks.followUpDays", "Follow-up after (days)", "Re-score on that day.") + numF("tasks.escalateLevel2", "Escalate to Admin / Country Manager after (× SLA)", "") + numF("tasks.maxPerPerson", "Tasks shown per person before 'show all'", "") + numF("tasks.dismissDays", "A dismissed task stays quiet for (days)", "") +
         boolF("tasks.autoClearUntouched", "Close untouched tasks when the condition is gone", "") + boolF("tasks.chainRelaunch", "Stock back → relaunch task for each ACM", "") + boolF("tasks.notifyNewTasks", "Bell notification for new tasks", "") + boolF("tasks.notifyEscalations", "Bell notification for late / escalated", "")) +
       card2("Schedule", txtF("engine.runHours", "Run at (Cairo hours, comma separated)", "e.g. 10, 15") + boolF("engine.enabled", "Engine on", "Off = no runs, no new tasks, no merchant notifications.")) + '</div>';
     if (tab === "routing") {
       var secOpts = C.viewOptions().map(function (o) { return { id: C.viewNav[o.view], label: o.label }; });
-      html = card2("Who gets what", '<div class="tw-scroll"><table class="tw-table lp-route"><thead><tr><th>On</th><th>Reason</th><th>Section → team (owners from Users & Roles)</th><th>By ACM</th><th>SLA h</th><th>Playbook actions (comma separated)</th></tr></thead><tbody>' +
-        Object.keys(CFG.routing).map(function (r) { var x = CFG.routing[r], p = "routing." + r; return '<tr><td><label class="tw-sw"><input type="checkbox" data-p="' + p + '.enabled" data-t="b"' + (x.enabled !== false ? " checked" : "") + '><span></span></label></td><td><b>' + esc((REASONS[r] || {}).label || r) + '</b><div class="tw-muted">' + esc(r) + '</div></td><td><select data-p="' + p + '.section" data-t="s">' + secOpts.map(function (o) { return '<option value="' + esc(o.id) + '"' + (o.id === x.section ? " selected" : "") + '>' + esc(o.label) + '</option>'; }).join("") + '</select></td><td><label class="tw-sw"><input type="checkbox" data-p="' + p + '.byAcm" data-t="b"' + (x.byAcm ? " checked" : "") + '><span></span></label></td><td><input type="number" min="0" data-p="' + p + '.sla" data-t="n" value="' + esc(x.sla) + '" style="width:80px"></td><td><input data-p="' + p + '.actions" data-t="list" value="' + esc((x.actions || []).join(", ")) + '"></td></tr>'; }).join("") +
-        '</tbody></table></div>', "Everyone whose role can open the section gets the task. 'By ACM' = only the person whose Users & Roles 'Linked ACM account' matches the merchant's ACM.");
+      html = card2("Who gets what", '<div class="tw-scroll"><table class="tw-table lp-route"><thead><tr><th>On</th><th>Reason</th><th>Section</th><th>Team (owners = this role in Users & Roles)</th><th>By ACM</th><th>SLA h</th><th>Playbook actions (comma separated)</th></tr></thead><tbody>' +
+        Object.keys(CFG.routing).map(function (r) { var x = CFG.routing[r], p = "routing." + r; return '<tr><td><label class="tw-sw"><input type="checkbox" data-p="' + p + '.enabled" data-t="b"' + (x.enabled !== false ? " checked" : "") + '><span></span></label></td><td><b>' + esc((REASONS[r] || {}).label || r) + '</b><div class="tw-muted">' + esc(r) + '</div></td><td><select data-p="' + p + '.section" data-t="s">' + secOpts.map(function (o) { return '<option value="' + esc(o.id) + '"' + (o.id === x.section ? " selected" : "") + '>' + esc(o.label) + '</option>'; }).join("") + '</select></td><td><select data-p="' + p + '.team" data-t="s"><option value="">Auto — ' + esc(SECTEAM[x.section] || "page access") + '</option>' + TEAMS.map(function (t) { return '<option value="' + esc(t) + '"' + (t === x.team ? " selected" : "") + '>' + esc(t) + '</option>'; }).join("") + '</select></td><td><label class="tw-sw"><input type="checkbox" data-p="' + p + '.byAcm" data-t="b"' + (x.byAcm ? " checked" : "") + '><span></span></label></td><td><input type="number" min="0" data-p="' + p + '.sla" data-t="n" value="' + esc(x.sla) + '" style="width:80px"></td><td><input data-p="' + p + '.actions" data-t="list" value="' + esc((x.actions || []).join(", ")) + '"></td></tr>'; }).join("") +
+        '</tbody></table></div>', "The task goes to the team that owns its section (e.g. Availability Locking → Marketplace): everyone whose role in Users & Roles is that team. Page access alone does not make you an owner. If nobody has that role, everyone who can open the page gets it. 'By ACM' = only the person whose 'Linked ACM account' matches the merchant's ACM.");
     }
     if (tab === "merchant") {
       var R = "merchant.rules.";
@@ -416,7 +444,7 @@
         card2("Locks", boolF(R + "N5.on", "N5 · Lock needs an update", "") + numF(R + "N5.coverDays", "N5 when the lock covers ≤ (days)", "Remaining ÷ avg CONFIRMED pieces/day") + numF(R + "N5.critical", "N5 critical at ≤ (days)", "") + boolF(R + "N6.on", "N6 · Lock expiry date close", "") + numF(R + "N6.days", "N6 within (days)", "") + boolF("merchant.lockRequests", "Merchants can ask for a lock update", "Creates a task in Availability Locking.") + numF("merchant.lockSuggestDays", "Suggested quantity = avg × (days) − remaining", "")) + '</div>';
     }
     if (tab === "cpa") html = '<div class="tw-grid2">' +
-      card2("Max CPA math", numF("cpa.shipping", "Shipping fee the customer pays (EGP)", "ASP = AVE Market − this fee. The RE-CPA sheet used 99.") + numF("cpa.safetyPct", "Safety margin (%)", "Safe CPA = Max CPA × (1 − this %). Below Safe CPA = 'Profitable', between Safe and Max = 'Thin margin'.")) +
+      card2("Max CPA math", ('<div class="tw-muted">Margin / piece = AVE Market − (Selling price − Profit). Empty AVE Market → the product\'s Placed ASP. Max CPA = margin × NDR (product CR × DR).</div>') + numF("cpa.safetyPct", "Safety margin (%)", "Safe CPA = Max CPA × (1 − this %). Below Safe CPA = 'Profitable', between Safe and Max = 'Thin margin'.")) +
       card2("Where CR / DR come from", numF("cpa.rateDays", "Merchant's own rates over the last (days) — dashboard", "The portal uses the last 14 days.") + numF("cpa.minOwnPieces", "Use the merchant's own rates from (placed pieces)", "Below this, the product's average is used.") + boolF("cpa.showProductAverages", "Show product averages to merchants", "Off = merchants only see their own rates (or type them).")) +
       card2("Merchant portal", boolF("cpa.portal", "RE-CPA tab in the merchant portal", "Merchants' saved plans show up in Merchants → RE-CPA → Merchant's own plan.")) + '</div>';
     if (tab === "exclusions") {

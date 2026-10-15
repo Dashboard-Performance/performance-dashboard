@@ -478,7 +478,7 @@
     if (!footer || !st || !up || !ver) return;
     var w = $("twStatus");
     if (!w) { w = document.createElement("div"); w.id = "twStatus"; footer.insertBefore(w, footer.firstChild); w.appendChild(st); w.appendChild(up); w.appendChild(ver); }
-    var t = (st.textContent || "").toLowerCase();
+    var t = ((st.textContent || "") + " " + (up.textContent || "")).toLowerCase(); // "⚠ Cached from …" → orange dot
     w.classList.toggle("warn", /fail|cached|retry|offline/.test(t));
   }
   function setPreview(role) { try { if (role) sessionStorage.setItem(PREVIEW_SS, role); else { sessionStorage.removeItem(PREVIEW_SS); sessionStorage.removeItem(PREVIEW_MID); } } catch (e) {} applyNav(); window.switchView("overview"); }

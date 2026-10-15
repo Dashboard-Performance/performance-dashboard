@@ -317,6 +317,9 @@ const METABASE_CACHE_TTL_MS = 60 * 1000;
 const METABASE_CONCURRENCY = 6;
 const metabaseMemCache = new Map();   // gid -> { at, payload }
 const metabaseInFlight = new Map();   // gid -> Promise (dedupe parallel callers)
+// v1.17.0: the Worker serves the LAST GOOD copy when Metabase fails or answers with a partial / shrunken result.
+// gid -> { source: "live"|"cache", cachedAt, reason } (from the X-Data-Source / X-Cached-At / X-Cache-Reason headers)
+const metabaseServedFrom = new Map();
 
 // RFC-4180 CSV parser (quotes, escaped quotes, CRLF, BOM). Returns array of string arrays.
 function metabaseParseCsv(text) {
@@ -418,6 +421,8 @@ async function metabaseFetchText(url, gid) {
       err.httpStatus = res.status;
       throw err;
     }
+    const src = res.headers.get("X-Data-Source");
+    if (src) metabaseServedFrom.set(gid, { source: src, cachedAt: res.headers.get("X-Cached-At") || null, reason: res.headers.get("X-Cache-Reason") || "" });
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -16600,6 +16605,8 @@ async function fetchAllSheetsSnapshot() {
     confirmedByDayRows: confirmedByDayPayload ? parseConfirmedByDaySheet(confirmedByDayPayload) : state.confirmedByDayRows, // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
     incentiveMerchantsRows: incentiveMerchantsPayload ? parseIncentiveMerchantsSheet(incentiveMerchantsPayload) : state.incentiveMerchantsRows, // <-- Incentives Tracker (Incentive Merchants)
     staleGids, // sheets that failed every retry and are still showing old data
+    cachedSources: Object.keys(METABASE_SOURCES).filter((g) => { const x = metabaseServedFrom.get(g); return x && x.source === "cache"; })
+      .map((g) => Object.assign({ gid: g, label: METABASE_SOURCES[g].label }, metabaseServedFrom.get(g))),
     // توقيت المزامنة المركزية من السيرفر (نفسه لكل اليوزرز) — لو مش موجود
     // (مسار fallback القديم اللي بيسحب لايف من غير backend)، بنرجع Date.now()
     // المحلي عشان الشاشة تعرض توقيت منطقي برضه.
@@ -16886,7 +16893,14 @@ async function loadData(isManualRefresh = false) {
     // بدل Date.now() المحلي — عشان أي يوزر فاتح الداشبورد يشوف نفس التوقيت
     // بالظبط اللي يوزر تاني شايفه في نفس اللحظة (مش وقت فتح كل متصفح لوحده).
     const syncTs = snapshot.serverFetchedAt || Date.now();
-    if (snapshot.staleGids && snapshot.staleGids.length > 0) {
+    const cachedSrc = snapshot.cachedSources || [];
+    if (cachedSrc.length) {
+      // the Worker refused a broken / partial Metabase answer and served the last good copy
+      const main = cachedSrc.find((x) => x.gid === MAIN_GID) || cachedSrc[0];
+      const when = main.cachedAt ? formatCacheTimestamp(Date.parse(main.cachedAt)) : "earlier";
+      setSyncStatus(`⚠ Cached from ${when} — ${cachedSrc.map((x) => x.label).join(", ")}: the source returned incomplete data (${main.reason || "error"}). Showing the last good numbers; it switches back to live by itself.`);
+      showToast();
+    } else if (snapshot.staleGids && snapshot.staleGids.length > 0) {
       const names = snapshot.staleGids.map((gid) => GID_LABELS[gid] || gid).join(", ");
       setSyncStatus(`Live — updated ${formatCacheTimestamp(syncTs)} — ⚠ didn't refresh: ${names} (showing previous data for those)`);
       showToast();

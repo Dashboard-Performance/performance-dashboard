@@ -3,8 +3,10 @@
    Source of truth: this file. `node tools/sync-cpa.mjs` copies it (and css/cpa.css) into merchant-portal/src/cpa-core.js.
 
    The math (per SKU row):
-     ASP (merchant's real selling price)  = AVE Market − shipping fee the customer pays (default 99)
-     Margin per delivered piece           = Taager profit + (ASP − Taager selling price)          ← "Top up for pic"
+     CR / DR / NDR, Selling price, Profit = the product's own numbers (filled in when the SKU is added)
+     Placed ASP                           = the product's placed GMV ÷ placed pieces (what merchants really sell it at)
+     Margin per delivered piece           = AVE Market − (Selling price − Profit)      ← "Top up for pic"
+                                            (AVE Market empty → the product's Placed ASP is used)
      NDR                                  = CR × DR   (or typed in)
      Max CPA (break-even)                 = Margin × NDR      → paying more than this per conversion loses money
      Safe CPA                             = Max CPA × (1 − safety %)
@@ -19,14 +21,16 @@
 
   function calc(r, cfg) {
     cfg = cfg || {};
-    var ship = n(cfg.shipping); if (ship == null) ship = 99;
     var safety = n(cfg.safetyPct); if (safety == null) safety = 20;
-    var price = n(r.price), profit = n(r.profit), market = n(r.market), cpa = n(r.cpa), conv = n(r.conv);
+    var price = n(r.price), profit = n(r.profit), market = n(r.market), asp = n(r.asp), cpa = n(r.cpa), conv = n(r.conv);
     var cr = pct(r.cr), dr = pct(r.dr), ndrIn = pct(r.ndrOverride);
     var ndr = ndrIn != null ? ndrIn : (cr != null && dr != null ? cr * dr : null);
-    var o = { price: price, profit: profit, market: market, cpa: cpa, conv: conv, ndr: ndr, ndrManual: ndrIn != null, ship: ship, safety: safety };
-    o.asp = market != null ? market - ship : price;
-    o.margin = profit != null && o.asp != null && price != null ? profit + (o.asp - price) : null;
+    var o = { price: price, profit: profit, market: market, cpa: cpa, conv: conv, ndr: ndr, ndrManual: ndrIn != null, safety: safety };
+    o.asp = asp;                                                     // product's Placed ASP (reference)
+    o.sellAt = market != null ? market : asp;                        // AVE Market, or the Placed ASP when not typed
+    o.marketFromAsp = market == null && asp != null;
+    o.cost = price != null && profit != null ? price - profit : null; // what one piece costs the merchant
+    o.margin = o.sellAt != null && o.cost != null ? o.sellAt - o.cost : null;
     o.maxCpa = o.margin != null && ndr != null ? o.margin * ndr : null;
     o.safeCpa = o.maxCpa != null ? o.maxCpa * (1 - safety / 100) : null;
     o.spend = cpa != null && conv != null ? cpa * conv : null;
@@ -36,7 +40,7 @@
     o.perConv = o.margin != null && ndr != null && cpa != null ? ndr * o.margin - cpa : null;
     o.roi = o.spend ? o.net / o.spend : null;
     o.breakEvenNdr = cpa != null && o.margin > 0 ? cpa / o.margin : null;
-    o.breakEvenMarket = cpa != null && ndr > 0 && profit != null && price != null ? cpa / ndr - profit + price + ship : null;
+    o.breakEvenMarket = cpa != null && ndr > 0 && o.cost != null ? cpa / ndr + o.cost : null;
     if (o.margin == null || ndr == null) o.status = "incomplete";
     else if (o.margin <= 0) o.status = "noMargin";
     else if (cpa == null) o.status = "noCpa";
@@ -52,10 +56,11 @@
   // plain-language suggestions for one row (o = calc result, r = row with productNdr/src)
   function suggestions(r, o) {
     var s = [];
-    if (o.status === "incomplete") { s.push(["", "Add the price, profit and CR/DR (or type the NDR) to see the numbers."]); return s; }
+    if (o.status === "incomplete") { s.push(["", "Add the price, profit, AVE Market and CR/DR (or type the NDR) to see the numbers."]); return s; }
+    if (o.marketFromAsp) s.push(["", "AVE Market is empty — using the product's Placed ASP " + money(o.asp) + ". Type the merchant's real selling price for an exact Max CPA."]);
     if (o.margin <= 0) {
-      s.push(["bad", "At AVE Market " + money(o.market) + " you earn " + money(o.margin) + " on each delivered piece — any ad spend is a loss."]);
-      s.push(["", "Sell at a market price above " + money(o.price - o.profit + o.ship) + " to have a margin at all."]);
+      s.push(["bad", "At " + money(o.sellAt) + " the merchant earns " + money(o.margin) + " on each delivered piece — any ad spend is a loss."]);
+      s.push(["", "Sell above " + money(o.cost) + " (selling price − profit) to have a margin at all."]);
       return s;
     }
     if (o.cpa == null) s.push(["", "Keep your CPA under " + money(o.safeCpa) + " (safe) — never above " + money(o.maxCpa) + " (break-even)."]);
@@ -72,9 +77,9 @@
       s.push(["good", "Healthy: " + money(o.perConv) + " profit per conversion, " + money(o.maxCpa - o.cpa) + " of room below Max CPA."]);
       s.push(["", "Room to scale: every extra 100 conversions ≈ " + money(o.perConv * 100) + " more profit, if CPA holds."]);
     }
-    if (o.market != null && o.asp < o.price) s.push(["warn", "Your selling price (" + money(o.asp) + " after shipping) is below Taager's price " + money(o.price) + " — you give away " + money(o.price - o.asp) + " per piece."]);
+    if (o.market != null && o.asp != null && o.market < o.asp * 0.9) s.push(["warn", "AVE Market " + money(o.market) + " is under the product's Placed ASP " + money(o.asp) + " — other merchants sell it higher."]);
     if (r.productNdr != null && o.ndr != null && !o.ndrManual && r.src === "merchant" && o.ndr < r.productNdr * 0.9) s.push(["warn", "Your NDR " + p1(o.ndr) + " is below the product average " + p1(r.productNdr) + " — the gap is in confirmation / delivery, not the ads."]);
-    if (r.src === "product" && !o.ndrManual) s.push(["", "CR/DR are the product's average (not enough of your own orders yet). Type your real NDR when you have it."]);
+    if (r.src === "product" && !o.ndrManual) s.push(["", "CR / DR / NDR are the product's numbers. Type the merchant's real NDR to override."]);
     return s;
   }
   // net profit per 100 conversions for CPA ±20% × NDR ±5 points
@@ -93,7 +98,7 @@
       '<div class="cpa-actions">' + (A.extraHead || "") + '</div></div>' +
       '<div class="cpa-add"><input class="cpa-in-sku" list="cpaSkuList" placeholder="Add SKU (e.g. EG030107CLAN99)" autocomplete="off"><datalist id="cpaSkuList"></datalist><button type="button" class="btn btn-primary cpa-addbtn">Add SKU</button><span class="cpa-grow"></span><span class="tw-muted cpa-cfgnote"></span><button type="button" class="btn cpa-save">Save</button><button type="button" class="btn cpa-csv">Export CSV</button><span class="tw-msg cpa-msg"></span></div></div>' +
       '<div class="tw-stats cpa-kpis"></div><div class="tw-card cpa-tablecard"><div class="tw-scroll"><table class="tw-table cpa-table"><thead><tr>' +
-      ["SKU", "Product", "CR", "DR", "NDR", "Taager price", "Profit", "AVE Market", "ASP", "Margin / piece", "Actual CPA", "Max CPA", "Safe CPA", "Conversions", "Ad spend", "Net profit", "Status", ""].map(function (h, i) { return "<th" + (i >= 2 && i <= 15 ? ' class="r"' : "") + ">" + h + "</th>"; }).join("") +
+      ["SKU", "Product", "CR", "DR", "NDR", "Taager price", "Profit", "AVE Market", "Placed ASP", "Margin / piece", "Actual CPA", "Max CPA", "Safe CPA", "Conversions", "Ad spend", "Net profit", "Status", ""].map(function (h, i) { return "<th" + (i >= 2 && i <= 15 ? ' class="r"' : "") + ">" + h + "</th>"; }).join("") +
       '</tr></thead><tbody class="cpa-body"></tbody></table></div><div class="tw-muted cpa-foot"></div></div><div class="tw-card cpa-detail"></div></div>';
     var $q = function (c) { return host.querySelector(c); };
     if (A.onHead) A.onHead(host);
@@ -103,7 +108,7 @@
     function inp(i, k, v, w) { return '<input class="cpa-in cpa-w' + (w || 8) + '" data-i="' + i + '" data-k="' + k + '" inputmode="decimal" value="' + esc(v == null ? "" : v) + '">'; }
     function draw() {
       var c = cfg(), tot = { spend: 0, net: 0, losing: 0, n: rows.length, conv: 0 };
-      $q(".cpa-cfgnote").textContent = "Shipping " + (c.shipping == null ? 99 : c.shipping) + " · safety " + (c.safetyPct == null ? 20 : c.safetyPct) + "%";
+      $q(".cpa-cfgnote").textContent = "Safety " + (c.safetyPct == null ? 20 : c.safetyPct) + "%";
       $q(".cpa-body").innerHTML = rows.map(function (r, i) {
         var o = calc(r, c), st = STATUS[o.status];
         if (o.spend) tot.spend += o.spend; if (o.net != null) tot.net += o.net; if (o.status === "losing" || o.status === "noMargin") tot.losing++; if (o.conv) tot.conv += o.conv;
@@ -115,9 +120,9 @@
           '<td class="r cpa-c cpa-max" data-c="maxCpa">' + money(o.maxCpa) + '</td><td class="r cpa-c" data-c="safeCpa">' + money(o.safeCpa) + '</td><td class="r">' + inp(i, "conv", r.conv, 6) + '</td>' +
           '<td class="r cpa-c" data-c="spend">' + money(o.spend) + '</td><td class="r cpa-c cpa-net ' + (o.net < 0 ? "neg" : o.net > 0 ? "pos" : "") + '" data-c="net">' + money(o.net) + '</td>' +
           '<td><span class="tw-pill ' + st[1] + '" data-c="status">' + st[0] + '</span></td><td><button type="button" class="tw-x cpa-rm" data-rm="' + i + '" aria-label="Remove">✕</button></td></tr>';
-      }).join("") || '<tr><td colspan="18" class="tw-muted cpa-empty">Add a SKU to start. Price, profit and CR/DR fill in by themselves — you type AVE Market, Actual CPA and Conversions.</td></tr>';
+      }).join("") || '<tr><td colspan="18" class="tw-muted cpa-empty">Add a SKU to start. CR / DR / NDR, price, profit and Placed ASP fill in by themselves — you type AVE Market, Actual CPA and Conversions.</td></tr>';
       $q(".cpa-kpis").innerHTML = [["SKUs", tot.n], ["Conversions", Math.round(tot.conv).toLocaleString("en-US")], ["Ad spend", money(tot.spend)], ["Net profit", money(tot.net)], ["Losing SKUs", tot.losing]].map(function (k, i) { return '<div class="tw-stat"><span>' + k[0] + '</span><b class="' + (i === 3 ? (tot.net < 0 ? "cpa-neg" : "cpa-pos") : i === 4 && tot.losing ? "cpa-neg" : "") + '">' + k[1] + "</b></div>"; }).join("");
-      $q(".cpa-foot").textContent = "Max CPA = margin per delivered piece × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
+      $q(".cpa-foot").textContent = "Margin / piece = AVE Market − (Selling price − Profit); empty AVE Market uses the Placed ASP. Max CPA = margin × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
       detail();
     }
     function refreshRow(i) { // update computed cells without rebuilding the inputs (keeps focus while typing)
@@ -148,7 +153,7 @@
       msg("Loading " + sku + "…");
       A.rates(sku).then(function (x) {
         if (!x || (!x.price && !x.n)) { msg("SKU not found — you can still type its numbers.", "err"); x = { sku: sku }; } else msg("");
-        rows.push({ sku: sku, n: x.n || "", price: x.price == null ? "" : x.price, profit: x.profit == null ? "" : x.profit, cr: x.cr == null ? "" : x.cr, dr: x.dr == null ? "" : x.dr, src: x.src || "", productNdr: x.productNdr == null ? null : x.productNdr, ndrOverride: "", market: "", cpa: "", conv: "" });
+        rows.push({ sku: sku, n: x.n || "", price: x.price == null ? "" : x.price, profit: x.profit == null ? "" : x.profit, asp: x.asp == null ? "" : Math.round(x.asp), cr: x.cr == null ? "" : x.cr, dr: x.dr == null ? "" : x.dr, src: x.src || "", productNdr: x.productNdr == null ? null : x.productNdr, ndrOverride: "", market: "", cpa: "", conv: "" });
         sel = rows.length - 1; dirty = true; $q(".cpa-in-sku").value = ""; draw();
       }).catch(function (e) { msg(e.message, "err"); });
     }
@@ -169,12 +174,12 @@
     var lt = 0; $q(".cpa-in-sku").addEventListener("input", function () { var q = this.value.trim(); clearTimeout(lt); if (q.length < 3 || !A.lookup) return; lt = setTimeout(function () { A.lookup(q).then(function (list) { var dl = $q("#cpaSkuList"); dl.innerHTML = (list || []).slice(0, 30).map(function (o) { return '<option value="' + esc(o.sku) + '">' + esc(o.n || "") + "</option>"; }).join(""); }).catch(function () {}); }, 250); });
     $q(".cpa-save").onclick = function () { msg("Saving…"); A.save(rows.map(clean)).then(function () { dirty = false; msg("Saved ✓", "ok"); }).catch(function (e) { msg(e.message, "err"); }); };
     $q(".cpa-csv").onclick = function () {
-      var c = cfg(), H = ["SKU", "Product", "CR", "DR", "NDR", "Selling Price", "Profit", "AVE Market", "ASP", "Top Up for pic", "Actual CPA", "Max CPA", "Safe CPA", "Num of Conversion", "Cost Of Total Orders", "NET Profit", "Status"];
+      var c = cfg(), H = ["SKU", "Product", "CR", "DR", "NDR", "Selling Price", "Profit", "AVE Market", "Placed ASP", "Top Up for pic", "Actual CPA", "Max CPA", "Safe CPA", "Num of Conversion", "Cost Of Total Orders", "NET Profit", "Status"];
       var q = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }, r2 = function (v) { return v == null ? "" : Math.round(v * 100) / 100; };
       var csv = H.join(",") + "\n" + rows.map(function (r) { var o = calc(r, c); return [r.sku, r.n, r2(pct(r.cr)), r2(pct(r.dr)), r2(o.ndr), r2(o.price), r2(o.profit), r2(o.market), r2(o.asp), r2(o.margin), r2(o.cpa), r2(o.maxCpa), r2(o.safeCpa), r2(o.conv), r2(o.spend), r2(o.net), STATUS[o.status][0]].map(q).join(","); }).join("\n");
       var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" })); a.download = "re-cpa.csv"; document.body.appendChild(a); a.click(); a.remove();
     };
-    function clean(r) { return { sku: r.sku, n: r.n, price: r.price, profit: r.profit, cr: r.cr, dr: r.dr, src: r.src, productNdr: r.productNdr, ndrOverride: r.ndrOverride, market: r.market, cpa: r.cpa, conv: r.conv }; }
+    function clean(r) { return { sku: r.sku, n: r.n, price: r.price, profit: r.profit, asp: r.asp, cr: r.cr, dr: r.dr, src: r.src, productNdr: r.productNdr, ndrOverride: r.ndrOverride, market: r.market, cpa: r.cpa, conv: r.conv }; }
     function reload() { msg("Loading…"); return A.load().then(function (d) { rows = ((d && d.rows) || []).map(function (r) { return Object.assign({}, r); }); sel = rows.length ? 0 : -1; dirty = false; fillList(); draw(); msg(d && d.updatedAt ? "Saved plan from " + new Date(d.updatedAt).toLocaleString() : ""); }).catch(function (e) { rows = []; draw(); msg(e.message, "err"); }); }
     draw(); reload();
     return { reload: reload, isDirty: function () { return dirty; }, rows: function () { return rows; }, fillList: fillList, redraw: draw };

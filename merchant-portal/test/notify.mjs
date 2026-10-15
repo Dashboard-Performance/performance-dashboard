@@ -108,23 +108,23 @@ console.log("RE-CPA");
   const { CPA_JS, CPA_CSS } = await import("../src/cpa-core.js");
   ok(CPA_JS === fs.readFileSync(path.join(root, "js/cpa-core.js"), "utf8") && CPA_CSS === fs.readFileSync(path.join(root, "css/cpa.css"), "utf8"), "portal copy of the RE-CPA core is in sync (node tools/sync-cpa.mjs)");
   new Function(CPA_JS)(); const T = globalThis.TaagerCpa;
-  // the rows of the RE-CPA sheet — same results as its formulas
-  let o = T.calc({ price: 735, profit: 200, market: 950, ndrOverride: 0.3, cpa: 120, conv: 100 });
-  ok(o.asp === 851 && o.margin === 316 && Math.abs(o.maxCpa - 94.8) < 1e-9 && o.spend === 12000 && Math.abs(o.net + 2520) < 1e-9 && o.status === "losing", "sheet row 2: ASP 851, Top-up 316, NET −2,520 → Max CPA 94.8 (the sheet had 72 typed by hand)");
+  // Margin / piece = AVE Market − (Selling price − Profit) ; Max CPA = margin × NDR
+  let o = T.calc({ price: 735, profit: 200, market: 950, asp: 900, ndrOverride: 0.3, cpa: 120, conv: 100 });
+  ok(o.cost === 535 && o.margin === 415 && Math.abs(o.maxCpa - 124.5) < 1e-9 && o.spend === 12000 && Math.abs(o.net - 450) < 1e-9 && o.status === "thin" && o.asp === 900, "735 / 200 / market 950 → margin 415 (950 − 535), Max CPA 124.5, NET +450");
   o = T.calc({ price: 600, profit: 175, market: 750, ndrOverride: 0.32, cpa: 60, conv: 132 });
-  ok(o.margin === 226 && Math.abs(o.net - 1626.24) < 1e-6 && Math.abs(o.maxCpa - 72.32) < 1e-9, "sheet row 5: NET 1,626.24, Max CPA 72.32");
+  ok(o.margin === 325 && Math.abs(o.maxCpa - 104) < 1e-9 && Math.abs(o.net - 5808) < 1e-6, "600 / 175 / market 750 → margin 325, Max CPA 104, NET 5,808");
   o = T.calc({ price: 900, profit: 200, market: 1070, cr: 0.7714285714, dr: 0.4074074074, cpa: 44, conv: 70 });
-  ok(o.margin === 271 && Math.abs(o.maxCpa - 85.17) < 0.01 && Math.abs(o.net - 2882) < 0.5 && o.status === "safe", "sheet row 10 (NDR = CR × DR): Max CPA 85.17, NET 2,882");
-  o = T.calc({ price: 550, profit: 150, market: "", ndrOverride: 0.54, cpa: "", conv: "" });
-  ok(o.asp === 550 && o.margin === 150 && o.status === "noCpa", "empty AVE Market = sells at Taager's price (no more −499 like the sheet)");
+  ok(o.margin === 370 && Math.abs(o.maxCpa - 116.29) < 0.01 && Math.abs(o.net - 5060) < 0.5 && o.status === "safe", "NDR = CR × DR: margin 370, Max CPA 116.29, NET 5,060");
+  o = T.calc({ price: 550, profit: 150, market: "", asp: 600, ndrOverride: 0.54, cpa: "", conv: "" });
+  ok(o.marketFromAsp && o.sellAt === 600 && o.margin === 200 && o.status === "noCpa", "empty AVE Market → the product's Placed ASP is used (600 − 400 = 200)");
+  ok(T.calc({ price: 550, profit: 150, market: "", ndrOverride: 0.54 }).status === "incomplete", "no AVE Market and no Placed ASP → missing data");
   ok(T.calc({ price: 750, profit: 50, market: 700, ndrOverride: 0.3, cpa: 10, conv: 10 }).status === "noMargin", "margin ≤ 0 → 'No margin'");
-  const sg = T.suggestions({ src: "merchant", productNdr: 0.4 }, T.calc({ price: 735, profit: 200, market: 950, cr: 0.6, dr: 0.5, cpa: 120, conv: 100 }));
-  ok(sg.some((x) => /lose/.test(x[1])) && sg.some((x) => /market price to at least/.test(x[1])) && sg.some((x) => /NDR to/.test(x[1])), "suggestions: lower CPA / raise price / lift NDR");
-  ok(T.calc({ price: 735, profit: 200, market: 950, ndrOverride: 0.3 }, { shipping: 50 }).asp === 900, "shipping fee comes from the dashboard settings");
+  const sg = T.suggestions({ src: "product", productNdr: 0.3 }, T.calc({ price: 735, profit: 200, market: 950, cr: 0.6, dr: 0.5, cpa: 150, conv: 100 }));
+  ok(sg.some((x) => /lose/.test(x[1])) && sg.some((x) => /market price to at least EGP 1,035/.test(x[1])) && sg.some((x) => /NDR to/.test(x[1])), "suggestions: lower CPA / raise price to 1,035 (150 ÷ 0.3 + 535) / lift NDR");
   // API
   let r = await call("/api/login", { method: "POST", body: { email: "owner@shop.com", password: "GoodPassw0rd!" } }); const cookie = r.cookie;
   r = await call("/api/cpa/sku?sku=A", { cookie });
-  ok(r.j.item && r.j.item.price === 735 && r.j.item.profit === 200 && r.j.item.src === "product" && Math.abs(r.j.item.productNdr - 0.3) < 1e-9, "SKU lookup: Taager price / profit + product CR/DR");
+  ok(r.j.item && r.j.item.price === 735 && r.j.item.profit === 200 && r.j.item.src === "product" && Math.abs(r.j.item.productNdr - 0.3) < 1e-9 && "asp" in r.j.item, "SKU lookup: Taager price / profit + product CR / DR + Placed ASP");
   r = await call("/api/cpa", { method: "POST", cookie, body: { rows: [{ sku: "A", n: "Alpha", price: 735, profit: 200, market: 950, cpa: 80, conv: 50 }] } });
   ok(r.status === 200 && sent.some((x) => x.sync && x.mid === "1001" && x.rows.length === 1), "plan saved and shared with the Taager team (per merchant ID)");
   r = await call("/api/cpa", { cookie });

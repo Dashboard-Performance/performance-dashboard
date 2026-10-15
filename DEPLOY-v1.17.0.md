@@ -201,6 +201,82 @@ Diagnose (السبب) ──► Route (السكشن → التيم من Users & 
 
 لو الإيميل موصلش، آخر غلطة بتتسجل في KV تحت `pwreset:lastError`.
 
+## حماية الأرقام من رفرش ناقص (Last good copy)
+
+كل مصادر Metabase بتعدّي على الـ Worker. الـ Worker بيحتفظ بآخر نسخة سليمة من كل مصدر. **لو حصلت حاجة من دول، الداشبورد يعرض آخر نسخة سليمة بدل الأرقام البايظة:**
+- Metabase وقع، أو عمل timeout، أو رجّع Error / صفحة HTML / JSON فيه error.
+- عدد الصفوف الكلي نزل أكتر من **15%**.
+- **(Main)** أي شهر كان موجود في النسخة السليمة صفوفه نزلت أكتر من **10%** مرة واحدة. أقدم شهر مستثنى، لأنه طبيعي يطلع من الـ Query.
+
+ولما ده يحصل:
+- تحت على الشمال هيظهر: **"⚠ Cached from <التاريخ والساعة> — Main: the source returned incomplete data (2026-10 rows fell from … to …)"**، والنقطة الخضرا هتبقى برتقالي.
+- لما Metabase يرجع سليم، الداشبورد بيرجع Live لوحده.
+- الـ Command Loop engine بيستخدم نفس الحماية، فمش هيعمل تاسكات من داتا ناقصة، وهيكتب Warning في الـ Engine.
+- **لو النقص حقيقي** (مثلاً الـ Query اتغيرت عن قصد): لو نفس النتيجة الأصغر فضلت ثابتة **12 ساعة**، بتتقبل لوحدها. أو تقدر تقبلها فوراً:
+  `<WORKER_URL>/?action=metabaseAccept&gid=2099497960&email=<owner email>`
+- **حالة كل مصدر:** آخر نسخة سليمة وآخر مشكلة:
+  `<WORKER_URL>/?action=metabaseStatus`
+
+## RE-CPA: الحسبة الجديدة
+
+لما الـ ACM يضيف SKU، الأرقام دي بتتملى لوحدها:
+- **CR% و DR% و NDR%:** بتوع **المنتج** (كل الميرشنتات).
+- **Selling price و Profit:** من شيت Products.
+- **Placed ASP:** الـ Placed GMV ÷ الـ Placed pieces بتاع المنتج.
+
+الحسبة:
+```
+Margin / piece = AVE Market − (Selling price − Profit)
+Max CPA        = Margin / piece × NDR
+```
+- لو الـ AVE Market فاضي، بيتحسب بالـ Placed ASP.
+- الـ Shipping 99 مبقاش بيتطرح.
+
+## تاسكات أقل وأهم + تاسكات Overall
+
+**فلاتر الجودة** (من Control ← Command Loop ← Diagnose & tasks ← Fewer, more important tasks):
+- **أقل حاجة 2,000 جنيه/يوم في خطر:** أي تاسك أقل من كده مش بيتعمل. ده مش بيطبق على الـ Lock requests والتاسكات اليدوية.
+- **الوقعة لازم تبان يومين ورا بعض:** لو يوم واحد وحش بس، مفيش تاسك.
+- **أقصى 30 تاسك جديدة في الـ Run:** الأكبر في الجنيه/يوم الأول، والباقي يستنى الـ Run اللي بعده.
+- **اتقفل افتراضياً:**
+  - Match dropped (الميرشنت × SKU): بدلها بقت Merchant dropped، حتى لو SKU واحد بس هو السبب.
+  - Partial watch.
+- **CM3 down على الـ SKU لسه شغالة**، والـ PPM اتضافت جنبها.
+- **التاسكات المفتوحة اللي من الأنواع دي ومحدش اشتغل عليها هتتقفل لوحدها في الـ Run الجاي.**
+
+**تاسكات جديدة:**
+- **PPM / piece below target** (لفريق Commercial، سكشن CM3 Analyst / Products):
+  - الـ PPM لكل قطعة اتسلمت، من D6 لـ D12، أقل من 80% من "Target PPM Pieces" بتاع الكاتيجوري في Category Targets.
+  - لازم يكون فيه 30 قطعة اتسلمت على الأقل في الأسبوع.
+- **Category down (overall)** (لفريق Commercial، سكشن Targets): الكاتيجوري كلها نازلة بنفس الـ Scoring، ومعاها أكتر SKUs نازلة.
+- **ACM portfolio down (overall)** (للـ ACM نفسه، سكشن Performance ACM): كل ميرشنتات الـ ACM مع بعض نازلين، ومعاها أكتر ميرشنتات نازلة.
+
+**جوه التاسك:** فوق خالص بيظهر الـ SKU والـ Merchant ID والـ ACM والكاتيجوري، وتقدر تدوس على أي واحد منهم عشان تنسخه.
+
+## مين بياخد التاسك (Team) + الـ Suggested lock
+
+**التاسك بتروح للفريق صاحب السكشن، مش لكل اللي بيفتح الصفحة.** كل سكشن تابع لفريق من الفرق اللي في الـ Sidebar:
+- **Marketplace:** Availability Locking وInventory وDecline Matches...
+- **Commercial:** Analyst / Products...
+- **Supply Chain:** Planner DOH...
+- **Account Manager:** Merchant Performance...
+
+الـ Owners هم الناس اللي الـ Role بتاعهم في Users & Roles هو اسم الفريق ده (أو فيه اسم الفريق، زي "Marketplace Lead"). فلو الـ ACM بيفتح صفحة Availability Locking، تاسكات الـ Lock مش هتروحله.
+
+- لو مفيش ولا واحد بالـ Role ده، التاسك بترجع للقاعدة القديمة (كل اللي بيفتح الصفحة).
+- تقدر تغيّر الفريق لأي سبب من **Control ← Command Loop ← Routing ← Team**. اختيار **Auto** معناه إن الفريق بيتحدد من السكشن.
+
+**الـ Suggested increase للـ Lock:**
+```
+Needed   = Avg placed/day × 7 − Lock left
+Kept     = لكل Seller تاني على نفس الـ Single: الأكبر بين (Confirmed/day × 7) و(Lock left بتاعه × CR)
+Free     = Stock − Kept
+Max      = Free ÷ Product CR − Lock left
+Suggest  = الأقل بين Needed و Max
+```
+- لو الاقتراح اتحدد بالستوك، هيظهر جنبه "(capped by stock)".
+- لو مفيش ستوك فاضي، الاقتراح هيبقى 0 ومكتوب جنبه "raise PO / transfer first".
+
 ## ملاحظات
 
 - **الأعمدة بتتقري بالاسم** (CREATION_DATE, TAGER_ID, PRODUCT_ID, PLACED_PIECES, CONFIRMED_PIECES, DELIVERED_PIECES, PLACED_GMV, CM3, ACM …). ولو الاسم مش موجود، بيرجع لنفس مكان العمود اللي `js/app.js` بيقراه.

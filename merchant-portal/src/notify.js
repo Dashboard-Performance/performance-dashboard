@@ -170,7 +170,7 @@ export function createNotify(H) {
   async function cpaCfg(env) { const meta = JSON.parse((await env.PORTAL_KV.get("ntf:meta")) || "null"); return (meta && meta.cfg && meta.cfg.cpa) || { shipping: 99, safetyPct: 20, minOwnPieces: 20, showProductAverages: true, portal: true }; }
   async function cpaGuard(env) { const c = await cpaCfg(env); if (c.portal === false) throw new H.HttpError(403, "RE-CPA is not available right now."); return c; }
   async function cpaGet(env, a) { const c = await cpaGuard(env); const t = await env.PORTAL_KV.get("cpa:" + H.normEmail(a.email)); return H.json({ cfg: c, plan: t ? JSON.parse(t) : null }); }
-  const CPA_KEYS = ["sku", "n", "price", "profit", "cr", "dr", "src", "productNdr", "ndrOverride", "market", "cpa", "conv"];
+  const CPA_KEYS = ["sku", "n", "price", "profit", "asp", "cr", "dr", "src", "productNdr", "ndrOverride", "market", "cpa", "conv"];
   async function cpaSave(request, env, a) {
     await cpaGuard(env);
     const b = await H.body(request);
@@ -191,8 +191,9 @@ export function createNotify(H) {
     let item = null; try { item = (await dash(env, "loopPortalCatalog", { sku: want })).item; } catch (e) {}
     if (!item && !name) return H.json({ item: null });
     const prodNdr = item && item.cr != null && item.dr != null ? item.cr * item.dr : null;
-    const pick = own || (item && item.cr != null ? { cr: item.cr, dr: item.dr } : { cr: null, dr: null });
-    return H.json({ item: { sku: want, n: (item && item.n) || name, price: item && item.price != null ? item.price : pr, profit: item && item.profit != null ? item.profit : pf, cr: pick.cr, dr: pick.dr, src: own ? "merchant" : item && item.cr != null ? "product" : "", productNdr: prodNdr } });
+    // CR / DR / NDR = the PRODUCT's numbers (own rates only when the dashboard hides product averages)
+    const pick = item && item.cr != null ? { cr: item.cr, dr: item.dr } : own || { cr: null, dr: null };
+    return H.json({ item: { sku: want, n: (item && item.n) || name, price: item && item.price != null ? item.price : pr, profit: item && item.profit != null ? item.profit : pf, asp: item && item.asp != null ? item.asp : null, cr: pick.cr, dr: pick.dr, src: item && item.cr != null ? "product" : own ? "merchant" : "", productNdr: prodNdr } });
   }
   async function cpaLookup(url, env, a) {
     await cpaGuard(env);

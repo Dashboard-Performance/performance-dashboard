@@ -726,3 +726,11 @@ body.tw-mscope .ov-row:has(#ovStTrendChart), body.tw-mscope .ov-row:has(#ovStock
 .lp-test b { color: var(--orange); margin-right: 6px; }
 .lp-testcard.on { border-color: color-mix(in srgb, var(--orange) 55%, var(--line)); }
 .lp-testcard .tw-row { display: flex; gap: 12px; align-items: flex-start; }
+/* v1.17 — IDs at the top of a task (click to copy) */
+.lp-ids { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.lp-id { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 10px; border: 1px solid var(--line2); border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+.lp-id span { opacity: .65; }
+.lp-id b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+.lp-id:hover { border-color: currentColor; }
+.lp-id.ok { border-color: #16a34a; }
+.lp-id.ok::after { content: "copied"; font-size: 11px; color: #16a34a; }
