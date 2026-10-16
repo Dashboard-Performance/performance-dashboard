@@ -268,11 +268,11 @@ SUM(Quantity) لكل Product Code، للصفوف اللي Product Condition Retu
 
 الحسبة:
 ```
-Margin / piece = AVE Market − (Selling price − Profit)
+Margin / piece = AVE Market − 99 (شحن) − (Selling price − Profit)
 Max CPA        = Margin / piece × NDR
 ```
 - لو الـ AVE Market فاضي، بيتحسب بالـ Placed ASP.
-- الـ Shipping 99 مبقاش بيتطرح.
+- الـ 99 بتاعة الشحن بتتطرح، وتقدر تغيّرها من Control ← Command Loop ← RE-CPA.
 
 ## تاسكات أقل وأهم + تاسكات Overall
 

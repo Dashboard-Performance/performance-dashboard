@@ -5,7 +5,7 @@
    The math (per SKU row):
      CR / DR / NDR, Selling price, Profit = the product's own numbers (filled in when the SKU is added)
      Placed ASP                           = the product's placed GMV ÷ placed pieces (what merchants really sell it at)
-     Margin per delivered piece           = AVE Market − (Selling price − Profit)      ← "Top up for pic"
+     Margin per delivered piece           = AVE Market − shipping (99) − (Selling price − Profit)      ← "Top up for pic"
                                             (AVE Market empty → the product's Placed ASP is used)
      NDR                                  = CR × DR   (or typed in)
      Max CPA (break-even)                 = Margin × NDR      → paying more than this per conversion loses money
@@ -22,15 +22,16 @@
   function calc(r, cfg) {
     cfg = cfg || {};
     var safety = n(cfg.safetyPct); if (safety == null) safety = 20;
+    var ship = n(cfg.shipping); if (ship == null) ship = 99;
     var price = n(r.price), profit = n(r.profit), market = n(r.market), asp = n(r.asp), cpa = n(r.cpa), conv = n(r.conv);
     var cr = pct(r.cr), dr = pct(r.dr), ndrIn = pct(r.ndrOverride);
     var ndr = ndrIn != null ? ndrIn : (cr != null && dr != null ? cr * dr : null);
-    var o = { price: price, profit: profit, market: market, cpa: cpa, conv: conv, ndr: ndr, ndrManual: ndrIn != null, safety: safety };
+    var o = { price: price, profit: profit, market: market, cpa: cpa, conv: conv, ndr: ndr, ndrManual: ndrIn != null, safety: safety, ship: ship };
     o.asp = asp;                                                     // product's Placed ASP (reference)
     o.sellAt = market != null ? market : asp;                        // AVE Market, or the Placed ASP when not typed
     o.marketFromAsp = market == null && asp != null;
     o.cost = price != null && profit != null ? price - profit : null; // what one piece costs the merchant
-    o.margin = o.sellAt != null && o.cost != null ? o.sellAt - o.cost : null;
+    o.margin = o.sellAt != null && o.cost != null ? o.sellAt - ship - o.cost : null; // the customer's shipping fee is not the merchant's money
     o.maxCpa = o.margin != null && ndr != null ? o.margin * ndr : null;
     o.safeCpa = o.maxCpa != null ? o.maxCpa * (1 - safety / 100) : null;
     o.spend = cpa != null && conv != null ? cpa * conv : null;
@@ -40,7 +41,7 @@
     o.perConv = o.margin != null && ndr != null && cpa != null ? ndr * o.margin - cpa : null;
     o.roi = o.spend ? o.net / o.spend : null;
     o.breakEvenNdr = cpa != null && o.margin > 0 ? cpa / o.margin : null;
-    o.breakEvenMarket = cpa != null && ndr > 0 && o.cost != null ? cpa / ndr + o.cost : null;
+    o.breakEvenMarket = cpa != null && ndr > 0 && o.cost != null ? cpa / ndr + o.cost + ship : null;
     if (o.margin == null || ndr == null) o.status = "incomplete";
     else if (o.margin <= 0) o.status = "noMargin";
     else if (cpa == null) o.status = "noCpa";
@@ -60,7 +61,7 @@
     if (o.marketFromAsp) s.push(["", "AVE Market is empty — using the product's Placed ASP " + money(o.asp) + ". Type the merchant's real selling price for an exact Max CPA."]);
     if (o.margin <= 0) {
       s.push(["bad", "At " + money(o.sellAt) + " the merchant earns " + money(o.margin) + " on each delivered piece — any ad spend is a loss."]);
-      s.push(["", "Sell above " + money(o.cost) + " (selling price − profit) to have a margin at all."]);
+      s.push(["", "Sell above " + money(o.cost + o.ship) + " (selling price − profit + " + money(o.ship) + " shipping) to have a margin at all."]);
       return s;
     }
     if (o.cpa == null) s.push(["", "Keep your CPA under " + money(o.safeCpa) + " (safe) — never above " + money(o.maxCpa) + " (break-even)."]);
@@ -108,7 +109,7 @@
     function inp(i, k, v, w) { return '<input class="cpa-in cpa-w' + (w || 8) + '" data-i="' + i + '" data-k="' + k + '" inputmode="decimal" value="' + esc(v == null ? "" : v) + '">'; }
     function draw() {
       var c = cfg(), tot = { spend: 0, net: 0, losing: 0, n: rows.length, conv: 0 };
-      $q(".cpa-cfgnote").textContent = "Safety " + (c.safetyPct == null ? 20 : c.safetyPct) + "%";
+      $q(".cpa-cfgnote").textContent = "Shipping " + (c.shipping == null ? 99 : c.shipping) + " · safety " + (c.safetyPct == null ? 20 : c.safetyPct) + "%";
       $q(".cpa-body").innerHTML = rows.map(function (r, i) {
         var o = calc(r, c), st = STATUS[o.status];
         if (o.spend) tot.spend += o.spend; if (o.net != null) tot.net += o.net; if (o.status === "losing" || o.status === "noMargin") tot.losing++; if (o.conv) tot.conv += o.conv;
@@ -122,7 +123,7 @@
           '<td><span class="tw-pill ' + st[1] + '" data-c="status">' + st[0] + '</span></td><td><button type="button" class="tw-x cpa-rm" data-rm="' + i + '" aria-label="Remove">✕</button></td></tr>';
       }).join("") || '<tr><td colspan="18" class="tw-muted cpa-empty">Add a SKU to start. CR / DR / NDR, price, profit and Placed ASP fill in by themselves — you type AVE Market, Actual CPA and Conversions.</td></tr>';
       $q(".cpa-kpis").innerHTML = [["SKUs", tot.n], ["Conversions", Math.round(tot.conv).toLocaleString("en-US")], ["Ad spend", money(tot.spend)], ["Net profit", money(tot.net)], ["Losing SKUs", tot.losing]].map(function (k, i) { return '<div class="tw-stat"><span>' + k[0] + '</span><b class="' + (i === 3 ? (tot.net < 0 ? "cpa-neg" : "cpa-pos") : i === 4 && tot.losing ? "cpa-neg" : "") + '">' + k[1] + "</b></div>"; }).join("");
-      $q(".cpa-foot").textContent = "Margin / piece = AVE Market − (Selling price − Profit); empty AVE Market uses the Placed ASP. Max CPA = margin × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
+      $q(".cpa-foot").textContent = "Margin / piece = AVE Market − " + (cfg().shipping == null ? 99 : cfg().shipping) + " shipping − (Selling price − Profit); empty AVE Market uses the Placed ASP. Max CPA = margin × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
       detail();
     }
     function refreshRow(i) { // update computed cells without rebuilding the inputs (keeps focus while typing)
