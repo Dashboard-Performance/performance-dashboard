@@ -1,5 +1,5 @@
 /* Merchants → RE-CPA (v1.17.0). Staff adapter for js/cpa-core.js:
-   price / profit from the Products sheet; CR / DR / NDR and Placed ASP = the PRODUCT's numbers from the Main rows
+   price / profit from the Products sheet; CR / DR / NDR and Delivered ASP = the PRODUCT's numbers from the Main rows
    (all merchants, last rateDays days; DR on the matured rows); plans saved per merchant on the Worker (and the merchant's own plan from the portal). */
 (function () {
   "use strict";
@@ -13,15 +13,15 @@
   function rates(sku, mid) {
     var rows = rowsAll(), latest = 0; rows.forEach(function (r) { if (r.timestamp > latest) latest = r.timestamp; });
     var c = cfg(), from = latest - (c.rateDays || 30) * 864e5, matured = latest - 5 * 864e5;
-    var P = { p: 0, c: 0, c2: 0, d2: 0, g: 0 }, M = { p: 0, c: 0, c2: 0, d2: 0, g: 0 }, name = "";
+    var P = { p: 0, c: 0, c2: 0, d2: 0, g: 0, dl: 0 }, M = { p: 0, c: 0, c2: 0, d2: 0, g: 0, dl: 0 }, name = "";
     rows.forEach(function (r) {
       if (r.sku !== sku || r.timestamp < from) return;
       var acc = [P]; if (mid && String(r.merchantId) === String(mid)) acc.push(M);
-      acc.forEach(function (a) { a.p += r.placedPieces || 0; a.g += r.placedGmv || 0; a.c += r.confirmedPieces || 0; if (r.timestamp <= matured) { a.c2 += r.confirmedPieces || 0; a.d2 += r.deliveredPieces || 0; } });
+      acc.forEach(function (a) { a.p += r.placedPieces || 0; a.g += r.deliveredGmv || 0; a.dl += r.deliveredPieces || 0; a.c += r.confirmedPieces || 0; if (r.timestamp <= matured) { a.c2 += r.confirmedPieces || 0; a.d2 += r.deliveredPieces || 0; } });
     });
     var rate = function (a) { return { cr: a.p > 0 ? a.c / a.p : null, dr: a.c2 > 0 ? a.d2 / a.c2 : null }; };
     var pr = rate(P), mr = rate(M), own = mid && M.p >= (c.minOwnPieces || 20) && mr.cr != null && mr.dr != null;
-    return { own: own ? mr : null, product: pr, asp: P.p > 0 ? P.g / P.p : null };
+    return { own: own ? mr : null, product: pr, asp: P.dl > 0 ? P.g / P.dl : null }; // Delivered ASP = delivered GMV ÷ delivered pieces
   }
   function lookupRates(sku) {
     var mid = cur.mid, prod = (st().productsMap || {})[sku], inv = (st().inventoryMap || {})[sku];
@@ -51,7 +51,7 @@
     handle = window.TaagerCpa.mount(host, {
       esc: esc, cfg: cfg,
       title: "RE-CPA · Max CPA calculator",
-      sub: "Add a SKU: the product's CR / DR / NDR, selling price, profit and Placed ASP fill in. Type AVE Market, Actual CPA and Conversions — Max CPA is automatic, above it the merchant loses money.",
+      sub: "Add a SKU: the product's CR / DR / NDR, selling price, profit and Delivered ASP fill in. Type AVE Market, Actual CPA and Conversions — Max CPA is automatic, above it the merchant loses money.",
       extraHead: '<input id="cpaMid" list="cpaMidList" placeholder="Merchant ID or name (empty = general plan)" value="' + esc(cur.mid) + '"><datalist id="cpaMidList">' + ms.slice(0, 3000).map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + "</option>"; }).join("") + '</datalist><button type="button" class="btn" id="cpaOpen">Open plan</button><button type="button" class="btn" id="cpaMerchant" disabled>Merchant\'s own plan</button>',
       onHead: function (h) {
         h.querySelector("#cpaOpen").onclick = function () { var v = h.querySelector("#cpaMid").value.trim(); var m = ms.filter(function (x) { return x.id === v || x.name.toLowerCase() === v.toLowerCase(); })[0]; cur.mid = m ? m.id : v.replace(/[^0-9A-Za-z_-]/g, ""); cur.source = "staff"; handle.reload(); };

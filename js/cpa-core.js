@@ -4,9 +4,9 @@
 
    The math (per SKU row):
      CR / DR / NDR, Selling price, Profit = the product's own numbers (filled in when the SKU is added)
-     Placed ASP                           = the product's placed GMV ÷ placed pieces (what merchants really sell it at)
+     Delivered ASP                        = the product's delivered GMV ÷ delivered pieces (what customers really paid)
      Margin per delivered piece           = AVE Market − shipping (99) − (Selling price − Profit)      ← "Top up for pic"
-                                            (AVE Market empty → the product's Placed ASP is used)
+                                            (AVE Market empty → the product's Delivered ASP is used)
      NDR                                  = CR × DR   (or typed in)
      Max CPA (break-even)                 = Margin × NDR      → paying more than this per conversion loses money
      Safe CPA                             = Max CPA × (1 − safety %)
@@ -27,8 +27,8 @@
     var cr = pct(r.cr), dr = pct(r.dr), ndrIn = pct(r.ndrOverride);
     var ndr = ndrIn != null ? ndrIn : (cr != null && dr != null ? cr * dr : null);
     var o = { price: price, profit: profit, market: market, cpa: cpa, conv: conv, ndr: ndr, ndrManual: ndrIn != null, safety: safety, ship: ship };
-    o.asp = asp;                                                     // product's Placed ASP (reference)
-    o.sellAt = market != null ? market : asp;                        // AVE Market, or the Placed ASP when not typed
+    o.asp = asp;                                                     // product's Delivered ASP (reference)
+    o.sellAt = market != null ? market : asp;                        // AVE Market, or the Delivered ASP when not typed
     o.marketFromAsp = market == null && asp != null;
     o.cost = price != null && profit != null ? price - profit : null; // what one piece costs the merchant
     o.margin = o.sellAt != null && o.cost != null ? o.sellAt - ship - o.cost : null; // the customer's shipping fee is not the merchant's money
@@ -58,7 +58,7 @@
   function suggestions(r, o) {
     var s = [];
     if (o.status === "incomplete") { s.push(["", "Add the price, profit, AVE Market and CR/DR (or type the NDR) to see the numbers."]); return s; }
-    if (o.marketFromAsp) s.push(["", "AVE Market is empty — using the product's Placed ASP " + money(o.asp) + ". Type the merchant's real selling price for an exact Max CPA."]);
+    if (o.marketFromAsp) s.push(["", "AVE Market is empty — using the product's Delivered ASP " + money(o.asp) + ". Type the merchant's real selling price for an exact Max CPA."]);
     if (o.margin <= 0) {
       s.push(["bad", "At " + money(o.sellAt) + " the merchant earns " + money(o.margin) + " on each delivered piece — any ad spend is a loss."]);
       s.push(["", "Sell above " + money(o.cost + o.ship) + " (selling price − profit + " + money(o.ship) + " shipping) to have a margin at all."]);
@@ -78,7 +78,7 @@
       s.push(["good", "Healthy: " + money(o.perConv) + " profit per conversion, " + money(o.maxCpa - o.cpa) + " of room below Max CPA."]);
       s.push(["", "Room to scale: every extra 100 conversions ≈ " + money(o.perConv * 100) + " more profit, if CPA holds."]);
     }
-    if (o.market != null && o.asp != null && o.market < o.asp * 0.9) s.push(["warn", "AVE Market " + money(o.market) + " is under the product's Placed ASP " + money(o.asp) + " — other merchants sell it higher."]);
+    if (o.market != null && o.asp != null && o.market < o.asp * 0.9) s.push(["warn", "AVE Market " + money(o.market) + " is under the product's Delivered ASP " + money(o.asp) + " — other merchants sell it higher."]);
     if (r.productNdr != null && o.ndr != null && !o.ndrManual && r.src === "merchant" && o.ndr < r.productNdr * 0.9) s.push(["warn", "Your NDR " + p1(o.ndr) + " is below the product average " + p1(r.productNdr) + " — the gap is in confirmation / delivery, not the ads."]);
     if (r.src === "product" && !o.ndrManual) s.push(["", "CR / DR / NDR are the product's numbers. Type the merchant's real NDR to override."]);
     return s;
@@ -99,7 +99,7 @@
       '<div class="cpa-actions">' + (A.extraHead || "") + '</div></div>' +
       '<div class="cpa-add"><input class="cpa-in-sku" list="cpaSkuList" placeholder="Add SKU (e.g. EG030107CLAN99)" autocomplete="off"><datalist id="cpaSkuList"></datalist><button type="button" class="btn btn-primary cpa-addbtn">Add SKU</button><span class="cpa-grow"></span><span class="tw-muted cpa-cfgnote"></span><button type="button" class="btn cpa-save">Save</button><button type="button" class="btn cpa-csv">Export CSV</button><span class="tw-msg cpa-msg"></span></div></div>' +
       '<div class="tw-stats cpa-kpis"></div><div class="tw-card cpa-tablecard"><div class="tw-scroll"><table class="tw-table cpa-table"><thead><tr>' +
-      ["SKU", "Product", "CR", "DR", "NDR", "Taager price", "Profit", "AVE Market", "Placed ASP", "Margin / piece", "Actual CPA", "Max CPA", "Safe CPA", "Conversions", "Ad spend", "Net profit", "Status", ""].map(function (h, i) { return "<th" + (i >= 2 && i <= 15 ? ' class="r"' : "") + ">" + h + "</th>"; }).join("") +
+      ["SKU", "Product", "CR", "DR", "NDR", "Taager price", "Profit", "AVE Market", "Delivered ASP", "Margin / piece", "Actual CPA", "Max CPA", "Safe CPA", "Conversions", "Ad spend", "Net profit", "Status", ""].map(function (h, i) { return "<th" + (i >= 2 && i <= 15 ? ' class="r"' : "") + ">" + h + "</th>"; }).join("") +
       '</tr></thead><tbody class="cpa-body"></tbody></table></div><div class="tw-muted cpa-foot"></div></div><div class="tw-card cpa-detail"></div></div>';
     var $q = function (c) { return host.querySelector(c); };
     if (A.onHead) A.onHead(host);
@@ -121,9 +121,9 @@
           '<td class="r cpa-c cpa-max" data-c="maxCpa">' + money(o.maxCpa) + '</td><td class="r cpa-c" data-c="safeCpa">' + money(o.safeCpa) + '</td><td class="r">' + inp(i, "conv", r.conv, 6) + '</td>' +
           '<td class="r cpa-c" data-c="spend">' + money(o.spend) + '</td><td class="r cpa-c cpa-net ' + (o.net < 0 ? "neg" : o.net > 0 ? "pos" : "") + '" data-c="net">' + money(o.net) + '</td>' +
           '<td><span class="tw-pill ' + st[1] + '" data-c="status">' + st[0] + '</span></td><td><button type="button" class="tw-x cpa-rm" data-rm="' + i + '" aria-label="Remove">✕</button></td></tr>';
-      }).join("") || '<tr><td colspan="18" class="tw-muted cpa-empty">Add a SKU to start. CR / DR / NDR, price, profit and Placed ASP fill in by themselves — you type AVE Market, Actual CPA and Conversions.</td></tr>';
+      }).join("") || '<tr><td colspan="18" class="tw-muted cpa-empty">Add a SKU to start. CR / DR / NDR, price, profit and Delivered ASP fill in by themselves — you type AVE Market, Actual CPA and Conversions.</td></tr>';
       $q(".cpa-kpis").innerHTML = [["SKUs", tot.n], ["Conversions", Math.round(tot.conv).toLocaleString("en-US")], ["Ad spend", money(tot.spend)], ["Net profit", money(tot.net)], ["Losing SKUs", tot.losing]].map(function (k, i) { return '<div class="tw-stat"><span>' + k[0] + '</span><b class="' + (i === 3 ? (tot.net < 0 ? "cpa-neg" : "cpa-pos") : i === 4 && tot.losing ? "cpa-neg" : "") + '">' + k[1] + "</b></div>"; }).join("");
-      $q(".cpa-foot").textContent = "Margin / piece = AVE Market − " + (cfg().shipping == null ? 99 : cfg().shipping) + " shipping − (Selling price − Profit); empty AVE Market uses the Placed ASP. Max CPA = margin × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
+      $q(".cpa-foot").textContent = "Margin / piece = AVE Market − " + (cfg().shipping == null ? 99 : cfg().shipping) + " shipping − (Selling price − Profit); empty AVE Market uses the Delivered ASP. Max CPA = margin × NDR (break-even). Safe CPA keeps a " + (cfg().safetyPct == null ? 20 : cfg().safetyPct) + "% cushion. NDR: type it to override CR × DR.";
       detail();
     }
     function refreshRow(i) { // update computed cells without rebuilding the inputs (keeps focus while typing)
@@ -175,7 +175,7 @@
     var lt = 0; $q(".cpa-in-sku").addEventListener("input", function () { var q = this.value.trim(); clearTimeout(lt); if (q.length < 3 || !A.lookup) return; lt = setTimeout(function () { A.lookup(q).then(function (list) { var dl = $q("#cpaSkuList"); dl.innerHTML = (list || []).slice(0, 30).map(function (o) { return '<option value="' + esc(o.sku) + '">' + esc(o.n || "") + "</option>"; }).join(""); }).catch(function () {}); }, 250); });
     $q(".cpa-save").onclick = function () { msg("Saving…"); A.save(rows.map(clean)).then(function () { dirty = false; msg("Saved ✓", "ok"); }).catch(function (e) { msg(e.message, "err"); }); };
     $q(".cpa-csv").onclick = function () {
-      var c = cfg(), H = ["SKU", "Product", "CR", "DR", "NDR", "Selling Price", "Profit", "AVE Market", "Placed ASP", "Top Up for pic", "Actual CPA", "Max CPA", "Safe CPA", "Num of Conversion", "Cost Of Total Orders", "NET Profit", "Status"];
+      var c = cfg(), H = ["SKU", "Product", "CR", "DR", "NDR", "Selling Price", "Profit", "AVE Market", "Delivered ASP", "Top Up for pic", "Actual CPA", "Max CPA", "Safe CPA", "Num of Conversion", "Cost Of Total Orders", "NET Profit", "Status"];
       var q = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }, r2 = function (v) { return v == null ? "" : Math.round(v * 100) / 100; };
       var csv = H.join(",") + "\n" + rows.map(function (r) { var o = calc(r, c); return [r.sku, r.n, r2(pct(r.cr)), r2(pct(r.dr)), r2(o.ndr), r2(o.price), r2(o.profit), r2(o.market), r2(o.asp), r2(o.margin), r2(o.cpa), r2(o.maxCpa), r2(o.safeCpa), r2(o.conv), r2(o.spend), r2(o.net), STATUS[o.status][0]].map(q).join(","); }).join("\n");
       var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" })); a.download = "re-cpa.csv"; document.body.appendChild(a); a.click(); a.remove();

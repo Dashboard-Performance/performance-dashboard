@@ -13605,7 +13605,40 @@ function dwApplySendVisibility() {
   let email = "";
   try { const u = (typeof getLoggedInUser === "function") ? getLoggedInUser() : null; email = String((u && u.email) || "").trim().toLowerCase(); } catch (e) {}
   const show = DW_OWNER_EMAILS.indexOf(email) !== -1;
-  ["dwSendBtn", "dwSendStatus"].forEach(id => { const el = $(id); if (el) el.style.display = show ? "" : "none"; });
+  ["dwSendBtn", "dwSendStatus", "dwTestBtn"].forEach(id => { const el = $(id); if (el) el.style.display = show ? "" : "none"; });
+  if (show) dwLoadAutoStatus();
+}
+// v1.17.0 — test: the dashboard builds today's daily email and sends it ONLY to the signed-in owner
+async function dwTestDailyEmail() {
+  const btn = $("dwTestBtn"), st = $("dwSendStatus"), C = window.TowerCore;
+  if (!C || !C.wfetch || !st) return;
+  let email = ""; try { const u = getLoggedInUser(); email = String((u && u.email) || "").trim().toLowerCase(); } catch (e) {}
+  st.dataset.busy = "1"; st.style.color = ""; st.textContent = "Building today's email and sending it to " + email + " only… (up to 2 minutes)";
+  if (btn) btn.disabled = true;
+  try {
+    const j = await C.wfetch("declineDigestSend", { timeout: 240000 }, "&test=1&email=" + encodeURIComponent(email));
+    if (j && j.state === "sent") { st.textContent = "Test sent to " + (j.to || [email]).join(", ") + (j.via === "relay" ? " — via the OLD relay (Resend failed: " + (j.note || "?") + ")" : " — from the dashboard (" + "no-reply@mail.taager.app) ✓"); st.style.color = j.via === "relay" ? "#B54708" : "#067647"; }
+    else if (j && j.state === "empty") st.textContent = "No declining matches today — nothing to send.";
+    else throw new Error((j && (j.message || j.state)) || "failed");
+  } catch (e) { st.textContent = "Test failed: " + (e && e.message ? e.message : e); st.style.color = "#B42318"; }
+  finally { if (btn) btn.disabled = false; st.dataset.busy = ""; }
+}
+if ($("dwTestBtn")) $("dwTestBtn").addEventListener("click", dwTestDailyEmail);
+// v1.17.0 — the daily email is sent by the dashboard itself (Worker, 12:00 Cairo). Owners see the last send here.
+let dwAutoLoadedAt = 0;
+function dwLoadAutoStatus() {
+  const st = $("dwSendStatus"), C = window.TowerCore;
+  if (!st || !C || !C.wfetch || Date.now() - dwAutoLoadedAt < 60000 || st.dataset.busy === "1") return;
+  dwAutoLoadedAt = Date.now();
+  C.wfetch("declineDigestStatus").then(j => {
+    if (!j || !j.success || st.dataset.busy === "1") return;
+    const L = j.last, when = L && L.at ? new Date(L.at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+    let t = j.mode === "off" ? "Daily email: OFF" : j.mode === "test" ? "Daily email: TEST mode — the dashboard sends it at " + j.hour + " to " + j.testTo + " only (the team still gets the old email)" : "Daily email: sent by the dashboard at " + j.hour + " to the whole team";
+    if (L && L.state === "sent") t += " · last sent " + when + (L.via === "relay" ? " (via the old relay)" : " (from the dashboard)") + " to " + (L.to ? L.to.join(", ") : L.recipients + " people");
+    else if (L && L.state === "failed") t += " · last try failed " + when + ": " + L.message;
+    else if (L && L.state === "empty") t += " · " + when + ": no declining matches, nothing sent";
+    st.textContent = t; st.style.color = L && L.state === "failed" ? "#B42318" : "";
+  }).catch(() => {});
 }
 
 function renderMpDeclineWatch() {
@@ -13681,6 +13714,7 @@ async function sendDeclineDigestEmail() {
   if (!MATCHES_FEEDBACK_API_URL) { setStatus("Backend is not configured.", "#B42318"); return; }
   const topDrop = dwState.view.reduce((a, x) => a + x.drop, 0);
   if (btn) btn.disabled = true;
+  if (st) st.dataset.busy = "1";
   setStatus("Sending...", "");
   try {
     const resp = await fbFetch(MATCHES_FEEDBACK_API_URL, {
@@ -13711,6 +13745,7 @@ async function sendDeclineDigestEmail() {
     setStatus("Failed: " + (err && err.message ? err.message : err), "#B42318");
   } finally {
     if (btn) btn.disabled = false;
+    if (st) st.dataset.busy = "";
   }
 }
 

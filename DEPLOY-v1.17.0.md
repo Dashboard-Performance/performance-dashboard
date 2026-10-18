@@ -264,14 +264,14 @@ SUM(Quantity) لكل Product Code، للصفوف اللي Product Condition Retu
 لما الـ ACM يضيف SKU، الأرقام دي بتتملى لوحدها:
 - **CR% و DR% و NDR%:** بتوع **المنتج** (كل الميرشنتات).
 - **Selling price و Profit:** من شيت Products.
-- **Placed ASP:** الـ Placed GMV ÷ الـ Placed pieces بتاع المنتج.
+- **Delivered ASP:** الـ Delivered GMV ÷ الـ Delivered pieces بتاع المنتج.
 
 الحسبة:
 ```
 Margin / piece = AVE Market − 99 (شحن) − (Selling price − Profit)
 Max CPA        = Margin / piece × NDR
 ```
-- لو الـ AVE Market فاضي، بيتحسب بالـ Placed ASP.
+- لو الـ AVE Market فاضي، بيتحسب بالـ Delivered ASP.
 - الـ 99 بتاعة الشحن بتتطرح، وتقدر تغيّرها من Control ← Command Loop ← RE-CPA.
 
 ## تاسكات أقل وأهم + تاسكات Overall
@@ -332,3 +332,28 @@ Suggest  = الأقل بين Needed و Max
 cd cloudflare-worker && npm test     # 18 staff gate + 18 password reset + 76 Command Loop + RE-CPA
 cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (حسبة الشيت صف بصف)
 ```
+
+## إيميل Decline Matches اليومي بيتبعت من الداش بورد نفسها
+
+- الـ Worker بيبعت الإيميل كل يوم الساعة 12:00 بتوقيت القاهرة (لو حصلت مشكلة بيعيد المحاولة كل 15 دقيقة، لحد 3 مرات، لحد الساعة 2:59).
+- الـ Apps Script بيبني الإيميل بنفس الداتا ونفس الشكل (action `decline_digest_build`)، والـ Worker بيبعته عن طريق Resend من `Marketplace Dashboard <no-reply@mail.taager.app>`، مش من الجيميل الشخصي.
+- لو Resend فشل أو الـ `RESEND_API_KEY` مش متحط، الإيميل بيتبعت عن طريق الـ relay القديم (`decline_digest_relay`)، فمش هيضيع يوم.
+- **خطوات النشر:**
+  1. حط Code.gs الجديد في الـ Apps Script واعمل Deploy → New version.
+  2. اعمل `npx wrangler deploy` للـ cloudflare-worker.
+  3. شغّل `removeDailyDeclineTrigger()` مرة واحدة في الـ Apps Script عشان تمسح الـ trigger القديم. ولو نسيت، الـ trigger القديم بيشوف إن الداش بورد بعتت الإيميل فمش هيبعته مرتين.
+- في صفحة Decline Matches، الـ owners بيشوفوا آخر إرسال (اتبعت إمتى، وبأنهي طريقة، ولكام شخص).
+- إرسال فوري (owners بس): `?action=declineDigestSend&email=<owner>`.
+- عشان توقفه: `DECLINE_DIGEST = "off"` في wrangler.toml.
+
+## التاسكات بالترتيب: الستوك الأول وبعدين اللوك
+
+- لو مفيش free stock (يعني الستوك ناقص منه اللي محجوز للسيلرز التانيين = 0)، مبيطلعش تاسك **Lock running out** لـ Marketplace، لأن زيادة اللوك وقتها مش هتفرق.
+- بدل كده، اللوك ده بيظهر جوه تاسك الستوك بتاع Supply Chain (Stock running out / Out of stock)، في جدول "Locks waiting for this stock" فيه التاجر والـ ACM واللوك الباقي والمطلوب لـ 7 أيام. ولو مفيش تاسك ستوك أصلاً للمنتج ده (مثلاً الستوك كله محجوز لسيلرز تانيين)، بيتعمل تاسك Stock running out جديد لـ Supply Chain.
+- أول ما الستوك يوصل ويبقى فيه free stock، تاسك اللوك بيفتح لوحده لـ Marketplace، والـ Suggested increase بيتحسب على الستوك الجديد.
+- **التاسكات اللي كانت مفتوحة:**
+  - لو محدش لمسها: بتتقفل وفيها "On hold — no free stock. Supply Chain first".
+  - لو حد شغال عليها: بتفضل موجودة بس بتتحول لـ **waiting** على تاسك الستوك، وترجع open أول ما تاسك الستوك يتقفل.
+- **الإعدادات** (Loop → Settings → Locks):
+  - "Stock first" (شغال افتراضياً).
+  - "Open the lock task when it can be raised by at least" (الافتراضي 1).
