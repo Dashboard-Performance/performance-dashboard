@@ -357,3 +357,11 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 - **الإعدادات** (Loop → Settings → Locks):
   - "Stock first" (شغال افتراضياً).
   - "Open the lock task when it can be raised by at least" (الافتراضي 1).
+
+## إيميل Decline Matches على الموبايل
+
+- على الموبايل والشاشات اللي أقل من 900px، الجدول الواسع بيتخفى، ومكانه بيظهر كارت لكل ماتش: الـ SKU، والتاجر، والـ ACM، والـ Drop، والـ Lost GMV، والـ Stock، والـ Locked، والسبب.
+- كروت الأرقام اللي فوق بقت 2 في كل صف على الموبايل، و4 على الكمبيوتر.
+- على الكمبيوتر الإيميل زي ما هو، بس بقى أعرض شوية (1200px) عشان الجدول ميتزنقش.
+- حجم الإيميل ~73KB، أقل من حد Gmail (102KB) اللي بعده بيقص الإيميل.
+- التعديل في `Code.gs` بس. اعمله **Deploy → New version** ومحتاجش Worker deploy.
