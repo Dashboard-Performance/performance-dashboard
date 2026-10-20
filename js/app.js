@@ -4631,6 +4631,20 @@ async function updateDashboard(rows) {
   try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) {} applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
 }
 
+// v1.17.0 — Overview "Delivered GMV" Run Rate up to YESTERDAY: today is still in progress, so when the data
+// reaches today its rows are left out and the month-to-date is divided by the days up to yesterday.
+// Run Rate = (sum of days 1..yesterday ÷ yesterday's day number) × days in month.
+function ovRunRateBasis(rows) {
+  let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
+  if (!latestTs) return null;
+  const ld = new Date(latestTs); ld.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const monthDays = new Date(ld.getFullYear(), ld.getMonth() + 1, 0).getDate();
+  if (ld.getTime() >= today.getTime() && ld.getDate() > 1) // data reaches today → stop at yesterday
+    return { cutTs: today.getTime(), elapsed: ld.getDate() - 1, monthDays };
+  return { cutTs: Infinity, elapsed: ld.getDate() || 1, monthDays };
+}
+
 function computeMetrics(rows) {
   let totalPlaced = 0, totalConfirmed = 0, totalDelivered = 0, confirmedGmv = 0, deliveredGmv = 0;
   let skus = new Set(), merchants = new Set();
@@ -4674,8 +4688,10 @@ function computeMetrics(rows) {
     const currentMonthDays = new Date(latestDate.getFullYear(), latestDate.getMonth() + 1, 0).getDate();
     placedRunRate = (totalPlaced / elapsedDays) * currentMonthDays;
     confirmedRunRate = (totalConfirmed / elapsedDays) * currentMonthDays;
-    deliveredGmvRunRate = (deliveredGmv / elapsedDays) * currentMonthDays;
   }
+  // v1.17.0 — Delivered GMV Run Rate only: up to yesterday (see ovRunRateBasis)
+  const rrB = ovRunRateBasis(rows);
+  if (rrB) { let g = 0; rows.forEach(r => { if (r.timestamp < rrB.cutTs) g += r.deliveredGmv; }); deliveredGmvRunRate = (g / rrB.elapsed) * rrB.monthDays; }
 
   return {
     placedOrders: totalPlaced, confirmedOrders: totalConfirmed, deliveredGmv, confirmedGmv, cr: cr * 100, dr: dr * 100, ndr: (dr * cr) * 100, activeSkus: skus.size, activeMerchants: merchants.size,
