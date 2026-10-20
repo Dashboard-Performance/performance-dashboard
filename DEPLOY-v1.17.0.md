@@ -365,3 +365,18 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 - على الكمبيوتر الإيميل زي ما هو، بس بقى أعرض شوية (1200px) عشان الجدول ميتزنقش.
 - حجم الإيميل ~73KB، أقل من حد Gmail (102KB) اللي بعده بيقص الإيميل.
 - التعديل في `Code.gs` بس. اعمله **Deploy → New version** ومحتاجش Worker deploy.
+
+## SKU Forecast: Stock check (مبيغيرش الـ forecast)
+
+- **الأعمدة الجديدة** (في وضع This month ووضع Next month):
+  - **Repack Avail.** = قطع الـ Damaged box المتاحة للـ repack، من شيت WareHouse، ونفس الرقم اللي في عمود Repack في الـ Purchase Plan.
+  - **Sellable** = الجزء من الـ forecast اللي الستوك الحالي يقدر يغطيه. في This month = الـ MTD + اللي الستوك يغطيه من باقي الشهر.
+  - **Shortfall** = اللي الستوك مش هيغطيه.
+  - **Last Inbound** = من كام يوم آخر استلام. لو الـ Shortfall أكبر من 0 ومفيش inbound بقاله 40+ يوم، بيظهر badge **Low stock**.
+- **فلتر All Stock** فيه: Low stock · no inbound 40d+ / Shortfall > 0 / Has repack avail.
+- **كروت جديدة:**
+  - Shortfall (no stock) في Next month.
+  - Shortfall rest of month في This month.
+  - في الـ Backtest: **Hit Rate excl. low stock** جنب الـ Hit Rate العادي. الـ Hit Rate القديم زي ما هو.
+- **الـ Low stock في الـ Backtest** = الستوك في الشهر ده (Beginning Inventory + Inbound الشهر) أقل من الـ forecast، ومفيش inbound في الـ 40 يوم لحد آخر الشهر.
+- الـ forecast والـ Min/Max والـ Hit Rate والـ WAPE والـ Bias والـ Purchase Plan مفيش فيهم أي تغيير.

@@ -2776,7 +2776,8 @@
                       <th data-stkey="retSales" class="num text-red" title="Delivered pieces sourced from returned stock.">RETURN_SALES</th>
                       <th data-stkey="remPurSales" class="num text-dim" title="Delivered pieces still needing coverage after beginning + returns.">Remaining from purchase sales</th>
                       <th data-stkey="totPur" class="num text-blue" title="Inbound purchase pieces received this month.">TOTAL_PURCHASES</th>
-                      <th data-stkey="purSales" class="num text-green" title="Delivered pieces sourced from new purchases.">PURCHASES_SALES</th>
+                      <th data-stkey="purSales" class="num text-green" title="Delivered pieces sourced from new purchases: MIN(DLV_QTY − BEGINNING_SALES − RETURN_SALES, TOTAL_PURCHASES).">PURCHASES_SALES (Delivered)</th>
+                      <th data-stkey="cPurSales" class="num text-blue" title="Same as PURCHASES_SALES (Delivered) but based on Confirmed: CNF_QTY is covered from Beginning Inventory first, then RTOS, the rest (up to TOTAL_PURCHASES) comes from new purchases.">PURCHASES_SALES (Confirmed)</th>
                       <th data-stkey="stRate" class="num text-purple font-bold" title="Delivered pieces ÷ (beginning inventory + purchases + returns).">SELLTHROUGH_RATE</th>
                       <th data-stkey="cStRate" class="num text-blue font-bold" title="Confirmed pieces ÷ (beginning inventory + purchases + returns) — same formula as SELLTHROUGH_RATE but based on Confirmed instead of Delivered.">SELLTHROUGH_RATE (Confirmed)</th>
                       <th data-stkey="soldInb" class="num font-bold" title="Share of this month's purchases that have already sold through, based on Delivered pieces.">SOLD_FROM_INBOUND</th>
@@ -2978,6 +2979,7 @@
                 <select id="fcTargetSelect" class="st-filter-select" title="Which month (or window, for 14/7 Day) to view — a past one to see how the forecast did, or the upcoming one to see what's forecast next."></select>
                 <select id="fcBehaviorSelect" class="st-filter-select"><option value="">All Behaviors</option></select>
                 <select id="fcCategorySelect" class="st-filter-select"><option value="">All Categories</option></select>
+                <select id="fcStockSelect" class="st-filter-select" title="Stock check (does not change the forecast)"><option value="">All Stock</option><option value="low">Low stock · no inbound 40d+</option><option value="short">Shortfall &gt; 0</option><option value="repack">Has repack avail.</option></select>
                 <input id="fcSearchInput" type="search" placeholder="Search SKU or Name..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 <div class="segmented" id="fcBandToggle" title="Hit = forecast within this band of actual (or within 2 pieces).">
                   <button type="button" class="segmented-btn" data-band="15">±15%</button>

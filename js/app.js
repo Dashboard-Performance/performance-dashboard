@@ -10315,6 +10315,8 @@ function fcAccuracy(rows, bandPct) {
 // Segment-A stock ceiling: forecast is capped at (beginning inventory +
 // inbound) × this. See the cap site in build() for the measured rationale.
 const FC_STOCK_CAP_A = 2.5;
+// v1.17.0 — "Low stock" flag on the SKU Forecast: stock can't cover the forecast AND nothing was received for this many days (display only)
+const FC_LOW_STOCK_INBOUND_DAYS = 40;
 
 // Price elasticity. The demand history alone cannot see a price change: if a
 // SKU's price went up last week, the last 30 days were sold at the OLD price
@@ -11074,7 +11076,7 @@ const fcState = {
   hist: null, histMeta: null, histError: null, loading: false,
   engine: null, engineSig: "", byKey: new Map(),
   engines: {}, family: "month", conf: 80,
-  target: "", catFilter: "", behaviorFilter: "", search: "", band: 25, v2: true,
+  target: "", catFilter: "", behaviorFilter: "", stockFilter: "", search: "", band: 25, v2: true,
   level: "single",
   sortKey: "forecast", sortDir: "desc", page: 0, filtered: [],
   chart: null, wired: false, series: null
@@ -11264,7 +11266,17 @@ function fcEnrichResults(engine) {
   let stockMap = null;
   try { stockMap = buildDebundledStockDohIndex(state.allParsedRows || []).stockByProductId; } catch (e) { stockMap = null; }
   const priceIdx = fcBuildPriceIndex();
+  // v1.17.0 — stock check columns (do NOT change the forecast): repack (damaged box), last inbound, sellable / shortfall
+  const repack = state.repackMap instanceof Map ? state.repackMap : new Map();
+  const inbTs = new Map(); // sku -> sorted receive timestamps
+  (state.inboundRows || []).forEach(x => { if (x.sku && x.rcvTs) { if (!inbTs.has(x.sku)) inbTs.set(x.sku, []); inbTs.get(x.sku).push(x.rcvTs); } });
+  inbTs.forEach(a => a.sort((p, q) => p - q));
+  const lastBefore = (sku, ts) => { const a = inbTs.get(sku); if (!a) return null; let v = null; for (const t of a) { if (t <= ts) v = t; else break; } return v; };
+  const avail = fcBuildAvailIndex();
+  const now = Date.now(), DAYMS = 864e5;
   for (const res of engine.results) {
+    const mStart = res.granularity !== "horizon" ? new Date(res.key + " 1") : null;
+    const monthStart = mStart && !isNaN(mStart.getTime()) ? mStart.getTime() : null;
     for (const r of res.rows) {
       const pi = priceIdx.get(r.sku);
       r.asp = pi ? pi.asp : null;
@@ -11284,6 +11296,23 @@ function fcEnrichResults(engine) {
         const expected = r.elapsed > 0 ? r.forecast * r.elapsed / res.dim : 0;
         r.pace = expected > 0 ? r.mtd / expected * 100 : null;
         r.projected = r.elapsed > 0 ? r.mtd * res.dim / r.elapsed : 0;
+      }
+      // ---- stock check (display only)
+      r.repack = repack.get(r.sku) || 0;
+      if (res.mode === "backtest") {
+        // that month: stock it had (beginning inventory + inbound that month) vs the forecast, and no inbound in the 40 days up to the month end
+        const a = avail && monthStart != null ? avail.get(r.sku, res.key) : null;
+        const end = monthStart != null ? monthStart + res.dim * DAYMS : null, li = end != null ? lastBefore(r.sku, end) : null;
+        r.inbDays = li != null ? Math.floor((end - li) / DAYMS) : null;
+        r.lowStock = a != null && a < r.forecast && (li == null || end - li > FC_LOW_STOCK_INBOUND_DAYS * DAYMS);
+      } else {
+        const li = lastBefore(r.sku, now);
+        r.lastInbound = li; r.inbDays = li != null ? Math.floor((now - li) / DAYMS) : null;
+        const need = res.mode === "current" ? Math.max(0, r.forecast - (r.mtd || 0)) : r.forecast; // what is still to be sold
+        const can = Math.min(need, Math.max(0, r.stock));
+        r.sellable = (res.mode === "current" ? (r.mtd || 0) : 0) + can;
+        r.shortfall = Math.max(0, need - can);
+        r.lowStock = r.shortfall > 0 && (li == null || now - li > FC_LOW_STOCK_INBOUND_DAYS * DAYMS);
       }
     }
   }
@@ -11471,6 +11500,8 @@ function fcRenderKpis() {
     const accEx = fcAccuracy(rows.filter(r => !r.flagged), fcState.band);
     cards.push(fcKpi("Total Actual", fcPcs(acc.sumA), `${res.newSkuCount ? `+${fcPcs(res.newSkuPcs)} pcs from ${fcPcs(res.newSkuCount)} new SKUs (not forecastable)` : "Confirmed pieces, debundled"}`, "text-green"));
     cards.push(fcKpi(`Hit Rate (±${fcState.band}%)`, fcPct(acc.hitRate), `Excl. flagged: ${fcPct(accEx.hitRate)}`, "text-purple"));
+    const lowN = rows.filter(r => r.lowStock).length, accLs = fcAccuracy(rows.filter(r => !r.lowStock), fcState.band);
+    cards.push(fcKpi("Hit Rate excl. low stock", fcPct(accLs.hitRate), `${fcPcs(lowN)} SKUs had stock below the forecast and no inbound for ${FC_LOW_STOCK_INBOUND_DAYS}+ days · WAPE acc. ${fcPct(accLs.wapeAcc)}`, "text-purple"));
     cards.push(fcKpi("Accuracy (1 − WAPE)", fcPct(acc.wapeAcc), `Excl. flagged: ${fcPct(accEx.wapeAcc)}`));
     cards.push(fcKpi("Bias", fcPct(acc.bias), acc.bias > 0 ? "Over-forecast" : "Under-forecast", Math.abs(acc.bias || 0) <= 10 ? "text-green" : "text-orange"));
   } else if (res.mode === "current") {
@@ -11483,6 +11514,8 @@ function fcRenderKpis() {
     cards.push(fcKpi("Month-to-Date Actual", fcPcs(mtd), `${elapsed} of ${res.dim} days`, "text-green"));
     cards.push(fcKpi("Pace vs Forecast", fcPct(pace), `Projected month-end: ${fcPcs(elapsed > 0 ? mtd * res.dim / elapsed : 0)}`, pace !== null && pace >= 95 ? "text-green" : "text-orange"));
     cards.push(fcKpi("Behind / Ahead", `${fcPcs(behind)} / ${fcPcs(ahead)}`, "SKUs below 85% / above 115% of pace"));
+    const sfC = rows.reduce((s, r) => s + (r.shortfall || 0), 0), lowC = rows.filter(r => r.lowStock).length;
+    cards.push(fcKpi("Shortfall rest of month", fcPcs(sfC), `${fcPcs(lowC)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days`, sfC ? "text-red" : "text-green"));
     const bt = fcLatestBacktest();
     if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
   } else {
@@ -11490,6 +11523,8 @@ function fcRenderKpis() {
     const stock = rows.reduce((s, r) => s + (r.stock || 0), 0);
     cards.push(fcKpi("Current Stock (these SKUs)", fcPcs(stock), `${fcPct(total > 0 ? stock / total * 100 : null, 0)} of forecast`));
     cards.push(fcKpi(`SKUs Short of ${res.dim} Days`, fcPcs(lowCover), `Stock runs out before the ${res.dim} days are up`, lowCover ? "text-orange" : "text-green"));
+    const sf = rows.reduce((s, r) => s + (r.shortfall || 0), 0), lowN = rows.filter(r => r.lowStock).length, rp = rows.reduce((s, r) => s + (r.repack || 0), 0);
+    cards.push(fcKpi("Shortfall (no stock)", fcPcs(sf), `${fcPcs(lowN)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days · repack avail. ${fcPcs(rp)}`, sf ? "text-red" : "text-green"));
     const bt = fcLatestBacktest();
     if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
   }
@@ -11701,11 +11736,21 @@ function fcColumns(res) {
     { key: "projected", label: "Projected", num: true, title: "MTD extrapolated to month-end." },
     { key: "stock", label: "Stock", num: true, title: "Current stock (Overall Debundled)." },
     { key: "cover", label: "Days Cover", num: true, title: "Stock ÷ forecast daily rate." }
-  ]);
+  ].concat(fcStockCols(res)));
   return base.concat([
     { key: "stock", label: "Stock", num: true, title: "Current stock (Overall Debundled)." },
     { key: "cover", label: "Days Cover", num: true, title: "Stock ÷ forecast daily rate." }
-  ]);
+  ].concat(fcStockCols(res)));
+}
+
+// v1.17.0 — stock check columns (display only — the forecast, range and accuracy are not changed by them)
+function fcStockCols(res) {
+  return [
+    { key: "repack", label: "Repack Avail.", num: true, title: "Damaged box pieces available to repack for this SKU right now (warehouse repack sheet)." },
+    { key: "sellable", label: "Sellable", num: true, title: res.mode === "current" ? "MTD + what the current stock can still cover of the rest of the forecast." : "The part of the forecast the current stock can cover = min(Forecast, Stock)." },
+    { key: "shortfall", label: "Shortfall", num: true, title: "Forecast the current stock can't cover (demand that will be lost without new stock or repack)." },
+    { key: "inbDays", label: "Last Inbound", num: true, title: "Days since this SKU last received stock. Low stock = shortfall > 0 and no inbound for " + FC_LOW_STOCK_INBOUND_DAYS + "+ days." }
+  ];
 }
 
 function fcApplyFilters() {
@@ -11715,6 +11760,7 @@ function fcApplyFilters() {
   fcState.filtered = res.rows.filter(r =>
     (!fcState.catFilter || r.prodCat === fcState.catFilter) &&
     (!fcState.behaviorFilter || r.cat === fcState.behaviorFilter) &&
+    (!fcState.stockFilter || (fcState.stockFilter === "low" ? r.lowStock : fcState.stockFilter === "short" ? r.shortfall > 0 : fcState.stockFilter === "repack" ? r.repack > 0 : true)) &&
     (!q || `${r.sku} ${r.name}`.toLowerCase().includes(q))
   );
   const k = fcState.sortKey, dir = fcState.sortDir === "asc" ? 1 : -1;
@@ -11750,6 +11796,12 @@ function fcCell(col, r, res) {
       if (r.pace === null || r.pace === undefined) return "—";
       const cls = r.pace >= 95 ? "text-green" : (r.pace >= 85 ? "text-orange" : "text-red");
       return `<span class="${cls}">${r.pace.toFixed(0)}%</span>`;
+    }
+    case "repack": return r.repack > 0 ? `<span class="text-blue font-bold">${fcPcs(r.repack)}</span>` : "—";
+    case "shortfall": return r.shortfall > 0 ? `<span class="text-red font-bold">${fcPcs(r.shortfall)}</span>` : (r.shortfall === 0 ? '<span class="text-green">0</span>' : "—");
+    case "inbDays": {
+      const d = r.inbDays === null || r.inbDays === undefined ? "never" : r.inbDays + "d ago";
+      return r.lowStock ? `<span class="badge-outline red" title="Stock can't cover the forecast and nothing was received for ${FC_LOW_STOCK_INBOUND_DAYS}+ days — check whether it is still being bought.">Low stock · ${d}</span>` : `<span class="text-dim">${d}</span>`;
     }
     case "cover": {
       if (r.cover === null || r.cover === undefined) return "—";
@@ -11799,6 +11851,7 @@ function fcDownloadCsv() {
       else if (c.key === "w") cells.push(r.ml === null ? "" : r.w.toFixed(2));
       else if (c.key === "errPct" || c.key === "pace") cells.push(num(r[c.key], 1));
       else if (c.key === "cover") cells.push(num(r.cover, 0));
+      else if (c.key === "inbDays") cells.push((r.inbDays === null || r.inbDays === undefined ? "never" : r.inbDays) + (r.lowStock ? " (Low stock)" : ""));
       else if (c.key === "hit") cells.push(r.actual === null ? "" : (fcIsHit(r.forecast, r.actual, fcState.band) ? "Hit" : "Miss"));
       else if (c.num) cells.push(num(r[c.key]));
       else cells.push(esc(r[c.key]));
@@ -11846,6 +11899,7 @@ function fcWireControlsOnce() {
   });
   on("fcCategorySelect", "change", (e) => { fcState.catFilter = e.target.value; fcApplyFilters(); });
   on("fcBehaviorSelect", "change", (e) => { fcState.behaviorFilter = e.target.value; fcApplyFilters(); });
+  on("fcStockSelect", "change", (e) => { fcState.stockFilter = e.target.value; fcApplyFilters(); });
   let t = null;
   on("fcSearchInput", "input", (e) => { clearTimeout(t); const v = e.target.value; t = setTimeout(() => { fcState.search = v; fcApplyFilters(); }, 250); });
   on("fcDownloadBtn", "click", fcDownloadCsv);
@@ -11965,6 +12019,7 @@ function renderPaginatedSellthroughTable() {
       <td class="num text-dim">${fmtIntCell(m.remPurSales)}</td>
       <td class="num text-blue">${fmtIntCell(m.totPur)}</td>
       <td class="num text-green">${fmtIntCell(m.purSales)}</td>
+      <td class="num text-blue">${fmtIntCell(m.cPurSales || 0)}</td>
       <td class="num text-purple font-bold">${m.stRate.toFixed(1)}%</td>
       <td class="num text-blue font-bold">${m.cStRate.toFixed(1)}%</td>
       <td class="num font-bold">${m.soldInb.toFixed(1)}%</td>
