@@ -380,3 +380,19 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
   - في الـ Backtest: **Hit Rate excl. low stock** جنب الـ Hit Rate العادي. الـ Hit Rate القديم زي ما هو.
 - **الـ Low stock في الـ Backtest** = الستوك في الشهر ده (Beginning Inventory + Inbound الشهر) أقل من الـ forecast، ومفيش inbound في الـ 40 يوم لحد آخر الشهر.
 - الـ forecast والـ Min/Max والـ Hit Rate والـ WAPE والـ Bias والـ Purchase Plan مفيش فيهم أي تغيير.
+
+## Planner DOH: نسخة يومية في شيت التخطيط الساعة 11
+
+- كل يوم الساعة 11:00 بتوقيت القاهرة، جدول **Planner DOH — Single SKUs** بيتكتب في الشيت `1LSvaSIvl4Gapb28FICNGMKyMOlrsyTr9pEbeFpW-c1w`، في التاب gid `693802633`.
+- **مين بيعمل إيه:**
+  - الـ Worker بيحدد المعاد (cron).
+  - الـ Apps Script بيحسب نفس أرقام الصفحة وبيكتبها (action `planner_doh_export`).
+- **الإعدادات:** Cutoff 5 أيام، Window 10 أيام، لو الـ CR ≤ 30% بيستخدم 60%، والـ SKUs اللي اتعملها placed امبارح بس. الترتيب حسب |Placed × CR − Avg 3D| من الأكبر للأصغر.
+- **الكتابة:** التاب بيتمسح وبيتكتب من الأول كل يوم. في الصف الأول العناوين، وعلى خلية A1 note فيها وقت التحديث.
+- **لو فشل:** بيعيد المحاولة كل 15 دقيقة، لحد 3 مرات، لحد الساعة 1:59.
+- **خطوات النشر:**
+  1. Code.gs → New version.
+  2. شغّل `exportPlannerDohNow()` مرة واحدة من الـ editor. دي بتعمل Authorize على الشيت، وبتملاه دلوقتي.
+  3. `npx wrangler deploy`.
+- **ملحوظة:** حساب الـ Apps Script (صاحب السكريبت) لازم يكون عنده **Edit** على الشيت ده.
+- **عشان توقفه:** `PLANNER_DOH_EXPORT = "off"` في wrangler.toml.
