@@ -848,17 +848,20 @@
     return '<span class="tg-pill">Default values</span>';
   }
   function showV(k, v) { v = +v || 0; return k === "rate" || k === "pct" ? +(v * 100).toFixed(2) : +v.toFixed(2); }
-  function readV(k, raw) { var n = parseFloat(String(raw).replace(/[,%\s]/g, "")); if (!isFinite(n)) return null; return k === "rate" || k === "pct" ? n / 100 : n; }
+  function readV(k, raw) { if (k === "text") return String(raw == null ? "" : raw).trim(); var n = parseFloat(String(raw).replace(/[,%\s]/g, "")); if (!isFinite(n)) return null; return k === "rate" || k === "pct" ? n / 100 : n; }
   function planCardsHtml() {
     var P = window.TaagerPlans; if (!P) return "";
     // Supply conversion plan
     var sv = planVals("supplyplan"), tot = 0;
     var srows = P.SUPPLY_FIELDS.map(function (f) { tot += +sv[f.id] || 0; return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" inputmode="decimal" data-plan="supplyplan" data-pid="' + f.id + '" value="' + esc(Math.round(+sv[f.id] || 0).toLocaleString("en-US")) + '"><s>EGP</s></span></td></tr>'; }).join("");
+    var stext = (P.SUPPLY_TEXT_FIELDS || []).map(function (f) {
+      return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" data-plan="supplyplan" data-pid="' + f.id + '" data-k="text" value="' + esc(sv[f.id] == null ? "" : String(sv[f.id])) + '"></span></td></tr>';
+    }).join("");
     var supply = '<div class="tg-card ' + (tgPlans.supplyplan && tgPlans.supplyplan.source === "month" ? "ok" : "idle") + '" data-t="supplyplan">' +
       '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span><div class="tg-ht"><b>Supply conversion plan</b>' + planPill("supplyplan") + '</div></div>' +
       '<p class="tg-desc">Planned COGS per source for ' + esc(monthTitle(tgMonth)) + ' — the "Planned" column of Supply Chain → Supply conversion.</p>' +
       '<div class="tg-kpi-wrap"><table class="tg-kpi-t"><thead><tr><th>Source</th><th class="n">Planned (COGS)</th></tr></thead><tbody>' + srows +
-      '<tr class="tg-totr"><td>Total</td><td class="n"><b id="tgSupTot">' + Math.round(tot).toLocaleString("en-US") + '</b></td></tr></tbody></table></div>' +
+      '<tr class="tg-totr"><td>Total</td><td class="n"><b id="tgSupTot">' + Math.round(tot).toLocaleString("en-US") + '</b></td></tr>' + stext + '</tbody></table></div>' +
       '<div class="tw-msg" data-msg="supplyplan"></div>' +
       '<div class="tg-acts"><button class="btn btn-primary small" data-psave="supplyplan">Save plan</button><button class="btn small" data-pcopy="supplyplan">Copy last month</button><button class="btn small" data-preset="supplyplan">Reset to default</button></div></div>';
     // Segmentation plan
@@ -887,6 +890,7 @@
     var P = window.TaagerPlans, out = Object.assign({}, planVals(type)), bad = [];
     host.querySelectorAll('[data-plan="' + type + '"]').forEach(function (i) {
       var id = i.getAttribute("data-pid"), k = i.getAttribute("data-k") || "money", v = readV(k, i.value);
+      if (k === "text") { out[id] = v; return; }
       if (v == null || v < 0) bad.push(id); else out[id] = v;
     });
     return { values: out, bad: bad };

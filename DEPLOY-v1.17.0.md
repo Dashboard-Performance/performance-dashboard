@@ -396,3 +396,18 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
   3. `npx wrangler deploy`.
 - **ملحوظة:** حساب الـ Apps Script (صاحب السكريبت) لازم يكون عنده **Edit** على الشيت ده.
 - **عشان توقفه:** `PLANNER_DOH_EXPORT = "off"` في wrangler.toml.
+
+## Importation في الـ Supply Chain و الـ Supply conversion
+
+- **إزاي الشيت بيعملها:** في تاب Working Sheet فيه عمود `Type` بيتكتب بالإيد (Existing / Importation / Repack)، وفي تاب Summery جدول الـ Supply conversion بيفصل:
+  - `Purchases Actual = SUMIFS(Purchased COGS, Type, "Existing")`
+  - `Importation Actual = SUMIFS(Purchased COGS, Type, "Importation")`
+  - `Importation Converted = SUMIFS(MTD Confirmed COGS, Type, "Importation")` — مش الـ waterfall.
+- **إزاي الداش بورد بتعملها دلوقتي:** بدل التصنيف اليدوي، فيه **لستة أرقام POs** في Control → Targets → Supply conversion plan. أي SKU اتستلم تحت واحد من الـ POs دي (عمود `Odoo_NO` في تاب Inbound) بيتحسب Importation.
+  - الافتراضي: `P38624, P42109, P42029, P38670`.
+  - صف **Importation** اتضاف في جدول الـ Supply conversion، والـ Planned بتاعه حقل جديد (الافتراضي 1,000,000).
+  - الـ SKUs دي **بتتشال من صف Purchases**، زي الشيت بالظبط.
+  - الـ Converted بتاعها = كل الـ MTD Confirmed COGS بتاعها، مش الجزء الجاي من الشراء — نفس طريقة الشيت.
+- **في SKU Analysis:** عمود **Importation PO** جديد، وفلتر **Importation SKUs**.
+- **ملحوظة على الشيت:** الـ SUMIFS في Summery مداها صفوف 3:1000 بس، والـ Working Sheet فيه 11,400 صف. 8 من الـ 10 SKUs المتعلّمين Importation واقعين تحت صف 1000. الداش بورد مفيهاش الحد ده.
+- **النشر:** ارفع `js/plans.js` و`js/supply.js` و`js/tower.js` وصفحات الـ html. مش محتاج Worker ولا Apps Script.

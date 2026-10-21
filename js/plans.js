@@ -10,9 +10,19 @@
     { id: "beg", label: "Beg Inv.", help: "Planned COGS sold from the beginning inventory" },
     { id: "pur", label: "Purchases", help: "Planned COGS sold from this month's purchases" },
     { id: "ret", label: "Returns", help: "Planned COGS sold from returned stock" },
-    { id: "rep", label: "Repack", help: "Planned COGS sold from repacked stock" }
+    { id: "rep", label: "Repack", help: "Planned COGS sold from repacked stock" },
+    { id: "imp", label: "Importation", help: "Planned COGS sold from importation purchases (the Importation POs below)" }
   ];
-  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000 };
+  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000, imp: 1000000, impPos: "P38624, P42109, P42029, P38670" };
+  // v1.17.0 — Importation is a list of PO numbers (Odoo_NO in the Inbound sheet). Any SKU ever received
+  // under one of these POs counts as an Importation SKU, exactly like the "Type = Importation" tag in the
+  // EG - Inventory Aging workbook. Edited in Control -> Targets -> Supply conversion plan.
+  var SUPPLY_TEXT_FIELDS = [
+    { id: "impPos", label: "Importation POs", help: "Odoo PO numbers, separated by commas. Any SKU received under one of them is counted as Importation." }
+  ];
+  function parsePos(v) {
+    return String(v == null ? "" : v).split(/[\s,;\n]+/).map(function (x) { return x.trim().toUpperCase(); }).filter(Boolean);
+  }
 
   // ---- Segmentation plan — same model as the "Egy-N" sheet (Merchants New Segmentation):
   //   rate  = % of last month's merchants of the segment  → target = ROUNDUP(last month × %)
@@ -120,6 +130,6 @@
     if (res.source === "previous") return "Nothing saved for this month — using the " + monthTitle(res.month) + " plan";
     return "Default plan — set this month's targets in Control → Targets";
   }
-  window.TaagerPlans = { SUPPLY_FIELDS: SUPPLY_FIELDS, SUPPLY_DEF: SUPPLY_DEF, SEG_INPUTS: SEG_INPUTS, SEG_DEF: SEG_DEF, SEG_AUTO: SEG_AUTO,
+  window.TaagerPlans = { SUPPLY_FIELDS: SUPPLY_FIELDS, SUPPLY_TEXT_FIELDS: SUPPLY_TEXT_FIELDS, parsePos: parsePos, SUPPLY_DEF: SUPPLY_DEF, SEG_INPUTS: SEG_INPUTS, SEG_DEF: SEG_DEF, SEG_AUTO: SEG_AUTO,
     get: get, peek: peek, forget: forget, keyOf: keyOf, prevKey: prevKey, monthTitle: monthTitle, sourceText: sourceText };
 })();

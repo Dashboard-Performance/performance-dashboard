@@ -39,7 +39,9 @@
     }).catch(function (e) { RET.data = null; RET.err = (e && e.message) || "failed"; })
       .then(function () { RET.loading = false; SC.sig = ""; rerender(); });
   }
-  function sigNow() { try { return [state.allParsedRows.length, (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length].join("|"); } catch (e) { return ""; } }
+  function sigNow() { try { return [state.allParsedRows.length, (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
+  // v1.17.0 — the Importation PO list is part of the signature so the table rebuilds when the saved plan arrives or changes
+  function impPosSig() { try { var P = window.TaagerPlans; if (!P) return ""; var k = planKey(), h = P.peek("supplyplan", k); return String((h ? h.values : P.SUPPLY_DEF).impPos || ""); } catch (e) { return ""; } }
   function ageIdx(days) { return days == null ? 4 : days <= 60 ? 0 : days <= 120 ? 1 : days <= 180 ? 2 : days <= 364 ? 3 : 4; } // same bands as the Inventory Aging sheet; no purchase date = Unhealthy
   var RET_FACTOR = 0.75; // Returns = MAX(0, Confirmed − Delivered) × 75% (conservative haircut, same as the Purchase Plan sheet)
   var SEGS = ["Mega", "Super", "Winning", "Potential Winning", "Normal"], SEG_MIN = [1200000, 400000, 200000, 100000, 0];
@@ -76,6 +78,17 @@
       (state.inboundRows || []).forEach(function (r) { if (!r.sku || !r.rcvTs) return; var d = new Date(r.rcvTs); if (d.getFullYear() === cy && d.getMonth() === cmo) inM[r.sku] = (inM[r.sku] || 0) + (+r.rcvQty || 0); });
       var last = {};
       (state.inboundRows || []).forEach(function (r) { if (r.sku && r.rcvTs && (!last[r.sku] || r.rcvTs > last[r.sku])) last[r.sku] = r.rcvTs; });
+      // v1.17.0 — Importation: every SKU ever received under one of the Importation PO numbers
+      // (Odoo_NO in the Inbound sheet). Same idea as the "Type = Importation" tag in the Inventory Aging
+      // workbook, but driven by the PO list in Control -> Targets -> Supply conversion plan.
+      var impPo = {}, impSku = {}, impPoOf = {};
+      (window.TaagerPlans ? window.TaagerPlans.parsePos(planGet().impPos) : []).forEach(function (x) { impPo[x] = 1; });
+      if (Object.keys(impPo).length) (state.inboundRows || []).forEach(function (x) {
+        var po = String(x.po || "").trim().toUpperCase();
+        if (x.sku && po && impPo[po]) { impSku[x.sku] = 1; if (!impPoOf[x.sku]) impPoOf[x.sku] = po; }
+      });
+      SC.impPo = Object.keys(impPo); SC.impSkuN = Object.keys(impSku).length;
+
       // v1.17.0 — repacked this month (repack sheet, APPLIED) and repack available now (damaged box)
       var repMtd = {}; (state.supplyRepackRows || []).forEach(function (x) { if (x.status !== "APPLIED" || !x.ts) return; var d = new Date(x.ts); if (d.getFullYear() === cy && d.getMonth() === cmo) repMtd[x.sku] = (repMtd[x.sku] || 0) + (+x.qty || 0); });
       var repAvail = state.repackMap instanceof Map ? state.repackMap : new Map();
@@ -96,7 +109,8 @@
         var gA_ = gA[id] || 0, gL_ = gL[id] || 0, gP = elapsed >= 5 ? gA_ / elapsed * mdays : (gA_ / elapsed * mdays * elapsed + gL_ * (5 - elapsed)) / 5;
         var action = "", channel = "";
         var row = { id: id, name: iv.skuName || pr.name || id, cat: String(iv.category || pr.category || "").toLowerCase() || "general", lpd: newest ? new Date(newest).toISOString().slice(0, 10) : "", days: days, aging: aging, avg3: a3, avg15: a15, c15: c15[id] || 0, c30: c30[id] || 0, stock: stock, doh: doh, wac: wac, inv: stock * wac, tag: tag, fms: fms, abc: "", quarter: newest ? (new Date(newest).getFullYear() < 2026 ? "Before 2026" : new Date(newest).getMonth() <= 2 ? "Q1" : new Date(newest).getMonth() <= 5 ? "Q2" : "Q3") : "", mtd: mtd[id] || 0, str: str, action: action, channel: channel, exRet: exRet, retV: exRet * wac, drPct: drPct, gA: gA_, gL: gL_, gP: gP, segA: segOf(gA_), segL: segOf(gL_), segP: segOf(gP),
-          asp: dP[id] > 0 ? dG[id] / dP[id] : null, aspPcs: dP[id] || 0, repMtd: repMtd[id] || 0, repAvail: repAvail.get(id) || 0 };
+          asp: dP[id] > 0 ? dG[id] / dP[id] : null, aspPcs: dP[id] || 0, repMtd: repMtd[id] || 0, repAvail: repAvail.get(id) || 0,
+          imp: !!impSku[id], impPo: impPoOf[id] || "" };
         for (var z = 0; z < 6; z++) { row["q" + z] = q[z]; row["v" + z] = q[z] * wac; }
         rows.push(row);
       });
@@ -109,14 +123,24 @@
       if (RET.data && RET.data.month === retMonth) { var rs = RET.data.skus || {}; Object.keys(rs).forEach(function (k) { var id = String(k).trim(); rto[id] = (rto[id] || 0) + (+rs[k] || 0); }); }
       SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
       var cids = {}; [beg, inM, rto, rep, mtd].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
-      var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0] }; }; // [actual, converted]
+      var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
         var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
         var P = mtd[id] || 0, V = beg[id] || 0, Z = inM[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
         var X = P === 0 ? 0 : Math.min(V, P), AB = Math.min(P - X, Z), AF = Math.min(P - X - AB, R), BR = Math.max(0, Math.min(P - X - AB - R, B));
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
-        [["all"], [cat]].forEach(function (kk) { var a = conv[kk[0]] = conv[kk[0]] || mkAgg(); a.beg[0] += V * w; a.beg[1] += X * w; a.pur[0] += Z * w; a.pur[1] += AB * w; a.ret[0] += R * w; a.ret[1] += AF * w; a.rep[0] += B * w; a.rep[1] += BR * w; });
+        var isImp = !!impSku[id];
+        [["all"], [cat]].forEach(function (kk) {
+          var a = conv[kk[0]] = conv[kk[0]] || mkAgg();
+          a.beg[0] += V * w; a.beg[1] += X * w;
+          a.ret[0] += R * w; a.ret[1] += AF * w;
+          a.rep[0] += B * w; a.rep[1] += BR * w;
+          // Purchases = the "Existing" SKUs only; Importation SKUs get their own row — same split as the sheet
+          // (Purchases = SUMIFS(Purchased COGS, Type, "Existing"), Importation = SUMIFS(…, "Importation")).
+          if (isImp) { a.imp[0] += Z * w; a.imp[1] += P * w; } // Converted = the SKU's whole MTD confirmed COGS, like the sheet
+          else { a.pur[0] += Z * w; a.pur[1] += AB * w; }
+        });
       });
       SC.convKey = cy + "-" + String(cmo + 1).padStart(2, "0"); SC.conv = conv; SC.convMonth = ref.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
       var tot = 0, cum = 0, sorted = rows.slice().sort(function (x, y) { return y.inv - x.inv; });
@@ -139,12 +163,17 @@
   }
   function convPanel() {
     var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat];
-    var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["ret", "Returns"], ["rep", "Repack"]];
+    var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["ret", "Returns"], ["rep", "Repack"], ["imp", "Importation"]];
     var body = labs.map(function (l) {
       var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
       return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num" title="Edit in Control → Targets → Supply conversion plan">' + int(p) + '</td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned.</div>' + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack · Importation vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the SKUs received under the Importation POs; its Actual is their purchases and its Converted is their whole MTD confirmed COGS — the same way the Inventory Aging sheet does it. Those SKUs are left out of the Purchases row.</div>' + impNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+  }
+  function impNote() {
+    var n = (SC.impPo || []).length;
+    if (!n) return '<div class="sc-note" style="margin:0 16px 12px">Importation: no PO numbers set yet — add them in Control → Targets → Supply conversion plan.</div>';
+    return '<div class="sc-note" style="margin:0 16px 12px">Importation POs (' + n + '): ' + esc((SC.impPo || []).join(", ")) + ' → ' + int(SC.impSkuN || 0) + ' SKU' + ((SC.impSkuN || 0) === 1 ? "" : "s") + ' received under them.</div>';
   }
   function retNote() {
     var I = SC.retInfo, t;
@@ -235,13 +264,13 @@
     host.innerHTML = html;
   }
 
-  var COLS = [["id", "SKU ID", ""], ["name", "SKU name", ""], ["cat", "Category", ""], ["lpd", "Last inbound", ""], ["aging", "Aging", ""], ["avg3", "Avg 3D", "num"], ["avg15", "Avg 15D", "num"], ["stock", "Stock", "num"], ["doh", "DOH", "num"], ["wac", "WAC", "num"], ["asp", "ASP", "num"], ["inv", "Inv. value", "num"], ["repMtd", "Repacked MTD", "num"], ["repAvail", "Repack avail.", "num"], ["exRet", "Exp. returns", "num"], ["tag", "Stock tag", ""], ["segA", "Segment", ""], ["segL", "Last month", ""], ["segP", "Projected", ""], ["fms", "Movement", ""], ["abc", "ABC", ""], ["action", "Proposed action", ""]];
+  var COLS = [["id", "SKU ID", ""], ["name", "SKU name", ""], ["cat", "Category", ""], ["lpd", "Last inbound", ""], ["aging", "Aging", ""], ["avg3", "Avg 3D", "num"], ["avg15", "Avg 15D", "num"], ["stock", "Stock", "num"], ["doh", "DOH", "num"], ["wac", "WAC", "num"], ["asp", "ASP", "num"], ["impPo", "Importation PO", ""], ["inv", "Inv. value", "num"], ["repMtd", "Repacked MTD", "num"], ["repAvail", "Repack avail.", "num"], ["exRet", "Exp. returns", "num"], ["tag", "Stock tag", ""], ["segA", "Segment", ""], ["segL", "Last month", ""], ["segP", "Projected", ""], ["fms", "Movement", ""], ["abc", "ABC", ""], ["action", "Proposed action", ""]];
   function sel(id, label, opts, v) { return '<select data-sk="' + id + '"><option value="">' + label + '</option>' + opts.map(function (o) { return '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + '>' + esc(CATL[o] || o) + '</option>'; }).join("") + '</select>'; }
   function skuFiltered() {
     var f = SC.sk, q = f.q.toLowerCase();
     var rows = SC.rows.filter(function (r) {
       if (f.instock && !(r.stock > 0)) return false;
-      if (f.repack === "done" && !(r.repMtd > 0)) return false; if (f.repack === "avail" && !(r.repAvail > 0)) return false; if (f.repack === "any" && !(r.repMtd > 0 || r.repAvail > 0)) return false;
+      if (f.repack === "done" && !(r.repMtd > 0)) return false; if (f.repack === "avail" && !(r.repAvail > 0)) return false; if (f.repack === "any" && !(r.repMtd > 0 || r.repAvail > 0)) return false; if (f.repack === "imp" && !r.imp) return false;
       if (f.cat && r.cat !== f.cat) return false; if (f.aging && r.aging !== f.aging) return false; if (f.tag && r.tag !== f.tag) return false; if (f.seg && r.segA !== f.seg) return false; if (f.action && r.action !== f.action) return false;
       if (q && (String(r.id).toLowerCase().indexOf(q) < 0 && String(r.name).toLowerCase().indexOf(q) < 0)) return false; return true;
     });
@@ -258,7 +287,7 @@
         '<div class="table-footer"><span id="scSkuCount"></span><div class="pager"><button class="btn btn-outline small" data-sc="prev">Prev</button><span id="scSkuPage"></span><button class="btn btn-outline small" data-sc="next">Next</button></div></div></div>';
     } else { var sc = host.querySelector(".sc-src"); }
     $("scSkuFilters").innerHTML = '<input type="search" id="scSkuQ" placeholder="Search SKU ID or name…" value="' + esc(f.q) + '" autocomplete="off" />' + sel("cat", "All categories", CATS, f.cat) + sel("aging", "All aging", AGES, f.aging) + sel("tag", "All stock tags", TAGS, f.tag) + sel("seg", "All segments", SEGS, f.seg) + sel("action", "All actions", ACTIONS, f.action) +
-      '<select data-sk="repack"><option value="">All (repack)</option>' + [["done", "Repacked this month"], ["avail", "Repack available (damaged box)"], ["any", "Repacked or available"]].map(function (o) { return '<option value="' + o[0] + '"' + (f.repack === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>' +
+      '<select data-sk="repack"><option value="">All (repack / importation)</option>' + [["done", "Repacked this month"], ["avail", "Repack available (damaged box)"], ["any", "Repacked or available"], ["imp", "Importation SKUs"]].map(function (o) { return '<option value="' + o[0] + '"' + (f.repack === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>' +
       '<label class="sc-chk"><input type="checkbox" data-sk="instock"' + (f.instock ? " checked" : "") + '> In stock only</label>';
     var q = $("scSkuQ"); if (q && document.activeElement !== q && f.q) { /* keep */ }
     drawSkuBody();
@@ -267,7 +296,7 @@
     var rows = skuFiltered(), f = SC.sk, PG = window.__dashExport ? Math.max(1, rows.length) : PAGE, tp = Math.max(1, Math.ceil(rows.length / PG)); if (f.page >= tp) f.page = tp - 1;
     var pg = rows.slice(f.page * PG, f.page * PG + PG);
     $("scSkuBody").innerHTML = pg.length ? pg.map(function (r) {
-      return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + moneyC(r.wac) + '</td><td class="num" title="Delivered GMV ÷ delivered pieces, last 30 days (' + int(r.aspPcs) + ' pcs)">' + (r.asp == null ? '<span class="text-dim">—</span>' : int(r.asp)) + '</td><td class="num font-bold">' + moneyC(r.inv) + '</td><td class="num ' + (r.repMtd > 0 ? 'text-blue font-bold' : 'text-dim') + '">' + (r.repMtd > 0 ? int(r.repMtd) : '—') + '</td><td class="num ' + (r.repAvail > 0 ? 'text-orange' : 'text-dim') + '">' + (r.repAvail > 0 ? int(r.repAvail) : '—') + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
+      return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + moneyC(r.wac) + '</td><td>' + (r.imp ? '<span class="badge-outline blue" title="Received under Importation PO ' + esc(r.impPo) + '">' + esc(r.impPo) + '</span>' : '<span class="text-dim">—</span>') + '</td><td class="num" title="Delivered GMV ÷ delivered pieces, last 30 days (' + int(r.aspPcs) + ' pcs)">' + (r.asp == null ? '<span class="text-dim">—</span>' : int(r.asp)) + '</td><td class="num font-bold">' + moneyC(r.inv) + '</td><td class="num ' + (r.repMtd > 0 ? 'text-blue font-bold' : 'text-dim') + '">' + (r.repMtd > 0 ? int(r.repMtd) : '—') + '</td><td class="num ' + (r.repAvail > 0 ? 'text-orange' : 'text-dim') + '">' + (r.repAvail > 0 ? int(r.repAvail) : '—') + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
     }).join("") : '<tr><td colspan="' + COLS.length + '" class="text-dim center">No SKUs match these filters.</td></tr>';
     $("scSkuCount").textContent = int(rows.length) + " SKUs"; $("scSkuPage").textContent = "Page " + (f.page + 1) + " of " + tp;
     var st = $("scSkuStats"); if (st) st.innerHTML = [["SKUs", int(rows.length)], ["Units", int(sum(rows, "stock"))], ["Inventory value", money(sum(rows, "inv"))], ["Avg DOH", int(dohVal(rows))]].map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b></div>'; }).join("");

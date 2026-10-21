@@ -4162,6 +4162,7 @@ function parseInboundSheet(payload) {
 
     rows.push({
       sku,
+      po: cellText(c[1]).trim(), // Odoo_NO — the PO number (v1.17.0: kept so Importation POs can be told apart)
       name: cellText(c[4]),
       cat: cellText(c[5]),
       rcvDateText,
