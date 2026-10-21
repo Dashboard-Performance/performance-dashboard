@@ -13,12 +13,13 @@
     { id: "rep", label: "Repack", help: "Planned COGS sold from repacked stock" },
     { id: "imp", label: "Importation", help: "Planned COGS sold from stock received this month under the Importation POs below" }
   ];
-  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000, imp: 1000000, impPos: "P38624, P42109, P42029, P38670" };
+  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000, imp: 1000000, impPos: "P38624, P42109, P42029, P38670", exclEnds: "CART" };
   // v1.17.0 — Importation is a list of PO numbers (Odoo_NO in the Inbound sheet). Any SKU ever received
   // under one of these POs counts as an Importation SKU, exactly like the "Type = Importation" tag in the
   // EG - Inventory Aging workbook. Edited in Control -> Targets -> Supply conversion plan.
   var SUPPLY_TEXT_FIELDS = [
-    { id: "impPos", label: "Importation POs", help: "Odoo PO numbers, separated by commas. Pieces received under one of them count as Importation instead of Purchases." }
+    { id: "impPos", label: "Importation POs", help: "Odoo PO numbers, separated by commas. Pieces received under one of them count as Importation instead of Purchases." },
+    { id: "exclEnds", label: "Exclude SKUs ending with", help: "Packaging, not product — e.g. CART for the carton SKUs (EG030501C5CART). Separated by commas. These are left out of Supply conversion entirely." }
   ];
   function parsePos(v) {
     return String(v == null ? "" : v).split(/[\s,;\n]+/).map(function (x) { return x.trim().toUpperCase(); }).filter(Boolean);

@@ -412,3 +412,11 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 - **في SKU Analysis:** عمود **Importation PO** جديد، وفلتر **Importation SKUs**.
 - **ملحوظة على الشيت:** الـ SUMIFS في Summery مداها صفوف 3:1000 بس، والـ Working Sheet فيه 11,400 صف. 8 من الـ 10 SKUs المتعلّمين Importation واقعين تحت صف 1000. الداش بورد مفيهاش الحد ده.
 - **النشر:** ارفع `js/plans.js` و`js/supply.js` و`js/tower.js` وصفحات الـ html. مش محتاج Worker ولا Apps Script.
+
+## استبعاد الكراتين من الـ Supply conversion
+
+- أي SKU بينتهي بـ **CART** (زي `EG030501C5CART`) بيتشال خالص من حسبة الـ Supply conversion — مش بيتحسب في Beg Inv ولا Purchases ولا Returns ولا Repack ولا Importation، ومش داخل في الـ Converted.
+- اللستة متظبطة من **Control → Targets → Supply conversion plan** في خانة **Exclude SKUs ending with**، والافتراضي `CART`. تقدر تزوّد غيرها بفاصلة (مثلاً `CART, BOX`).
+- الشرط على **آخر** الـ SKU بس. يعني `EG0305CARTON99` مش هيتشال.
+- تحت الجدول بيظهر سطر بيقولك كام SKU اتشال.
+- التعديل في `js/plans.js` و`js/supply.js` بس.

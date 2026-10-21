@@ -41,7 +41,7 @@
   }
   function sigNow() { try { return [state.allParsedRows.length, (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
   // v1.17.0 — the Importation PO list is part of the signature so the table rebuilds when the saved plan arrives or changes
-  function impPosSig() { try { var P = window.TaagerPlans; if (!P) return ""; var k = planKey(), h = P.peek("supplyplan", k); return String((h ? h.values : P.SUPPLY_DEF).impPos || ""); } catch (e) { return ""; } }
+  function impPosSig() { try { var P = window.TaagerPlans; if (!P) return ""; var k = planKey(), h = P.peek("supplyplan", k); var v = h ? h.values : P.SUPPLY_DEF; return String(v.impPos || "") + "~" + String(v.exclEnds || ""); } catch (e) { return ""; } }
   function ageIdx(days) { return days == null ? 4 : days <= 60 ? 0 : days <= 120 ? 1 : days <= 180 ? 2 : days <= 364 ? 3 : 4; } // same bands as the Inventory Aging sheet; no purchase date = Unhealthy
   var RET_FACTOR = 0.75; // Returns = MAX(0, Confirmed − Delivered) × 75% (conservative haircut, same as the Purchase Plan sheet)
   var SEGS = ["Mega", "Super", "Winning", "Potential Winning", "Normal"], SEG_MIN = [1200000, 400000, 200000, 100000, 0];
@@ -83,6 +83,16 @@
         impSku[r.sku] = 1; if (!impPoOf[r.sku]) impPoOf[r.sku] = String(r.po).trim().toUpperCase(); impLines++;
       });
       SC.impPo = Object.keys(impPo); SC.impSkuN = Object.keys(impSku).length; SC.impLines = impLines;
+
+      // v1.17.0 — packaging SKUs (cartons/boxes) are not product: anything whose ID ends with one of these
+      // is left out of Supply conversion. Edited in Control -> Targets -> Supply conversion plan.
+      var exclEnds = (window.TaagerPlans ? window.TaagerPlans.parsePos(planGet().exclEnds) : []);
+      var isExcluded = function (id) {
+        var u = String(id || "").toUpperCase();
+        for (var i = 0; i < exclEnds.length; i++) if (u.length > exclEnds[i].length && u.slice(-exclEnds[i].length) === exclEnds[i]) return true;
+        return false;
+      };
+      SC.exclEnds = exclEnds; SC.exclN = 0;
 
       var beg = {}, inM = {};
       (state.metabaseBeginningInventory || []).forEach(function (r) { var d = new Date(r.MONTH); if (isNaN(d.getTime()) || d.getUTCFullYear() !== cy || d.getUTCMonth() !== cmo) return; beg[r.PRODUCT_ID] = (beg[r.PRODUCT_ID] || 0) + (+r.QTY || 0); });
@@ -131,6 +141,7 @@
       var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
+        if (isExcluded(id)) { SC.exclN++; return; } // packaging, not product
         var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
         var P = mtd[id] || 0, V = beg[id] || 0, Z = inM[id] || 0, I = impM[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
         // MTD confirmed is consumed in order: Beg Inv -> Purchases -> Importation -> Returns -> Repack.
@@ -175,7 +186,11 @@
       var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
       return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num" title="Edit in Control → Targets → Supply conversion plan">' + int(p) + '</td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Importation · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Importation → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Importation · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Importation → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+  }
+  function exclNote() {
+    var e = SC.exclEnds || []; if (!e.length) return "";
+    return '<div class="sc-note" style="margin:0 16px 12px">Left out as packaging: SKUs ending with ' + esc(e.join(", ")) + ' — ' + int(SC.exclN || 0) + ' SKU' + ((SC.exclN || 0) === 1 ? "" : "s") + ' skipped this month.</div>';
   }
   function impNote() {
     var n = (SC.impPo || []).length;
