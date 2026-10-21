@@ -73,22 +73,27 @@
           if (needG) { var g = r.confirmedGmv * (mp.cogsWeight != null ? mp.cogsWeight : 1); if (inCur) gA[id] = (gA[id] || 0) + g; else gL[id] = (gL[id] || 0) + g; }
         });
       });
+      // v1.17.0 — Importation = the pieces RECEIVED under an Importation PO (Odoo_NO in the Inbound sheet).
+      // The PO list is edited in Control -> Targets -> Supply conversion plan.
+      var impPo = {}, impSku = {}, impPoOf = {}, impM = {}, impLines = 0;
+      (window.TaagerPlans ? window.TaagerPlans.parsePos(planGet().impPos) : []).forEach(function (x) { impPo[x] = 1; });
+      var isImpPo = function (r) { var po = String(r.po || "").trim().toUpperCase(); return !!(po && impPo[po]); };
+      if (Object.keys(impPo).length) (state.inboundRows || []).forEach(function (r) {
+        if (!r.sku || !isImpPo(r)) return;
+        impSku[r.sku] = 1; if (!impPoOf[r.sku]) impPoOf[r.sku] = String(r.po).trim().toUpperCase(); impLines++;
+      });
+      SC.impPo = Object.keys(impPo); SC.impSkuN = Object.keys(impSku).length; SC.impLines = impLines;
+
       var beg = {}, inM = {};
       (state.metabaseBeginningInventory || []).forEach(function (r) { var d = new Date(r.MONTH); if (isNaN(d.getTime()) || d.getUTCFullYear() !== cy || d.getUTCMonth() !== cmo) return; beg[r.PRODUCT_ID] = (beg[r.PRODUCT_ID] || 0) + (+r.QTY || 0); });
-      (state.inboundRows || []).forEach(function (r) { if (!r.sku || !r.rcvTs) return; var d = new Date(r.rcvTs); if (d.getFullYear() === cy && d.getMonth() === cmo) inM[r.sku] = (inM[r.sku] || 0) + (+r.rcvQty || 0); });
+      // this month's receipts, split by PO: Importation POs -> impM, everything else -> inM (the Purchases row)
+      (state.inboundRows || []).forEach(function (r) {
+        if (!r.sku || !r.rcvTs) return; var d = new Date(r.rcvTs);
+        if (d.getFullYear() !== cy || d.getMonth() !== cmo) return;
+        var t = isImpPo(r) ? impM : inM; t[r.sku] = (t[r.sku] || 0) + (+r.rcvQty || 0);
+      });
       var last = {};
       (state.inboundRows || []).forEach(function (r) { if (r.sku && r.rcvTs && (!last[r.sku] || r.rcvTs > last[r.sku])) last[r.sku] = r.rcvTs; });
-      // v1.17.0 — Importation: every SKU ever received under one of the Importation PO numbers
-      // (Odoo_NO in the Inbound sheet). Same idea as the "Type = Importation" tag in the Inventory Aging
-      // workbook, but driven by the PO list in Control -> Targets -> Supply conversion plan.
-      var impPo = {}, impSku = {}, impPoOf = {};
-      (window.TaagerPlans ? window.TaagerPlans.parsePos(planGet().impPos) : []).forEach(function (x) { impPo[x] = 1; });
-      if (Object.keys(impPo).length) (state.inboundRows || []).forEach(function (x) {
-        var po = String(x.po || "").trim().toUpperCase();
-        if (x.sku && po && impPo[po]) { impSku[x.sku] = 1; if (!impPoOf[x.sku]) impPoOf[x.sku] = po; }
-      });
-      SC.impPo = Object.keys(impPo); SC.impSkuN = Object.keys(impSku).length;
-
       // v1.17.0 — repacked this month (repack sheet, APPLIED) and repack available now (damaged box)
       var repMtd = {}; (state.supplyRepackRows || []).forEach(function (x) { if (x.status !== "APPLIED" || !x.ts) return; var d = new Date(x.ts); if (d.getFullYear() === cy && d.getMonth() === cmo) repMtd[x.sku] = (repMtd[x.sku] || 0) + (+x.qty || 0); });
       var repAvail = state.repackMap instanceof Map ? state.repackMap : new Map();
@@ -122,24 +127,26 @@
       var retMonth = cy + "-" + String(cmo + 1).padStart(2, "0"); loadActualReturns(retMonth);
       if (RET.data && RET.data.month === retMonth) { var rs = RET.data.skus || {}; Object.keys(rs).forEach(function (k) { var id = String(k).trim(); rto[id] = (rto[id] || 0) + (+rs[k] || 0); }); }
       SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
-      var cids = {}; [beg, inM, rto, rep, mtd].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
+      var cids = {}; [beg, inM, impM, rto, rep, mtd].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
       var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
         var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
-        var P = mtd[id] || 0, V = beg[id] || 0, Z = inM[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
-        var X = P === 0 ? 0 : Math.min(V, P), AB = Math.min(P - X, Z), AF = Math.min(P - X - AB, R), BR = Math.max(0, Math.min(P - X - AB - R, B));
+        var P = mtd[id] || 0, V = beg[id] || 0, Z = inM[id] || 0, I = impM[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
+        // MTD confirmed is consumed in order: Beg Inv -> Purchases -> Importation -> Returns -> Repack.
+        var X = P === 0 ? 0 : Math.min(V, P),
+            AB = Math.min(P - X, Z),
+            IM = Math.min(P - X - AB, I),
+            AF = Math.min(P - X - AB - IM, R),
+            BR = Math.max(0, Math.min(P - X - AB - IM - R, B));
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
-        var isImp = !!impSku[id];
         [["all"], [cat]].forEach(function (kk) {
           var a = conv[kk[0]] = conv[kk[0]] || mkAgg();
           a.beg[0] += V * w; a.beg[1] += X * w;
+          a.pur[0] += Z * w; a.pur[1] += AB * w;
+          a.imp[0] += I * w; a.imp[1] += IM * w;
           a.ret[0] += R * w; a.ret[1] += AF * w;
           a.rep[0] += B * w; a.rep[1] += BR * w;
-          // Purchases = the "Existing" SKUs only; Importation SKUs get their own row — same split as the sheet
-          // (Purchases = SUMIFS(Purchased COGS, Type, "Existing"), Importation = SUMIFS(…, "Importation")).
-          if (isImp) { a.imp[0] += Z * w; a.imp[1] += P * w; } // Converted = the SKU's whole MTD confirmed COGS, like the sheet
-          else { a.pur[0] += Z * w; a.pur[1] += AB * w; }
         });
       });
       SC.convKey = cy + "-" + String(cmo + 1).padStart(2, "0"); SC.conv = conv; SC.convMonth = ref.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
@@ -163,17 +170,17 @@
   }
   function convPanel() {
     var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat];
-    var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["ret", "Returns"], ["rep", "Repack"], ["imp", "Importation"]];
+    var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["imp", "Importation"], ["ret", "Returns"], ["rep", "Repack"]];
     var body = labs.map(function (l) {
       var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
       return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num" title="Edit in Control → Targets → Supply conversion plan">' + int(p) + '</td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Returns · Repack · Importation vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the SKUs received under the Importation POs; its Actual is their purchases and its Converted is their whole MTD confirmed COGS — the same way the Inventory Aging sheet does it. Those SKUs are left out of the Purchases row.</div>' + impNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Importation · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Importation → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
   }
   function impNote() {
     var n = (SC.impPo || []).length;
     if (!n) return '<div class="sc-note" style="margin:0 16px 12px">Importation: no PO numbers set yet — add them in Control → Targets → Supply conversion plan.</div>';
-    return '<div class="sc-note" style="margin:0 16px 12px">Importation POs (' + n + '): ' + esc((SC.impPo || []).join(", ")) + ' → ' + int(SC.impSkuN || 0) + ' SKU' + ((SC.impSkuN || 0) === 1 ? "" : "s") + ' received under them.</div>';
+    return '<div class="sc-note" style="margin:0 16px 12px">Importation POs (' + n + '): ' + esc((SC.impPo || []).join(", ")) + ' → ' + int(SC.impLines || 0) + ' inbound line' + ((SC.impLines || 0) === 1 ? "" : "s") + ' on ' + int(SC.impSkuN || 0) + ' SKU' + ((SC.impSkuN || 0) === 1 ? "" : "s") + '. Only what was received <b>this month</b> under these POs counts in the Importation row.</div>';
   }
   function retNote() {
     var I = SC.retInfo, t;
