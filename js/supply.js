@@ -25,7 +25,7 @@
   var ACT_NOTE = { "Liquidation (On-Cost)": "Offline - B2B", "Merchant Focus": "Online", "Telesales - Upselling - Cross Selling": "Online", "Supplier Returns": "Supply Team" };
 
   /* ---------------------------------------------------------------- data (computed from the dashboard's own data) */
-  var SC = { rows: [], asOf: "", sig: "", cat: "all", sk: { q: "", cat: "", aging: "", tag: "", seg: "", action: "", instock: true, key: "inv", dir: "desc", page: 0 }, act: ACTIONS[0], empty: true, segMode: "segA" };
+  var SC = { rows: [], asOf: "", sig: "", cat: "all", sk: { q: "", cat: "", aging: "", tag: "", seg: "", action: "", repack: "", instock: true, key: "inv", dir: "desc", page: 0 }, act: ACTIONS[0], empty: true, segMode: "segA" };
   var PAGE = 25, DAY = 86400000;
   // v1.17.0 — ACTUAL returns (warehouse scans "Product is good", Return_Archive_YYYY-MM → Return_RCV) — used ONLY in the
   // Supply conversion → Returns row below. Nothing else in the dashboard uses it.
@@ -56,12 +56,14 @@
       var maxTs = 0; main.forEach(function (r) { if (r.timestamp > maxTs) maxTs = r.timestamp; });
       var ref = new Date(maxTs || today), cy = ref.getFullYear(), cmo = ref.getMonth(), elapsed = ref.getDate() || 1, mdays = new Date(cy, cmo + 1, 0).getDate();
       var py = cmo === 0 ? cy - 1 : cy, pmo = cmo === 0 ? 11 : cmo - 1;
-      var c3 = {}, c15 = {}, c30 = {}, gA = {}, gL = {}, mtd = {};
+      var c3 = {}, c15 = {}, c30 = {}, gA = {}, gL = {}, mtd = {}, dP = {}, dG = {};
       main.forEach(function (r) {
         if (!r.sku) return;
         var d = new Date(r.timestamp), dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); var age = (today - dd.getTime()) / DAY;
         var inCur = d.getFullYear() === cy && d.getMonth() === cmo, inPrev = d.getFullYear() === py && d.getMonth() === pmo;
         var needQ = r.confirmedPieces && ((age >= 1 && age <= 30) || inCur), needG = (inCur || inPrev) && r.confirmedGmv;
+        // v1.17.0 — Delivered ASP (last 30 full days): delivered GMV ÷ delivered pieces, bundles split to their singles
+        if (r.deliveredPieces > 0 && age >= 1 && age <= 30) mapsFor(r.sku).forEach(function (mp) { var id = mp.singleId; dP[id] = (dP[id] || 0) + r.deliveredPieces * (mp.quantity || 1); dG[id] = (dG[id] || 0) + (r.deliveredGmv || 0) * (mp.cogsWeight != null ? mp.cogsWeight : 1); });
         if (!needQ && !needG) return;
         mapsFor(r.sku).forEach(function (mp) {
           var id = mp.singleId;
@@ -74,6 +76,9 @@
       (state.inboundRows || []).forEach(function (r) { if (!r.sku || !r.rcvTs) return; var d = new Date(r.rcvTs); if (d.getFullYear() === cy && d.getMonth() === cmo) inM[r.sku] = (inM[r.sku] || 0) + (+r.rcvQty || 0); });
       var last = {};
       (state.inboundRows || []).forEach(function (r) { if (r.sku && r.rcvTs && (!last[r.sku] || r.rcvTs > last[r.sku])) last[r.sku] = r.rcvTs; });
+      // v1.17.0 — repacked this month (repack sheet, APPLIED) and repack available now (damaged box)
+      var repMtd = {}; (state.supplyRepackRows || []).forEach(function (x) { if (x.status !== "APPLIED" || !x.ts) return; var d = new Date(x.ts); if (d.getFullYear() === cy && d.getMonth() === cmo) repMtd[x.sku] = (repMtd[x.sku] || 0) + (+x.qty || 0); });
+      var repAvail = state.repackMap instanceof Map ? state.repackMap : new Map();
       // expected returns — same logic as Purchase Plan (pending confirmed × (1 − DR%))
       var ov = null; try { ov = computePurchasePlanOverallSingleStats(); } catch (e) { ov = null; }
       var ids = {}; Object.keys(invMap).forEach(function (k) { ids[k] = 1; }); idx.stockByProductId.forEach(function (v, k) { ids[k] = 1; });
@@ -90,7 +95,8 @@
         var o = ov && ov.get(id), drPct = o && o.drConfirmed ? o.drDelivered / o.drConfirmed * 100 : 0, exRet = o ? Math.round(Math.max(0, o.confirmed - o.delivered) * RET_FACTOR) : 0;
         var gA_ = gA[id] || 0, gL_ = gL[id] || 0, gP = elapsed >= 5 ? gA_ / elapsed * mdays : (gA_ / elapsed * mdays * elapsed + gL_ * (5 - elapsed)) / 5;
         var action = "", channel = "";
-        var row = { id: id, name: iv.skuName || pr.name || id, cat: String(iv.category || pr.category || "").toLowerCase() || "general", lpd: newest ? new Date(newest).toISOString().slice(0, 10) : "", days: days, aging: aging, avg3: a3, avg15: a15, c15: c15[id] || 0, c30: c30[id] || 0, stock: stock, doh: doh, wac: wac, inv: stock * wac, tag: tag, fms: fms, abc: "", quarter: newest ? (new Date(newest).getFullYear() < 2026 ? "Before 2026" : new Date(newest).getMonth() <= 2 ? "Q1" : new Date(newest).getMonth() <= 5 ? "Q2" : "Q3") : "", mtd: mtd[id] || 0, str: str, action: action, channel: channel, exRet: exRet, retV: exRet * wac, drPct: drPct, gA: gA_, gL: gL_, gP: gP, segA: segOf(gA_), segL: segOf(gL_), segP: segOf(gP) };
+        var row = { id: id, name: iv.skuName || pr.name || id, cat: String(iv.category || pr.category || "").toLowerCase() || "general", lpd: newest ? new Date(newest).toISOString().slice(0, 10) : "", days: days, aging: aging, avg3: a3, avg15: a15, c15: c15[id] || 0, c30: c30[id] || 0, stock: stock, doh: doh, wac: wac, inv: stock * wac, tag: tag, fms: fms, abc: "", quarter: newest ? (new Date(newest).getFullYear() < 2026 ? "Before 2026" : new Date(newest).getMonth() <= 2 ? "Q1" : new Date(newest).getMonth() <= 5 ? "Q2" : "Q3") : "", mtd: mtd[id] || 0, str: str, action: action, channel: channel, exRet: exRet, retV: exRet * wac, drPct: drPct, gA: gA_, gL: gL_, gP: gP, segA: segOf(gA_), segL: segOf(gL_), segP: segOf(gP),
+          asp: dP[id] > 0 ? dG[id] / dP[id] : null, aspPcs: dP[id] || 0, repMtd: repMtd[id] || 0, repAvail: repAvail.get(id) || 0 };
         for (var z = 0; z < 6; z++) { row["q" + z] = q[z]; row["v" + z] = q[z] * wac; }
         rows.push(row);
       });
@@ -229,12 +235,13 @@
     host.innerHTML = html;
   }
 
-  var COLS = [["id", "SKU ID", ""], ["name", "SKU name", ""], ["cat", "Category", ""], ["lpd", "Last inbound", ""], ["aging", "Aging", ""], ["avg3", "Avg 3D", "num"], ["avg15", "Avg 15D", "num"], ["stock", "Stock", "num"], ["doh", "DOH", "num"], ["wac", "WAC", "num"], ["inv", "Inv. value", "num"], ["exRet", "Exp. returns", "num"], ["tag", "Stock tag", ""], ["segA", "Segment", ""], ["segL", "Last month", ""], ["segP", "Projected", ""], ["fms", "Movement", ""], ["abc", "ABC", ""], ["action", "Proposed action", ""]];
+  var COLS = [["id", "SKU ID", ""], ["name", "SKU name", ""], ["cat", "Category", ""], ["lpd", "Last inbound", ""], ["aging", "Aging", ""], ["avg3", "Avg 3D", "num"], ["avg15", "Avg 15D", "num"], ["stock", "Stock", "num"], ["doh", "DOH", "num"], ["wac", "WAC", "num"], ["asp", "ASP", "num"], ["inv", "Inv. value", "num"], ["repMtd", "Repacked MTD", "num"], ["repAvail", "Repack avail.", "num"], ["exRet", "Exp. returns", "num"], ["tag", "Stock tag", ""], ["segA", "Segment", ""], ["segL", "Last month", ""], ["segP", "Projected", ""], ["fms", "Movement", ""], ["abc", "ABC", ""], ["action", "Proposed action", ""]];
   function sel(id, label, opts, v) { return '<select data-sk="' + id + '"><option value="">' + label + '</option>' + opts.map(function (o) { return '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + '>' + esc(CATL[o] || o) + '</option>'; }).join("") + '</select>'; }
   function skuFiltered() {
     var f = SC.sk, q = f.q.toLowerCase();
     var rows = SC.rows.filter(function (r) {
       if (f.instock && !(r.stock > 0)) return false;
+      if (f.repack === "done" && !(r.repMtd > 0)) return false; if (f.repack === "avail" && !(r.repAvail > 0)) return false; if (f.repack === "any" && !(r.repMtd > 0 || r.repAvail > 0)) return false;
       if (f.cat && r.cat !== f.cat) return false; if (f.aging && r.aging !== f.aging) return false; if (f.tag && r.tag !== f.tag) return false; if (f.seg && r.segA !== f.seg) return false; if (f.action && r.action !== f.action) return false;
       if (q && (String(r.id).toLowerCase().indexOf(q) < 0 && String(r.name).toLowerCase().indexOf(q) < 0)) return false; return true;
     });
@@ -251,6 +258,7 @@
         '<div class="table-footer"><span id="scSkuCount"></span><div class="pager"><button class="btn btn-outline small" data-sc="prev">Prev</button><span id="scSkuPage"></span><button class="btn btn-outline small" data-sc="next">Next</button></div></div></div>';
     } else { var sc = host.querySelector(".sc-src"); }
     $("scSkuFilters").innerHTML = '<input type="search" id="scSkuQ" placeholder="Search SKU ID or name…" value="' + esc(f.q) + '" autocomplete="off" />' + sel("cat", "All categories", CATS, f.cat) + sel("aging", "All aging", AGES, f.aging) + sel("tag", "All stock tags", TAGS, f.tag) + sel("seg", "All segments", SEGS, f.seg) + sel("action", "All actions", ACTIONS, f.action) +
+      '<select data-sk="repack"><option value="">All (repack)</option>' + [["done", "Repacked this month"], ["avail", "Repack available (damaged box)"], ["any", "Repacked or available"]].map(function (o) { return '<option value="' + o[0] + '"' + (f.repack === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>' +
       '<label class="sc-chk"><input type="checkbox" data-sk="instock"' + (f.instock ? " checked" : "") + '> In stock only</label>';
     var q = $("scSkuQ"); if (q && document.activeElement !== q && f.q) { /* keep */ }
     drawSkuBody();
@@ -259,7 +267,7 @@
     var rows = skuFiltered(), f = SC.sk, PG = window.__dashExport ? Math.max(1, rows.length) : PAGE, tp = Math.max(1, Math.ceil(rows.length / PG)); if (f.page >= tp) f.page = tp - 1;
     var pg = rows.slice(f.page * PG, f.page * PG + PG);
     $("scSkuBody").innerHTML = pg.length ? pg.map(function (r) {
-      return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + moneyC(r.wac) + '</td><td class="num font-bold">' + moneyC(r.inv) + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
+      return '<tr class="cx-row" data-sc-sku="' + esc(r.id) + '"><td class="font-mono text-dim">' + esc(r.id) + '</td><td class="truncate-cell" title="' + esc(r.name) + '">' + esc(r.name) + '</td><td class="text-dim">' + esc(CATL[r.cat] || r.cat) + '</td><td class="text-dim">' + dfmt(r.lpd) + '</td><td>' + ageChip(r.aging) + '</td><td class="num">' + (+r.avg3).toFixed(1) + '</td><td class="num">' + (+r.avg15).toFixed(1) + '</td><td class="num font-bold">' + int(r.stock) + '</td><td class="num">' + dohTxt(r) + '</td><td class="num text-dim">' + moneyC(r.wac) + '</td><td class="num" title="Delivered GMV ÷ delivered pieces, last 30 days (' + int(r.aspPcs) + ' pcs)">' + (r.asp == null ? '<span class="text-dim">—</span>' : int(r.asp)) + '</td><td class="num font-bold">' + moneyC(r.inv) + '</td><td class="num ' + (r.repMtd > 0 ? 'text-blue font-bold' : 'text-dim') + '">' + (r.repMtd > 0 ? int(r.repMtd) : '—') + '</td><td class="num ' + (r.repAvail > 0 ? 'text-orange' : 'text-dim') + '">' + (r.repAvail > 0 ? int(r.repAvail) : '—') + '</td><td class="num ' + (r.exRet > 0 ? '' : 'text-dim') + '">' + int(r.exRet) + '</td><td>' + chip(r.tag.replace(/^\d-\s*/, "") || "—", TAG_TONE[r.tag] || "na") + '</td><td>' + segChip(r.segA) + '</td><td class="text-dim">' + esc(r.segL) + '</td><td class="text-dim">' + esc(r.segP) + '</td><td class="text-dim">' + esc((r.fms || "").replace(/^\d\.\s*/, "")) + '</td><td class="text-dim">' + esc(r.abc) + '</td><td class="text-dim truncate-cell">' + esc(r.action) + '</td></tr>';
     }).join("") : '<tr><td colspan="' + COLS.length + '" class="text-dim center">No SKUs match these filters.</td></tr>';
     $("scSkuCount").textContent = int(rows.length) + " SKUs"; $("scSkuPage").textContent = "Page " + (f.page + 1) + " of " + tp;
     var st = $("scSkuStats"); if (st) st.innerHTML = [["SKUs", int(rows.length)], ["Units", int(sum(rows, "stock"))], ["Inventory value", money(sum(rows, "inv"))], ["Avg DOH", int(dohVal(rows))]].map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b></div>'; }).join("");
