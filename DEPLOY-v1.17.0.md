@@ -424,7 +424,8 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 ## Supply conversion → شيت لوحده
 
 - فانكشن جديدة في الـ Apps Script بتكتب جدول **Supply conversion** بنفس شكله بالظبط في الشيت `1qaugR6FocPVpDFMjZNnPFy24K2T9MN5IFg02cZHUvK4` (التاب gid `1516662734`).
-- **الشكل:** الصف الأول العناوين `Metric · Actual · Planned · Converted · Conversion %`، وتحتيه 5 صفوف: Beg Inv. · Purchases · Importation · Returns · Repack. الأعمدة **A لحد E بس**، وأي حاجة من F ورايح متتلمسش.
+- **الشكل:** الصف الأول العناوين `Metric · Actual · Planned · Converted · Conversion % · Planned MTD · Actual MTD · Conversion % MTD`، وتحتيه 5 صفوف: Beg Inv. · Purchases · Importation · Returns · Repack. الأعمدة **A لحد H**، وأي حاجة من I ورايح متتلمسش.
+- **أعمدة الـ MTD:** `Planned MTD` = الخطة الشهرية × (الأيام اللي فيها داتا ÷ أيام الشهر). `Actual MTD` = الـ Converted. `Conversion % MTD` = Actual MTD ÷ Planned MTD. الفايدة إن نص الشهر بيتقارن بنص خطة مش بخطة شهر كامل.
 - **نفس مصادر الداش بورد:** Main (Metabase)، Beginning Inventory (Metabase)، Products Debundle Map (Metabase)، COGS وInbound وRepack (تابات WebSite_EGY)، والمرتجعات الفعلية من Return_Archive.
 - **نفس الفلاتر:** الـ singles بس، البندلات بره، الـ SKUs اللي بتخلص بـ CART بره، واللي ملوش WAC بره.
 - **نفس الـ waterfall:** Beg Inv → Purchases → Importation → Returns → Repack.
