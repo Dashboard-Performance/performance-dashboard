@@ -179,10 +179,11 @@
     P.get("supplyplan", key).then(function (p) { PLAN = p; rerender(); });
     return P.SUPPLY_DEF;
   }
-  // v1.17.0 — the six numbers behind every row of the Supply conversion table.
+  // v1.17.0 — the seven numbers behind every row of the Supply conversion table.
   //   Actual             = the COGS this source made available this month
+  //   Planned            = what the plan expected it to make available (Control -> Targets)
   //   Target Converted % = the share it is expected to convert (Control -> Targets)
-  //   Target             = Actual x Target Converted %
+  //   Target             = Planned x Target Converted %  — judged against the plan, not against whatever turned up
   //   Target MTD         = Target x (days with data / days in month)
   //   Converted MTD      = the COGS that has actually converted out of it so far (EGP)
   //   Converted % MTD    = Converted MTD / Target MTD — how much of the month-to-date target is in
@@ -194,9 +195,9 @@
     var elapsed = +SC.elapsed || 0, mdays = +SC.mdays || 0, share = mdays > 0 ? elapsed / mdays : 1;
     return CONV_ROWS.map(function (l) {
       var actual = Math.round(d[l[0]][0]), converted = Math.round(d[l[0]][1]);
-      var tgtPct = +pl[l[2]] || 0;
-      var target = Math.round(actual * tgtPct), targetMtd = Math.round(target * share);
-      return { metric: l[1], actual: actual, targetPct: tgtPct, target: target, targetMtd: targetMtd,
+      var planned = Math.round(+pl[l[0]] || 0), tgtPct = +pl[l[2]] || 0;
+      var target = Math.round(planned * tgtPct), targetMtd = Math.round(target * share);
+      return { metric: l[1], actual: actual, planned: planned, targetPct: tgtPct, target: target, targetMtd: targetMtd,
                convertedMtd: converted,
                convertedPctMtd: targetMtd > 0 ? converted / targetMtd : 0 };
     });
@@ -214,24 +215,26 @@
   }
 
   function convPanel() {
-    var rows = convCalc() || CONV_ROWS.map(function (l) { return { metric: l[1], actual: 0, targetPct: 0, target: 0, targetMtd: 0, convertedMtd: 0, convertedPctMtd: 0 }; });
+    var rows = convCalc() || CONV_ROWS.map(function (l) { return { metric: l[1], actual: 0, planned: 0, targetPct: 0, target: 0, targetMtd: 0, convertedMtd: 0, convertedPctMtd: 0 }; });
     var body = rows.map(function (r) {
       var pc = r.convertedPctMtd * 100, hit = pc >= 100;
       return '<tr><td>' + esc(r.metric) + '</td>' +
         '<td class="num">' + int(r.actual) + '</td>' +
+        '<td class="num" title="What the plan expected this source to make available \u2014 Control \u2192 Targets \u2192 Supply conversion plan.">' + int(r.planned) + '</td>' +
         '<td class="num" title="Edit in Control \u2192 Targets \u2192 Supply conversion plan">' + (r.targetPct * 100).toFixed(0) + '%</td>' +
         '<td class="num">' + int(r.target) + '</td>' +
         '<td class="num">' + int(r.targetMtd) + '</td>' +
         '<td class="num ' + (hit ? "text-green" : "") + '"><b>' + int(r.convertedMtd) + '</b></td>' +
         '<td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion \u2014 ' + esc(SC.convMonth || "") + '</h2><p>Actual \u00b7 Target \u00b7 Converted MTD \u2014 per source</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th>' +
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion \u2014 ' + esc(SC.convMonth || "") + '</h2><p>Actual \u00b7 Planned \u00b7 Target \u00b7 Converted MTD \u2014 per source</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th>' +
       '<th class="num" title="Quantity \u00d7 WAC this source made available this month.">Actual</th>' +
+      '<th class="num" title="What the plan expected this source to make available this month \u2014 Control \u2192 Targets \u2192 Supply conversion plan.">Planned</th>' +
       '<th class="num" title="The share this source is expected to convert \u2014 Control \u2192 Targets \u2192 Supply conversion plan.">Target Converted %</th>' +
-      '<th class="num" title="Actual \u00d7 Target Converted %.">Target</th>' +
+      '<th class="num" title="Planned \u00d7 Target Converted % \u2014 the target comes from the plan, so it does not move with whatever actually turned up.">Target</th>' +
       '<th class="num" title="Target \u00d7 (days with data \u00f7 days in the month).">Target MTD</th>' +
       '<th class="num" title="The COGS that has actually converted out of this source so far this month.">Converted MTD</th>' +
-      '<th class="num" title="Converted MTD \u00f7 Target MTD \u2014 how much of the month-to-date target is in.">Converted % MTD</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity \u00d7 WAC), single SKUs only. Converted MTD = the MTD confirmed COGS consumed from each source, in order: Beg Inv \u2192 Purchases \u2192 Importation \u2192 Returns \u2192 Repack. Target = Actual \u00d7 Target Converted %, and Target MTD is that pro-rated to the days with data, so half a month is judged against half a target. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control \u2192 Targets \u2192 Supply conversion plan).</div></div>';
+      '<th class="num" title="Converted MTD \u00f7 Target MTD \u2014 how much of the month-to-date target is in.">Converted % MTD</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity \u00d7 WAC), single SKUs only. Converted MTD = the MTD confirmed COGS consumed from each source, in order: Beg Inv \u2192 Purchases \u2192 Importation \u2192 Returns \u2192 Repack. Target = Planned \u00d7 Target Converted %, so it is fixed by the plan and does not move with the Actual; Target MTD is that pro-rated to the days with data, so half a month is judged against half a target. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control \u2192 Targets \u2192 Supply conversion plan).</div></div>';
   }
   function exclNote() {
     var e = SC.exclEnds || []; if (!e.length) return "";
