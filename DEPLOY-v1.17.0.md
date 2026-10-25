@@ -430,5 +430,9 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 - **نفس الـ waterfall:** Beg Inv → Purchases → Importation → Returns → Repack.
 - **الشهر** بيتاخد من أحدث تاريخ في الـ Main، زي الداش بورد.
 - **الـ Planned** بيتاخد من `PSC_PLANNED` في السكربت، لأن الـ Apps Script مش بيقدر يقرا الـ Targets من الـ Worker. لو غيرت الخطة في Control → Targets، غيرها هنا كمان. فيه note على خلية A1 بيفكرك.
-- **التشغيل:** `exportSupplyConversionNow()` من الـ editor. وفيه كمان action للـ Worker اسمه `supply_conversion_export` لو حبيت نجدوله بعدين.
+- **التشغيل:** متجدول كل يوم **11:30 بتوقيت القاهرة** — بعد الـ Planner DOH (11:00) بنص ساعة وقبل إيميل الـ Decline (12:00)، عشان مايبقاش فيه تنفيذين على الـ Apps Script في نفس اللحظة. لو فشل بيعيد كل 15 دقيقة لحد 3 مرات، لحد 1:59.
+  - الـ Worker هو اللي بيظبط المعاد (action `supply_conversion_export`).
+  - تشغيل يدوي: `exportSupplyConversionNow()` من الـ editor، أو `?action=supplyConversionExport&run=1` للـ owners.
+  - حالة آخر تشغيل: `?action=supplyConversionExport`.
+  - للإيقاف: `SUPPLY_CONVERSION_EXPORT = "off"` في wrangler.toml.
 - **إصلاح معاه:** الـ Planner DOH كان بيقرا الـ Products Debundle Map من تاب في WebSite_EGY، والداش بورد بتقراه من Metabase. اتظبط يقرا من Metabase زيها.
