@@ -854,6 +854,9 @@
     // Supply conversion plan
     var sv = planVals("supplyplan"), tot = 0;
     var srows = P.SUPPLY_FIELDS.map(function (f) { tot += +sv[f.id] || 0; return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" inputmode="decimal" data-plan="supplyplan" data-pid="' + f.id + '" value="' + esc(Math.round(+sv[f.id] || 0).toLocaleString("en-US")) + '"><s>EGP</s></span></td></tr>'; }).join("");
+    var spct = (P.SUPPLY_PCT_FIELDS || []).map(function (f) {
+      return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" inputmode="decimal" data-plan="supplyplan" data-pid="' + f.id + '" data-k="pct" value="' + esc(showV("pct", sv[f.id])) + '"><s>%</s></span></td></tr>';
+    }).join("");
     var stext = (P.SUPPLY_TEXT_FIELDS || []).map(function (f) {
       return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" data-plan="supplyplan" data-pid="' + f.id + '" data-k="text" value="' + esc(sv[f.id] == null ? "" : String(sv[f.id])) + '"></span></td></tr>';
     }).join("");
@@ -861,7 +864,7 @@
       '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span><div class="tg-ht"><b>Supply conversion plan</b>' + planPill("supplyplan") + '</div></div>' +
       '<p class="tg-desc">Planned COGS per source for ' + esc(monthTitle(tgMonth)) + ' — the "Planned" column of Supply Chain → Supply conversion.</p>' +
       '<div class="tg-kpi-wrap"><table class="tg-kpi-t"><thead><tr><th>Source</th><th class="n">Planned (COGS)</th></tr></thead><tbody>' + srows +
-      '<tr class="tg-totr"><td>Total</td><td class="n"><b id="tgSupTot">' + Math.round(tot).toLocaleString("en-US") + '</b></td></tr>' + stext + '</tbody></table></div>' +
+      '<tr class="tg-totr"><td>Total</td><td class="n"><b id="tgSupTot">' + Math.round(tot).toLocaleString("en-US") + '</b></td></tr>' + spct + stext + '</tbody></table></div>' +
       '<div class="tw-msg" data-msg="supplyplan"></div>' +
       '<div class="tg-acts"><button class="btn btn-primary small" data-psave="supplyplan">Save plan</button><button class="btn small" data-pcopy="supplyplan">Copy last month</button><button class="btn small" data-preset="supplyplan">Reset to default</button></div></div>';
     // Segmentation plan

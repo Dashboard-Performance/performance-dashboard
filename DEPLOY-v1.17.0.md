@@ -423,17 +423,13 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 
 ## Supply conversion → شيت لوحده
 
-- فانكشن جديدة في الـ Apps Script بتكتب جدول **Supply conversion** بنفس شكله بالظبط في الشيت `1qaugR6FocPVpDFMjZNnPFy24K2T9MN5IFg02cZHUvK4` (التاب gid `1516662734`).
-- **الشكل:** الصف الأول العناوين `Metric · Actual · Planned · Converted · Conversion % · Planned MTD · Actual MTD · Conversion % MTD`، وتحتيه 5 صفوف: Beg Inv. · Purchases · Importation · Returns · Repack. الأعمدة **A لحد H**، وأي حاجة من I ورايح متتلمسش.
-- **أعمدة الـ MTD:** `Planned MTD` = الخطة الشهرية × (الأيام اللي فيها داتا ÷ أيام الشهر). `Actual MTD` = الـ Converted. `Conversion % MTD` = Actual MTD ÷ Planned MTD. الفايدة إن نص الشهر بيتقارن بنص خطة مش بخطة شهر كامل.
-- **نفس مصادر الداش بورد:** Main (Metabase)، Beginning Inventory (Metabase)، Products Debundle Map (Metabase)، COGS وInbound وRepack (تابات WebSite_EGY)، والمرتجعات الفعلية من Return_Archive.
-- **نفس الفلاتر:** الـ singles بس، البندلات بره، الـ SKUs اللي بتخلص بـ CART بره، واللي ملوش WAC بره.
-- **نفس الـ waterfall:** Beg Inv → Purchases → Importation → Returns → Repack.
-- **الشهر** بيتاخد من أحدث تاريخ في الـ Main، زي الداش بورد.
-- **الـ Planned** بيتاخد من `PSC_PLANNED` في السكربت، لأن الـ Apps Script مش بيقدر يقرا الـ Targets من الـ Worker. لو غيرت الخطة في Control → Targets، غيرها هنا كمان. فيه note على خلية A1 بيفكرك.
-- **التشغيل:** متجدول كل يوم **11:30 بتوقيت القاهرة** — بعد الـ Planner DOH (11:00) بنص ساعة وقبل إيميل الـ Decline (12:00)، عشان مايبقاش فيه تنفيذين على الـ Apps Script في نفس اللحظة. لو فشل بيعيد كل 15 دقيقة لحد 3 مرات، لحد 1:59.
-  - الـ Worker هو اللي بيظبط المعاد (action `supply_conversion_export`).
-  - تشغيل يدوي: `exportSupplyConversionNow()` من الـ editor، أو `?action=supplyConversionExport&run=1` للـ owners.
-  - حالة آخر تشغيل: `?action=supplyConversionExport`.
-  - للإيقاف: `SUPPLY_CONVERSION_EXPORT = "off"` في wrangler.toml.
-- **إصلاح معاه:** الـ Planner DOH كان بيقرا الـ Products Debundle Map من تاب في WebSite_EGY، والداش بورد بتقراه من Metabase. اتظبط يقرا من Metabase زيها.
+- **الداش بورد هي اللي بتحسب، والـ Apps Script بيكتب بس.** مفيش أي حسابات اتكتبت تاني في السكربت، فالشيت مستحيل يختلف عن الصفحة.
+- **إزاي بيشتغل:** أول ما الداش بورد تخلص تحميل الداتا، بتبعت جدول الـ Supply conversion اللي محسوب أصلاً للـ Apps Script (action `supply_conversion_rows`)، وهو يكتبه في الشيت `1qaugR6FocPVpDFMjZNnPFy24K2T9MN5IFg02cZHUvK4` (التاب gid `1516662734`). ده أوتوماتيك مع نفس دورة النشر الموجودة، من غير أي زرار.
+- **شرط واحد:** المتصفح لازم يكون فيه الـ **admin key** محفوظ (زي باقي الـ 27 قسم اللي بتتنشر). أي حد تاني يفتح الداش بورد بيشوف الأرقام عادي بس مش بيبعت حاجة.
+- **الشكل:** `Metric · Actual · Planned · Converted · Conversion % · Planned MTD · Actual MTD · Conversion % MTD`، وتحتيه 5 صفوف: Beg Inv. · Purchases · Importation · Returns · Repack. الأعمدة **A لحد H**، وأي حاجة من I ورايح متتلمسش.
+- **أعمدة الـ MTD:** `Planned MTD` = الخطة × (الأيام اللي فيها داتا ÷ أيام الشهر)، `Actual MTD` = الـ Converted، `Conversion % MTD` = القسمة بينهم. باقي الأعمدة بتتكتب زي ما وصلت بالحرف.
+- **الـ 11:30 بتوقيت القاهرة:** الـ Worker بينادي `supply_conversion_export`، وده **مش بيحسب حاجة** — بيعيد كتابة آخر جدول وصل من الداش بورد. فلو عدى يوم محدش فتح الداش بورد فيه، الشيت بيفضل بأرقام آخر مرة، والـ note على A1 بيقول وصلت إمتى واتكتبت إمتى.
+- **لو الداش بورد عمرها ما بعتت:** الـ 11:30 بيرجع رسالة واضحة والشيت ما بيتلمسش.
+- **التشغيل اليدوي:** `exportSupplyConversionNow()` بيعيد كتابة آخر نسخة وصلت.
+- **اللي اتشال:** 260 سطر حسابات مكررة من الـ Apps Script. ومعاهم اختفت 3 نقط كانت بتخلي الشيت يختلف عن الصفحة: الـ Planned والـ Importation POs واللستة بتاعت CART — دلوقتي كلهم جايين من Control → Targets زي الصفحة بالظبط.
+- **النشر:** ارفع `js/app.js` و`js/supply.js` وصفحات الـ html، والصق `Code.gs` واعمل **Deploy → New version**.

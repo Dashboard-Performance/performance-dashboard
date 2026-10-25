@@ -13,10 +13,19 @@
     { id: "rep", label: "Repack", help: "Planned COGS sold from repacked stock" },
     { id: "imp", label: "Importation", help: "Planned COGS sold from stock received this month under the Importation POs below" }
   ];
-  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000, imp: 1000000, impPos: "P38624, P42109, P42029, P38670", exclEnds: "CART" };
+  var SUPPLY_DEF = { beg: 27000000, pur: 12500000, ret: 16096387, rep: 9442000, imp: 1000000, impPos: "P38624, P42109, P42029, P38670", exclEnds: "CART", tbeg: 0.40, tpur: 0.90, timp: 0.50, tret: 0.60, trep: 0.60 };
   // v1.17.0 — Importation is a list of PO numbers (Odoo_NO in the Inbound sheet). Any SKU ever received
   // under one of these POs counts as an Importation SKU, exactly like the "Type = Importation" tag in the
   // EG - Inventory Aging workbook. Edited in Control -> Targets -> Supply conversion plan.
+  // v1.17.0 — the conversion % each source is expected to hit (the "Target" column of the sheet).
+  // Target (EGP) = Beginning x this.
+  var SUPPLY_PCT_FIELDS = [
+    { id: "tbeg", label: "Beg Inv. — target converted %", help: "How much of the beginning inventory should convert" },
+    { id: "tpur", label: "Purchases — target converted %", help: "How much of this month's purchases should convert" },
+    { id: "timp", label: "Importation — target converted %", help: "How much of the importation receipts should convert" },
+    { id: "tret", label: "Returns — target converted %", help: "How much of the returned stock should convert" },
+    { id: "trep", label: "Repack — target converted %", help: "How much of the repacked stock should convert" }
+  ];
   var SUPPLY_TEXT_FIELDS = [
     { id: "impPos", label: "Importation POs", help: "Odoo PO numbers, separated by commas. Pieces received under one of them count as Importation instead of Purchases." },
     { id: "exclEnds", label: "Exclude SKUs ending with", help: "Packaging, not product — e.g. CART for the carton SKUs (EG030501C5CART). Separated by commas. These are left out of Supply conversion entirely." }
@@ -131,6 +140,6 @@
     if (res.source === "previous") return "Nothing saved for this month — using the " + monthTitle(res.month) + " plan";
     return "Default plan — set this month's targets in Control → Targets";
   }
-  window.TaagerPlans = { SUPPLY_FIELDS: SUPPLY_FIELDS, SUPPLY_TEXT_FIELDS: SUPPLY_TEXT_FIELDS, parsePos: parsePos, SUPPLY_DEF: SUPPLY_DEF, SEG_INPUTS: SEG_INPUTS, SEG_DEF: SEG_DEF, SEG_AUTO: SEG_AUTO,
+  window.TaagerPlans = { SUPPLY_FIELDS: SUPPLY_FIELDS, SUPPLY_PCT_FIELDS: SUPPLY_PCT_FIELDS, SUPPLY_TEXT_FIELDS: SUPPLY_TEXT_FIELDS, parsePos: parsePos, SUPPLY_DEF: SUPPLY_DEF, SEG_INPUTS: SEG_INPUTS, SEG_DEF: SEG_DEF, SEG_AUTO: SEG_AUTO,
     get: get, peek: peek, forget: forget, keyOf: keyOf, prevKey: prevKey, monthTitle: monthTitle, sourceText: sourceText };
 })();

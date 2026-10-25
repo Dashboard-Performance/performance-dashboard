@@ -55,3 +55,44 @@ npx wrangler deploy
 
 - افتح **Loop** ودوس **Run now**.
 - تاسكات اللوك اللي مفيش ليها ستوك هتتنقل لـ Supply Chain.
+
+---
+
+## v1.17.0 — Shared snapshot (الأرقام تظهر فوراً لأي حد جديد)
+
+**المشكلة:** الكاش كان في IndexedDB — محلي لكل متصفح. فأي حد يفتح الداش بورد أول مرة كان يشوف أصفار لحد ما الـ 15 شيت يخلصوا تحميل.
+
+**الحل:** snapshot مشترك على Cloudflare R2. أول ما أي حد يحمّل داتا جديدة بتتبعت مضغوطة للـ Worker، وأي حد يفتح بمتصفح فاضي بيسحبها في request واحد ويرسم فوراً، وبعدين يعمل sync عادي في الخلفية.
+
+### الخطوات
+
+**1. اعمل الـ R2 bucket (مرة واحدة بس):**
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+cd "C:\Users\Youssef Hanafy\Desktop\New-Ver\Performance_dashboard_v1_17_0\Performance_dashboard_v1_17_0\cloudflare-worker"
+npx wrangler r2 bucket create taager-dashboard-snapshot
+```
+
+**2. ارفع الـ Worker:**
+```powershell
+npx wrangler deploy
+```
+لازم تشوف في آخر الكلام: `R2 Buckets: env.SNAPSHOTS (taager-dashboard-snapshot)`
+
+**3. ارفع `js/app.js` + الصفحات على الموقع.**
+
+**4. افتح الداش بورد وسيبها تحمّل خالص.** في الـ Console المفروض تشوف:
+```
+[Shared snapshot] pushed 8.1MB
+```
+
+**5. تأكد إنها اشتغلت:** افتح نافذة Incognito، سجل دخول، والأرقام المفروض تظهر في ثانية - اتنين بدل دقيقتين. في الـ Console:
+```
+[Shared snapshot] 48213 rows from 25/10/2026, 15:40:11
+```
+
+### ملاحظات
+- الـ endpoint مقفول بالـ staff auth زي أي action تاني — الـ snapshot فيه CM3/PPM فممنوع يتفتح باللينك لوحده.
+- مش بيتكتب في R2 إلا لو الداتا فعلاً اتغيرت (fingerprint)، فمفيش write لكل شخص بيفتح.
+- snapshot أقدم من 12 ساعة بيتتجاهل وبيحمّل من الشيتات عادي.
+- لو الـ bucket مش موجود، كل حاجة بتشتغل زي الأول بالظبط — الداش بورد بتتجاهله وتحمّل من الشيتات.

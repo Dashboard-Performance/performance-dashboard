@@ -1711,6 +1711,84 @@ async function loadDataFromCache() {
   }
 }
 
+// -------------------------------------------------------------------------
+// v1.17.0 — SHARED SNAPSHOT (Cloudflare R2, through the Worker)
+// -------------------------------------------------------------------------
+// The IndexedDB cache above is per-browser, so somebody opening the dashboard
+// for the first time used to sit in front of zeros until the whole sheet load
+// finished. Whoever loads fresh data pushes the gzipped snapshot to the Worker,
+// and a browser with an empty cache pulls it in one request and paints straight
+// away — then syncs fresh in the background exactly as before.
+// The endpoint is staff-gated on the Worker (the snapshot carries CM3/PPM) and
+// the staff token goes on automatically — see the fetch wrapper in js/auth.js.
+// -------------------------------------------------------------------------
+const SHARED_SNAPSHOT_MAX_AGE_MS = 12 * 60 * 60 * 1000;   // older than this and it isn't worth painting
+const SHARED_SNAPSHOT_TIMEOUT_MS = 45000;
+
+// Inflates whatever came back: the browser may already have decoded it from
+// Content-Encoding, or we may be holding the raw gzip bytes.
+async function inflateSnapshotBody(buf) {
+  const bytes = new Uint8Array(buf);
+  const gzipped = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  if (!gzipped) return JSON.parse(new TextDecoder().decode(bytes));
+  if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot read the shared snapshot (no DecompressionStream).");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+async function fetchSharedSnapshot() {
+  if (!SYNC_CDN_URL) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SHARED_SNAPSHOT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${SYNC_CDN_URL}?action=snapshotGet`, { cache: "no-store", signal: ctrl.signal });
+    if (!res.ok) {    // 404 = nobody has pushed one yet, 503 = no bucket bound — both are normal, not errors
+      console.info("[Shared snapshot] not available (HTTP " + res.status + ") — loading from the sheets instead.");
+      return null;
+    }
+    const parsed = await inflateSnapshotBody(await res.arrayBuffer());
+    if (!parsed || !parsed.data || !Array.isArray(parsed.data.allParsedRows) || !parsed.data.allParsedRows.length) return null;
+    const savedAt = +parsed.savedAt || 0;
+    if (savedAt && Date.now() - savedAt > SHARED_SNAPSHOT_MAX_AGE_MS) {
+      console.info("[Shared snapshot] too old (" + formatCacheTimestamp(savedAt) + ") — loading from the sheets instead.");
+      return null;
+    }
+    console.log(`[Shared snapshot] ${parsed.data.allParsedRows.length} rows from ${formatCacheTimestamp(savedAt)}`);
+    return { savedAt: savedAt || Date.now(), data: parsed.data, fingerprint: computeSnapshotFingerprint(parsed.data) };
+  } catch (e) {
+    console.warn("[Shared snapshot] could not be fetched:", (e && e.message) || e);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Pushed after a fresh load that actually changed something. Fire-and-forget:
+// if it fails the dashboard is unaffected, the next person to load just pushes again.
+let sharedSnapshotPushing = false;
+async function pushSharedSnapshot(snapshot, savedAt, fingerprint) {
+  if (!SYNC_CDN_URL || sharedSnapshotPushing) return { ok: false };
+  sharedSnapshotPushing = true;
+  try {
+    const gz = await gzipSnapshotInWorker(savedAt, snapshot, true);
+    if (!gz || gz.error || !gz.buffer) { console.warn("[Shared snapshot] gzip failed:", gz && gz.error); return { ok: false }; }
+    const who = (() => { try { const u = getLoggedInUser(); return (u && u.email) || ""; } catch (e) { return ""; } })();
+    const q = `&savedAt=${savedAt}&fp=${encodeURIComponent(fingerprint || "")}&email=${encodeURIComponent(who)}`;
+    const res = await fetch(`${SYNC_CDN_URL}?action=snapshotPut${q}`, {
+      method: "POST", body: gz.buffer, headers: { "Content-Type": "application/octet-stream" },
+    });
+    const j = await res.json().catch(() => null);
+    if (j && j.success) console.log(`[Shared snapshot] ${j.skipped ? "already current (" + j.skipped + ")" : "pushed " + (gz.byteLength / 1e6).toFixed(1) + "MB"}`);
+    else console.warn("[Shared snapshot] push rejected:", (j && j.message) || ("HTTP " + res.status));
+    return { ok: !!(j && j.success) };
+  } catch (e) {
+    console.warn("[Shared snapshot] push failed:", (e && e.message) || e);
+    return { ok: false };
+  } finally {
+    sharedSnapshotPushing = false;
+  }
+}
+
 function formatCacheTimestamp(ts) {
   try {
     return new Date(ts).toLocaleString("en-GB", { hour12: false });
@@ -1779,7 +1857,7 @@ function getBackupWorker() {
   try {
     const workerSrc = `
       self.onmessage = async function (e) {
-        const { id, savedAt, data } = e.data;
+        const { id, savedAt, data, raw } = e.data;
         try {
           if (typeof CompressionStream === "undefined") {
             self.postMessage({ id, error: "NO_COMPRESSION_STREAM" });
@@ -1788,6 +1866,9 @@ function getBackupWorker() {
           const json = JSON.stringify({ savedAt: savedAt, data: data });
           const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
           const buf = await new Response(stream).arrayBuffer();
+          // raw: the shared snapshot goes to R2 as bytes — no base64, so nothing
+          // is copied into a 33%-bigger string just to be sent and decoded again.
+          if (raw) { self.postMessage({ id: id, buffer: buf, byteLength: buf.byteLength }, [buf]); return; }
           const bytes = new Uint8Array(buf);
           let binary = "";
           const CHUNK = 0x8000;
@@ -1821,13 +1902,13 @@ function getBackupWorker() {
   }
 }
 
-function gzipSnapshotInWorker(savedAt, data) {
+function gzipSnapshotInWorker(savedAt, data, raw) {
   return new Promise((resolve) => {
     const worker = getBackupWorker();
     if (!worker) { resolve(null); return; } // مفيش Worker — الـ caller هيرجع للطريقة القديمة
     const id = ++backupWorkerReqId;
     backupWorkerPending.set(id, resolve);
-    worker.postMessage({ id, savedAt, data });
+    worker.postMessage({ id, savedAt, data, raw: !!raw });
   });
 }
 
@@ -2030,6 +2111,30 @@ async function publishComputedSnapshots() {
   // اليوم (زي باقي أي حد فيه heartbeat) هيتبعت تحديث. try/catch لوحده عشان
   // فشلها ما يأثرش على publish باقي السكشنز فوق.
   try { await publishAnalystSingleDaily(); } catch (e) { console.warn("[Analyst / Single daily publish] skipped (non-fatal):", e && e.message); }
+  try { await publishSupplyConversion(); } catch (e) { console.warn("[Supply conversion publish] skipped (non-fatal):", e && e.message); }
+}
+
+// v1.17.0 — send the Supply conversion table that is ALREADY computed for the Supply Chain page,
+// so the planning sheet shows the dashboard's own numbers. Nothing is recalculated anywhere else.
+async function publishSupplyConversion() {
+  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  var C = window.TowerCore;
+  if (!C || typeof C.supplyConversionExport !== "function") return { ok: false, error: "Supply Chain module not loaded" };
+  const payload = C.supplyConversionExport();
+  if (!payload || !payload.rows || !payload.rows.length) return { ok: false, error: "nothing computed yet" };
+  try {
+    await fetch(DATA_API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ action: "supply_conversion_rows" }, payload))
+    });
+    console.log("[Supply conversion publish] sent " + payload.rows.length + " rows for " + payload.monthKey);
+    return { ok: true };
+  } catch (e) {
+    console.warn("[Supply conversion publish] failed (non-fatal):", e && e.message);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
 }
 
 function setSyncStatus(text) {
@@ -17017,8 +17122,22 @@ async function renderCurrentState() {
 //    of wiping the screen with an error.
 async function loadData(isManualRefresh = false) {
   const loadingEl = $("loadingState"); const errorEl = $("errorState"); const errorMsg = $("errorMsgText");
-  const cache = await loadDataFromCache();
+  let cache = await loadDataFromCache();
   let paintedFromCache = false;
+
+  // v1.17.0 — cold start. Nothing cached in this browser (first visit, cleared
+  // data, a different machine) used to mean zeros on screen for the whole sheet
+  // load. Pull the last snapshot somebody else already loaded, paint it, and
+  // keep it locally — the background sync right below still runs as normal, so
+  // what is on screen is never more than one sync behind.
+  if (!cache) {
+    setSyncStatus("Loading the latest numbers…");
+    const shared = await fetchSharedSnapshot();
+    if (shared) {
+      cache = shared;
+      saveDataToCache(shared.data);   // so the next open on this browser is instant too
+    }
+  }
 
   // v1.3.51: حتى في الرفرش اليدوي لو فيه كاش بنعرضه فورًا بدل شاشة "Syncing" اللي بتحجب كل حاجة
   // لحد ما كل المصادر تخلص (ممكن أكتر من دقيقة لو Apps Script بطيء).
@@ -17071,7 +17190,12 @@ async function loadData(isManualRefresh = false) {
       // تخلص بدل ما تتجاهل خالص، عشان آخر نسخة من الداتا برضه توصل للـ backup/API.
       if (loadData._bgChainTail === undefined) loadData._bgChainTail = Promise.resolve();
       loadData._bgChainTail = loadData._bgChainTail.then(() =>
-        backupSnapshotToDrive(snapshot).then(() => publishComputedSnapshots())
+        // The shared snapshot goes first and is the cheapest of the three (one
+        // POST to the Worker, no Apps Script involved), so whoever opens the
+        // dashboard next gets these numbers even if the two below are still running.
+        pushSharedSnapshot(snapshot, Date.now(), freshFingerprint)
+          .then(() => backupSnapshotToDrive(snapshot))
+          .then(() => publishComputedSnapshots())
       ).catch((e) => console.warn("[background publish chain] failed (non-fatal):", e && e.message));
     }
     if (loadingEl) loadingEl.classList.add("hidden");

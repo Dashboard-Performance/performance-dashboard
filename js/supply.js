@@ -179,14 +179,59 @@
     P.get("supplyplan", key).then(function (p) { PLAN = p; rerender(); });
     return P.SUPPLY_DEF;
   }
+  // v1.17.0 — the six numbers behind every row of the Supply conversion table.
+  //   Actual             = the COGS this source made available this month
+  //   Target Converted % = the share it is expected to convert (Control -> Targets)
+  //   Target             = Actual x Target Converted %
+  //   Target MTD         = Target x (days with data / days in month)
+  //   Converted MTD      = the COGS that has actually converted out of it so far (EGP)
+  //   Converted % MTD    = Converted MTD / Target MTD — how much of the month-to-date target is in
+  var CONV_ROWS = [["beg", "Beg Inv.", "tbeg"], ["pur", "Purchases", "tpur"], ["imp", "Importation", "timp"],
+                   ["ret", "Returns", "tret"], ["rep", "Repack", "trep"]];
+  function convCalc() {
+    var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat]; if (!d) return null;
+    var pl = planGet();
+    var elapsed = +SC.elapsed || 0, mdays = +SC.mdays || 0, share = mdays > 0 ? elapsed / mdays : 1;
+    return CONV_ROWS.map(function (l) {
+      var actual = Math.round(d[l[0]][0]), converted = Math.round(d[l[0]][1]);
+      var tgtPct = +pl[l[2]] || 0;
+      var target = Math.round(actual * tgtPct), targetMtd = Math.round(target * share);
+      return { metric: l[1], actual: actual, targetPct: tgtPct, target: target, targetMtd: targetMtd,
+               convertedMtd: converted,
+               convertedPctMtd: targetMtd > 0 ? converted / targetMtd : 0 };
+    });
+  }
+
+  // v1.17.0 — the five rows of the Supply conversion panel, exactly as rendered, ready to be sent
+  // to the Apps Script so the sheet carries the dashboard's own numbers instead of a second calculation.
+  function convExport() {
+    var save = SC.cat; SC.cat = "all";
+    var rows = convCalc(); SC.cat = save;
+    if (!rows) return null;
+    return { rows: rows, monthKey: SC.convKey || "", monthLabel: SC.convMonth || "", elapsed: SC.elapsed || 0, daysInMonth: SC.mdays || 0,
+             skus: (SC.rows || []).length, excludedEnds: SC.exclEnds || [], excluded: SC.exclN || 0,
+             importPos: SC.impPo || [], importLines: SC.impLines || 0, asOf: SC.asOf || "" };
+  }
+
   function convPanel() {
-    var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat];
-    var pl = planGet(), labs = [["beg", "Beg Inv."], ["pur", "Purchases"], ["imp", "Importation"], ["ret", "Returns"], ["rep", "Repack"]];
-    var body = labs.map(function (l) {
-      var k = l[0], a = d ? d[k][0] : 0, c = d ? d[k][1] : 0, p = pl[k], pc = p > 0 ? c / p * 100 : 0;
-      return '<tr><td>' + l[1] + '</td><td class="num">' + int(a) + '</td><td class="num" title="Edit in Control → Targets → Supply conversion plan">' + int(p) + '</td><td class="num">' + int(c) + '</td><td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
+    var rows = convCalc() || CONV_ROWS.map(function (l) { return { metric: l[1], actual: 0, targetPct: 0, target: 0, targetMtd: 0, convertedMtd: 0, convertedPctMtd: 0 }; });
+    var body = rows.map(function (r) {
+      var pc = r.convertedPctMtd * 100, hit = pc >= 100;
+      return '<tr><td>' + esc(r.metric) + '</td>' +
+        '<td class="num">' + int(r.actual) + '</td>' +
+        '<td class="num" title="Edit in Control \u2192 Targets \u2192 Supply conversion plan">' + (r.targetPct * 100).toFixed(0) + '%</td>' +
+        '<td class="num">' + int(r.target) + '</td>' +
+        '<td class="num">' + int(r.targetMtd) + '</td>' +
+        '<td class="num ' + (hit ? "text-green" : "") + '"><b>' + int(r.convertedMtd) + '</b></td>' +
+        '<td class="num" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion — ' + esc(SC.convMonth || "") + '</h2><p>Beg Inv · Purchases · Importation · Returns · Repack vs plan</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th class="num" title="Quantity × WAC available from this source this month.">Actual</th><th class="num" title="From Control → Targets → Supply conversion plan (per month).">Planned</th><th class="num" title="Confirmed COGS fulfilled from this source.">Converted</th><th class="num">Conversion %</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity × WAC), single SKUs only. Converted = MTD confirmed quantity consumed from each source in order: Beg Inv → Purchases → Importation → Returns → Repack. Conversion % = Converted ÷ Planned. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control → Targets → Supply conversion plan).</div></div>';
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion \u2014 ' + esc(SC.convMonth || "") + '</h2><p>Actual \u00b7 Target \u00b7 Converted MTD \u2014 per source</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th>' +
+      '<th class="num" title="Quantity \u00d7 WAC this source made available this month.">Actual</th>' +
+      '<th class="num" title="The share this source is expected to convert \u2014 Control \u2192 Targets \u2192 Supply conversion plan.">Target Converted %</th>' +
+      '<th class="num" title="Actual \u00d7 Target Converted %.">Target</th>' +
+      '<th class="num" title="Target \u00d7 (days with data \u00f7 days in the month).">Target MTD</th>' +
+      '<th class="num" title="The COGS that has actually converted out of this source so far this month.">Converted MTD</th>' +
+      '<th class="num" title="Converted MTD \u00f7 Target MTD \u2014 how much of the month-to-date target is in.">Converted % MTD</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity \u00d7 WAC), single SKUs only. Converted MTD = the MTD confirmed COGS consumed from each source, in order: Beg Inv \u2192 Purchases \u2192 Importation \u2192 Returns \u2192 Repack. Target = Actual \u00d7 Target Converted %, and Target MTD is that pro-rated to the days with data, so half a month is judged against half a target. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control \u2192 Targets \u2192 Supply conversion plan).</div></div>';
   }
   function exclNote() {
     var e = SC.exclEnds || []; if (!e.length) return "";
@@ -256,7 +301,7 @@
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
       ["SKUs in stock", int(stocked.length), "of " + int(rows.length) + " SKUs in inventory", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"],
-      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX / repack qty not included", ""],
+      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX not included (repacked pieces count once the warehouse marks them Good item)", ""],
       ["Obsolete stock", money(sum(dead, "inv")), int(dead.length) + " SKUs · sold < 10% of supply MTD", dead.length ? "bad" : "ok"],
       ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""],
       ["Damaged BOX value", money(dmg.val), int(dmg.n) + " SKUs · qty × WAC", dmg.val ? "warn" : ""],
@@ -365,13 +410,14 @@
     var rows = SC.rows, inv = sum(rows, "inv"), unh = bsum(rows, 4);
     var items = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
-      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX / repack qty not included", ""],
+      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX not included (repacked pieces count once the warehouse marks them Good item)", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
     ];
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
   };
 
   /* ---------------------------------------------------------------- wiring */
+  C.supplyConversionExport = convExport;
   var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions] };
   var current = null;
   function rerender() { build(); if (current && VIEWS[current]) { var h = $(VIEWS[current][0]); if (h && !h.classList.contains("hidden")) VIEWS[current][1](h); } }
