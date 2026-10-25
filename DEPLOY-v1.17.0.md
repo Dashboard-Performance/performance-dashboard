@@ -420,3 +420,15 @@ cd ../merchant-portal && npm test    # 27 smoke + 41 notifications + RE-CPA (ح�
 - الشرط على **آخر** الـ SKU بس. يعني `EG0305CARTON99` مش هيتشال.
 - تحت الجدول بيظهر سطر بيقولك كام SKU اتشال.
 - التعديل في `js/plans.js` و`js/supply.js` بس.
+
+## Supply conversion → شيت لوحده
+
+- فانكشن جديدة في الـ Apps Script بتكتب جدول **Supply conversion** بنفس شكله بالظبط في الشيت `1qaugR6FocPVpDFMjZNnPFy24K2T9MN5IFg02cZHUvK4` (التاب gid `1516662734`).
+- **الشكل:** الصف الأول العناوين `Metric · Actual · Planned · Converted · Conversion %`، وتحتيه 5 صفوف: Beg Inv. · Purchases · Importation · Returns · Repack. الأعمدة **A لحد E بس**، وأي حاجة من F ورايح متتلمسش.
+- **نفس مصادر الداش بورد:** Main (Metabase)، Beginning Inventory (Metabase)، Products Debundle Map (Metabase)، COGS وInbound وRepack (تابات WebSite_EGY)، والمرتجعات الفعلية من Return_Archive.
+- **نفس الفلاتر:** الـ singles بس، البندلات بره، الـ SKUs اللي بتخلص بـ CART بره، واللي ملوش WAC بره.
+- **نفس الـ waterfall:** Beg Inv → Purchases → Importation → Returns → Repack.
+- **الشهر** بيتاخد من أحدث تاريخ في الـ Main، زي الداش بورد.
+- **الـ Planned** بيتاخد من `PSC_PLANNED` في السكربت، لأن الـ Apps Script مش بيقدر يقرا الـ Targets من الـ Worker. لو غيرت الخطة في Control → Targets، غيرها هنا كمان. فيه note على خلية A1 بيفكرك.
+- **التشغيل:** `exportSupplyConversionNow()` من الـ editor. وفيه كمان action للـ Worker اسمه `supply_conversion_export` لو حبيت نجدوله بعدين.
+- **إصلاح معاه:** الـ Planner DOH كان بيقرا الـ Products Debundle Map من تاب في WebSite_EGY، والداش بورد بتقراه من Metabase. اتظبط يقرا من Metabase زيها.

@@ -256,7 +256,7 @@
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
       ["SKUs in stock", int(stocked.length), "of " + int(rows.length) + " SKUs in inventory", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"],
-      ["Days on hand", int(dohVal(rows)), "stock value ÷ 15-day avg daily demand value", ""],
+      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX / repack qty not included", ""],
       ["Obsolete stock", money(sum(dead, "inv")), int(dead.length) + " SKUs · sold < 10% of supply MTD", dead.length ? "bad" : "ok"],
       ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""],
       ["Damaged BOX value", money(dmg.val), int(dmg.n) + " SKUs · qty × WAC", dmg.val ? "warn" : ""],
@@ -365,7 +365,7 @@
     var rows = SC.rows, inv = sum(rows, "inv"), unh = bsum(rows, 4);
     var items = [
       ["Inventory value", money(inv), int(sum(rows, "stock")) + " units on hand", ""],
-      ["Days on hand", int(dohVal(rows)), "stock value ÷ 15-day avg daily demand value", ""],
+      ["Days on hand", int(dohVal(rows)), "Good item stock value ÷ 15-day avg daily demand value — Damaged BOX / repack qty not included", ""],
       ["Unhealthy stock", pct(inv ? unh / inv * 100 : 0, 0), money(unh) + " at 12m+ aging", (inv && unh / inv > 0.3) ? "bad" : "warn"]
     ];
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
