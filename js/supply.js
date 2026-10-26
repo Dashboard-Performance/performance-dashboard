@@ -58,7 +58,7 @@
       var maxTs = 0; main.forEach(function (r) { if (r.timestamp > maxTs) maxTs = r.timestamp; });
       var ref = new Date(maxTs || today), cy = ref.getFullYear(), cmo = ref.getMonth(), elapsed = ref.getDate() || 1, mdays = new Date(cy, cmo + 1, 0).getDate();
       var py = cmo === 0 ? cy - 1 : cy, pmo = cmo === 0 ? 11 : cmo - 1;
-      var c3 = {}, c15 = {}, c30 = {}, gA = {}, gL = {}, mtd = {}, dP = {}, dG = {};
+      var c3 = {}, c15 = {}, c30 = {}, gA = {}, gL = {}, mtd = {}, dP = {}, dG = {}, dMtd = {};
       main.forEach(function (r) {
         if (!r.sku) return;
         var d = new Date(r.timestamp), dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); var age = (today - dd.getTime()) / DAY;
@@ -66,6 +66,8 @@
         var needQ = r.confirmedPieces && ((age >= 1 && age <= 30) || inCur), needG = (inCur || inPrev) && r.confirmedGmv;
         // v1.17.0 — Delivered ASP (last 30 full days): delivered GMV ÷ delivered pieces, bundles split to their singles
         if (r.deliveredPieces > 0 && age >= 1 && age <= 30) mapsFor(r.sku).forEach(function (mp) { var id = mp.singleId; dP[id] = (dP[id] || 0) + r.deliveredPieces * (mp.quantity || 1); dG[id] = (dG[id] || 0) + (r.deliveredGmv || 0) * (mp.cogsWeight != null ? mp.cogsWeight : 1); });
+        // v1.17.0 — delivered pieces for THIS month, for Delivered COGS. dP above is a rolling 30 days (ASP), not the month.
+        if (r.deliveredPieces > 0 && inCur) mapsFor(r.sku).forEach(function (mp) { dMtd[mp.singleId] = (dMtd[mp.singleId] || 0) + r.deliveredPieces * (mp.quantity || 1); });
         if (!needQ && !needG) return;
         mapsFor(r.sku).forEach(function (mp) {
           var id = mp.singleId;
@@ -125,6 +127,7 @@
         var action = "", channel = "";
         var row = { id: id, name: iv.skuName || pr.name || id, cat: String(iv.category || pr.category || "").toLowerCase() || "general", lpd: newest ? new Date(newest).toISOString().slice(0, 10) : "", days: days, aging: aging, avg3: a3, avg15: a15, c15: c15[id] || 0, c30: c30[id] || 0, stock: stock, doh: doh, wac: wac, inv: stock * wac, tag: tag, fms: fms, abc: "", quarter: newest ? (new Date(newest).getFullYear() < 2026 ? "Before 2026" : new Date(newest).getMonth() <= 2 ? "Q1" : new Date(newest).getMonth() <= 5 ? "Q2" : "Q3") : "", mtd: mtd[id] || 0, str: str, action: action, channel: channel, exRet: exRet, retV: exRet * wac, drPct: drPct, gA: gA_, gL: gL_, gP: gP, segA: segOf(gA_), segL: segOf(gL_), segP: segOf(gP),
           asp: dP[id] > 0 ? dG[id] / dP[id] : null, aspPcs: dP[id] || 0, repMtd: repMtd[id] || 0, repAvail: repAvail.get(id) || 0,
+          dMtd: dMtd[id] || 0, cogsC: (mtd[id] || 0) * wac, cogsD: (dMtd[id] || 0) * wac,
           imp: !!impSku[id], impPo: impPoOf[id] || "" };
         for (var z = 0; z < 6; z++) { row["q" + z] = q[z]; row["v" + z] = q[z] * wac; }
         rows.push(row);
@@ -213,6 +216,27 @@
              importPos: SC.impPo || [], importLines: SC.impLines || 0, asOf: SC.asOf || "" };
   }
 
+  var ICON_SHEET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>';
+
+  // v1.17.0 — "Send to sheet": the same table, written to the planning sheet on demand, so the
+  // numbers can be pushed the moment a plan changes instead of waiting for the 11:30 Cairo run.
+  // publishSupplyConversion() posts no-cors, so there is no reply to read — the button reports
+  // that it was sent, and cell A1 of the tab carries the timestamps that prove it landed.
+  function convPush(btn) {
+    var say = function (txt, cls) { var sp = btn.querySelector("span"); if (sp) sp.textContent = txt; btn.className = "tw-exp" + (cls ? " " + cls : ""); };
+    if (typeof window.publishSupplyConversion !== "function") { say("Not available", "bad"); return; }
+    var rows = convCalc();
+    if (!rows || !rows.length) { say("Nothing to send yet", "bad"); setTimeout(function () { say("Send to sheet"); }, 2600); return; }
+    btn.disabled = true; say("Sending\u2026", "busy");
+    window.publishSupplyConversion().then(function (r) {
+      say(r && r.ok ? "Sent \u2713" : ((r && r.error) || "Failed"), r && r.ok ? "ok" : "bad");
+    }, function (e) {
+      say((e && e.message) || "Failed", "bad");
+    }).then(function () {
+      setTimeout(function () { btn.disabled = false; say("Send to sheet"); }, 3200);
+    });
+  }
+
   function convPanel() {
     var rows = convCalc() || CONV_ROWS.map(function (l) { return { metric: l[1], actual: 0, planned: 0, targetPct: 0, converted: 0, conversionPct: 0, convertedVsActual: 0 }; });
     var body = rows.map(function (r) {
@@ -225,7 +249,7 @@
         '<td class="num ' + (hit ? "text-green" : "") + '" style="min-width:150px"><b>' + pc.toFixed(2) + '%</b>' + bar(pc, "ok", "sm") + '</td>' +
         '<td class="num"><b>' + (r.convertedVsActual * 100).toFixed(2) + '%</b></td></tr>';
     }).join("");
-    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion \u2014 ' + esc(SC.convMonth || "") + '</h2><p>Actual \u00b7 Planned \u00b7 Converted \u2014 per source</p></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th>' +
+    return '<div class="panel table-panel hover-glow" style="margin-top:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply conversion \u2014 ' + esc(SC.convMonth || "") + '</h2><p>Actual \u00b7 Planned \u00b7 Converted \u2014 per source</p></div><button type="button" class="tw-exp" id="scConvPush" title="Write this exact table into the Supply conversion tab of the planning sheet.">' + ICON_SHEET + '<span>Send to sheet</span></button></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th>' +
       '<th class="num" title="Quantity \u00d7 WAC this source made available this month.">Actual</th>' +
       '<th class="num" title="What the plan expected this source to make available this month \u2014 Control \u2192 Targets \u2192 Supply conversion plan.">Planned</th>' +
       '<th class="num" title="The share this source is expected to convert. Shown as the line to read the two percentages against \u2014 nothing is multiplied by it.">Target%</th>' +
@@ -305,7 +329,11 @@
       ["Obsolete stock", money(sum(dead, "inv")), int(dead.length) + " SKUs · sold < 10% of supply MTD", dead.length ? "bad" : "ok"],
       ["Expected returns", money(retV), int(sum(rows, "exRet")) + " pcs · (Confirmed − Delivered) × 75%", ""],
       ["Damaged BOX value", money(dmg.val), int(dmg.n) + " SKUs · qty × WAC", dmg.val ? "warn" : ""],
-      ["Damaged BOX qty", int(dmg.qty), "pieces in Damaged BOX condition", dmg.qty ? "warn" : ""]
+      ["Damaged BOX qty", int(dmg.qty), "pieces in Damaged BOX condition", dmg.qty ? "warn" : ""],
+      // v1.17.0 — what the month's sales actually cost, at WAC. Confirmed is what was sold, Delivered is
+      // what reached the customer; the gap is the orders still in transit (and the ones that come back).
+      ["Confirmed COGS", money(sum(rows, "cogsC")), int(sum(rows, "mtd")) + " pcs confirmed MTD \u00d7 WAC", ""],
+      ["Delivered COGS", money(sum(rows, "cogsD")), int(sum(rows, "dMtd")) + " pcs delivered MTD \u00d7 WAC", ""]
     ];
     var html = '<div class="cx-bar-top"><div>' + catPills() + '</div>' + srcChip() + '</div>' +
       '<div class="cx-hero2">' + tiles.map(function (t) { return '<div class="cx-tile ' + (t[3] ? "cx-" + t[3] : "") + '"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>';
@@ -430,6 +458,7 @@
     var c = t.closest("[data-sc-cat]"); if (c) { SC.cat = c.getAttribute("data-sc-cat"); rerender(); return; }
     var sg = t.closest("[data-sc-seg]"); if (sg) { SC.segMode = sg.getAttribute("data-sc-seg"); rerender(); return; }
     var a = t.closest("[data-sc-act]"); if (a) { SC.act = a.getAttribute("data-sc-act"); rerender(); return; }
+    var pb = t.closest("#scConvPush"); if (pb) { e.stopPropagation(); convPush(pb); return; }
     var s = t.closest("[data-sc-sku]"); if (s) { openSku(s.getAttribute("data-sc-sku")); return; }
     var b = t.closest("[data-sc]"); if (b) { var k = b.getAttribute("data-sc"); if (k === "prev") { SC.sk.page = Math.max(0, SC.sk.page - 1); drawSkuBody(); } else if (k === "next") { SC.sk.page++; drawSkuBody(); } return; }
     var th = t.closest("#scSkuTable th[data-k]"); if (th) { var key = th.getAttribute("data-k"); if (SC.sk.key === key) SC.sk.dir = SC.sk.dir === "asc" ? "desc" : "asc"; else { SC.sk.key = key; SC.sk.dir = "desc"; } SC.sk.page = 0; drawSkuBody(); }

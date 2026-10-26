@@ -1228,9 +1228,9 @@
   function injectExportButtons() {
     document.querySelectorAll(".data-table, .st-summary-table").forEach(function (t) {
       var panel = t.closest(".panel, .table-panel, .seg-section-card"); if (!panel) return;
-      var head = panel.querySelector(".panel-head-modern"); if (!head || head.querySelector(".tw-exp")) return;
+      var head = panel.querySelector(".panel-head-modern"); if (!head || head.querySelector(".tw-exp[data-csv]")) return;
       var first = panel.querySelector(".data-table, .st-summary-table"); if (first !== t) return;
-      var btn = document.createElement("button"); btn.type = "button"; btn.className = "tw-exp"; btn.title = "Download all rows as CSV";
+      var btn = document.createElement("button"); btn.type = "button"; btn.className = "tw-exp"; btn.setAttribute("data-csv", "1"); btn.title = "Download all rows as CSV";
       btn.innerHTML = ICON_DL + "<span>Export CSV</span>";
       btn.addEventListener("click", function (e) {
         e.stopPropagation();

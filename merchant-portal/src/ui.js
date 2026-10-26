@@ -11,6 +11,7 @@ const HEAD = (title, script) => `<!doctype html>
 <title>${title}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js" defer></script>
 <script src="/static/${script}" defer></script>
 </head>`;
 
@@ -127,7 +128,10 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-m
 
 /* auth */
 .auth{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(800px 360px at 80% -10%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%)}
-.auth-card{width:min(400px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 30px 60px -30px rgba(0,0,0,.6)}
+.auth-card{width:min(400px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;position:relative;padding:28px;box-shadow:0 30px 60px -30px rgba(0,0,0,.6)}
+.mp-lang{position:absolute;top:14px;inset-inline-end:16px;font-weight:700;font-size:13px}
+html[dir=rtl] body{direction:rtl;text-align:right}
+html[dir=rtl] input,html[dir=rtl] .msg{text-align:start}
 .auth-card .brand{margin-bottom:22px}
 .form{display:flex;flex-direction:column;gap:12px}
 .form label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:var(--text2)}

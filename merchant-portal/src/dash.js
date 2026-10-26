@@ -15,6 +15,7 @@ export const DASH_HTML = `<!doctype html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/dash.css">
+<script src="/static/i18n.js" defer></script>
 <script src="/static/cpa.js" defer></script>
 <script src="/static/dash.js" defer></script>
 </head>

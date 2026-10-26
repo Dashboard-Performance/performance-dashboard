@@ -21,6 +21,7 @@
 import { PORTAL_HTML, ADMIN_HTML, APP_CSS, PORTAL_JS, ADMIN_JS, FAVICON_SVG } from "./ui.js";
 import { DASH_HTML, DASH_JS } from "./dash.js";
 import { DASH_CSS, DASH_CSS_EXTRA } from "./dash-css.js";
+import { I18N_JS } from "./i18n.js";
 import { createNotify } from "./notify.js";
 import { CPA_JS, CPA_CSS } from "./cpa-core.js";
 
@@ -64,6 +65,7 @@ async function route(request, env, ctx) {
   if (m === "GET" && p === "/static/cpa.js") return asset(CPA_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/dash.js") return asset(DASH_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/app.css") return asset(APP_CSS, "text/css; charset=utf-8");
+  if (m === "GET" && p === "/static/i18n.js") return asset(I18N_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/portal.js") return asset(PORTAL_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/static/admin.js") return asset(ADMIN_JS, "text/javascript; charset=utf-8");
   if (m === "GET" && p === "/favicon.svg") return asset(FAVICON_SVG, "image/svg+xml");

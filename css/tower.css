@@ -202,6 +202,11 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):
 .tw-exp:hover svg { color: var(--accent); }
 .tw-exp:active { transform: translateY(1px) scale(.98); }
 .tw-exp.busy { opacity: .6; pointer-events: none; }
+.tw-exp.ok { color: var(--green, #4cd68a); border-color: color-mix(in srgb, var(--green, #4cd68a) 50%, var(--line2)); }
+.tw-exp.ok svg { color: var(--green, #4cd68a); }
+.tw-exp.bad { color: var(--red, #ff6b6b); border-color: color-mix(in srgb, var(--red, #ff6b6b) 50%, var(--line2)); }
+.tw-exp.bad svg { color: var(--red, #ff6b6b); }
+.tw-exp[disabled] { pointer-events: none; }
 .panel-head-modern > .tw-exp { margin-left: auto; align-self: center; }
 .table-controls { display: flex; align-items: center; }
 .panel-head-modern { align-items: center; }
