@@ -2137,9 +2137,15 @@ async function publishSupplyConversion() {
   }
 }
 
-function setSyncStatus(text) {
+// The sidebar is narrow, and on a small screen a long status pushed the account box off the bottom.
+// The line shown is kept short and clamped in CSS; `detail` carries the full explanation into the
+// tooltip, so nothing is lost — it just is not occupying six lines of everyone's sidebar.
+function setSyncStatus(text, detail) {
   const el = $("sidebarUpdated");
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.textContent = text;
+  if (detail) el.title = detail;
+  else if (el.title && el.title.indexOf("Last error:") !== 0) el.title = "";
 }
 
 function cellNumber(cell) {
@@ -17209,11 +17215,14 @@ async function loadData(isManualRefresh = false) {
       // the Worker refused a broken / partial Metabase answer and served the last good copy
       const main = cachedSrc.find((x) => x.gid === MAIN_GID) || cachedSrc[0];
       const when = main.cachedAt ? formatCacheTimestamp(Date.parse(main.cachedAt)) : "earlier";
-      setSyncStatus(`⚠ Cached from ${when} — ${cachedSrc.map((x) => x.label).join(", ")}: the source returned incomplete data (${main.reason || "error"}). Showing the last good numbers; it switches back to live by itself.`);
+      const names = cachedSrc.map((x) => x.label).join(", ");
+      setSyncStatus(`⚠ ${names} — cached from ${when}`,
+        `${names}: the source returned incomplete data (${main.reason || "error"}). Showing the last good numbers; it switches back to live by itself.`);
       showToast();
     } else if (snapshot.staleGids && snapshot.staleGids.length > 0) {
       const names = snapshot.staleGids.map((gid) => GID_LABELS[gid] || gid).join(", ");
-      setSyncStatus(`Live — updated ${formatCacheTimestamp(syncTs)} — ⚠ didn't refresh: ${names} (showing previous data for those)`);
+      setSyncStatus(`Live — ${formatCacheTimestamp(syncTs)} · ⚠ ${snapshot.staleGids.length} not refreshed`,
+        `Didn't refresh: ${names} — showing the previous data for those. Everything else is live.`);
       showToast();
     } else if (dataChanged) {
       setSyncStatus(`Live — updated ${formatCacheTimestamp(syncTs)}`);
@@ -17988,18 +17997,23 @@ function dohDownloadCsv() {
 // that already has the numbers sends them, and the script only writes.
 // ALL rows are sent (dohState.rows), not the filtered view: the search box and the DOH filter are
 // for looking at the page, and must never silently shrink what the planning team receives.
+const PDOH_PUBLISH_TIMEOUT_MS = 180000;   // Apps Script needs a while to write a few thousand rows
+
 function plannerDohExportPayload() {
   if (!dohState.rows || !dohState.rows.length || !dohState.meta) return null;
   const m = dohState.meta;
-  const num = (v) => (v === null || v === undefined || !Number.isFinite(v)) ? null : v;
+  // Rows go as compact arrays in a fixed order, not objects: with a few thousand SKUs the field
+  // names alone were most of the payload, and this is the request that was sitting on "Sending…".
+  // Order: sku, name, cat, stock, placedYday, avg3, cr, dr, ndr, crUsed, expConf, diff, dohPlaced, dohAvg3
+  const num = (v, d) => (v === null || v === undefined || !Number.isFinite(v)) ? null : Math.round(v * d) / d;
   return {
-    rows: dohState.rows.map(r => ({
-      sku: r.sku, name: r.name || "", cat: r.category || "",
-      stock: r.stock || 0, placedYday: r.placedYday || 0, avg3: r.avg3 || 0,
-      cr: num(r.cr), dr: num(r.dr), ndr: num(r.ndr), crUsed: num(r.crUsed),
-      expConf: r.expConf || 0, diff: r.diff || 0,
-      dohPlaced: num(r.dohPlaced), dohAvg3: num(r.dohAvg3)
-    })),
+    cols: ["sku", "name", "cat", "stock", "placedYday", "avg3", "cr", "dr", "ndr", "crUsed", "expConf", "diff", "dohPlaced", "dohAvg3"],
+    rows: dohState.rows.map(r => [
+      r.sku, r.name || "", r.category || "",
+      Math.round(r.stock || 0), Math.round(r.placedYday || 0), num(r.avg3, 100),
+      num(r.cr, 10), num(r.dr, 10), num(r.ndr, 10), num(r.crUsed, 10),
+      num(r.expConf, 100), num(r.diff, 100), num(r.dohPlaced, 10), num(r.dohAvg3, 10)
+    ]),
     yday: m.ydayMs ? new Date(m.ydayMs).toISOString().slice(0, 10) : "",
     params: m.params || {},
     floored: dohState.rows.filter(r => r.floored).length,
@@ -18008,21 +18022,36 @@ function plannerDohExportPayload() {
 }
 
 async function publishPlannerDoh() {
-  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  if (!SYNC_CDN_URL) return { ok: false, error: "SYNC_CDN_URL not configured" };
   const payload = plannerDohExportPayload();
   if (!payload) return { ok: false, error: "nothing computed yet" };
+  const body = JSON.stringify(payload);
+  // Through the Worker rather than straight to Apps Script: the Worker answers with CORS, so this
+  // gets a real success/failure instead of an opaque no-cors response, and it keeps a copy for the
+  // 11:00 Cairo run (Apps Script's Script Properties cap out at 9KB, far below a few thousand SKUs).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PDOH_PUBLISH_TIMEOUT_MS);
+  const t0 = Date.now();
   try {
-    await fetch(DATA_API_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(Object.assign({ action: "planner_doh_rows" }, payload))
+    const res = await fetch(`${SYNC_CDN_URL}?action=plannerDohRows`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: body, signal: ctrl.signal
     });
-    console.log("[Planner DOH publish] sent " + payload.rows.length + " rows (placed " + payload.yday + ")");
-    return { ok: true, rows: payload.rows.length };
+    const j = await res.json().catch(() => null);
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    if (j && j.success) {
+      console.log(`[Planner DOH publish] ${j.rows} rows written (placed ${j.yday}), ${(body.length / 1e6).toFixed(2)}MB in ${secs}s`);
+      return { ok: true, rows: j.rows };
+    }
+    const msg = (j && j.message) || `HTTP ${res.status}`;
+    console.warn("[Planner DOH publish] rejected:", msg);
+    return { ok: false, error: msg };
   } catch (e) {
-    console.warn("[Planner DOH publish] failed (non-fatal):", e && e.message);
-    return { ok: false, error: (e && e.message) || String(e) };
+    const timedOut = e && e.name === "AbortError";
+    console.warn("[Planner DOH publish] " + (timedOut ? "timed out" : "failed") + ":", e && e.message);
+    return { ok: false, timedOut: timedOut,
+             error: timedOut ? "Timed out — check the sheet" : ((e && e.message) || String(e)) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

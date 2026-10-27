@@ -194,7 +194,18 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):
 #twStatus #sidebarStatus::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent); flex: none; }
 #twStatus.warn #sidebarStatus::before { background: var(--orange); box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 20%, transparent); }
 #twStatus #sidebarUpdated, #twStatus #sidebarVersion { font-family: var(--font, 'Inter', sans-serif) !important; font-size: 11px !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--text-dim); margin: 0 !important; }
+/* A sync warning can be long. Keep it to three lines with an ellipsis and the full text on hover,
+   so a bad sync can never push the account box off the bottom of a short screen. */
+#twStatus #sidebarUpdated { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; cursor: help; }
 #twStatus #sidebarUpdated:empty { display: none; }
+/* Short screens: the footer keeps the account box visible and scrolls the status instead. */
+@media (max-height: 760px) {
+  #twStatus #sidebarUpdated { -webkit-line-clamp: 2; line-clamp: 2; }
+  .sidebar-footer { gap: 8px; padding: 10px 14px; }
+}
+@media (max-height: 620px) {
+  #twStatus #sidebarVersion { display: none; }
+}
 
 /* ---- per-table Export CSV ---- */
 .tw-exp { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; margin-left: 10px; border-radius: 9px; border: 1px solid var(--line2); background: var(--panel); color: var(--text2); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease), transform .12s var(--ease); }
