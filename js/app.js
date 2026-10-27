@@ -17953,6 +17953,10 @@ function dohRecalculate() {
     const { rows, meta } = dohComputeRows(dohReadParams());
     dohState.rows = rows; dohState.meta = meta;
     renderDohPlanner();
+    // Keep the planning sheet current without anyone pressing anything — same admin-key gate as the
+    // other publishes, so it only ever goes out from an admin's browser and costs other users nothing.
+    let pubKey = ""; try { pubKey = localStorage.getItem("towerAdminKey") || ""; } catch (e) {}
+    if (pubKey && rows.length) publishPlannerDoh().catch(() => {});
   } catch (e) {
     console.error("DOH Planner error:", e);
     if (status) status.textContent = "Couldn't build the Planner DOH: " + (e && e.message ? e.message : e);
@@ -17978,6 +17982,63 @@ function dohDownloadCsv() {
   URL.revokeObjectURL(url);
 }
 
+// v1.17.0 — Planner DOH -> the planning sheet, published by the dashboard.
+// The Apps Script used to work this table out a second time, reading the whole Main query itself —
+// which both timed out before it could write and risked disagreeing with this page. Now the page
+// that already has the numbers sends them, and the script only writes.
+// ALL rows are sent (dohState.rows), not the filtered view: the search box and the DOH filter are
+// for looking at the page, and must never silently shrink what the planning team receives.
+function plannerDohExportPayload() {
+  if (!dohState.rows || !dohState.rows.length || !dohState.meta) return null;
+  const m = dohState.meta;
+  const num = (v) => (v === null || v === undefined || !Number.isFinite(v)) ? null : v;
+  return {
+    rows: dohState.rows.map(r => ({
+      sku: r.sku, name: r.name || "", cat: r.category || "",
+      stock: r.stock || 0, placedYday: r.placedYday || 0, avg3: r.avg3 || 0,
+      cr: num(r.cr), dr: num(r.dr), ndr: num(r.ndr), crUsed: num(r.crUsed),
+      expConf: r.expConf || 0, diff: r.diff || 0,
+      dohPlaced: num(r.dohPlaced), dohAvg3: num(r.dohAvg3)
+    })),
+    yday: m.ydayMs ? new Date(m.ydayMs).toISOString().slice(0, 10) : "",
+    params: m.params || {},
+    floored: dohState.rows.filter(r => r.floored).length,
+    asOf: new Date().toISOString().slice(0, 10)
+  };
+}
+
+async function publishPlannerDoh() {
+  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  const payload = plannerDohExportPayload();
+  if (!payload) return { ok: false, error: "nothing computed yet" };
+  try {
+    await fetch(DATA_API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ action: "planner_doh_rows" }, payload))
+    });
+    console.log("[Planner DOH publish] sent " + payload.rows.length + " rows (placed " + payload.yday + ")");
+    return { ok: true, rows: payload.rows.length };
+  } catch (e) {
+    console.warn("[Planner DOH publish] failed (non-fatal):", e && e.message);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
+// The button in the panel header. publishPlannerDoh() posts no-cors, so there is no reply to read —
+// it reports that the table was sent, and the note in cell A1 of the tab carries the timestamps.
+function dohSendToSheet() {
+  const btn = $("dohSendBtn"); if (!btn) return;
+  const say = (t) => { btn.textContent = t; };
+  if (!dohState.rows || !dohState.rows.length) { say("Nothing to send yet"); setTimeout(() => say("Send to sheet"), 2600); return; }
+  btn.disabled = true; say("Sending…");
+  publishPlannerDoh().then(
+    (r) => say(r && r.ok ? `Sent ${r.rows} rows ✓` : ((r && r.error) || "Failed")),
+    (e) => say((e && e.message) || "Failed")
+  ).then(() => setTimeout(() => { btn.disabled = false; say("Send to sheet"); }, 3200));
+}
+
 function dohWireOnce() {
   if (dohState.wired) return;
   dohState.wired = true;
@@ -17986,6 +18047,7 @@ function dohWireOnce() {
   on("dohMaxDoh", "input", (e) => { const v = e.target.value.trim(); const n = Number(v); dohState.maxDoh = (v === "" || !Number.isFinite(n)) ? null : n; renderDohPlanner(); });
   on("dohReloadBtn", "click", dohRecalculate);
   on("dohDownloadBtn", "click", dohDownloadCsv);
+  on("dohSendBtn", "click", dohSendToSheet);
   ["dohCutoffDays", "dohWindowDays", "dohCrFloorBelow", "dohCrFloorTo"].forEach(id => on(id, "change", dohRecalculate));
   on("dohOnlyPlacedYday", "change", dohRecalculate);
   document.querySelectorAll("#dohTable thead th[data-dkey]").forEach(th => {
