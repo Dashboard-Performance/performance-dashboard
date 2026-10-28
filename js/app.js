@@ -2121,23 +2121,35 @@ async function publishComputedSnapshots() {
 // Same arrangement as the Supply conversion table above: the Inventory Aging page is the only place
 // these are worked out, and the Apps Script only writes what it is sent.
 async function publishInvCategory() {
-  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  if (!SYNC_CDN_URL) return { ok: false, error: "SYNC_CDN_URL not configured" };
   var C = window.TowerCore;
   if (!C || typeof C.invCategoryExport !== "function") return { ok: false, error: "Supply Chain module not loaded" };
   const payload = C.invCategoryExport();
   if (!payload || !payload.rows || !payload.rows.length) return { ok: false, error: "nothing computed yet" };
+  // Through the Worker, not straight to Apps Script: Apps Script is no-cors from here, so a refusal
+  // (an action a deployment does not know yet, most often) came back indistinguishable from success
+  // and the button said "Sent ✓" for a write that never happened.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000);
   try {
-    await fetch(DATA_API_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(Object.assign({ action: "inv_category_rows" }, payload))
+    const res = await fetch(`${SYNC_CDN_URL}?action=invCategoryRows`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal: ctrl.signal
     });
-    console.log("[Inventory per category publish] sent " + payload.rows.length + " rows");
-    return { ok: true, rows: payload.rows.length };
+    const j = await res.json().catch(() => null);
+    if (j && j.success) {
+      console.log("[Inventory per category publish] " + j.rows + " rows written");
+      return { ok: true, rows: j.rows };
+    }
+    const msg = (j && j.message) || ("HTTP " + res.status);
+    console.warn("[Inventory per category publish] rejected:", msg);
+    return { ok: false, error: msg };
   } catch (e) {
-    console.warn("[Inventory per category publish] failed (non-fatal):", e && e.message);
-    return { ok: false, error: (e && e.message) || String(e) };
+    const timedOut = e && e.name === "AbortError";
+    console.warn("[Inventory per category publish] " + (timedOut ? "timed out" : "failed") + ":", e && e.message);
+    return { ok: false, timedOut: timedOut, error: timedOut ? "Timed out — check the sheet" : ((e && e.message) || String(e)) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
