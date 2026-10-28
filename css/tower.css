@@ -218,6 +218,9 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):
 .tw-exp.bad { color: var(--red, #ff6b6b); border-color: color-mix(in srgb, var(--red, #ff6b6b) 50%, var(--line2)); }
 .tw-exp.bad svg { color: var(--red, #ff6b6b); }
 .tw-exp[disabled] { pointer-events: none; }
+/* the same button inside a compact card header, where there is far less room than a panel head */
+.cx-card-h { display: flex; align-items: center; gap: 10px; }
+.cx-card-h > .tw-exp.cx-cardbtn { margin-left: auto; height: 28px; padding: 0 10px; font-size: 11px; flex: none; }
 .panel-head-modern > .tw-exp { margin-left: auto; align-self: center; }
 .table-controls { display: flex; align-items: center; }
 .panel-head-modern { align-items: center; }

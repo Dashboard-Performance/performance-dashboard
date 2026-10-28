@@ -2112,10 +2112,35 @@ async function publishComputedSnapshots() {
   // فشلها ما يأثرش على publish باقي السكشنز فوق.
   try { await publishAnalystSingleDaily(); } catch (e) { console.warn("[Analyst / Single daily publish] skipped (non-fatal):", e && e.message); }
   try { await publishSupplyConversion(); } catch (e) { console.warn("[Supply conversion publish] skipped (non-fatal):", e && e.message); }
+  try { await publishInvCategory(); } catch (e) { console.warn("[Inventory per category publish] skipped (non-fatal):", e && e.message); }
 }
 
 // v1.17.0 — send the Supply conversion table that is ALREADY computed for the Supply Chain page,
 // so the planning sheet shows the dashboard's own numbers. Nothing is recalculated anywhere else.
+// v1.17.0 — Inventory & DOH per category -> its own tab in the planning sheet.
+// Same arrangement as the Supply conversion table above: the Inventory Aging page is the only place
+// these are worked out, and the Apps Script only writes what it is sent.
+async function publishInvCategory() {
+  if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
+  var C = window.TowerCore;
+  if (!C || typeof C.invCategoryExport !== "function") return { ok: false, error: "Supply Chain module not loaded" };
+  const payload = C.invCategoryExport();
+  if (!payload || !payload.rows || !payload.rows.length) return { ok: false, error: "nothing computed yet" };
+  try {
+    await fetch(DATA_API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ action: "inv_category_rows" }, payload))
+    });
+    console.log("[Inventory per category publish] sent " + payload.rows.length + " rows");
+    return { ok: true, rows: payload.rows.length };
+  } catch (e) {
+    console.warn("[Inventory per category publish] failed (non-fatal):", e && e.message);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
 async function publishSupplyConversion() {
   if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
   var C = window.TowerCore;

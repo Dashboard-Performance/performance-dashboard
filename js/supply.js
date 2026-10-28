@@ -237,6 +237,22 @@
     });
   }
 
+  // v1.17.0 — "Send to sheet" for the per-category table, same behaviour as the Supply conversion one.
+  function catPush(btn) {
+    var say = function (txt, cls) { var sp = btn.querySelector("span"); if (sp) sp.textContent = txt; btn.className = "tw-exp cx-cardbtn" + (cls ? " " + cls : ""); };
+    if (typeof window.publishInvCategory !== "function") { say("Not available", "bad"); return; }
+    var rows = catCalc();
+    if (!rows || !rows.length) { say("Nothing to send yet", "bad"); setTimeout(function () { say("Send to sheet"); }, 2600); return; }
+    btn.disabled = true; say("Sending\u2026", "busy");
+    window.publishInvCategory().then(function (r) {
+      say(r && r.ok ? "Sent \u2713" : ((r && r.error) || "Failed"), r && r.ok ? "ok" : "bad");
+    }, function (e) {
+      say((e && e.message) || "Failed", "bad");
+    }).then(function () {
+      setTimeout(function () { btn.disabled = false; say("Send to sheet"); }, 3200);
+    });
+  }
+
   function convPanel() {
     var rows = convCalc() || CONV_ROWS.map(function (l) { return { metric: l[1], actual: 0, planned: 0, targetPct: 0, converted: 0, conversionPct: 0, convertedVsActual: 0 }; });
     var body = rows.map(function (r) {
@@ -317,6 +333,40 @@
     });
     return { qty: qty, val: val, n: n };
   }
+  // v1.17.0 — Inventory & DOH per category, exactly as the Inventory Aging page shows them, ready to
+  // be written into the planning sheet. The page is the only place these are worked out.
+  //   Inventory value = Σ (stock × WAC)                     · Pieces = Σ stock (Good item only)
+  //   DOH (value)     = inventory value ÷ Σ (avg15 × WAC)   — the figure on the "Days on hand" tile
+  //   DOH (pcs)       = pieces ÷ Σ avg15                    — the same idea counted in pieces
+  // Every category is sent whether or not the page is filtered to one: the pills are for looking at
+  // the page, and must never decide what the planning team receives.
+  function catRowsFor(rs) {
+    var pcs = sum(rs, "stock"), inv = sum(rs, "inv");
+    var dAvg = rs.reduce(function (a, r) { return a + (+r.avg15 || 0); }, 0);
+    return { skus: rs.filter(function (r) { return r.stock > 0; }).length,
+             pcs: Math.round(pcs), value: Math.round(inv),
+             dohValue: dohVal(rs), dohPcs: dAvg > 0 ? pcs / dAvg : 0,
+             avg15Pcs: dAvg, avg15Value: rs.reduce(function (a, r) { return a + (+r.avg15 || 0) * (+r.wac || 0); }, 0) };
+  }
+  function catCalc() {
+    var all = SC.rows || []; if (!all.length) return null;
+    var seen = {}; all.forEach(function (r) { seen[r.cat] = 1; });
+    // the five known categories first, then anything else the data actually carries
+    var list = CATS.filter(function (c) { return seen[c]; })
+      .concat(Object.keys(seen).filter(function (c) { return CATS.indexOf(c) < 0; }).sort());
+    var rows = list.map(function (c) {
+      var o = catRowsFor(all.filter(function (r) { return r.cat === c; }));
+      o.category = CATL[c] || c; return o;
+    });
+    var tot = catRowsFor(all); tot.category = "TOTAL";
+    return rows.concat([tot]);
+  }
+  function catExport() {
+    var rows = catCalc(); if (!rows) return null;
+    return { rows: rows, asOf: SC.asOf || "", monthLabel: SC.monthLbl || "",
+             elapsed: SC.elapsed || 0, daysInMonth: SC.mdays || 0 };
+  }
+
   function renderAging(host) {
     var rows = scoped(), inv = sum(rows, "inv"), stocked = rows.filter(function (r) { return r.stock > 0; });
     var unh = bsum(rows, 4), dead = stocked.filter(function (r) { return r.fms === FMS[3]; }), retV = sum(rows, "retV");
@@ -343,7 +393,7 @@
       return '<div class="sc-stk"><span class="sc-stk-l">' + CATL[c] + '<small>' + money(sum(rs, "inv")) + '</small></span><div class="sc-stk-b">' + AGES.map(function (a, i) { var v = bsum(rs, i); return v > 0 ? '<i style="width:' + (v / tv * 100) + '%;background:' + AGE_COL[i] + '" title="' + AGE_LBL[a] + ' · ' + money(v) + '"></i>' : ""; }).join("") + '</div></div>';
     }).join("");
     var ageItems = AGES.map(function (a, i) { return { l: AGE_LBL[a], c: AGE_COL[i], v: bsum(rows, i), n: rows.filter(function (r) { return r["q" + i] > 0; }).length }; });
-    html += '<div class="cx-grid2"><div class="panel cx-card"><div class="cx-card-h">Inventory value by aging <small>per category</small></div>' + stack +
+    html += '<div class="cx-grid2"><div class="panel cx-card"><div class="cx-card-h">Inventory value by aging <small>per category</small><button type="button" class="tw-exp cx-cardbtn" id="scCatPush" title="Write inventory value, pieces and DOH per category into the planning sheet.">' + ICON_SHEET + '<span>Send to sheet</span></button></div>' + stack +
       '<div class="sc-legend">' + AGES.map(function (a, i) { return '<span><i style="background:' + AGE_COL[i] + '"></i>' + AGE_LBL[a] + '</span>'; }).join("") + '</div></div>' +
       '<div class="panel cx-card"><div class="cx-card-h">Aging buckets <small>value · share</small></div>' + distV(ageItems, inv) + '</div></div>';
     var segTone = ["#0ea58a", "#7c5cf0", "#3b82f6", "#fbbf24", "#9aa7bd"], sm = SC.segMode, smL = { segA: "Actual (MTD)", segL: "Last month", segP: "Projected" };
@@ -446,6 +496,7 @@
 
   /* ---------------------------------------------------------------- wiring */
   C.supplyConversionExport = convExport;
+  C.invCategoryExport = catExport;
   var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions] };
   var current = null;
   function rerender() { build(); if (current && VIEWS[current]) { var h = $(VIEWS[current][0]); if (h && !h.classList.contains("hidden")) VIEWS[current][1](h); } }
@@ -459,6 +510,7 @@
     var sg = t.closest("[data-sc-seg]"); if (sg) { SC.segMode = sg.getAttribute("data-sc-seg"); rerender(); return; }
     var a = t.closest("[data-sc-act]"); if (a) { SC.act = a.getAttribute("data-sc-act"); rerender(); return; }
     var pb = t.closest("#scConvPush"); if (pb) { e.stopPropagation(); convPush(pb); return; }
+    var cb = t.closest("#scCatPush"); if (cb) { e.stopPropagation(); catPush(cb); return; }
     var s = t.closest("[data-sc-sku]"); if (s) { openSku(s.getAttribute("data-sc-sku")); return; }
     var b = t.closest("[data-sc]"); if (b) { var k = b.getAttribute("data-sc"); if (k === "prev") { SC.sk.page = Math.max(0, SC.sk.page - 1); drawSkuBody(); } else if (k === "next") { SC.sk.page++; drawSkuBody(); } return; }
     var th = t.closest("#scSkuTable th[data-k]"); if (th) { var key = th.getAttribute("data-k"); if (SC.sk.key === key) SC.sk.dir = SC.sk.dir === "asc" ? "desc" : "asc"; else { SC.sk.key = key; SC.sk.dir = "desc"; } SC.sk.page = 0; drawSkuBody(); }
