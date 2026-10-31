@@ -9,9 +9,15 @@
   var C = null, $ = function (id) { return document.getElementById(id); };
   var S = { data: null, err: "", empty: false, seg: "ALL", q: "", sort: "live", dir: -1, page: 0, host: null, bucket: "end", names: null, loading: false };
   var PAGE = 50;
-  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble" };
+  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix" };
   var BUCKET_LABEL = { "7": "Day 7", "14": "Day 14", "21": "Day 21", "end": "Month end (locked)" };
-  var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_tw", "gbm_log", "ens"];
+  var FEATURE_LABEL = { m1: "Last month", m2: "2 months ago", m3: "3 months ago", m4: "4 months ago", mtd: "Month to date", mtd_rr: "Month-to-date pace", r3: "Pace 3d", r7: "Pace 7d", r14: "Pace 14d", r30: "Pace 30d", r60: "Pace 60d", r90: "Pace 90d",
+    r7_r30: "7d vs 30d", r14_r60: "14d vs 60d", r30_r90: "30d vs 90d", slope30: "30-day trend", cv30: "30-day volatility", zero30: "Zero-sale days", maxshare30: "Spikiness", cr14: "Confirmation rate", dr_mature: "Delivery rate",
+    nm1: "Merchants last month", nm2: "Merchants 2 months ago", nm_chg: "Merchants change", top1_1: "Top merchant share", hhi_1: "Merchant concentration", ret_1: "Merchants who stayed", nm_mtd: "Merchants this month", nm14: "Merchants last 14d",
+    top1_mtd: "Top merchant still selling", new_mtd: "New merchants' share", inb30: "Inbound 30d", inb90: "Inbound 90d", inb_mtd: "Inbound this month", since_inb: "Days since inbound", inb30_m1: "Inbound vs sales", bi_c: "Stock at month start",
+    bi_cover: "Stock cover", avail_pace: "Stock vs pace", miss_pace1: "Last month's miss", miss_pace2: "Miss 2 months ago", miss_ma3_1: "Trend vs 3-mo avg", age_days: "SKU age", since_sale: "Days since last sale", nz_months6: "Months with sales",
+    scale: "Size", cat: "Category", p_chg30: "Price change 30d", p_chg90: "Price change 90d", dow_units_m: "Trading days of target month", len_m: "Days in target month", d: "Day of month", frac_c: "Share of month elapsed", len_c: "Days in this month" };
+  var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal"];
 
   function esc(v) { return C && C.esc ? C.esc(v) : String(v == null ? "" : v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function n0(v) { return v == null || isNaN(v) ? "—" : Math.round(v).toLocaleString("en-US"); }
@@ -32,7 +38,7 @@
       ".mlf-up{color:var(--green)}.mlf-down{color:var(--red,#e5484d)}.mlf-dim{color:var(--text-dim)}.mlf-note{color:var(--text-dim);font-size:12.5px;line-height:1.55;margin:8px 2px}" +
       ".mlf-two{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:14px;margin:14px 0}@media(max-width:1250px){.mlf-two{grid-template-columns:1fr}}" +
       ".mlf-empty{padding:28px 18px;color:var(--text-dim);font-size:14px;line-height:1.7}.mlf-empty code{background:color-mix(in srgb,var(--text) 8%,transparent);padding:1px 6px;border-radius:6px}" +
-      ".mlf-pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding-top:10px;font-size:13px;color:var(--text-dim)}";
+      ".mlf-imp div{display:grid;grid-template-columns:200px 1fr 54px;gap:10px;align-items:center;padding:5px 0;font-size:13px}.mlf-imp i{display:block;height:8px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,transparent),var(--accent))}.mlf-imp b{text-align:right;font-variant-numeric:tabular-nums}.mlf-pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding-top:10px;font-size:13px;color:var(--text-dim)}";
     document.head.appendChild(st);
   }
 
@@ -92,6 +98,15 @@
     // accuracy
     h += '<div class="mlf-two"><div class="tw-card"><div class="tw-card-h"><b>Backtest accuracy</b><span class="mlf-dim"> · 1 − WAPE, each past month forecast as it would have been on that day of the month before</span></div>' + accTable(acc, S.seg, ch) + '</div>';
     h += '<div class="tw-card"><div class="tw-card-h"><b>Frozen forecasts vs what happened</b></div>' + lockedTable(la) + '</div></div>';
+    // month by month (the old months, as the model would have forecast them)
+    h += '<div class="tw-card"><div class="mlf-bar" style="margin-top:0"><span><b>Past months, month by month</b><span class="mlf-dim"> · what the model would have forecast, compared with what really happened (all SKUs)</span></span><div class="mlf-seg">' +
+      ["7", "14", "21", "end"].map(function (b) { return '<button data-bk="' + b + '" class="' + (S.bucket === b ? "on" : "") + '">' + (BUCKET_LABEL[b] || b).replace(" (locked)", "") + '</button>'; }).join("") + '</div></div>' + monthTable(D, S.bucket) + '</div>';
+    // what the model looks at most
+    if (D.importance && D.importance.length) {
+      var mx = D.importance[0][1] || 1;
+      h += '<div class="tw-card"><div class="tw-card-h"><b>What the model looks at most</b><span class="mlf-dim"> · share of the main model\'s decisions, out of ' + (D.features || "?") + ' signals</span></div><div class="mlf-imp">' +
+        D.importance.map(function (r) { return '<div><span title="' + esc(r[0]) + '">' + esc(FEATURE_LABEL[r[0]] || r[0]) + '</span><i style="width:' + Math.max(2, r[1] / mx * 100).toFixed(0) + '%"></i><b>' + r[1].toFixed(1) + '%</b></div>'; }).join("") + '</div></div>';
+    }
     // per SKU table
     var q = S.q.trim().toLowerCase(), list = seg.filter(function (r) { return !q || r.sku.toLowerCase().indexOf(q) >= 0 || r.name.toLowerCase().indexOf(q) >= 0; });
     list.sort(function (a, b) { var x = a[S.sort], y = b[S.sort]; if (typeof x === "string" || typeof y === "string") return S.dir * String(x || "").localeCompare(String(y || "")); return S.dir * ((x == null ? -Infinity : x) - (y == null ? -Infinity : y)); });
@@ -112,7 +127,7 @@
     host.innerHTML = h; wire(D, list);
     if (keepFocus) { var qi = $("mlfQ"); qi.focus(); try { qi.setSelectionRange(caret, caret); } catch (e) {} }
   }
-  function dataLine(D) { var d = D.data || {}, a = []; if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); if (d.overlap && d.overlap.days) a.push("history tab vs Product Only on " + d.overlap.days + " shared days: " + (d.overlap.ratio == null ? "n/a" : "ratio " + (+d.overlap.ratio).toFixed(3) + " (1.000 = identical)")); if (d.stale) a.push("WARNING: " + d.stale); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
+  function dataLine(D) { var d = D.data || {}, a = []; if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.source) a.push("source: " + d.source); if (d.merchants) a.push(n0(d.merchants) + " merchants"); if (d.inboundSkus) a.push("inbound for " + n0(d.inboundSkus) + " SKUs"); if (d.inbound === false) a.push("no inbound data"); if (d.beginInventory === false) a.push("no beginning inventory"); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); if (d.overlap && d.overlap.days) a.push("history tab vs Product Only on " + d.overlap.days + " shared days: " + (d.overlap.ratio == null ? "n/a" : "ratio " + (+d.overlap.ratio).toFixed(3) + " (1.000 = identical)")); if (d.stale) a.push("WARNING: " + d.stale); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
 
   function accTable(acc, segKey, champ) {
     var b = Object.keys(acc).length; if (!b) return '<div class="mlf-empty">Not enough finished months to run a backtest yet.</div>';
@@ -125,6 +140,18 @@
     });
     return h + '</tbody></table></div><p class="mlf-note">Green = best on that row. Underlined = the model currently used for this segment. Accuracy = 1 − (total absolute error ÷ total actual pieces). Every past month is forecast using only what was known on that day, never later.</p>';
   }
+  function monthTable(D, bk) {
+    var rows = (((D.accuracy || {}).byMonth || {})[bk]) || [];
+    if (!rows.length) return '<div class="mlf-empty">No finished months to replay yet.</div>';
+    var cols = [["ens", "Ensemble"], ["gbm_l1", "GBM"], ["pace14", "Pace 14d"], ["naive", "Last month"]];
+    return '<div class="table-responsive"><table class="mlf-t"><thead><tr><th>Month</th><th class="num">Actual</th><th class="num">Ensemble forecast</th><th class="num">Bias</th>' + cols.map(function (c) { return '<th class="num">' + c[1] + ' acc.</th>'; }).join("") + '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        var best = -1e9, bk2 = ""; cols.forEach(function (c) { if (r[c[0]] != null && r[c[0]] > best) { best = r[c[0]]; bk2 = c[0]; } });
+        var bias = r.ensF != null && r.actual ? (r.ensF / r.actual - 1) * 100 : null;
+        return '<tr><td>' + esc(monthName(r.month)) + '</td><td class="num">' + n0(r.actual) + '</td><td class="num">' + n0(r.ensF) + '</td><td class="num ' + (bias == null ? "" : bias >= 0 ? "mlf-up" : "mlf-down") + '">' + (bias == null ? "—" : (bias >= 0 ? "+" : "") + pct(bias)) + '</td>' +
+          cols.map(function (c) { return '<td class="num' + (c[0] === bk2 ? " best" : "") + '">' + pct(r[c[0]]) + '</td>'; }).join("") + '</tr>';
+      }).join("") + '</tbody></table></div><p class="mlf-note">Each month is forecast only with what was known on that day of the month before it. Accuracy = 1 − total absolute error ÷ total actual pieces. Green = best of the four on that month.</p>';
+  }
   function lockedTable(la) {
     if (!la.length) return '<div class="mlf-empty">Nothing to score yet: a frozen forecast is scored once its month has finished. The first one is frozen on the 1st of the next month.</div>';
     return '<div class="table-responsive"><table class="mlf-t"><thead><tr><th>Month</th><th class="num">Forecast</th><th class="num">Actual</th><th class="num">ML</th><th class="num">Last month</th><th class="num">Bias</th></tr></thead><tbody>' +
@@ -134,6 +161,7 @@
   function wire(D, list) {
     var host = S.host;
     host.querySelectorAll("[data-seg]").forEach(function (b) { b.onclick = function () { S.seg = b.dataset.seg; S.page = 0; draw(); }; });
+    host.querySelectorAll("[data-bk]").forEach(function (b) { b.onclick = function () { S.bucket = b.dataset.bk; draw(); }; });
     host.querySelectorAll("[data-sort]").forEach(function (t) { t.onclick = function () { var k = t.dataset.sort; if (S.sort === k) S.dir = -S.dir; else { S.sort = k; S.dir = k === "sku" || k === "seg" ? 1 : -1; } S.page = 0; draw(); }; });
     var q = $("mlfQ"); if (q) q.oninput = function (e) { S.q = e.target.value; S.page = 0; draw(); };
     var p = $("mlfPrev"), n = $("mlfNext"); if (p) p.onclick = function () { S.page = Math.max(0, S.page - 1); draw(); }; if (n) n.onclick = function () { S.page++; draw(); };
