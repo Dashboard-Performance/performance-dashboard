@@ -112,7 +112,7 @@
     host.innerHTML = h; wire(D, list);
     if (keepFocus) { var qi = $("mlfQ"); qi.focus(); try { qi.setSelectionRange(caret, caret); } catch (e) {} }
   }
-  function dataLine(D) { var d = D.data || {}, a = []; if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
+  function dataLine(D) { var d = D.data || {}, a = []; if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); if (d.overlap && d.overlap.days) a.push("history tab vs Product Only on " + d.overlap.days + " shared days: " + (d.overlap.ratio == null ? "n/a" : "ratio " + (+d.overlap.ratio).toFixed(3) + " (1.000 = identical)")); if (d.stale) a.push("WARNING: " + d.stale); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
 
   function accTable(acc, segKey, champ) {
     var b = Object.keys(acc).length; if (!b) return '<div class="mlf-empty">Not enough finished months to run a backtest yet.</div>';
