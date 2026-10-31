@@ -10,19 +10,26 @@
   var KEY_LS = "towerAdminKey", ACCESS_LS = "towerAccessCache", PREVIEW_SS = "towerPreviewRole", PREVIEW_MID = "towerPreviewMerchantId", SESSION_LS = "taagerDashboardSession";
 
   // view name (switchView) -> nav element id
-  var VIEW_NAV = {
+    // NAMING RULE: a tab's view key / nav id / page id / functions are named like the tab's VISIBLE name (Commercial Plan -> commercialPlan / navCommercialPlan /
+  // viewCommercialPlan / prepareCommercialPlanData; Forecast Model Merchant -> forecastModelMerchant ...). Tabs added from now on follow it.
+  // Older tabs whose internal key still differs from the visible name (saved roles / links use these ids, so they are renamed only together with a migration):
+  //   Targets=targetsCommercial · Analyst / Products=ppmAnalystProducts · Analyst / Single=ppmAnalystSingle · Inventory Aging=scAging · Sellthrough Rate Panel=sellthrough
+  //   Inventory & Inbound=weeklyInventory · SKU Analysis=scSkus · Action Plan=scActions · Planner DOH=dohPlanner · Matches / Single=productsMatchesAnalyst
+  //   Performance-Matches=mpMatches · New Matches=mpNewMatches · Decline Matches=mpDeclineWatch · Unlocking Action's=healthyUnlocking · Segmentation Panel=segmentation
+  //   RE-CPA=merchantCpa · Target ACM=acmTargets · Performance ACM=acmPerformance · Sales Plan-ACM=mpSalesPlan · Sales Plan - Feedback=spFeedback
+var VIEW_NAV = {
     overview: "navOverview", inventory: "navInventory",
     acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", merchantCpa: "navMerchantCpa", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
-    targetsCommercial: "navTargetsCommercial", commercialDebundlized: "navCommercialDebundlized", purchasePlan: "navPurchasePlan",
+    targetsCommercial: "navTargetsCommercial", commercialPlan: "navCommercialPlan", purchasePlan: "navPurchasePlan",
     cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle",
     productsMatchesAnalyst: "navProductsMatchesAnalyst", scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions",
     cm3Analyst: "navCm3Analyst", poorMatches: "navPoorMatches", availabilityLocking: "navAvailabilityLocking",
     allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking",
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
-    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner"
+    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner"
   };
-  var ADMIN_PW_VIEWS = ["forecastModel"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
+  var ADMIN_PW_VIEWS = ["forecastModel", "forecastModelMerchant"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
   var TARGET_TYPES = [
     { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "TAGER_ID · Tager_name · Target GMV (Actual) · Target Placed (Actual) — each merchant's ACM is picked up automatically and its target is added to that ACM" },
@@ -95,7 +102,7 @@
     Object.keys(c.roles).forEach(function (n) {
       var r = c.roles[n]; if (!r || !Array.isArray(r.views)) return;
       var v = r.views, add = function (has, id) { if (v.indexOf(has) >= 0 && v.indexOf(id) < 0) v.push(id); };
-      add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets"); add("navMerchantPerf", "navMerchantCpa"); // v1.17.0: RE-CPA
+      add("navForecastModel", "navForecastModelMerchant"); add("navCommercialDebundlized", "navCommercialPlan"); /* v1.18.0: nav id renamed to match the tab name */ add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets"); add("navMerchantPerf", "navMerchantCpa"); // v1.17.0: RE-CPA
       if (v.indexOf("navMerchantPerf") >= 0 && v.indexOf("navMerchantsToggle") < 0) v.push("navMerchantsToggle");
     });
     if (!c.defaultRole || !c.roles[c.defaultRole]) c.defaultRole = "Merchant";
@@ -1004,7 +1011,7 @@
   var HUBS = [
     { toggle: "navCommercialToggle", title: "Commercial", tabs: [
       { nav: "navTargetsCommercial", view: "targetsCommercial", label: "Targets" },
-      { nav: "navCommercialDebundlized", view: "commercialDebundlized", label: "Commercial Plan" },
+      { nav: "navCommercialPlan", view: "commercialPlan", label: "Commercial Plan" },
       { nav: "navCm3AnalystProducts", view: "cm3AnalystProducts", label: "CM3 Analyst / Products" },
       { nav: "navPpmAnalystProducts", view: "ppmAnalystProducts", label: "Analyst / Products" },
       { nav: "navPpmAnalystSingle", view: "ppmAnalystSingle", label: "Analyst / Single" }
@@ -1051,6 +1058,7 @@
     ] },
     { toggle: "navAdminToggle", title: "Admin Panel", tabs: [
       { nav: "navForecastModel", view: "forecastModel", label: "Forecast Model" },
+      { nav: "navForecastModelMerchant", view: "forecastModelMerchant", label: "Forecast Model Merchant" },
       { nav: "navMlForecast", view: "mlForecast", label: "ML Forecast" }
     ] },
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
@@ -1191,14 +1199,14 @@
   var VIEW_SLUG = {
     inventory: "inventory",
     acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", merchantCpa: "re-cpa", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
-    targetsCommercial: "targets", commercialDebundlized: "commercial-plan", purchasePlan: "purchase-plan",
+    targetsCommercial: "targets", commercialPlan: "commercial-plan", purchasePlan: "purchase-plan",
     cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
     productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",
     cm3Analyst: "cm3-analyst", poorMatches: "poor-matches", availabilityLocking: "availability-locking",
     allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions",
     mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
     incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
-    weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", dohPlanner: "planner-doh"
+    weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh"
   };
   function twFileOf(view) { return view === "overview" ? "index.html" : (VIEW_SLUG[view] || view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()) + ".html"; }
   // Old file names (camelCase view name) keep working so saved links don't break; they open the same tab and the address bar switches to the new name.
@@ -1230,6 +1238,7 @@
     };
     window.__twSwitch = function (name) {
       var res; renderTok++;
+      if (name === "commercialDebundlized") name = "commercialPlan"; // old view name (saved links / state)
       if (isOwnView(name)) { if (!(name === "towerInvite" ? canInvite() : (EXTRA_VIEWS[name] && EXTRA_VIEWS[name].open ? allowed(EXTRA_VIEWS[name].navId) : isEffAdmin()))) { res = origSwitch("overview"); updateHub("overview"); return res; } res = showOwnView(name); updateHub(name); return res; }
       var nid = VIEW_NAV[name];
       if (nid && !allowed(nid)) { name = "overview"; }

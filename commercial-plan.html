@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script>window.__ENTRY_VIEW="commercialDebundlized";</script>
+<script>window.__ENTRY_VIEW="commercialPlan";</script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Performance Dashboard</title>
@@ -61,7 +61,7 @@
           </a>
           <div class="nav-submenu hidden" id="commercialSubmenu">
             <a class="nav-item-sub" id="navTargetsCommercial">Targets</a>
-            <a class="nav-item-sub nav-hub-child" id="navCommercialDebundlized">Commercial Plan</a>
+            <a class="nav-item-sub nav-hub-child" id="navCommercialPlan">Commercial Plan</a>
             <a class="nav-item-sub" id="navCm3AnalystProducts">CM3 Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystProducts">Analyst / Products</a>
             <a class="nav-item-sub" id="navPpmAnalystSingle">Analyst / Single</a>
@@ -117,6 +117,7 @@
           </a>
           <div class="nav-submenu hidden" id="adminSubmenu">
             <a class="nav-item-sub nav-hub-child" id="navForecastModel">Forecast Model</a>
+            <a class="nav-item-sub nav-hub-child" id="navForecastModelMerchant">Forecast Model Merchant</a>
             <a class="nav-item-sub nav-hub-child" id="navMlForecast">ML Forecast</a>
           </div>
         </div>
@@ -596,8 +597,8 @@
             </div>
           </section>
         </div>
-        <!-- COMMERCIAL DEBUNDLIZED SECTION -->
-        <div id="viewCommercialDebundlized" class="view-section hidden">
+        <!-- COMMERCIAL PLAN SECTION -->
+        <div id="viewCommercialPlan" class="view-section hidden">
           <section class="mb-4">
             <div class="metrics-grid">
               <div class="metric-card hover-glow">
@@ -681,11 +682,11 @@
                   <p>SKU demand (Bundle) — Placed / Confirmed / Delivered Pieces / GMV, each with Target MTD, Run Rate &amp; Achievement%</p>
                 </div>
                 <div class="table-controls">
-                  <div class="filter-group section-date-filter" data-section-date="commercialDebundlized" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
-                    <input id="startDate_commercialDebundlized" type="date" class="date-filter-input" aria-label="Start Date" />
+                  <div class="filter-group section-date-filter" data-section-date="commercialPlan" title="Pick both dates to use an exact custom range for this section only, with cutoffs disabled. Clear either date to go back to normal.">
+                    <input id="startDate_commercialPlan" type="date" class="date-filter-input" aria-label="Start Date" />
                     <span class="text-dim" style="padding:0 4px;">→</span>
-                    <input id="endDate_commercialDebundlized" type="date" class="date-filter-input" aria-label="End Date" />
-                    <button id="clearDate_commercialDebundlized" class="btn btn-outline small hidden" data-clear-date="commercialDebundlized">Clear</button>
+                    <input id="endDate_commercialPlan" type="date" class="date-filter-input" aria-label="End Date" />
+                    <button id="clearDate_commercialPlan" class="btn btn-outline small hidden" data-clear-date="commercialPlan">Clear</button>
                   </div>
                   <input id="searchCdzInput" type="search" placeholder="Search Product ID, Name or Category..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
                 </div>
@@ -2980,7 +2981,7 @@
             <div class="panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
-                  <h2>Forecast Model</h2>
+                  <h2 id="fcTitle">Forecast Model</h2>
                   <p id="fcTargetSubtitle">SKU-level monthly demand forecast — Confirmed pieces, debundled to Single SKUs.</p>
                 </div>
                 <div class="table-controls">
@@ -3047,7 +3048,7 @@
             <div class="panel table-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-blue">
-                  <h2>Method by SKU Size</h2>
+                  <h2 id="fcSegTitle">Method by SKU Size</h2>
                   <p>Each size segment is forecast differently, because different things work at different volumes. The accuracy here is the real result on past months — the final number after every step, not the score of any single method.</p>
                 </div>
               </div>
@@ -3056,7 +3057,7 @@
                   <thead>
                     <tr>
                       <th>Segment</th>
-                      <th class="num">SKUs</th>
+                      <th class="num" id="fcSegCountTh">SKUs</th>
                       <th class="num text-blue">Forecast</th>
                       <th title="Every step that produces this segment's number, in order.">How It's Built</th>
                       <th class="num" title="Whether a model correcting the forecast's own past errors is applied to this segment.">Error Correction</th>

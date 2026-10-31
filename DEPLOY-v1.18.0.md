@@ -24,7 +24,7 @@
 - **لاج التنقل بين التابات:** الـ View Transition (انتقال الصفحة كلها) كان بيعمل فريمز واقفة لحد 217ms عند كل تبديل. اتقفل افتراضياً، والصفحة الجديدة بتدخل بحركة السكشن العادية (نفس الاتجاه والتوقيت تقريباً، من غير ما القديمة تتحرك لبرّا). قياس في متصفح تجريبي: 10 فريمز فوق 100ms ← صفر، زي Classic بالظبط. لو عايز تجرّب الانتقال القديم: في الـ Console اكتب `localStorage.setItem("glVT","1")` وبعدين Reload.
 
 **Over View (بعد التسليم)**
-- كروت الأرقام فوق (Placed / Confirmed / Delivered Pieces و Delivered GMV و CR / DR / NDR) و Avg Placed Pcs بقت بتتقرا من **Product Only** (الـ Pipeline Velocity فضل على **Main / Matches** زي ما كان). أي شهر مش موجود في Product Only (الأقدم من الشهر اللي فات) بيفضل من Main. وفي All Months بيتجمعوا من غير تكرار. لو اختارت ACM معين أو المستخدم Merchant، بيفضل على Main. جدول التجار والـ ACM والإنفنتوري لسه على Main.
+- الـ Overview كله (الكروت وPipeline Velocity وAvg Placed Pcs والـ Top Products والـ Category) بيتقرا من **Main (Matches)**، لأن فيه Bundle و Single مع بعض. Product Only فيه الـ Single SKUs بس.
 - **Category Demand Breakdown اتشال.**
 - صف جديد تحت: **Top Products** (أعلى 10 منتجات بالـ Delivered GMV ونسبة كل واحد) على الشمال تحت Sellthrough & Inbound، و **Category Contribution** (Pie Chart لنسبة كل كاتيجوري من الـ Delivered GMV) تحت Avg Placed Pcs. الـ GMV هنا هو Delivered GMV زي الكارت اللي فوق.
 
@@ -56,7 +56,7 @@
 - **صفحات ACM (ACM Performance و Target ACM): فضلت على Merchant Segmentation** (قرارك: دي تعريف الـ GMV المعتمد). يعني أرقام الأوردرات والـ Delivered GMV لكل ACM زي ما كانت في 17_6 بالظبط، ومفيش تغيير في الـ GMV. كويري Merchant Only مبقاش بيتطلب خالص (الكود موجود ومقفول بمفتاح واحد `ACM_USES_MERCHANT_ONLY` في أول `js/app.js` لو احتجته بعدين).
 - الشهور الأقدم (يناير–أغسطس) في صفحات ACM بتتقرا من تاب gid 1433599782. ده تغيير عن 17_6 (كانت بتطلع أصفار للأوردرات في الشهور القديمة).
 - **سبتمبر في صفحات ACM هيطلع فاضي زي 17_6:** كويري Segmentation فيها أكتوبر بس. لو عايز سبتمبر يظهر لازم نختار مصدر ليه (قولي).
-- **Product Only:** PPM Analyst / Products، Analyst / Single، CM3 Analyst / Products، **Commercial Plan** (مستوى المنتج PRODUCT_ID بس، من غير تاجر)، أرقام الكاتيجوري في Targets (Commercial) وفي chart الـ Overview، صفحات الـ Supply Chain (طلب)، و Planner DOH. الصف الـ IS_PRIMARY=true فيه الأوردرات، والـ false فيه قطع إضافية (أوردرات صفر)، وبنجمعهم، فالأوردر بيتحسب مرة واحدة (Main كان بيحسبه على كل منتج جواه). الكاتيجوري مش في الكويري، فبتتاخد من نفس الـ SKU في Main / Products Info.
+- **القاعدة:** Product Only = Single SKUs بس (البندل متفكك على السنجلز). أي صفحة فيها Bundle و Single مع بعض بتقرا Main (Matches): Overview، Inventory & Products Performance، Commercial Plan، PPM Analyst / Products، أرقام الكاتيجوري في Targets (Commercial). أي صفحة Single بس بتقرا **Product Only**: PPM Analyst / Single، CM3 Analyst / Products، Planner DOH، صفحات الـ Supply Chain. الأوردر في Product Only بيتحسب مرة واحدة (Main كان بيحسبه على كل منتج جواه)، وقطع البندل بتتحسب على السنجلز، فالإجماليات مش لازم تتطابق. الكاتيجوري مش في الكويري، فبتتاخد من نفس الـ SKU في Main / Products Info.
 - لسه على Main (مش اتنقلوا): كل صفحات الـ Match، صفحات التجار، Purchase Plan، Weekly Inventory، Forecast Model، Inventory، Overview الإجمالي.
 - **Control › Settings:** كارت "Product & category pages — data source": اختيار Product Only / Main (محفوظ على المتصفح) + جدول مقارنة Main مقابل Product Only لكل شهر (القطع، الأوردرات، GMV، CM3، PPM) عشان تقارن الأرقام بنفسك.
 - لو أي مصدر جديد ما اتحمّلش (أو الـ Worker لسه ما اترفعش)، الصفحات بترجع لوحدها للمصدر القديم.
@@ -68,6 +68,12 @@
 ## اتجرّب إزاي
 - اختبارات الـ Worker: 18 + 25 + 109 + 19 + 9 الموجودة + 26 جداد للـ Usage Log، كلها نجحت.
 - صفحات ACM بعد الرجوع لـ Segmentation: بالدالة الحقيقية نفس مخرجات 17_6 بالظبط (أكتوبر، سبتمبر، All Months)، وأكتوبر بيطلع 2700 (Segmentation) مش 2500 (Merchant Only) في الاختبار؛ والصفحة بتفتح من غير أخطاء ومبتطلبش Merchant Only. التاجر 1160154 مش في Segmentation، وفي Merchant Only ACM بتاعه فاضي (أكتوبر: 103 أوردر، 8 اتسلموا، GMV 1,522)، فمفيش أثر على أرقام الـ ACM.
-- صفحات المنتج على Product Only بالدوال الحقيقية: نفس مخرجات Main على داتا متكافئة (PPM Products / Single، CM3 Products، Commercial Plan، Targets، Planner DOH). عيّنة حقيقية من Product Only (SE0105، 1 سبتمبر) اتجمعت صح.
+- صفحات الـ Single على Product Only بالدوال الحقيقية: نفس مخرجات Main على داتا متكافئة (PPM Single، CM3 Products، Planner DOH). عيّنة حقيقية من Product Only (SE0105، 1 سبتمبر) اتجمعت صح.
 - Glass / Classic / الافتراضي / الجهاز الضعيف والقوي، اللوجين (غامق وفاتح و Classic، الـ pill، الـ Caps Lock، كسر الضوء)، إصلاح Matches / Single، و Usage Log (تتبّع، Worker بداتا مزيفة، الصفحة، Admin بس) — كلهم اتجرّبوا في متصفح.
 - **ما اتجرّبش:** مقارنة Product Only بـ Main على الداتا الحقيقية كاملة (المتصفح كان مفصول)، فاستخدم كارت Settings. ولا Usage Log على Worker مرفوع فعلاً.
+
+## Forecast Model Merchant + أسماء التابات في الكود
+- **Forecast Model Merchant** (Admin Panel، بنفس باسوورد Forecast Model): نفس صفحة Forecast Model ونفس الحسابات بالظبط (الـ Behaviors، الـ Size segments A/B/C، الـ TSB وقواعد المعدل الأخير، الـ error-correction، الـ ranges، الـ backtests والـ accuracy)، بس الوحدة هي الـ **Merchant** مش الـ SKU. الديماند = الـ Confirmed pieces اليومية للتاجر (as sold) من تاب الـ History (مجمّعة بالتاجر على Google) + صفوف Matches، واليوم الموجود في الاتنين بيتحسب مرة من Matches. اسم التاجر والـ ACM من Matches. مفيش price-change adjustment ولا stock ceiling ولا أعمدة Stock / Repack / Inbound (دول مفهومين على مستوى الـ SKU بس). الـ segments (A ≥ 100 / B 30–99 / C < 30 قطعة في الشهر) هي نفس حدود الـ SKU.
+- التابين بيحتفظوا بداتا وفلاتر منفصلة؛ بتتحمّل الداتا أول مرة تفتح كل تاب، وبعدها الرجوع بين التابين فوري.
+- الاسم في الكود بقى زي الاسم الظاهر: **Commercial Plan** = `commercialPlan` / `navCommercialPlan` / `viewCommercialPlan` / `computeCommercialPlan` / `prepareCommercialPlanData` (كان Commercial Debundlized). الأدوار المحفوظة واللينكات القديمة (`commercial-debundlized.html` واسم التاب القديم) بتتحول تلقائي. قاعدة التسمية مكتوبة في أول `js/tower.js` مع قائمة التابات القديمة اللي اسمها الداخلي لسه مختلف.
+- الـ Worker: تعديل صغير في `cloudflare-worker/loop.js` (قائمة تابات فريق Commercial فيها الاسم الجديد). ارفعه مع أي رفع جاي، مش مستعجل.

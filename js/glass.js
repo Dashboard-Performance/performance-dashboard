@@ -35,18 +35,18 @@
     navOverview: "overview", navInventory: "inventory", navAcmTargets: "acmTargets", navAcmPerf: "acmPerformance",
     navMerchantTargets: "merchantTargets", navMerchantPerf: "merchantPerformance", navMerchantCpa: "merchantCpa",
     navMpSalesPlan: "mpSalesPlan", navSpFeedback: "spFeedback", navTargetsCommercial: "targetsCommercial",
-    navCommercialDebundlized: "commercialDebundlized", navPurchasePlan: "purchasePlan", navCm3AnalystProducts: "cm3AnalystProducts",
+    navCommercialPlan: "commercialPlan", navPurchasePlan: "purchasePlan", navCm3AnalystProducts: "cm3AnalystProducts",
     navPpmAnalystProducts: "ppmAnalystProducts", navPpmAnalystSingle: "ppmAnalystSingle", navProductsMatchesAnalyst: "productsMatchesAnalyst",
     navScAging: "scAging", navScSkus: "scSkus", navScActions: "scActions", navCm3Analyst: "cm3Analyst", navPoorMatches: "poorMatches",
     navAvailabilityLocking: "availabilityLocking", navAllocationLocking: "allocationLocking", navHealthyUnlocking: "healthyUnlocking",
     navMpMatches: "mpMatches", navMpNewMatches: "mpNewMatches", navMpDeclineWatch: "mpDeclineWatch", navIncMerchants: "incentiveMerchants",
     navSegmentationPanel: "segmentation", navSellthroughPanel: "sellthrough", navWeeklyInventory: "weeklyInventory",
-    navForecastModel: "forecastModel", navMlForecast: "mlForecast", navDohPlanner: "dohPlanner",
+    navForecastModel: "forecastModel", navForecastModelMerchant: "forecastModelMerchant", navMlForecast: "mlForecast", navDohPlanner: "dohPlanner",
     navTowerRoles: "towerRoles", navTowerTargets: "towerTargets", navLoopTasks: "loopTasks", navTowerAlerts: "towerAlerts",
     navLoopControl: "loopControl", navTowerSettings: "towerSettings", navTowerActivity: "towerActivity", navTowerUsage: "towerUsage", navTowerInvite: "towerInvite"
   };
   // Forecast Model لسه ورا باسورد الـ Admin Panel — فهنا بنسيب العنصر الأصلي يتداس (الباقي بقى من غير باسورد)
-  var VIA_CLICK = { navForecastModel: 1 };
+  var VIA_CLICK = { navForecastModel: 1, navForecastModelMerchant: 1 };
   function go(sub) {
     var v = NAV_VIEW[sub.id];
     if (v && !VIA_CLICK[sub.id] && typeof window.switchView === "function") window.switchView(v); else sub.click();

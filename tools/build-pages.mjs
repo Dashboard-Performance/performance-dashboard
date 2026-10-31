@@ -32,4 +32,15 @@ for (const view of Object.keys(canonical)) {
 `);
   stubs++;
 }
+// Old file names of renamed tabs keep working (saved links): old file -> new file
+const RENAMED = { "commercial-debundlized.html": "commercial-plan.html" };
+for (const [oldFile, to] of Object.entries(RENAMED)) {
+  fs.writeFileSync(path.join(root, oldFile), `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Opening…</title>
+<meta http-equiv="refresh" content="0; url=${to}">
+<script>location.replace(${JSON.stringify(to)} + location.search + location.hash);</script>
+</head><body><a href="${to}">Open the dashboard</a></body></html>
+`);
+  stubs++;
+}
 console.log("built " + pages + " tab pages + " + stubs + " redirects from index.html");

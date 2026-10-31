@@ -157,7 +157,7 @@ const DEBUG_FORCE_CONFIRMED_FROM_TAB = false;
 const INCENTIVE_MERCHANTS_GID = "1548963809";
 
 // -------------------------------------------------------------------------
-// COMMERCIAL DEBUNDLIZED (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
+// COMMERCIAL PLAN (تحت Targets Commercial) — بيديبندلايز الديماند بتاع
 // كل Single SKU عن طريق ضم الديماند اللي جاي من البندلز اللي فيها نفس الـ
 // Single SKU (مضروبة في الكمية بتاعتها جوه البندل) فوق الديماند المباشر بتاعه.
 //   PRODUCTS_DEBUNDLE_MAP_GID: شيت الماب بين PRODUCT_ID (سنجل أو بندل) و SINGLE_ID
@@ -168,7 +168,7 @@ const INCENTIVE_MERCHANTS_GID = "1548963809";
 const PRODUCTS_DEBUNDLE_MAP_GID = "1409034448";
 const SINGLE_SKU_TARGETS_GID = "1620722565";
 // شيت الـ COGS: الأعمدة Internal Reference (Product/Single ID), Cost, LAST_PP, Country.
-// مستخدم بس في Commercial Debundlized عشان نحسب نصيب كل Single من قيمة
+// مستخدم بس في Commercial Plan عشان نحسب نصيب كل Single من قيمة
 // البندل (GMV/CM3/PPM) بالنسبة لتكلفته (COGS) داخل نفس البندل — بالظبط زي
 // عمود "%" في شيت الـ BUNDLE TABLE المرجعي (Single Cogs ÷ Bundle Cogs).
 const COGS_GID = "1724469150";
@@ -562,7 +562,7 @@ const CM3_LAG_DAYS = 5;
 // -------------------------------------------------------------------------
 // ملحوظة: سكشن Performance-Matches بقى بيقرأ من شيت الـ Main (MAIN_GID) زي أي
 // سكشن تاني، فبيستخدم نفس قاعدة الـ CM3_LAG_DAYS اللي فوق ومفيش لاج خاص بيه.
-// سكشن Sales Plan-ACM و Commercial Plan (السابق اسمه Commercial Debundlized)
+// سكشن Sales Plan-ACM و Commercial Plan (كان اسمه في الكود Commercial Debundlized؛ اتغيّر عشان يطابق الاسم الظاهر في الداشبورد)
 // كمان بياخدوا الأداء الفعلي بتاعهم من MAIN_GID بالظبط زي أي سكشن تاني في
 // الداشبورد — مفيش أي شيت "برفورمانس" منفصل بيتقرا لأي منهم.
 // -------------------------------------------------------------------------
@@ -910,7 +910,7 @@ const navMarketplaceToggle = $("navMarketplaceToggle");
 const marketplaceSubmenu = $("marketplaceSubmenu");
 const navMarketplaceCaret = $("navMarketplaceCaret");
 const navTargetsCommercial = $("navTargetsCommercial");
-const navCommercialDebundlized = $("navCommercialDebundlized");
+const navCommercialPlan = $("navCommercialPlan");
 const navPurchasePlan = $("navPurchasePlan");
 const navCm3AnalystProducts = $("navCm3AnalystProducts");
 const navPpmAnalystProducts = $("navPpmAnalystProducts");
@@ -933,6 +933,7 @@ const navSegmentationPanel = $("navSegmentationPanel");
 const navSellthroughPanel = $("navSellthroughPanel");
 const navWeeklyInventory = $("navWeeklyInventory");
 const navForecastModel = $("navForecastModel");
+const navForecastModelMerchant = $("navForecastModelMerchant");
 const navDohPlanner = $("navDohPlanner");
 const navIncentivesToggle = $("navIncentivesToggle");
 const incentivesSubmenu = $("incentivesSubmenu");
@@ -1276,7 +1277,7 @@ function switchView(viewName) {
   if(navAcmTargets) navAcmTargets.classList.remove("active");
   if(navMerchantTargets) navMerchantTargets.classList.remove("active");
   if(navTargetsCommercial) navTargetsCommercial.classList.remove("active");
-  if(navCommercialDebundlized) navCommercialDebundlized.classList.remove("active");
+  if(navCommercialPlan) navCommercialPlan.classList.remove("active");
   if(navPurchasePlan) navPurchasePlan.classList.remove("active");
   if(navCm3AnalystProducts) navCm3AnalystProducts.classList.remove("active");
   if(navPpmAnalystProducts) navPpmAnalystProducts.classList.remove("active");
@@ -1296,6 +1297,7 @@ function switchView(viewName) {
   if(navSellthroughPanel) navSellthroughPanel.classList.remove("active");
   if(navWeeklyInventory) navWeeklyInventory.classList.remove("active");
   if(navForecastModel) navForecastModel.classList.remove("active");
+  if(navForecastModelMerchant) navForecastModelMerchant.classList.remove("active");
   if(navDohPlanner) navDohPlanner.classList.remove("active");
   if(navIncMerchants) navIncMerchants.classList.remove("active");
 
@@ -1307,7 +1309,7 @@ function switchView(viewName) {
   else if (viewName === "merchantTargets") { activeSection = $("viewMerchantTargets"); if(navMerchantTargets) navMerchantTargets.classList.add("active"); __queueViewRender(() => { renderMerchantTargetsView(); }); }
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
   else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); __queueViewRender(() => { renderTargetsCommercialView(); }); }
-  else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); __queueViewRender(() => { prepareCommercialDebundlizedData(); }); }
+  else if (viewName === "commercialPlan") { activeSection = $("viewCommercialPlan"); if(navCommercialPlan) navCommercialPlan.classList.add("active"); __queueViewRender(() => { prepareCommercialPlanData(); }); }
   else if (viewName === "purchasePlan") { activeSection = $("viewPurchasePlan"); if(navPurchasePlan) navPurchasePlan.classList.add("active"); __queueViewRender(() => { preparePurchasePlanData(); }); }
   else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); __queueViewRender(() => { prepareCm3AnalystProductsData(); }); }
   else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); __queueViewRender(() => { preparePpmAnalystProductsData(); }); }
@@ -1339,7 +1341,12 @@ function switchView(viewName) {
   else if (viewName === "forecastModel") {
       activeSection = $("viewForecastModel");
       if(navForecastModel) navForecastModel.classList.add("active");
-      __queueViewRender(() => { prepareForecastModelView(false); });
+      __queueViewRender(() => { fcEnterEntity("sku"); });
+  }
+  else if (viewName === "forecastModelMerchant") {
+      activeSection = $("viewForecastModel");   // same page as Forecast Model, opened in merchant mode (see fcSwitchEntity)
+      if(navForecastModelMerchant) navForecastModelMerchant.classList.add("active");
+      __queueViewRender(() => { fcEnterEntity("merchant"); });
   }
   else if (viewName === "dohPlanner") {
       activeSection = $("viewDohPlanner");
@@ -1365,7 +1372,7 @@ if(navMerchantPerf) navMerchantPerf.addEventListener("click", () => switchView("
 if(navAcmTargets) navAcmTargets.addEventListener("click", () => switchView("acmTargets"));
 if(navMerchantTargets) navMerchantTargets.addEventListener("click", () => switchView("merchantTargets"));
 if(navTargetsCommercial) navTargetsCommercial.addEventListener("click", () => switchView("targetsCommercial"));
-if(navCommercialDebundlized) navCommercialDebundlized.addEventListener("click", () => switchView("commercialDebundlized"));
+if(navCommercialPlan) navCommercialPlan.addEventListener("click", () => switchView("commercialPlan"));
 if(navPurchasePlan) navPurchasePlan.addEventListener("click", () => switchView("purchasePlan"));
 if(navCm3AnalystProducts) navCm3AnalystProducts.addEventListener("click", () => switchView("cm3AnalystProducts"));
 if(navPpmAnalystProducts) navPpmAnalystProducts.addEventListener("click", () => switchView("ppmAnalystProducts"));
@@ -1385,6 +1392,7 @@ if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => sw
 if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => switchView("sellthrough"));
 if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => switchView("weeklyInventory"));
 if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
+if(navForecastModelMerchant) navForecastModelMerchant.addEventListener("click", () => requestAdminAccess("forecastModelMerchant"));
 if(navDohPlanner) navDohPlanner.addEventListener("click", () => switchView("dohPlanner"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
 
@@ -2024,7 +2032,7 @@ async function backupSnapshotToDrive(snapshot) {
 // اتفحصت خصوصي (كانت المرشحة الوحيدة للاستبعاد) وطلعت آمنة تتنادى مباشرة
 // (تفاصيل التعليق فوق عنصرها تحت)، فمفيش أي سكشن مستبعد حاليًا.
 const COMPUTED_SNAPSHOT_REGISTRY = [
-  { section: "commercialPlan", table: "main", getRows: () => computeCommercialDebundlized({ inPlanOnly: true }).rows },
+  { section: "commercialPlan", table: "main", getRows: () => computeCommercialPlan({ inPlanOnly: true }).rows },
   { section: "purchasePlan", table: "main", getRows: () => computePurchasePlanData() },
   { section: "salesPlanAcm", table: "main", getRows: () => state.mpSalesPlanDataPrepared || [] },
   { section: "performanceMerchant", table: "overall", getRows: () => state.merchantTableData || [] },
@@ -2039,7 +2047,7 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   { section: "performanceAcm", table: "main", getRows: () => state.acmTableData || [] },
   // Targets Commercial — computeCommercialActuals(rows) دالة حسابية بحتة
   // (بترجع object لكل كاتيجوري + "grand total")، بنحولها لـ array من صفوف.
-  { section: "targetsCommercial", table: "main", getRows: () => { const actuals = computeCommercialActuals(productLevelRows()); return Object.entries(actuals).map(([category, row]) => ({ category, ...row })); } },
+  { section: "targetsCommercial", table: "main", getRows: () => { const actuals = computeCommercialActuals(allSkuRows()); return Object.entries(actuals).map(([category, row]) => ({ category, ...row })); } },
   // CM3 Analyst / Products — cm3apDataAll متغير عام (مش جوه state) بيتحدث
   // جوه prepareCm3AnalystProductsData()، فبنناديها الأول.
   { section: "cm3AnalystProducts", table: "main", getRows: () => { prepareCm3AnalystProductsData(); return cm3apDataAll || []; } },
@@ -2292,7 +2300,7 @@ function isCm3RowEligible(row, cutoffTs, sectionKey) {
 // De-dup: شيت الـ Main (MAIN_GID) بيبقى فيه أحيانًا نفس صف (نفس التاريخ + نفس
 // التاجر + نفس الـ SKU) متكرر أكتر من مرة (مشكلة مصدر الداتا نفسه، مش من هنا).
 // لو سبناها زي ما هي، أي تجميع بيعتمد على state.allParsedRows — بما فيه
-// Commercial Debundlized — هيدبل الأرقام لكل صف متكرر، وده هيبعدنا عن أرقام
+// Commercial Plan — هيدبل الأرقام لكل صف متكرر، وده هيبعدنا عن أرقام
 // شيت Single المرجعي (اللي مصدره BUNDLE TABLE/Financial Profitabilty، مش
 // فيهم التكرار ده). فبنفلتر الصفوف اللي عندها نفس مفتاح (تاريخ+تاجر+SKU)
 // ونسيب أول ظهور بس، قبل ما نرجع الداتا لأي حساب في الداشبورد.
@@ -2820,7 +2828,7 @@ function parseAcmSalesPlanSheet(payload) {
 // -------------------------------------------------------------------------
 // شيت الـ COGS (COGS_GID / gid=1724469150). الأعمدة: Internal Reference
 // (Product/Single ID), Cost, LAST_PP, Country. بيرجع Map(productId -> cost).
-// مستخدم بس في Commercial Debundlized لحساب وزن كل Single داخل البندل.
+// مستخدم بس في Commercial Plan لحساب وزن كل Single داخل البندل.
 // -------------------------------------------------------------------------
 function parseCogsSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
@@ -3123,7 +3131,7 @@ function escapeHtml(str) {
 const ppmAnalystState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
 function preparePpmAnalystProductsData() {
-  const mainRowsAll = productLevelRows();
+  const mainRowsAll = allSkuRows();   // bundles + singles -> Main (Matches)
 
   // "الشهر ده" = الشهر الحقيقي الحالي (تاريخ الجهاز)، بنفس فورمات monthYear
   // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
@@ -3838,7 +3846,7 @@ async function publishAnalystSingleDaily() {
 //    داعي لأي توزيع/ديبندلايز هنا (بعكس PPM/GMV/CM3 تحت اللي مصدرهم Main).
 //  • AVG CONFIRMED DAILY = DEMAND CONFIRMED (3M) ÷ إجمالي عدد أيام الـ 3
 //    شهور دول بالظبط (نفس منطق avg3dConfirmed = conf3d ÷ 3 المستخدم في
-//    Commercial Debundlized، بس هنا بتاع 3 شهور مش 3 أيام).
+//    Commercial Plan، بس هنا بتاع 3 شهور مش 3 أيام).
 //  • TOTAL PPM DELIVERED / TOTAL DELIVERED PCS / PPM/Piece / PPM% — الشهر
 //    الحالي، من غير أي كات أوف، بنفس لوجيك PPM Analyst / Products بالظبط
 //    (PPM/Piece هنا = TOTAL PPM DELIVERED ÷ TOTAL DELIVERED PCS مباشرة، زي
@@ -3864,7 +3872,7 @@ async function publishAnalystSingleDaily() {
 // يفضلوا متسقين مع بعض (نفس الـ "مصدر" اللي طلبه اليوزر).
 //
 // CR%/DR%/NDR%/CM3 بتاخد نفس منطق الكات أوف المستخدم في Targets Commercial/
-// Commercial Debundlized (computeCommercialActuals/tcFinalizeBucket):
+// Commercial Plan (computeCommercialActuals/tcFinalizeBucket):
 //   • CR% (Confirmed/Placed): كات أوف يومين (CR_LAG_DAYS).
 //   • DR% (Delivered/Confirmed) وCM3 وCM3/Piece وCM3%: كات أوف الـ 4 أيام
 //     بتاع CM3 (CM3_LAG_DAYS) — ونفس القاعدة العامة اللي اتفقنا عليها قبل
@@ -4442,19 +4450,11 @@ function productMode() {
   let scoped = false; try { scoped = !!(window.TowerCore && window.TowerCore.merchantScope && window.TowerCore.merchantScope()); } catch (e) {}
   return (forced === "main" || scoped || !(state.productOnlyRows && state.productOnlyRows.length)) ? "main" : "po";
 }
+// Product Only = SINGLE SKUs only (bundles are already split into their singles). So:
+//  - productLevelRows(): pages that work on single SKUs only (Analyst / Single, CM3 Analyst / Products, Planner DOH, Supply Chain) -> Product Only when loaded, else Main.
+//  - allSkuRows(): pages / cards that include bundles AND singles (Over View, Inventory & Products Performance, Commercial Plan, PPM Analyst / Products, category actuals) -> always Main (Matches).
 function productLevelRows() { return productMode() === "po" ? state.productOnlyRows : (state.allParsedRows || []); }
-// Over View cards (numbers, Avg Placed Pcs, category chart, top products): rows of the selected month. Pipeline Velocity is NOT here: it reads Main (Matches).
-// Product Only is used for every month it holds; a month it does not hold (older months) keeps coming from the Main rows.
-// With an ACM filter, or for a Merchant-role user, they stay on Main (Product Only has no ACM / merchant).
-// `rows` = the Main rows already filtered by the month / ACM filters (what updateDashboard receives).
-function overviewRowsFor(rows) {
-  if (productMode() !== "po") return rows;
-  const acm = $("acmSelect") ? $("acmSelect").value : "All"; if (acm !== "All") return rows;
-  const m = $("monthSelect") ? $("monthSelect").value : "";
-  const po = state.productOnlyRows, poMonths = new Set(po.map(r => r.monthYear));
-  if (m) return poMonths.has(m) ? po.filter(r => r.monthYear === m) : rows;
-  return po.concat(rows.filter(r => !poMonths.has(r.monthYear)));
-}
+function allSkuRows() { return state.allParsedRows || []; }
 // Main vs Product Only totals per month (for the reconciliation table in Control > Settings)
 function productSourceCheck() {
   const sum = (rows) => { const o = {}; (rows || []).forEach(r => { const m = r.monthYear; const e = o[m] || (o[m] = { placedPieces: 0, deliveredPieces: 0, placedOrders: 0, deliveredOrders: 0, deliveredGmv: 0, cm3: 0, ppm: 0 });
@@ -4476,7 +4476,7 @@ function poSettingsCardHtml() {
       : '<div class="tw-muted">No month is in both sources yet.</div>';
   }
   return '<div class="tw-card" id="poCard" style="margin-top:14px"><h3>Product &amp; category pages — data source</h3>' +
-    '<div class="tw-muted">PPM Analyst / Products, Analyst / Single, CM3 Analyst / Products, Commercial Plan, Targets (category numbers), the Overview category chart, the Supply Chain pages and Planner DOH read the <b>Product Only</b> query. Match, merchant and ACM pages are not affected. Orders in Product Only are counted once per order (Main adds an order to every product inside it).</div>' +
+    '<div class="tw-muted">Product Only holds <b>single SKUs only</b> (bundles are already split into their singles). Pages that work on single SKUs only read <b>Product Only</b>: PPM Analyst / Single, CM3 Analyst / Products, Planner DOH and the Supply Chain pages. Anything that has bundles and singles together reads the <b>Main (Matches)</b> query: Over View, Inventory &amp; Products Performance, Commercial Plan, PPM Analyst / Products, Targets (category numbers). Match, merchant and ACM pages are not affected. Orders in Product Only are counted once per order (Main adds an order to every product inside it), and bundle pieces are counted on their singles, so the totals below are NOT expected to match.</div>' +
     '<div style="display:flex;gap:18px;margin:12px 0;flex-wrap:wrap"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="radio" name="poMode" value="po"' + (forced !== "main" ? " checked" : "") + '> Product Only' + (has ? "" : " (not loaded)") + '</label>' +
     '<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="radio" name="poMode" value="main"' + (forced === "main" ? " checked" : "") + '> Main (previous behaviour)</label><span class="tw-muted" id="poNow">Now reading: ' + (mode === "po" ? "Product Only" : "Main") + " · saved on this browser</span></div>" + table + "</div>";
 }
@@ -4998,7 +4998,7 @@ async function updateDashboard(rows) {
   const tok = updateDashboard._tok = (updateDashboard._tok || 0) + 1;
   const Y = async () => { await yieldToMainThread(); return tok !== updateDashboard._tok; };
   const isActive = (id) => { const el = $(id); return !!(el && el.classList.contains("active-view")); };
-  const ovRows = overviewRowsFor(rows);   // Over View cards read Product Only (see overviewRowsFor); every table below keeps `rows`
+  const ovRows = rows;   // Over View has bundles + singles -> Main (Matches), like before; Product Only (singles only) is not used here
   const metrics = computeMetrics(ovRows);
   if($("deliveredGmvVal")) $("deliveredGmvVal").textContent = fmtMoneyCompact(metrics.deliveredGmv);
   if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: ${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
@@ -5006,7 +5006,7 @@ async function updateDashboard(rows) {
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
   renderOverviewHero(ovRows, metrics); if (await Y()) return;
-  renderPipelineChart(rows); if (await Y()) return;   // Pipeline Velocity stays on Main (Matches), like before
+  renderPipelineChart(ovRows); if (await Y()) return;
   renderOvTopProducts(ovRows); renderOvCategoryContr(ovRows);
   if (!state._ovStTrendDone && $("ovStTrendChart")) { state._ovStTrendDone = true; setTimeout(() => renderSellthroughTrendChart(OV_ST_TREND_CFG), 60); }
   if (await Y()) return;
@@ -5016,7 +5016,7 @@ async function updateDashboard(rows) {
   prepareInventoryTableData(rows); if (await Y()) return;
   const steps = [
     ["viewTargetsCommercial", () => renderTargetsCommercialView()],
-    ["viewCommercialDebundlized", () => prepareCommercialDebundlizedData()],
+    ["viewCommercialPlan", () => prepareCommercialPlanData()],
     ["viewPurchasePlan", () => preparePurchasePlanData()],
     ["viewCm3AnalystProducts", () => prepareCm3AnalystProductsData()],
     ["viewPpmAnalystProducts", () => preparePpmAnalystProductsData()],
@@ -6696,7 +6696,7 @@ function tcUpdateKpiCard(prefix, targetPct, actualPct) {
 function renderTargetsCommercialView() {
   const cat = state.tcCategory || "grand total";
   const targetRow = state.commercialTargets ? state.commercialTargets[cat] : null;
-  const actuals = computeCommercialActuals(productLevelRows());
+  const actuals = computeCommercialActuals(allSkuRows());
   const actualRow = actuals[cat];
 
   if ($("tcTableTitle")) $("tcTableTitle").textContent = `Targets Commercial — ${TC_CATEGORY_LABELS[cat] || cat}`;
@@ -7281,7 +7281,7 @@ function renderPaginatedMpSalesPlanTable() {
     if ($("nextPageMpSalesPlan")) $("nextPageMpSalesPlan").disabled = state.mpSalesPlanPage >= totalPages - 1;
 }
 // -------------------------------------------------------------------------
-// COMMERCIAL DEBUNDLIZED — لكل Single SKU (من PRODUCTS_DEBUNDLE_MAP_GID)،
+// COMMERCIAL PLAN — لكل Single SKU (من PRODUCTS_DEBUNDLE_MAP_GID)،
 // بيجمع الديماند بتاعه من شيت الـ Main (MAIN_GID) على مستوى PRODUCT_ID، سواء
 // كان الـ PRODUCT_ID ده هو نفسه الـ Single SKU أو بندل بيحتويه — في حالة
 // البندل، القيم (Placed/Confirmed/Delivered/GMV/CM3) بتتضرب في PRODUCT_QUANTITY
@@ -7355,7 +7355,7 @@ function cdzBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays,
 // بينادوا الدالة من غير opts فبيفضل سلوكهم زي ما هو (كل شيت الديبندلايز).
 // إجمالي Delivered GMV / CM3 (overall*) مش بيتأثر: بيتحسب على كل صفوف الـ Main
 // قبل أي فلترة على القايمة.
-function computeCommercialDebundlized(opts) {
+function computeCommercialPlan(opts) {
   const inPlanOnly = !!(opts && opts.inPlanOnly);
   const planTargets = state.singleSkuTargets || {};
   // من غير أي تجميع/توزيع بندل خالص: كل SKU (PRODUCT_ID، عمود A في شيت
@@ -7371,10 +7371,10 @@ function computeCommercialDebundlized(opts) {
     }
   });
 
-  const mainRowsAll = productLevelRows();
+  const mainRowsAll = allSkuRows();   // Commercial Plan: bundles + singles -> Main (Matches)
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialDebundlized")) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialPlan")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // نفس الـ 4 أيام بتاعة الـ DR والـ CM3
   const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين بتاعة الـ CR
@@ -7414,7 +7414,7 @@ function computeCommercialDebundlized(opts) {
   rows.forEach(r => {
     if (!r.sku) return;
     overallDeliveredGmv += r.deliveredGmv;
-    if (isCm3RowEligible(r, cm3CutoffTs, "commercialDebundlized")) overallCm3 += r.cm3;
+    if (isCm3RowEligible(r, cm3CutoffTs, "commercialPlan")) overallCm3 += r.cm3;
 
     if (!skuList.has(r.sku)) return; // مش موجود في شيت الديبندلايز خالص (عمود A)
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
@@ -7431,8 +7431,8 @@ function computeCommercialDebundlized(opts) {
     // الحقيقي (زي pendingConfirmed/Expected Returns تحت).
     if (rTime < todayMs) { b.mtdPlaced += r.placedPieces; b.mtdConfirmed += r.confirmedPieces; b.mtdDelivered += r.deliveredPieces; }
     if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
-    if (isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
-    if (isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
+    if (isRowEligibleForLag(r, crCutoffTs, "commercialPlan")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
+    if (isRowEligibleForLag(r, cm3CutoffTs, "commercialPlan")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
     else {
       // لسه في نافذة الـ CM3_LAG_DAYS (يعني "Pending" — لسه معرفناش هيتسلم
       // ولا هيترجع). لو عمره (من "امبارح الحقيقي" بتاع الداتا) >= CM3_LAG_DAYS−3
@@ -7442,7 +7442,7 @@ function computeCommercialDebundlized(opts) {
       const ageDays = Math.round((todayMs - rTime) / 86400000);
       if (ageDays >= (CM3_LAG_DAYS - 3)) b.pendingConfNear3d += r.confirmedPieces;
     }
-    if (isCm3RowEligible(r, cm3CutoffTs, "commercialDebundlized")) {
+    if (isCm3RowEligible(r, cm3CutoffTs, "commercialPlan")) {
       b.deliveredGmv += r.deliveredGmv;
       b.cm3 += r.cm3;
       b.cm3Gmv += r.deliveredGmv;
@@ -7703,8 +7703,8 @@ function renderCdzAchievementBuckets() {
   renderCdzAchievementBucketTable("cdzConfirmedBucketBody", computeCdzAchievementBuckets("confirmed"));
 }
 
-function prepareCommercialDebundlizedData() {
-  const computed = computeCommercialDebundlized({ inPlanOnly: true });
+function prepareCommercialPlanData() {
+  const computed = computeCommercialPlan({ inPlanOnly: true });
   state.cdzDataPrepared = computed.rows;
   state.cdzDaysUntilYesterday = computed.daysUntilYesterday;
 
@@ -7878,7 +7878,7 @@ function computePurchasePlanOverallSingleStats() {
   const mainRowsAll = state.allParsedRows || [];
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
-  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialDebundlized")) && (selectedAcm === "All" || r.acmName === selectedAcm));
+  const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialPlan")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(rows);
   const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
@@ -7898,8 +7898,8 @@ function computePurchasePlanOverallSingleStats() {
     if (!r.sku) return;
     const mappings = productMap.get(r.sku) || [{ singleId: r.sku, quantity: 1 }];
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0); const rTime = rDate.getTime();
-    const crEligible = isRowEligibleForLag(r, crCutoffTs, "commercialDebundlized");
-    const cm3Eligible = isRowEligibleForLag(r, cm3CutoffTs, "commercialDebundlized");
+    const crEligible = isRowEligibleForLag(r, crCutoffTs, "commercialPlan");
+    const cm3Eligible = isRowEligibleForLag(r, cm3CutoffTs, "commercialPlan");
     let ageDaysNear3 = false;
     if (!cm3Eligible) {
       const ageDays = Math.round((todayMs - rTime) / 86400000);
@@ -7951,7 +7951,7 @@ function buildPurchasePlanEligibility() {
 const PURCHASE_PLAN_TARGET_DOH_DAYS = 10;
 
 function computePurchasePlanData() {
-  const cdz = computeCommercialDebundlized();
+  const cdz = computeCommercialPlan();
   const repackMap = state.repackMap || new Map();
   const cogsMap = state.cogsMap || new Map();
   const { isBundleByProductId, singlesInBundles } = buildPurchasePlanEligibility();
@@ -8087,7 +8087,7 @@ function purchasePlanWireControlsOnce() {
 }
 
 // =========================================================================
-// CM3 ANALYST / PRODUCTS (تحت Commercial Debundlized) — تحليل على مستوى
+// CM3 ANALYST / PRODUCTS (تحت Commercial Plan) — تحليل على مستوى
 // المنتج (SKU) بس، مباشرة من شيت الـ Main (MAIN_GID)، بنفس منطق/كات أوف الـ
 // CM3 (CM3_LAG_DAYS) المستخدم في أي سكشن تاني مصدره نفس الشيت.
 //
@@ -8161,7 +8161,7 @@ function cm3apSeriesFmtCell(v, fmt) {
 
 function buildCm3ApSeriesData(periodMode) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
+  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));   // single SKUs -> Product Only
   if (!rows.length) return { skuList: [], periodLabels: [] };
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
@@ -8253,7 +8253,7 @@ function buildCm3AnalystProductsData(periodMode) {
   // بيحترم فلتر الشهر العام اللي فوق الموقع (نفس شيت monthSelect المستخدم في كل
   // سكشن تاني) — لو مفيش شهر مختار (All Months) بيدي كل الداتا زي ما هي.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
+  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));   // single SKUs -> Product Only
   if (!rows.length) return { products: [], latestPeriod: null, prevPeriod: null };
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
   const crCutoff = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين المستخدمين لـ CR% في أي مكان تاني
@@ -11549,8 +11549,59 @@ const fcState = {
   target: "", catFilter: "", behaviorFilter: "", stockFilter: "", search: "", band: 25, v2: true,
   level: "single",
   sortKey: "forecast", sortDir: "desc", page: 0, filtered: [],
-  chart: null, wired: false, series: null
+  chart: null, wired: false, series: null, entity: "sku"
 };
+
+// ---- Forecast Model Merchant ------------------------------------------------
+// "Forecast Model Merchant" is the same Forecast Model (same engine, same calculations: behaviors, size segments,
+// TSB / recent-rate rules, error-correction, bands, backtests, accuracy) with ONE change: the unit is the MERCHANT
+// instead of the Single SKU. The daily series per merchant = the merchant's Confirmed pieces (as sold, from the same
+// History tab + Matches rows). It is the same page (same HTML), opened in "merchant" mode: the two tabs keep separate
+// data / filters / results, swapped in and out of fcState by fcSwitchEntity().
+// Not used for merchants (they only make sense per SKU): price-change adjustment, stock ceiling, stock / repack / inbound columns.
+const fcStash = {};
+const FC_SHARED_KEYS = ["wired", "loading", "conf", "band", "v2", "entity", "chart"];   // user choices (and the one accuracy chart on the page) that stay the same in both tabs
+function fcIsM() { return fcState.entity === "merchant"; }
+function fcFreshState(entity) {
+  return { hist: null, histMeta: null, histError: null, engine: null, engineSig: "", byKey: new Map(), engines: {}, family: "month",
+    target: "", catFilter: "", behaviorFilter: "", stockFilter: "", search: "", level: entity === "merchant" ? "raw" : "single",
+    sortKey: "forecast", sortDir: "desc", page: 0, filtered: [], series: null };
+}
+function fcSwitchEntity(entity) {
+  entity = entity === "merchant" ? "merchant" : "sku";
+  if (fcState.entity === entity) { fcApplyEntityLabels(); return; }
+  const keep = {}; FC_SHARED_KEYS.forEach(k => { keep[k] = fcState[k]; });
+  const out = {}; Object.keys(fcState).forEach(k => { if (FC_SHARED_KEYS.indexOf(k) < 0) out[k] = fcState[k]; });
+  fcStash[fcState.entity] = out;
+  Object.keys(fcState).forEach(k => { if (FC_SHARED_KEYS.indexOf(k) < 0) delete fcState[k]; });
+  Object.assign(fcState, fcStash[entity] || fcFreshState(entity), keep, { entity });
+  fcApplyEntityLabels();
+  const si = $("fcSearchInput"); if (si) si.value = fcState.search || "";
+  const ss = $("fcStockSelect"); if (ss) ss.value = fcState.stockFilter || "";
+}
+// Words for the screen: SKU wording -> merchant wording (only in merchant mode).
+function fcT(str) {
+  if (!fcIsM() || typeof str !== "string") return str;
+  return str.replace(/Per single SKU/g, "Per merchant").replace(/Per product category/g, "Per ACM").replace(/single SKU/gi, "merchant").replace(/Single SKUs?/g, "Merchants")
+    .replace(/\bSKUs\b/g, "Merchants").replace(/\bSKU\b/g, "Merchant").replace(/, debundled/g, "").replace(/ \(bundles are split into their components\)/g, "");
+}
+function fcApplyEntityLabels() {
+  const m = fcIsM();
+  const set = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+  set("fcTitle", m ? "Forecast Model Merchant" : "Forecast Model");
+  set("fcSegTitle", m ? "Method by Merchant Size" : "Method by SKU Size");
+  set("fcSegCountTh", m ? "Merchants" : "SKUs");
+  const si = $("fcSearchInput"); if (si) si.placeholder = m ? "Search Merchant ID or Name..." : "Search SKU or Name...";
+  ["fcStockSelect", "fcLevelToggle"].forEach(id => { const el = $(id); if (el) el.classList.toggle("hidden", m); });
+}
+
+let fcPendingEntity = null;
+// Open the Forecast Model page for "sku" or "merchant". If the other one is still being built, wait for it to finish first.
+function fcEnterEntity(entity) {
+  if (fcState.loading) { fcPendingEntity = entity; return; }
+  fcSwitchEntity(entity);
+  prepareForecastModelView(false);
+}
 
 function fcNextFrame() { return new Promise(r => requestAnimationFrame(() => setTimeout(r, 16))); }
 function fcSetProgress(stage, pct) {
@@ -11590,6 +11641,35 @@ async function fcLoadPriceHistory() {
   return rows;
 }
 
+// Merchant mode: the History tab, summed per day x merchant on Google's side (the History tab has the same columns as Matches / Main).
+async function fcLoadHistoryMerchant(onStage) {
+  onStage("Reading the history tab header…", 8);
+  const head = await fcLoadGvizQuery(FORECAST_HISTORY_GID, "select * limit 3", 60000);
+  const det = fcDetectHistoryColumns(head && head.table);
+  if (!det.ok) { const err = new Error(det.reason); err.labels = det.labels; throw err; }
+  const L = det.letters;
+  if (!L.merchant) { const err = new Error("The history tab has no Merchant ID column."); err.labels = det.labels; throw err; }
+  onStage("Downloading daily demand per merchant…", 22);
+  const q = `select ${L.date}, ${L.merchant}, sum(${L.qty}) where ${L.merchant} is not null group by ${L.date}, ${L.merchant}`;
+  const table = (await fcLoadGvizQuery(FORECAST_HISTORY_GID, q, 240000)).table;
+  const rows = [];
+  for (const r of ((table && table.rows) || [])) {
+    const c = r.c || [];
+    const day = fcParseDateCell(c[0]); if (!day) continue;
+    const mid = c[1] ? cellText(c[1]).trim() : ""; if (!mid) continue;
+    let qty = 0;
+    if (c[2]) { if (typeof c[2].v === "number") qty = c[2].v; else { const n = parseFloat(String(c[2].f ?? c[2].v ?? "0").replace(/[%,]/g, "")); qty = Number.isFinite(n) ? n : 0; } }
+    rows.push({ day, merchantId: "", sku: mid, qty });   // `sku` carries the merchant id so the same series builder can be used
+  }
+  return { rows, meta: { detection: det, aggregated: true, rawRows: ((table && table.rows) || []).length } };
+}
+// merchant id -> { name, acm } for the table (names / ACM come from the Matches rows)
+function fcMerchantInfo() {
+  const info = new Map();
+  try { buildMerchantInfoMap(state.allParsedRows || []).forEach((v, k) => info.set(k, { name: v.merchantName || "", acm: v.acmName || "Unassigned" })); } catch (e) {}
+  return info;
+}
+
 async function prepareForecastModelView(forceReload) {
   fcWireControlsOnce();
   if (fcState.loading) return;
@@ -11603,9 +11683,10 @@ async function prepareForecastModelView(forceReload) {
       fcSetProgress("Connecting to the history tab…", 3); await fcNextFrame();
       // Both tabs are fetched at once — the price history is small and there is
       // no reason to make it wait for the much larger demand history.
-      const wantPrices = !fcState.priceTimeline;
+      const isM = fcIsM();
+      const wantPrices = !isM && !fcState.priceTimeline;   // merchants have no price history
       const [histOut, priceOut] = await Promise.all([
-        fcLoadHistory((s, p) => fcSetProgress(s, p)).then(r => ({ ok: true, r }), e => ({ ok: false, e })),
+        (isM ? fcLoadHistoryMerchant : fcLoadHistory)((s, p) => fcSetProgress(s, p)).then(r => ({ ok: true, r }), e => ({ ok: false, e })),
         wantPrices
           ? fcLoadPriceHistory().then(r => ({ ok: true, r }), e => ({ ok: false, e }))
           : Promise.resolve(null)
@@ -11621,8 +11702,9 @@ async function prepareForecastModelView(forceReload) {
         else { fcState.priceTimeline = null; console.warn("price history unavailable", priceOut.e); }
       }
     }
-    const rawLevel = fcState.level === "raw";
-    fcSetProgress(rawLevel ? "Building daily demand per SKU (as sold)…" : "Building daily demand per SKU (debundled)…", 45); await fcNextFrame();
+    const isM = fcIsM();
+    const rawLevel = isM || fcState.level === "raw";
+    fcSetProgress(isM ? "Building daily demand per merchant…" : (rawLevel ? "Building daily demand per SKU (as sold)…" : "Building daily demand per SKU (debundled)…"), 45); await fcNextFrame();
     const { productMap: bundleProductMap } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
     // Default: debundle bundles into their component Singles and pool the same
     // Single across every bundle — more data per SKU, measurably more accurate.
@@ -11630,10 +11712,12 @@ async function prepareForecastModelView(forceReload) {
     const mappingsFor = rawLevel
       ? (sku) => [{ singleId: sku, quantity: 1 }]
       : (sku) => { const m = bundleProductMap.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
-    const sd = fcBuildSeries(fcState.hist || [], state.allParsedRows || [], mappingsFor, new Date());
+    // merchant mode: the series key is the merchant id (history rows already carry it in `sku`; Matches rows are re-keyed here)
+    const mainForSeries = isM ? (state.allParsedRows || []).filter(r => r.merchantId).map(r => ({ sku: r.merchantId, timestamp: r.timestamp, confirmedPieces: r.confirmedPieces })) : (state.allParsedRows || []);
+    const sd = fcBuildSeries(fcState.hist || [], mainForSeries, mappingsFor, new Date());
     fcState.series = sd;
     fcSetProgress("Categorizing SKUs and training models…", 65); await fcNextFrame();
-    const engine = fcRunEngine(sd, new Date(), { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
+    const engine = fcRunEngine(sd, new Date(), isM ? { v2: fcState.v2, priceTimeline: null, avail: null } : { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
     fcSetProgress("Forecasting the next 7 / 14 / 30 days…", 80); await fcNextFrame();
     const engines = { month: engine };
     // Rolling 7/14-day engines are built on demand, the first time their
@@ -11653,6 +11737,8 @@ async function prepareForecastModelView(forceReload) {
     fcSetProgress(null);
   }
   fcRenderAll();
+  if (fcPendingEntity && fcPendingEntity !== fcState.entity) { const e = fcPendingEntity; fcPendingEntity = null; fcEnterEntity(e); }
+  else fcPendingEntity = null;
 }
 
 // Per Single SKU: the delivered selling price and the share of confirmed
@@ -11731,7 +11817,30 @@ function fcBuildPriceIndex() {
   return out;
 }
 
+// Merchant mode: name + ACM from the Matches rows; the error / pace columns are the same as for SKUs; no stock / price / inbound data.
+function fcEnrichResultsMerchant(engine) {
+  const info = fcMerchantInfo();
+  for (const res of engine.results) {
+    for (const r of res.rows) {
+      const mi = info.get(r.sku) || {};
+      r.name = mi.name || r.sku;
+      r.prodCat = mi.acm || "Unassigned";
+      r.asp = null; r.dr = null; r.gmvDelivered = null; r.stock = null; r.cover = null; r.repack = 0;
+      r.inbDays = null; r.lowStock = false; r.sellable = null; r.shortfall = null;
+      if (res.mode === "backtest") {
+        r.errPct = r.actual > 0 ? (r.forecast - r.actual) / r.actual * 100 : (r.forecast > 0 ? null : 0);
+      }
+      if (res.mode === "current") {
+        const expected = r.elapsed > 0 ? r.forecast * r.elapsed / res.dim : 0;
+        r.pace = expected > 0 ? r.mtd / expected * 100 : null;
+        r.projected = r.elapsed > 0 ? r.mtd * res.dim / r.elapsed : 0;
+      }
+    }
+  }
+}
+
 function fcEnrichResults(engine) {
+  if (fcIsM()) { fcEnrichResultsMerchant(engine); return; }
   const { singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
   let stockMap = null;
   try { stockMap = buildDebundledStockDohIndex(state.allParsedRows || []).stockByProductId; } catch (e) { stockMap = null; }
@@ -11828,6 +11937,7 @@ function fcIsInPlan(sku) {
 }
 
 function fcRenderAll() {
+  fcApplyEntityLabels();
   fcRenderStatus();
   fcRenderMethod();
   fcRenderHorizonOptions();
@@ -11870,6 +11980,13 @@ function fcRenderMethod() {
       ["Guardrails", "Up: floor ≥ 0.85× (last 7 × 4). Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75× 30-day total. Spiky: cap ≤ 1.5× 30-day total."],
       ["Next month", "Forecast from the last 30 full days of data — and deliberately NOT capped by the stock ceiling. This is the number you buy on: a purchase plan needs true demand, not demand throttled to the stock you happen to hold now (capping it there would make you under-buy). The stock ceiling only ever applies to months whose real opening stock is known, which the future month isn't."]
     ];
+  if (fcIsM()) {
+    // Same engine; the unit is the merchant. Price changes and the stock ceiling are SKU-only ideas, so they are not part of this tab.
+    const mCommon = [["Unit", "Each row is one merchant. Its demand is the merchant's Confirmed pieces per day, as sold (the History tab plus the Matches rows — a day that is in both is counted once, Matches wins). This tab uses exactly the same calculations as Forecast Model; only the unit changes from the Single SKU to the merchant."]].concat(common.slice(1));
+    const skip = { "Price changes": 1, "Stock ceiling (segment A)": 1 };
+    el.innerHTML = mCommon.concat(specific.filter(x => !skip[x[0]])).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${fcT(b)}</p>`).join("");
+    return;
+  }
   el.innerHTML = common.concat(specific).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${b}</p>`).join("");
 }
 
@@ -11891,7 +12008,7 @@ function fcRenderStatus() {
     const c = sd.coverage;
     const range = (a, b) => (a && b) ? `${fcShortDate(a)} – ${fcShortDate(b)}, ${b.getFullYear()}` : "—";
     parts.push(`<span class="badge-outline blue">Recent data</span> <span class="text-dim">${range(c.mainFrom, c.mainTo)}</span>`);
-    parts.push(`<span class="badge-outline gray">${fcPcs(sd.series.size)} SKUs with demand</span>`);
+    parts.push(`<span class="badge-outline gray">${fcPcs(sd.series.size)} ${fcIsM() ? "merchants" : "SKUs"} with demand</span>`);
   }
   // Same-day comparison of the two sources: the strongest signal that they
   // do (or don't) count the same thing.
@@ -11944,10 +12061,11 @@ function fcRenderBehaviorOptions() {
 function fcRenderProductCategoryOptions() {
   const sel = $("fcCategorySelect"); const res = fcCurrent(); if (!sel || !res) return;
   const cats = Array.from(new Set(res.rows.map(r => r.prodCat))).sort();
-  sel.innerHTML = `<option value="">All Categories</option>` + cats.map(c => `<option value="${c}" ${fcState.catFilter === c ? "selected" : ""}>${c}</option>`).join("");
+  sel.innerHTML = `<option value="">${fcIsM() ? "All ACMs" : "All Categories"}</option>` + cats.map(c => `<option value="${c}" ${fcState.catFilter === c ? "selected" : ""}>${c}</option>`).join("");
 }
 
 function fcKpi(title, value, sub, color) {
+  title = fcT(title); sub = fcT(sub);
   return `<div class="metric-card hover-glow"><div class="metric-title">${title}</div><div class="metric-value ${color || ""}">${value}</div>${sub ? `<div class="metric-sub text-dim">${sub}</div>` : ""}</div>`;
 }
 function fcRenderKpis() {
@@ -11962,7 +12080,7 @@ function fcRenderKpis() {
   const modeLabel = res.granularity === "horizon"
     ? (res.mode === "next" ? `Rolling ${res.horizon}-day forecast` : `${res.horizon}-day backtest`)
     : (FC_MODE_LABEL[res.mode] || res.mode);
-  if (sub) sub.textContent = `${modeLabel} · source window ${res.sourceLabel} · ${trained}`;
+  if (sub) sub.textContent = fcT(`${modeLabel} · source window ${res.sourceLabel} · ${trained}`);
   const cards = [];
   cards.push(fcKpi("Total Forecast", fcPcs(total), `${fcPcs(rows.length)} SKUs · ${res.granularity === "horizon" ? `next ${res.dim} days` : `${fcPcs(flagged)} flagged as unreliable · ${res.dim} days`}`, "text-blue"));
   if (res.mode === "backtest") {
@@ -11971,7 +12089,7 @@ function fcRenderKpis() {
     cards.push(fcKpi("Total Actual", fcPcs(acc.sumA), `${res.newSkuCount ? `+${fcPcs(res.newSkuPcs)} pcs from ${fcPcs(res.newSkuCount)} new SKUs (not forecastable)` : "Confirmed pieces, debundled"}`, "text-green"));
     cards.push(fcKpi(`Hit Rate (±${fcState.band}%)`, fcPct(acc.hitRate), `Excl. flagged: ${fcPct(accEx.hitRate)}`, "text-purple"));
     const lowN = rows.filter(r => r.lowStock).length, accLs = fcAccuracy(rows.filter(r => !r.lowStock), fcState.band);
-    cards.push(fcKpi("Hit Rate excl. low stock", fcPct(accLs.hitRate), `${fcPcs(lowN)} SKUs had stock below the forecast and no inbound for ${FC_LOW_STOCK_INBOUND_DAYS}+ days · WAPE acc. ${fcPct(accLs.wapeAcc)}`, "text-purple"));
+    if (!fcIsM()) cards.push(fcKpi("Hit Rate excl. low stock", fcPct(accLs.hitRate), `${fcPcs(lowN)} SKUs had stock below the forecast and no inbound for ${FC_LOW_STOCK_INBOUND_DAYS}+ days · WAPE acc. ${fcPct(accLs.wapeAcc)}`, "text-purple"));
     cards.push(fcKpi("Accuracy (1 − WAPE)", fcPct(acc.wapeAcc), `Excl. flagged: ${fcPct(accEx.wapeAcc)}`));
     cards.push(fcKpi("Bias", fcPct(acc.bias), acc.bias > 0 ? "Over-forecast" : "Under-forecast", Math.abs(acc.bias || 0) <= 10 ? "text-green" : "text-orange"));
   } else if (res.mode === "current") {
@@ -11985,16 +12103,16 @@ function fcRenderKpis() {
     cards.push(fcKpi("Pace vs Forecast", fcPct(pace), `Projected month-end: ${fcPcs(elapsed > 0 ? mtd * res.dim / elapsed : 0)}`, pace !== null && pace >= 95 ? "text-green" : "text-orange"));
     cards.push(fcKpi("Behind / Ahead", `${fcPcs(behind)} / ${fcPcs(ahead)}`, "SKUs below 85% / above 115% of pace"));
     const sfC = rows.reduce((s, r) => s + (r.shortfall || 0), 0), lowC = rows.filter(r => r.lowStock).length;
-    cards.push(fcKpi("Shortfall rest of month", fcPcs(sfC), `${fcPcs(lowC)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days`, sfC ? "text-red" : "text-green"));
+    if (!fcIsM()) cards.push(fcKpi("Shortfall rest of month", fcPcs(sfC), `${fcPcs(lowC)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days`, sfC ? "text-red" : "text-green"));
     const bt = fcLatestBacktest();
     if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
   } else {
     const lowCover = rows.filter(r => r.cover !== null && r.cover < res.dim).length;
     const stock = rows.reduce((s, r) => s + (r.stock || 0), 0);
-    cards.push(fcKpi("Current Stock (these SKUs)", fcPcs(stock), `${fcPct(total > 0 ? stock / total * 100 : null, 0)} of forecast`));
-    cards.push(fcKpi(`SKUs Short of ${res.dim} Days`, fcPcs(lowCover), `Stock runs out before the ${res.dim} days are up`, lowCover ? "text-orange" : "text-green"));
+    if (!fcIsM()) cards.push(fcKpi("Current Stock (these SKUs)", fcPcs(stock), `${fcPct(total > 0 ? stock / total * 100 : null, 0)} of forecast`));
+    if (!fcIsM()) cards.push(fcKpi(`SKUs Short of ${res.dim} Days`, fcPcs(lowCover), `Stock runs out before the ${res.dim} days are up`, lowCover ? "text-orange" : "text-green"));
     const sf = rows.reduce((s, r) => s + (r.shortfall || 0), 0), lowN = rows.filter(r => r.lowStock).length, rp = rows.reduce((s, r) => s + (r.repack || 0), 0);
-    cards.push(fcKpi("Shortfall (no stock)", fcPcs(sf), `${fcPcs(lowN)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days · repack avail. ${fcPcs(rp)}`, sf ? "text-red" : "text-green"));
+    if (!fcIsM()) cards.push(fcKpi("Shortfall (no stock)", fcPcs(sf), `${fcPcs(lowN)} SKUs low stock & no inbound ${FC_LOW_STOCK_INBOUND_DAYS}+ days · repack avail. ${fcPcs(rp)}`, sf ? "text-red" : "text-green"));
     const bt = fcLatestBacktest();
     if (bt) { const a = fcAccuracy(bt.rows, fcState.band); cards.push(fcKpi("Model Accuracy (last month)", fcPct(a.wapeAcc), `${bt.key} · hit rate ±${fcState.band}%: ${fcPct(a.hitRate)}`)); }
   }
@@ -12033,7 +12151,7 @@ function fcRenderTrustTable() {
   head.innerHTML = `<th>Level the number is used at</th>${cols.map(c => `<th class="num">${c}</th>`).join("")}<th class="num">Average</th><th>Verdict</th>`;
   const avg = (key) => { const v = data.map(d => d[key]).filter(x => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const verdict = (v, good, ok) => v === null ? "—" : (v >= good ? `<span class="badge-outline green">Trust it</span>` : (v >= ok ? `<span class="badge-outline orange">Directional</span>` : `<span class="badge-outline red">Don't decide on it</span>`));
-  const line = (label, key, good, ok, title) => `<tr><td title="${title}">${label}</td>${data.map(d => `<td class="num">${fcPct(d[key])}</td>`).join("")}<td class="num font-bold">${fcPct(avg(key))}</td><td>${verdict(avg(key), good, ok)}</td></tr>`;
+  const line = (label, key, good, ok, title) => { label = fcT(label); title = fcT(title); return `<tr><td title="${title}">${label}</td>${data.map(d => `<td class="num">${fcPct(d[key])}</td>`).join("")}<td class="num font-bold">${fcPct(avg(key))}</td><td>${verdict(avg(key), good, ok)}</td></tr>`; };
   body.innerHTML =
     line("Whole portfolio total", "total", 88, 80, "How close the sum of every forecast was to the sum of every actual.") +
     line("Per product category", "cat", 85, 75, "Forecasts summed per category, compared to that category's actual.") +
@@ -12073,8 +12191,8 @@ function fcRenderSegmentTable() {
     } else {
       parts.push("TSB (intermittent demand)");
     }
-    parts.push("price-change adjustment");
-    if (seg === "A") parts.push(`stock ceiling ×${FC_STOCK_CAP_A}`);
+    if (!fcIsM()) parts.push("price-change adjustment");   // SKU-only ideas: not used for merchants
+    if (seg === "A" && !fcIsM()) parts.push(`stock ceiling ×${FC_STOCK_CAP_A}`);
     if (FC_RESID_SEGMENTS[seg]) parts.push("error-correction model");
     return parts.join(" → ");
   };
@@ -12108,7 +12226,7 @@ function fcRenderCategoryTable() {
   if (!res) { head.innerHTML = ""; body.innerHTML = ""; return; }
   const bt = res.mode === "backtest", cur = res.mode === "current";
   const blends = res.blends || null;
-  head.innerHTML = `<th>Behavior</th>${blends ? `<th title="The mix that scored best on earlier months for this behavior — chosen from the data, not hard-coded.">Method</th>` : ""}<th class="num">SKUs</th><th class="num text-blue">Forecast</th><th class="num">Share</th>` +
+  head.innerHTML = `<th>Behavior</th>${blends ? `<th title="The mix that scored best on earlier months for this behavior — chosen from the data, not hard-coded.">Method</th>` : ""}<th class="num">${fcIsM() ? "Merchants" : "SKUs"}</th><th class="num text-blue">Forecast</th><th class="num">Share</th>` +
     (bt ? `<th class="num text-green">Actual</th><th class="num text-purple">Hit Rate</th><th class="num">Accuracy</th><th class="num">Bias</th>` : "") +
     (cur ? `<th class="num text-green">MTD</th><th class="num">Pace</th>` : "");
   const total = res.rows.reduce((s, r) => s + r.forecast, 0);
@@ -12181,6 +12299,13 @@ function fcRenderAccuracyTrend() {
 
 // SKU table — columns depend on the target's mode.
 function fcColumns(res) {
+  const cols = fcColumnsBase(res);
+  if (!fcIsM()) return cols;
+  const STOCK_KEYS = { stock: 1, cover: 1, repack: 1, sellable: 1, shortfall: 1, inbDays: 1 };
+  const rename = { sku: ["Merchant ID", "Taager merchant ID."], name: ["Merchant", "Merchant name."], prodCat: ["ACM", "Account manager of the merchant."], method: ["Method", "How this merchant's forecast is built. Segment A blends the average of the recent-rate rules with TSB; B and C use TSB; B and C also get the error-correction model."] };
+  return cols.filter(c => !STOCK_KEYS[c.key]).map(c => rename[c.key] ? Object.assign({}, c, { label: rename[c.key][0], title: rename[c.key][1] }) : Object.assign({}, c, { title: fcT(c.title || "") }));
+}
+function fcColumnsBase(res) {
   const base = [
     { key: "sku", label: "SKU", cls: "font-mono", title: "Single SKU (bundles are debundled into their Singles)." },
     { key: "name", label: "Name", cls: "truncate-cell", title: "Product name." },
@@ -12299,9 +12424,9 @@ function fcRenderSkuTable() {
   const pageRows = fcState.filtered.slice(start, start + PAGE_SIZE);
   body.innerHTML = pageRows.length
     ? pageRows.map(r => `<tr>${cols.map(c => `<td class="${c.num ? "num " : ""}${c.cls || ""}"${c.key === "name" ? ` title="${String(r.name).replace(/"/g, "&quot;")}"` : ""}>${fcCell(c, r, res)}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${cols.length}" class="text-dim" style="text-align:center;padding:20px;">No SKUs match the current filters.</td></tr>`;
+    : `<tr><td colspan="${cols.length}" class="text-dim" style="text-align:center;padding:20px;">No ${fcIsM() ? "merchants" : "SKUs"} match the current filters.</td></tr>`;
   const totalPages = Math.max(1, Math.ceil(fcState.filtered.length / PAGE_SIZE));
-  if ($("fcRowCount")) $("fcRowCount").textContent = `${fmtInt.format(fcState.filtered.length)} SKUs`;
+  if ($("fcRowCount")) $("fcRowCount").textContent = `${fmtInt.format(fcState.filtered.length)} ${fcIsM() ? "merchants" : "SKUs"}`;
   if ($("fcPageIndicator")) $("fcPageIndicator").textContent = `Page ${fcState.page + 1} of ${totalPages}`;
   if ($("fcPrevPage")) $("fcPrevPage").disabled = fcState.page === 0;
   if ($("fcNextPage")) $("fcNextPage").disabled = fcState.page >= totalPages - 1;
@@ -12346,22 +12471,25 @@ function fcWireControlsOnce() {
     fcState.family = fam;
     fcState.catFilter = "";
     // First time a rolling horizon is picked, build its engine now.
-    if (fam !== "month" && !fcState.engines[fam] && fcState.series) {
+    if (fam !== "month" && !fcState.engines[fam] && fcState.series && !fcState.loading) {
       const H = Number(fam.slice(1));
       fcSetProgress(`Building the ${H}-day forecast…`, 30);
+      fcState.loading = true;   // switching to the other Forecast Model tab waits until this finishes
       await fcNextFrame();
       try {
-        const eng = fcRunHorizonEngine(fcState.series, H, { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
+        const eng = fcRunHorizonEngine(fcState.series, H, fcIsM() ? { v2: fcState.v2, priceTimeline: null } : { v2: fcState.v2, priceTimeline: fcState.priceTimeline });
         fcEnrichResults(eng);
         fcState.engines[fam] = eng;
       } catch (err) {
         console.warn("horizon " + H + " failed", err);
         fcState.family = "month";
       }
+      fcState.loading = false;
       fcSetProgress(null);
     }
     fcState.target = fcNextKeyOf(fcState.family);
     fcRenderAll();
+    if (fcPendingEntity && fcPendingEntity !== fcState.entity) { const e = fcPendingEntity; fcPendingEntity = null; fcEnterEntity(e); }
   });
   on("fcTargetSelect", "change", (e) => {
     fcState.target = String(e.target.value);
@@ -17245,9 +17373,9 @@ async function fetchAllSheetsSnapshot() {
     metabaseSellthroughNeededIrq: irqSellthroughNeededPayload ? parseSellthroughNeededSheet(irqSellthroughNeededPayload) : state.metabaseSellthroughNeededIrq,
     cogsMapIrq: irqCogsPayload ? parseCogsSheet(irqCogsPayload) : state.cogsMapIrq,
     irqInventoryMap: irqInventoryPayload ? parseIrqInventorySheet(irqInventoryPayload) : state.irqInventoryMap,
-    debundleMap: debundleMapPayload ? applyGoodStockToDebundle(parseDebundleMapSheet(debundleMapPayload), warehouseRepackPayload) : state.debundleMap, // <-- Commercial Debundlized
+    debundleMap: debundleMapPayload ? applyGoodStockToDebundle(parseDebundleMapSheet(debundleMapPayload), warehouseRepackPayload) : state.debundleMap, // <-- Commercial Plan
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
-    cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Debundlized (وزن الـ Single داخل البندل)
+    cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Plan (وزن الـ Single داخل البندل)
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
@@ -17702,7 +17830,7 @@ const SECTION_DATE_FILTER_REFRESH = {
   healthyUnlocking: () => prepareHealthyUnlockingData(),
   mpMatches: () => prepareMpMatchesData(),
   mpNewMatches: () => prepareMpNewMatchesData(),
-  commercialDebundlized: () => prepareCommercialDebundlizedData(),
+  commercialPlan: () => prepareCommercialPlanData(),
   targetsCommercial: () => renderTargetsCommercialView(),
   mpSalesPlan: () => prepareMpSalesPlanData(),
   spFeedback: () => prepareSpFeedbackData(),
@@ -18377,7 +18505,7 @@ if (typeof document !== "undefined") {
 // كل الأرقام Debundled على مستوى الـ Single SKU: أي صف في MAIN_GID بيكون
 // PRODUCT_ID بتاعه بندل بيتوزع على كل Single جواه × PRODUCT_QUANTITY (نفس
 // buildDebundleProductMap المستخدمة في Recommended Tracker / Commercial
-// Debundlized)، وأي PRODUCT_ID مالوش ماب بيتعامل كـ Single بكمية 1.
+// Plan)، وأي PRODUCT_ID مالوش ماب بيتعامل كـ Single بكمية 1.
 //
 //  • "النهاردة" = تاريخ الجهاز الفعلي (زي Recommended Tracker بالظبط).
 //  • Placed Yesterday = Placed Pieces امبارح.
