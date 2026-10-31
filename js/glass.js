@@ -41,7 +41,7 @@
     navAvailabilityLocking: "availabilityLocking", navAllocationLocking: "allocationLocking", navHealthyUnlocking: "healthyUnlocking",
     navMpMatches: "mpMatches", navMpNewMatches: "mpNewMatches", navMpDeclineWatch: "mpDeclineWatch", navIncMerchants: "incentiveMerchants",
     navSegmentationPanel: "segmentation", navSellthroughPanel: "sellthrough", navWeeklyInventory: "weeklyInventory",
-    navForecastModel: "forecastModel", navDohPlanner: "dohPlanner",
+    navForecastModel: "forecastModel", navMlForecast: "mlForecast", navDohPlanner: "dohPlanner",
     navTowerRoles: "towerRoles", navTowerTargets: "towerTargets", navLoopTasks: "loopTasks", navTowerAlerts: "towerAlerts",
     navLoopControl: "loopControl", navTowerSettings: "towerSettings", navTowerActivity: "towerActivity", navTowerUsage: "towerUsage", navTowerInvite: "towerInvite"
   };

@@ -20,7 +20,7 @@
     allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking",
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
-    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", dohPlanner: "navDohPlanner"
+    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner"
   };
   var ADMIN_PW_VIEWS = ["forecastModel"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
@@ -1050,7 +1050,8 @@
       { nav: "navTowerInvite", view: "towerInvite", label: "Invite people" }
     ] },
     { toggle: "navAdminToggle", title: "Admin Panel", tabs: [
-      { nav: "navForecastModel", view: "forecastModel", label: "Forecast Model" }
+      { nav: "navForecastModel", view: "forecastModel", label: "Forecast Model" },
+      { nav: "navMlForecast", view: "mlForecast", label: "ML Forecast" }
     ] },
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
       { nav: "navIncMerchants", view: "incentiveMerchants", label: "Incentive Merchants" }
