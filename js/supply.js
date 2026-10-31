@@ -39,7 +39,7 @@
     }).catch(function (e) { RET.data = null; RET.err = (e && e.message) || "failed"; })
       .then(function () { RET.loading = false; SC.sig = ""; rerender(); });
   }
-  function sigNow() { try { return [state.allParsedRows.length, (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
+  function sigNow() { try { return [state.allParsedRows.length, (state.productOnlyRows || []).length, typeof productMode === "function" ? productMode() : "", (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
   // v1.17.0 — the Importation PO list is part of the signature so the table rebuilds when the saved plan arrives or changes
   function impPosSig() { try { var P = window.TaagerPlans; if (!P) return ""; var k = planKey(), h = P.peek("supplyplan", k); var v = h ? h.values : P.SUPPLY_DEF; return String(v.impPos || "") + "~" + String(v.exclEnds || ""); } catch (e) { return ""; } }
   function ageIdx(days) { return days == null ? 4 : days <= 60 ? 0 : days <= 120 ? 1 : days <= 180 ? 2 : days <= 364 ? 3 : 4; } // same bands as the Inventory Aging sheet; no purchase date = Unhealthy
@@ -50,7 +50,7 @@
     var sg = sigNow(); if (sg && sg === SC.sig) return; SC.sig = sg;
     var rows = [];
     try {
-      var main = state.allParsedRows || [], invMap = state.inventoryMap || {};
+      var main = (typeof productLevelRows === "function" ? productLevelRows() : (state.allParsedRows || [])), invMap = state.inventoryMap || {};
       if (!main.length || !Object.keys(invMap).length || typeof buildDebundledStockDohIndex !== "function") { SC.rows = []; SC.empty = true; return; }
       var idx = buildDebundledStockDohIndex(main), dbm = buildDebundleProductMap(state.debundleMap, state.cogsMap), pm = dbm.productMap, singles = dbm.singlesList;
       var mapsFor = function (sku) { var m = pm.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
@@ -502,8 +502,10 @@
   function rerender() { build(); if (current && VIEWS[current]) { var h = $(VIEWS[current][0]); if (h && !h.classList.contains("hidden")) VIEWS[current][1](h); } }
   // وقت الداونلود (زرار Download CSV): نعرض كل الصفوف بدل الصفحة الحالية، وبعدها نرجع زي ما كان.
   var _savedSkuPage = 0;
-  window.addEventListener("dash:export-start", function () { _savedSkuPage = SC.sk.page; SC.sk.page = 0; try { rerender(); } catch (e) { } });
-  window.addEventListener("dash:export-end", function () { SC.sk.page = _savedSkuPage; try { rerender(); } catch (e) { } });
+  // v1.17.1: بنعيد البناء بس لو صفحة الـ Supply Chain هي المفتوحة (الداونلود من صفحة تانية مالوش دعوة بيها)
+  function scOpen() { var h = current && VIEWS[current] && $(VIEWS[current][0]); return !!(h && !h.classList.contains("hidden")); }
+  window.addEventListener("dash:export-start", function () { _savedSkuPage = SC.sk.page; SC.sk.page = 0; if (scOpen()) try { rerender(); } catch (e) { } });
+  window.addEventListener("dash:export-end", function () { SC.sk.page = _savedSkuPage; if (scOpen()) try { rerender(); } catch (e) { } });
   function onClick(e) {
     var t = e.target;
     var c = t.closest("[data-sc-cat]"); if (c) { SC.cat = c.getAttribute("data-sc-cat"); rerender(); return; }

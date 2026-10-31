@@ -22,7 +22,7 @@
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
     weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", dohPlanner: "navDohPlanner"
   };
-  var ADMIN_PW_VIEWS = ["segmentation", "sellthrough", "weeklyInventory", "forecastModel"]; // still behind the Admin Panel password
+  var ADMIN_PW_VIEWS = ["forecastModel"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
   var TARGET_TYPES = [
     { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "TAGER_ID · Tager_name · Target GMV (Actual) · Target Placed (Actual) — each merchant's ACM is picked up automatically and its target is added to that ACM" },
@@ -608,7 +608,7 @@
       var trs = rows.map(function (u) {
         var c = roleColor(u.role);
         return '<tr class="tw-prow" data-edit="' + esc(u.email) + '"><td><div class="tw-person"><span class="tw-av" style="background:' + c + '">' + esc(initials(u.name || u.email)) + '</span><div><div class="tw-pn">' + esc(u.name || u.email.split("@")[0]) + '</div><div class="tw-muted">' + esc(u.email) + '</div></div></div></td>' +
-          '<td><select class="tw-rolechip" style="background:' + c + '" data-urole="' + esc(u.email) + '">' + roleOpts(u.role) + '</select></td><td>' + esc(u.role === "Merchant" ? (u.merchantId ? "Merchant ID " + u.merchantId : "No Merchant ID yet") : scopeOf(u.role)) + '</td><td><span class="tw-pill ' + (u.status === "inactive" ? "warn" : "good") + '">' + (u.status === "inactive" ? "Inactive" : "Active") + '</span></td>' +
+          '<td><select class="tw-rolechip" style="--rc:' + c + ';background:' + c + '" data-urole="' + esc(u.email) + '">' + roleOpts(u.role) + '</select></td><td>' + esc(u.role === "Merchant" ? (u.merchantId ? "Merchant ID " + u.merchantId : "No Merchant ID yet") : scopeOf(u.role)) + '</td><td><span class="tw-pill ' + (u.status === "inactive" ? "warn" : "good") + '">' + (u.status === "inactive" ? "Inactive" : "Active") + '</span></td>' +
           '<td style="text-align:right"><button class="btn small danger" data-udel="' + esc(u.email) + '">Remove</button></td></tr>';
       }).join("") || '<tr><td colspan="5" class="tw-muted" style="padding:22px">No people match.</td></tr>';
       body = pendHtml + '<div class="tw-card"><div class="tw-ch"><div><h3>People in Egypt</h3><div class="tw-muted">' + (usersLoading && !uList.length ? 'Loading people…' : uList.length + ' users. Click a row to edit, or change the role from the chip.') + '</div></div>' +
@@ -860,7 +860,7 @@
     var stext = (P.SUPPLY_TEXT_FIELDS || []).map(function (f) {
       return '<tr><td>' + esc(f.label) + '<div class="tg-sub">' + esc(f.help) + '</div></td><td class="n"><span class="tg-num wide"><input type="text" data-plan="supplyplan" data-pid="' + f.id + '" data-k="text" value="' + esc(sv[f.id] == null ? "" : String(sv[f.id])) + '"></span></td></tr>';
     }).join("");
-    var supply = '<div class="tg-card ' + (tgPlans.supplyplan && tgPlans.supplyplan.source === "month" ? "ok" : "idle") + '" data-t="supplyplan">' +
+    var supply = '<div class="tg-card wide ' + (tgPlans.supplyplan && tgPlans.supplyplan.source === "month" ? "ok" : "idle") + '" data-t="supplyplan">' +
       '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.tune + '</span><div class="tg-ht"><b>Supply conversion plan</b>' + planPill("supplyplan") + '</div></div>' +
       '<p class="tg-desc">Planned COGS per source for ' + esc(monthTitle(tgMonth)) + ' — the "Planned" column of Supply Chain → Supply conversion.</p>' +
       '<div class="tg-kpi-wrap"><table class="tg-kpi-t"><thead><tr><th>Source</th><th class="n">Planned (COGS)</th></tr></thead><tbody>' + srows +
@@ -1011,6 +1011,8 @@
     ] },
     { toggle: "navSupplyChainToggle", title: "Supply Chain", tabs: [
       { nav: "navScAging", view: "scAging", label: "Inventory Aging" },
+      { nav: "navSellthroughPanel", view: "sellthrough", label: "Sellthrough Rate Panel" },
+      { nav: "navWeeklyInventory", view: "weeklyInventory", label: "Inventory & Inbound" },
       { nav: "navScSkus", view: "scSkus", label: "SKU Analysis" },
       { nav: "navScActions", view: "scActions", label: "Action Plan" },
       { nav: "navPurchasePlan", view: "purchasePlan", label: "Purchase Plan" },
@@ -1044,12 +1046,10 @@
       { nav: "navLoopControl", view: "loopControl", label: "Command Loop" },
       { nav: "navTowerSettings", view: "towerSettings", label: "Settings" },
       { nav: "navTowerActivity", view: "towerActivity", label: "Activity Log" },
+      { nav: "navTowerUsage", view: "towerUsage", label: "Usage Log" },
       { nav: "navTowerInvite", view: "towerInvite", label: "Invite people" }
     ] },
     { toggle: "navAdminToggle", title: "Admin Panel", tabs: [
-      { nav: "navSegmentationPanel", view: "segmentation", label: "Segmentation Panel" },
-      { nav: "navSellthroughPanel", view: "sellthrough", label: "Sellthrough Rate Panel" },
-      { nav: "navWeeklyInventory", view: "weeklyInventory", label: "Inventory & Inbound" },
       { nav: "navForecastModel", view: "forecastModel", label: "Forecast Model" }
     ] },
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
@@ -1057,6 +1057,7 @@
     ] },
     { toggle: "navMerchantsToggle", title: "Merchants", tabs: [
       { nav: "navMerchantTargets", view: "merchantTargets", label: "Merchant Targets" },
+      { nav: "navSegmentationPanel", view: "segmentation", label: "Segmentation Panel" },
       { nav: "navMerchantPerf", view: "merchantPerformance", label: "Merchant Performance" },
       { nav: "navMerchantCpa", view: "merchantCpa", label: "RE-CPA" }
     ] },
@@ -1124,6 +1125,11 @@
     rows.forEach(function (m) { gmv += +m.deliveredGmv || 0; placed += +m.placed || 0; delivered += +m.delivered || 0; });
     var ndr = placed > 0 ? (delivered / placed) * 100 : 0;
     var tiles = [["Merchants", rows.length.toLocaleString()], ["Delivered GMV", fmtC(gmv)], ["Placed orders", Math.round(placed).toLocaleString()], ["NDR", ndr.toFixed(1) + "%"]];
+    // Update the numbers in place. Rebuilding the tiles every tick (this runs every 1.5 s) made them brand-new elements each time,
+    // and the Glass count-up then counted them from zero again and again.
+    var kids = host.children, same = kids.length === tiles.length;
+    for (var i = 0; same && i < tiles.length; i++) { var sp = kids[i].querySelector("span"), bb = kids[i].querySelector("b"); if (!sp || !bb || sp.textContent !== tiles[i][0]) same = false; }
+    if (same) { tiles.forEach(function (t, k) { var b = kids[k].querySelector("b"); if (b.textContent !== t[1]) b.textContent = t[1]; }); return; }
     host.innerHTML = tiles.map(function (t) { return '<div class="tw-stat"><span>' + esc(t[0]) + '</span><b>' + esc(t[1]) + '</b></div>'; }).join("");
   }
   setInterval(refreshMerchantStats, 1500);
@@ -1131,6 +1137,16 @@
   // ---------------------------------------------------------------- wrap navigation
   var EXTRA_VIEWS = {};
   function isOwnView(n) { return n === "towerRoles" || n === "towerTargets" || n === "towerInvite" || !!EXTRA_VIEWS[n]; }
+  var renderTok = 0;
+  function laterRender(fn) {
+    var tok = renderTok;
+    var go = function () { setTimeout(function () { if (tok !== renderTok) return; try { fn(); } catch (e) { console.error("[Tower] render failed:", e); } }, 0); };
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      var gate = window.__glMotionGate; // Glass view: نستنى الحركة تبدأ (بحد أقصى 120ms)
+      if (!gate) return go();
+      Promise.race([gate, new Promise(function (r) { setTimeout(r, 120); })]).then(go, go);
+    }); });
+  }
   function showOwnView(name) {
     var X = EXTRA_VIEWS[name];
     if (X) {
@@ -1138,8 +1154,9 @@
       document.querySelectorAll(".nav-item.active, .nav-item-sub.active").forEach(function (el) { el.classList.remove("active"); });
       var xs = $(X.sectionId); if (!xs) return;
       var xn = $(X.navId); if (xn) xn.classList.add("active");
-      X.render(xs);
+      // v1.17.1: الصفحة تظهر الأول، والرندر التقيل بعد ما الفريم يترسم (ولو اتنقلت قبلها يتلغي)
       xs.classList.remove("hidden"); setTimeout(function () { xs.classList.add("active-view"); }, 10);
+      laterRender(function () { X.render(xs); });
       var hh = document.querySelector(".topbar-title p"); if (hh) hh.textContent = X.sub || "";
       return;
     }
@@ -1147,14 +1164,14 @@
     document.querySelectorAll(".nav-item.active, .nav-item-sub.active").forEach(function (el) { el.classList.remove("active"); });
     if (name === "towerInvite") {
       var iv = $("viewTowerInvite"); if (!iv) return;
-      renderInvite();
+      laterRender(renderInvite);
       iv.classList.remove("hidden"); setTimeout(function () { iv.classList.add("active-view"); }, 10);
       var ih = document.querySelector(".topbar-title p"); if (ih) ih.textContent = "Invite people to the dashboard"; return;
     }
     var id = name === "towerRoles" ? "viewTowerRoles" : "viewTowerTargets", nid = name === "towerRoles" ? "navTowerRoles" : "navTowerTargets";
     var sec = $(id); if (!sec) return;
     $(nid).classList.add("active");
-    if (name === "towerRoles") { draft = null; usersLoaded = false; renderRoles(); } else renderTargets();
+    if (name === "towerRoles") { draft = null; usersLoaded = false; laterRender(renderRoles); } else laterRender(renderTargets);
     sec.classList.remove("hidden"); setTimeout(function () { sec.classList.add("active-view"); }, 10);
     var h = document.querySelector(".topbar-title p"); if (h) h.textContent = name === "towerRoles" ? "Users, roles & views" : "Targets upload";
   }
@@ -1211,7 +1228,7 @@
       var res = window.__twSwitch(name); if (!window.__twNoPush) twPushUrl(name); return res;
     };
     window.__twSwitch = function (name) {
-      var res;
+      var res; renderTok++;
       if (isOwnView(name)) { if (!(name === "towerInvite" ? canInvite() : (EXTRA_VIEWS[name] && EXTRA_VIEWS[name].open ? allowed(EXTRA_VIEWS[name].navId) : isEffAdmin()))) { res = origSwitch("overview"); updateHub("overview"); return res; } res = showOwnView(name); updateHub(name); return res; }
       var nid = VIEW_NAV[name];
       if (nid && !allowed(nid)) { name = "overview"; }
@@ -1237,9 +1254,10 @@
         var h2 = panel.querySelector("h2"), title = h2 ? h2.innerText : "table";
         try { selectedTableForDownload = { el: t, title: title }; } catch (err) { return; }
         var go = $("confirmDownload"); if (!go) return;
-        btn.classList.add("busy"); btn.querySelector("span").textContent = "Preparing…";
+        // v1.17.4: التصدير بقى في الخلفية والتقدم بيظهر في كارت فوق — الزرار بيرجع على طول
+        btn.classList.add("busy"); btn.querySelector("span").textContent = "Started";
         go.click();
-        setTimeout(function () { btn.classList.remove("busy"); btn.querySelector("span").textContent = "Export CSV"; }, 1800);
+        setTimeout(function () { btn.classList.remove("busy"); btn.querySelector("span").textContent = "Export CSV"; }, 700);
       });
       head.appendChild(btn);
     });

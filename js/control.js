@@ -123,7 +123,8 @@
         '<div class="tw-field"><label>ACM CR floor (%)</label>' + num("stAcr", S.thresholds.acmCrMin) + '</div>' +
         '<div class="tw-field"><label>ACM GMV pacing floor (%)</label>' + num("stPace", S.thresholds.acmPacingMin) + '</div>' +
         '<div class="tw-field"><label>Merchant NDR floor (%)</label>' + num("stMndr", S.thresholds.merchNdrMin) + '</div></div></div>' +
-      '<div class="tw-savebar"><button class="btn btn-primary" id="stSave">Save settings</button><button class="btn" id="stReset">Reset to defaults</button><span class="tw-msg" id="stMsg"></span></div></div>';
+      (window.poSettingsCardHtml ? window.poSettingsCardHtml() : "") + '<div class="tw-savebar"><button class="btn btn-primary" id="stSave">Save settings</button><button class="btn" id="stReset">Reset to defaults</button><span class="tw-msg" id="stMsg"></span></div></div>';
+    if (window.poSettingsWire) window.poSettingsWire(host);
     var read = function () { S.cutoffs.cr = +$("stCr").value; S.cutoffs.dr = +$("stDr").value; S.thresholds.acmNdrMin = +$("stNdr").value; S.thresholds.acmCrMin = +$("stAcr").value; S.thresholds.acmPacingMin = +$("stPace").value; S.thresholds.merchNdrMin = +$("stMndr").value; };
     $("stReset").onclick = function () { if (!confirm("Reset cutoffs and thresholds to defaults?")) return; S = { cutoffs: { cr: 2, dr: 5 }, thresholds: { acmNdrMin: 50, acmCrMin: 60, acmPacingMin: 70, merchNdrMin: 40 }, rules: S.rules }; C.saveSettings(S).then(function () { renderSettings(host); }).catch(function (e) { $("stMsg").className = "tw-msg err"; $("stMsg").textContent = e.message; }); };
     $("stSave").onclick = function () {

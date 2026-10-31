@@ -4,7 +4,7 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0-glass";
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -70,6 +70,15 @@ const PRICE_HISTORY_GID = "1968659230";
 // بالظبط — بدل ما كانت بتتحسب من تجميع MAIN_GID زي باقي أعمدة الجدول التاني
 // (Performance Merchant's) اللي فاضلة زي ما هي.
 const MERCHANT_SEGMENTATION_GID = "620123165";
+// v1.18.0 — Merchant Only (Metabase public question). One row per (DAY x merchant x ACC_MANAGER), all countries;
+// the dashboard keeps Egypt only. Covers the current month (MTD) + the whole previous month.
+const MERCHANT_ONLY_GID = "7100000001";
+// ACM pages (ACM Performance / Target ACM) read their orders + Delivered GMV from Merchant Segmentation (decided by the owner:
+// Segmentation is the GMV definition to use). Set to true to read them from Merchant Only instead (daily, = Main's Delivered GMV).
+// While false, Merchant Only is not requested at all.
+const ACM_USES_MERCHANT_ONLY = false;
+// v1.18.0 — Product Only (Metabase public question): one row per (DATE_GROUP x PRODUCT_ID x IS_PRIMARY), Egypt, no merchant dimension.
+const PRODUCT_ONLY_GID = "7100000002";
 
 
 // الشهر اللي لوحة Incentive Merchants بتفتح عليه افتراضيًا (من غير ما المستخدم
@@ -310,6 +319,8 @@ const METABASE_SOURCES = {
   [AVAILABILITY_LOCKING_GID]: { label: "Availability Locking",     format: "json" },
   [MERCHANT_SKU_DAILY_GID]:   { label: "Merchant SKU Daily",       format: "json" },
   [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json" },
+  ...(ACM_USES_MERCHANT_ONLY ? { [MERCHANT_ONLY_GID]: { label: "Merchant Only", format: "csv" } } : {}),
+  [PRODUCT_ONLY_GID]:         { label: "Product Only",             format: "csv" },
   [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json" }
 };
 const METABASE_TIMEOUT_MS = 180000;
@@ -577,6 +588,8 @@ const state = {
   allParsedRows: [], merchantTargets: {}, merchantSegmentsMap: {}, acmTargets: {}, newSegRows: [], newSegLoadError: null,
   merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
   merchantSegHistoryRows: [], // أرشيف شهور سابقة (MERCHANT_SEG_HISTORY_GIDS) — مصدر Incentive Merchants للشهور الفاتت فقط
+  merchantOnlyRows: [], // v1.18.0 — Merchant Only (Egypt): per day x merchant x ACC_MANAGER — source of the ACM pages
+  productOnlyRows: [], // v1.18.0 — Product Only (Egypt): per day x product, in the same shape as Main rows — source of the product + category pages
   supplyRepackRows: [], // شيت SUPPLY_REPACK_GID — [{ts, sku, qty, status}]
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
   purchasePlanData: [], purchasePlanFiltered: [],  purchasePlanSortKey: "singleId", purchasePlanSortDir: "asc", purchasePlanPage: 0,
@@ -1234,7 +1247,27 @@ if (syncStatusModal) {
   syncStatusModal.addEventListener("click", (e) => { if (e.target === syncStatusModal) syncStatusModal.classList.add("hidden"); });
 }
 
+// v1.17.1 — التنقل بين التابات من غير تعليق: switchView بقت تظهر الصفحة الأول (الـ nav والعنوان
+// والتابات بيتحركوا فورًا)، وبعد ما المتصفح يرسم الفريم ده بس بيبدأ الحساب/الرندر التقيل بتاع الصفحة.
+// ولو اتنقلت لصفحة تانية قبل ما الرندر يبدأ، الرندر القديم بيتلغي بدل ما يتنفذوا كلهم ورا بعض.
+let __viewRenderSeq = 0;
+function __queueViewRender(fn) {
+  const seq = __viewRenderSeq;
+  // فريمين: الأول بيظهر الصفحة ويبدأ الحركة على الـ GPU، وبعده بس يبدأ الرندر التقيل — فالحركة مابتستناش الرندر
+  // ولو الـ Glass view شغال: بنستنى كمان لحد ما حركة الصفحة تبدأ فعلاً (بحد أقصى 120ms)
+  const go = () => setTimeout(() => {
+    if (seq !== __viewRenderSeq) return;
+    try { fn(); } catch (e) { console.error("[switchView] render failed:", e); }
+  }, 0);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const gate = window.__glMotionGate;
+    if (!gate) return go();
+    Promise.race([gate, new Promise(r => setTimeout(r, 120))]).then(go, go);
+  }));
+}
+
 function switchView(viewName) {
+  __viewRenderSeq++; // أي رندر لصفحة تانية لسه مستني بيتلغي (لو بتقلب بسرعة بين التابات)
   document.querySelectorAll('.view-section').forEach(el => { el.classList.remove('active-view'); el.classList.add('hidden'); });
   if(navOverview) navOverview.classList.remove("active");
   if(navInventory) navInventory.classList.remove("active");
@@ -1270,53 +1303,53 @@ function switchView(viewName) {
   if (viewName === "overview") { activeSection = $("viewOverview"); if(navOverview) navOverview.classList.add("active"); }
   else if (viewName === "inventory") { activeSection = $("viewInventory"); if(navInventory) navInventory.classList.add("active"); }
   else if (viewName === "acmPerformance") { activeSection = $("viewAcmPerformance"); if(navAcmPerf) navAcmPerf.classList.add("active"); } 
-  else if (viewName === "acmTargets") { activeSection = $("viewAcmTargets"); if(navAcmTargets) navAcmTargets.classList.add("active"); renderAcmTargetsView(); }
-  else if (viewName === "merchantTargets") { activeSection = $("viewMerchantTargets"); if(navMerchantTargets) navMerchantTargets.classList.add("active"); renderMerchantTargetsView(); }
+  else if (viewName === "acmTargets") { activeSection = $("viewAcmTargets"); if(navAcmTargets) navAcmTargets.classList.add("active"); __queueViewRender(() => { renderAcmTargetsView(); }); }
+  else if (viewName === "merchantTargets") { activeSection = $("viewMerchantTargets"); if(navMerchantTargets) navMerchantTargets.classList.add("active"); __queueViewRender(() => { renderMerchantTargetsView(); }); }
   else if (viewName === "merchantPerformance") { activeSection = $("viewMerchantPerformance"); if(navMerchantPerf) navMerchantPerf.classList.add("active"); } 
-  else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); renderTargetsCommercialView(); }
-  else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); prepareCommercialDebundlizedData(); }
-  else if (viewName === "purchasePlan") { activeSection = $("viewPurchasePlan"); if(navPurchasePlan) navPurchasePlan.classList.add("active"); preparePurchasePlanData(); }
-  else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); prepareCm3AnalystProductsData(); }
-  else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); preparePpmAnalystProductsData(); }
-  else if (viewName === "ppmAnalystSingle") { activeSection = $("viewPpmAnalystSingle"); if(navPpmAnalystSingle) navPpmAnalystSingle.classList.add("active"); preparePpmAnalystSingleData(); }
-  else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); prepareProductsMatchesAnalystData(); }
+  else if (viewName === "targetsCommercial") { activeSection = $("viewTargetsCommercial"); if(navTargetsCommercial) navTargetsCommercial.classList.add("active"); __queueViewRender(() => { renderTargetsCommercialView(); }); }
+  else if (viewName === "commercialDebundlized") { activeSection = $("viewCommercialDebundlized"); if(navCommercialDebundlized) navCommercialDebundlized.classList.add("active"); __queueViewRender(() => { prepareCommercialDebundlizedData(); }); }
+  else if (viewName === "purchasePlan") { activeSection = $("viewPurchasePlan"); if(navPurchasePlan) navPurchasePlan.classList.add("active"); __queueViewRender(() => { preparePurchasePlanData(); }); }
+  else if (viewName === "cm3AnalystProducts") { activeSection = $("viewCm3AnalystProducts"); if(navCm3AnalystProducts) navCm3AnalystProducts.classList.add("active"); __queueViewRender(() => { prepareCm3AnalystProductsData(); }); }
+  else if (viewName === "ppmAnalystProducts") { activeSection = $("viewPpmAnalystProducts"); if(navPpmAnalystProducts) navPpmAnalystProducts.classList.add("active"); __queueViewRender(() => { preparePpmAnalystProductsData(); }); }
+  else if (viewName === "ppmAnalystSingle") { activeSection = $("viewPpmAnalystSingle"); if(navPpmAnalystSingle) navPpmAnalystSingle.classList.add("active"); __queueViewRender(() => { preparePpmAnalystSingleData(); }); }
+  else if (viewName === "productsMatchesAnalyst") { activeSection = $("viewProductsMatchesAnalyst"); if(navProductsMatchesAnalyst) navProductsMatchesAnalyst.classList.add("active"); __queueViewRender(() => { prepareProductsMatchesAnalystData(); }); }
   // CM3 Target اتدمجت جوه صفحة CM3 Analyst نفسها (بطلب صريح) — بدل ما تبقى
   // صفحة لوحدها، دلوقتي هي أول سكشن في viewCm3Analyst، فبنرندر الاتنين مع بعض.
-  else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); renderCm3TargetView(); renderCm3AnalystView(); }
-  else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); preparePoorMatchesData(); }
-  else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); prepareAvailabilityLockingData(); }
-  else if (viewName === "allocationLocking") { activeSection = $("viewAllocationLocking"); if(navAllocationLocking) navAllocationLocking.classList.add("active"); prepareAllocationLockingData(); }
-  else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); prepareHealthyUnlockingData(); }
-  else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); prepareMpSalesPlanData(); }
-  else if (viewName === "spFeedback") { activeSection = $("viewSpFeedback"); if(navSpFeedback) navSpFeedback.classList.add("active"); prepareSpFeedbackData(); }
-  else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); prepareMpMatchesData(); }
-  else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); prepareMpNewMatchesData(); }
-  else if (viewName === "mpDeclineWatch") { activeSection = $("viewMpDeclineWatch"); if(navMpDeclineWatch) navMpDeclineWatch.classList.add("active"); prepareMpDeclineWatchData(); }
-  else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); renderSegmentationPanel(); }
+  else if (viewName === "cm3Analyst") { activeSection = $("viewCm3Analyst"); if(navCm3Analyst) navCm3Analyst.classList.add("active"); __queueViewRender(() => { renderCm3TargetView(); renderCm3AnalystView(); }); }
+  else if (viewName === "poorMatches") { activeSection = $("viewPoorMatches"); if(navPoorMatches) navPoorMatches.classList.add("active"); __queueViewRender(() => { preparePoorMatchesData(); }); }
+  else if (viewName === "availabilityLocking") { activeSection = $("viewAvailabilityLocking"); if(navAvailabilityLocking) navAvailabilityLocking.classList.add("active"); __queueViewRender(() => { prepareAvailabilityLockingData(); }); }
+  else if (viewName === "allocationLocking") { activeSection = $("viewAllocationLocking"); if(navAllocationLocking) navAllocationLocking.classList.add("active"); __queueViewRender(() => { prepareAllocationLockingData(); }); }
+  else if (viewName === "healthyUnlocking") { activeSection = $("viewHealthyUnlocking"); if(navHealthyUnlocking) navHealthyUnlocking.classList.add("active"); __queueViewRender(() => { prepareHealthyUnlockingData(); }); }
+  else if (viewName === "mpSalesPlan") { activeSection = $("viewMpSalesPlan"); if(navMpSalesPlan) navMpSalesPlan.classList.add("active"); __queueViewRender(() => { prepareMpSalesPlanData(); }); }
+  else if (viewName === "spFeedback") { activeSection = $("viewSpFeedback"); if(navSpFeedback) navSpFeedback.classList.add("active"); __queueViewRender(() => { prepareSpFeedbackData(); }); }
+  else if (viewName === "mpMatches") { activeSection = $("viewMpMatches"); if(navMpMatches) navMpMatches.classList.add("active"); __queueViewRender(() => { prepareMpMatchesData(); }); }
+  else if (viewName === "mpNewMatches") { activeSection = $("viewMpNewMatches"); if(navMpNewMatches) navMpNewMatches.classList.add("active"); __queueViewRender(() => { prepareMpNewMatchesData(); }); }
+  else if (viewName === "mpDeclineWatch") { activeSection = $("viewMpDeclineWatch"); if(navMpDeclineWatch) navMpDeclineWatch.classList.add("active"); __queueViewRender(() => { prepareMpDeclineWatchData(); }); }
+  else if (viewName === "segmentation") { activeSection = $("viewSegmentationPanel"); if(navSegmentationPanel) navSegmentationPanel.classList.add("active"); __queueViewRender(() => { renderSegmentationPanel(); }); }
   else if (viewName === "sellthrough") {      
       activeSection = $("viewSellthroughPanel");      
       if(navSellthroughPanel) navSellthroughPanel.classList.add("active");            
-      simulateSellthroughProgress(); 
+      __queueViewRender(() => { simulateSellthroughProgress(); }); 
   }
   else if (viewName === "weeklyInventory") {
       activeSection = $("viewWeeklyInventory");
       if(navWeeklyInventory) navWeeklyInventory.classList.add("active");
-      renderWeeklyInventoryPanel();
+      __queueViewRender(() => { renderWeeklyInventoryPanel(); });
   }
   else if (viewName === "forecastModel") {
       activeSection = $("viewForecastModel");
       if(navForecastModel) navForecastModel.classList.add("active");
-      prepareForecastModelView(false);
+      __queueViewRender(() => { prepareForecastModelView(false); });
   }
   else if (viewName === "dohPlanner") {
       activeSection = $("viewDohPlanner");
       if(navDohPlanner) navDohPlanner.classList.add("active");
-      prepareDohPlannerData();
+      __queueViewRender(() => { prepareDohPlannerData(); });
   }
   else if (viewName === "incentiveMerchants") {
       activeSection = $("viewIncMerchants");
       if(navIncMerchants) navIncMerchants.classList.add("active");
-      renderIncentiveMerchantsPanel();
+      __queueViewRender(() => { renderIncentiveMerchantsPanel(); });
   }
 
   if (activeSection) {
@@ -1348,9 +1381,9 @@ if(navSpFeedback) navSpFeedback.addEventListener("click", () => switchView("spFe
 if(navMpMatches) navMpMatches.addEventListener("click", () => switchView("mpMatches"));
 if(navMpNewMatches) navMpNewMatches.addEventListener("click", () => switchView("mpNewMatches"));
 if(navMpDeclineWatch) navMpDeclineWatch.addEventListener("click", () => switchView("mpDeclineWatch"));
-if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => requestAdminAccess("segmentation"));
-if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => requestAdminAccess("sellthrough"));
-if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => requestAdminAccess("weeklyInventory"));
+if(navSegmentationPanel) navSegmentationPanel.addEventListener("click", () => switchView("segmentation"));
+if(navSellthroughPanel) navSellthroughPanel.addEventListener("click", () => switchView("sellthrough"));
+if(navWeeklyInventory) navWeeklyInventory.addEventListener("click", () => switchView("weeklyInventory"));
 if(navForecastModel) navForecastModel.addEventListener("click", () => requestAdminAccess("forecastModel"));
 if(navDohPlanner) navDohPlanner.addEventListener("click", () => switchView("dohPlanner"));
 if(navIncMerchants) navIncMerchants.addEventListener("click", () => switchView("incentiveMerchants"));
@@ -1680,6 +1713,9 @@ function computeSnapshotFingerprint(snapshot) {
   let segConfirmed = 0, segRowsCount = 0;
   (snapshot.merchantSegSourceRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
   (snapshot.merchantSegHistoryRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
+  const poRows = snapshot.productOnlyRows || []; let poPieces = 0; poRows.forEach(r => { poPieces += r.placedPieces || 0; });
+  let moPlaced = 0, moGmv = 0; const moRows = snapshot.merchantOnlyRows || [];
+  moRows.forEach(r => { moPlaced += r.placedOrders || 0; moGmv += r.deliveredGmv || 0; });
   const parts = [
     rows.length, Math.round(sumPlaced), Math.round(sumConfirmed), Math.round(sumDelivered),
     Math.round(sumGmv), Math.round(sumCm3), maxTs,
@@ -1687,7 +1723,7 @@ function computeSnapshotFingerprint(snapshot) {
     (snapshot.debundleMap || []).length, Object.keys(snapshot.singleSkuTargets || {}).length,
     (snapshot.inboundRows || []).length, (snapshot.newSegRows || []).length,
     (snapshot.availabilityLockingRows || []).length,
-    segRowsCount, Math.round(segConfirmed)
+    segRowsCount, Math.round(segConfirmed), moRows.length, Math.round(moPlaced), Math.round(moGmv), poRows.length, Math.round(poPieces)
   ];
   return parts.join("|");
 }
@@ -2003,7 +2039,7 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
   { section: "performanceAcm", table: "main", getRows: () => state.acmTableData || [] },
   // Targets Commercial — computeCommercialActuals(rows) دالة حسابية بحتة
   // (بترجع object لكل كاتيجوري + "grand total")، بنحولها لـ array من صفوف.
-  { section: "targetsCommercial", table: "main", getRows: () => { const actuals = computeCommercialActuals(state.allParsedRows || []); return Object.entries(actuals).map(([category, row]) => ({ category, ...row })); } },
+  { section: "targetsCommercial", table: "main", getRows: () => { const actuals = computeCommercialActuals(productLevelRows()); return Object.entries(actuals).map(([category, row]) => ({ category, ...row })); } },
   // CM3 Analyst / Products — cm3apDataAll متغير عام (مش جوه state) بيتحدث
   // جوه prepareCm3AnalystProductsData()، فبنناديها الأول.
   { section: "cm3AnalystProducts", table: "main", getRows: () => { prepareCm3AnalystProductsData(); return cm3apDataAll || []; } },
@@ -2052,7 +2088,12 @@ const COMPUTED_SNAPSHOT_REGISTRY = [
 // بيستنى تيك واحد من الـ event loop (macrotask) — بنستخدمها بين كل سكشن
 // والتاني تحت عشان نسيب فرصة للمتصفح يرسم/يستجيب (مايجمدش) بدل ما يحسب
 // الـ 27 سكشن كلهم ورا بعض في نفس الـ tick.
-function yieldToMainThread() { return new Promise(resolve => setTimeout(resolve, 0)); }
+// v1.17.1: لو المتصفح بيدعم scheduler.yield بنستخدمها — بتدي الأولوية للضغطات والسكرول اللي مستنية
+// وبعدين ترجع تكمّل الشغل في نفس مكانه، بدل ما تقف ورا أي timers تانية.
+function yieldToMainThread() {
+  try { if (window.scheduler && typeof scheduler.yield === "function") return scheduler.yield(); } catch (e) {}
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
 
 async function publishComputedSnapshots() {
   if (!PUBLISH_COMPUTED_API_URL) return; // disabled (لو الرابط فاضي)
@@ -3082,7 +3123,7 @@ function escapeHtml(str) {
 const ppmAnalystState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
 function preparePpmAnalystProductsData() {
-  const mainRowsAll = state.allParsedRows || [];
+  const mainRowsAll = productLevelRows();
 
   // "الشهر ده" = الشهر الحقيقي الحالي (تاريخ الجهاز)، بنفس فورمات monthYear
   // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
@@ -3336,7 +3377,7 @@ if ($("nextPagePpmAnalyst")) $("nextPagePpmAnalyst").addEventListener("click", (
 const ppmAnalystSingleState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
 function preparePpmAnalystSingleData() {
-  const mainRowsAll = state.allParsedRows || [];
+  const mainRowsAll = productLevelRows();
 
   const now = new Date();
   const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -3672,7 +3713,7 @@ if ($("nextPagePpmAnalystSingle")) $("nextPagePpmAnalystSingle").addEventListene
 const ANALYST_SINGLE_DAILY_WINDOW_DAYS = 30;
 
 function buildPpmAnalystSingleDailyRows() {
-  const mainRowsAll = state.allParsedRows || [];
+  const mainRowsAll = productLevelRows();
   if (!mainRowsAll.length) return [];
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4239,6 +4280,215 @@ function applyMerchantAcmToMainRows(rows, acmMap) {
   });
   console.info("[ACM] Main rows mapped to ACM: " + mapped + " · still Unassigned: " + missing + " rows (" + missingIds.size + " merchants)");
 }
+
+// ==== MERCHANT-ONLY BEGIN ====
+// v1.18.0 — Merchant Only (Metabase, MERCHANT_ONLY_GID). Columns: DAY, COUNTRY, TAGER_ID, TAGER_NAME, ACC_MANAGER,
+// TOTAL_GMV, TOTAL_PROFIT, PLACED_ORDERS, REMAINING_PLACED_ORDERS, CONFIRMED, REMAINING_CONFIRMED, DELIVERED,
+// CR, DR, NDR, PLACED_PIECES, CONFIRMED_PIECES, DELIVERED_PIECES, FIRST_ORDER_DATE.
+// Egypt only (IRQ/SAU/... GMV is in other currencies). Columns are found by name, so their order does not matter.
+// CR / DR / NDR are not read: they are plain ratios (Confirmed/Placed, Delivered/Confirmed, Delivered/Placed) and are
+// recomputed from the summed orders, exactly like every other table of the dashboard.
+// Merchants that are Egyptian but are tagged with another COUNTRY in the Merchant Only query (confirmed by the owner):
+// 1160154 = admin-service (tagged SAU there). Their rows are kept as Egypt.
+const MERCHANT_ONLY_EGY_MERCHANTS = new Set(["1160154"]);
+function parseMerchantOnlySheet(payload) {
+  const cols = (payload && payload.table && payload.table.cols) || [];
+  const ix = {};
+  cols.forEach((c, i) => { ix[String(c.label || "").trim().toUpperCase()] = i; });
+  const need = ["DAY", "COUNTRY", "TAGER_ID", "ACC_MANAGER", "PLACED_ORDERS", "CONFIRMED", "DELIVERED", "TOTAL_GMV"];
+  const missing = need.filter(k => ix[k] === undefined);
+  if (missing.length) throw new Error("Merchant Only is missing columns: " + missing.join(", "));
+  const g = (c, k) => (ix[k] === undefined ? null : c[ix[k]]);
+  const rows = [];
+  for (const r of ((payload.table && payload.table.rows) || [])) {
+    const c = r.c || [];
+    const merchantId = cellText(g(c, "TAGER_ID")).trim();
+    if (!merchantId) continue;
+    if (cellText(g(c, "COUNTRY")).trim().toUpperCase() !== "EGY" && !MERCHANT_ONLY_EGY_MERCHANTS.has(merchantId)) continue;
+    const dayStr = cellText(g(c, "DAY")).trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dayStr);
+    if (!m) continue;
+    const d = new Date(+m[1], +m[2] - 1, +m[3]);
+    rows.push({
+      day: m[0], ts: d.getTime(), monthYear: d.toLocaleString("en-US", { month: "long", year: "numeric" }),
+      country: "EGY", merchantId, merchantName: cellText(g(c, "TAGER_NAME")).trim(), acmName: cellText(g(c, "ACC_MANAGER")).trim(),
+      deliveredGmv: cellNumber(g(c, "TOTAL_GMV")), totalProfit: cellNumber(g(c, "TOTAL_PROFIT")),
+      placedOrders: cellNumber(g(c, "PLACED_ORDERS")), remainingPlacedOrders: cellNumber(g(c, "REMAINING_PLACED_ORDERS")),
+      confirmedOrders: cellNumber(g(c, "CONFIRMED")), remainingConfirmed: cellNumber(g(c, "REMAINING_CONFIRMED")),
+      deliveredOrders: cellNumber(g(c, "DELIVERED")),
+      placedPieces: cellNumber(g(c, "PLACED_PIECES")), confirmedPieces: cellNumber(g(c, "CONFIRMED_PIECES")), deliveredPieces: cellNumber(g(c, "DELIVERED_PIECES"))
+    });
+  }
+  return rows;
+}
+// Merchant Only rows of the month picked in the month filter ("All Months" = every month the query holds).
+// null when the query is not loaded or has nothing for that month -> callers fall back to the previous logic.
+function merchantOnlySelectedRows() {
+  if (!ACM_USES_MERCHANT_ONLY) return null;
+  const all = state.merchantOnlyRows || [];
+  if (!all.length) return null;
+  const m = $("monthSelect") ? $("monthSelect").value : "";
+  const rows = m ? all.filter(r => r.monthYear === m) : all;
+  return rows.length ? rows : null;
+}
+// ACM -> { placed, confirmed, delivered, deliveredGmv } for the selected month. Blank / "Unassigned" ACM rows are left out,
+// the same way the ACM table has always ignored unassigned merchants.
+function merchantOnlyByAcm() {
+  const rows = merchantOnlySelectedRows();
+  if (!rows) return null;
+  const map = new Map();
+  rows.forEach(r => {
+    const nm = r.acmName;
+    if (!nm || nm === "Unassigned" || nm === "-") return;
+    let e = map.get(nm);
+    if (!e) { e = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 }; map.set(nm, e); }
+    e.placed += r.placedOrders || 0; e.confirmed += r.confirmedOrders || 0; e.delivered += r.deliveredOrders || 0; e.deliveredGmv += r.deliveredGmv || 0;
+  });
+  return map;
+}
+// Merchants shown under an ACM row of Target ACM. With Merchant Only loaded, the actuals come from the same query as the ACM
+// row (so the ACM total = the sum of its merchants); targets / CM3 % / segment still come from the merchant table.
+function acmMerchantList(key) {
+  const byTarget = (x, y) => (y.targetGmv - x.targetGmv) || (y.deliveredGmv - x.deliveredGmv);
+  const merchants = state.merchantTableData || [];
+  const mo = merchantOnlySelectedRows();
+  if (!mo) return merchants.filter(m => normalizeName(m.tgtAcm || m.acm) === key && (m.targetGmv > 0 || m.deliveredGmv > 0 || m.placed > 0)).sort(byTarget);
+  const per = new Map();
+  mo.forEach(r => {
+    if (normalizeName(r.acmName) !== key) return;
+    let e = per.get(r.merchantId);
+    if (!e) { e = { id: r.merchantId, name: r.merchantName, placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 }; per.set(r.merchantId, e); }
+    e.name = r.merchantName || e.name;
+    e.placed += r.placedOrders || 0; e.confirmed += r.confirmedOrders || 0; e.delivered += r.deliveredOrders || 0; e.deliveredGmv += r.deliveredGmv || 0;
+  });
+  const byId = new Map(merchants.map(m => [m.id, m]));
+  const t = tgtTiming();
+  const build = (id, e) => {
+    const b = byId.get(id) || {};
+    const tm = tgtMetrics(b.targetGmv || 0, b.targetPlaced || 0, e.deliveredGmv, e.placed, t);
+    return Object.assign({}, b, tm, {
+      id, name: e.name || b.name || id, placed: e.placed, confirmed: e.confirmed, delivered: e.delivered, deliveredGmv: e.deliveredGmv,
+      ndr: e.placed ? (e.delivered / e.placed) * 100 : 0, ndrPct: null
+    });
+  };
+  const out = [];
+  per.forEach((e, id) => out.push(build(id, e)));
+  // merchants that have a target under this ACM but no orders under it in Merchant Only
+  merchants.forEach(m => { if (!per.has(m.id) && normalizeName(m.tgtAcm || m.acm) === key && m.targetGmv > 0) out.push(build(m.id, { name: m.name, placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 })); });
+  return out.filter(m => m.targetGmv > 0 || m.deliveredGmv > 0 || m.placed > 0).sort(byTarget);
+}
+// ==== MERCHANT-ONLY END ====
+
+// ==== PRODUCT-ONLY BEGIN ====
+// v1.18.0 — Product Only (Metabase, PRODUCT_ONLY_GID). Columns are found by name (130 of them; the ones used here are listed in PO_COLS).
+// A product-day has two rows: IS_PRIMARY=true (orders + the pieces of orders led by this product) and IS_PRIMARY=false (extra pieces of this product
+// inside other products' orders, orders = 0). Both are added, so a product-day becomes ONE row in the same shape as a Main row (merchantId "").
+// Not in the query: CATEGORY -> taken from the Main rows / Products Info of the same SKU ("Uncategorized" when neither knows it).
+const PO_COLS = {
+  placedOrders: "PLC_ORDERS_ACTUAL", confirmedOrders: "CNF_ORDERS_ACTUAL", deliveredOrders: "DLV_ORDERS_ACTUAL",
+  placedPieces: "PLC_PIECES_ACTUAL", confirmedPieces: "CNF_PIECES_ACTUAL", deliveredPieces: "DLV_PIECES_ACTUAL",
+  placedGmv: "GROSS_PLACED_GMV", confirmedGmv: "GROSS_CONFIRMED_GMV", deliveredGmv: "GROSS_DELIVERED_GMV",
+  ppm: "TOTAL_PPM_DELIVERED", cm3: "TOTAL_CM3_DELIVERED"
+};
+function buildCategoryBySku(mainRows, productsInfoRows) {
+  const m = new Map();
+  (mainRows || []).forEach(r => { if (r.sku && r.category && r.category !== "Uncategorized" && !m.has(r.sku)) m.set(r.sku, r.category); });
+  (productsInfoRows || []).forEach(r => { if (r.PRODUCT_ID && r.CATEGORY_L1 && !m.has(r.PRODUCT_ID)) m.set(r.PRODUCT_ID, String(r.CATEGORY_L1).trim().toUpperCase()); });
+  return m;
+}
+// SKU -> product name (the query has no name column): Main rows first, then Products Info.
+function buildNameBySku(mainRows, productsInfoRows) {
+  const m = new Map();
+  (mainRows || []).forEach(r => { if (r.sku && r.productName && !m.has(r.sku)) m.set(r.sku, r.productName); });
+  (productsInfoRows || []).forEach(r => { if (r.PRODUCT_ID && r.PRODUCT_NAME && !m.has(r.PRODUCT_ID)) m.set(r.PRODUCT_ID, String(r.PRODUCT_NAME).trim()); });
+  return m;
+}
+function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
+  const cols = (payload && payload.table && payload.table.cols) || [];
+  const ix = {};
+  cols.forEach((c, i) => { ix[String(c.label || "").trim().toUpperCase()] = i; });
+  const missing = ["DATE_GROUP", "PRODUCT_ID"].concat(Object.keys(PO_COLS).map(k => PO_COLS[k])).filter(k => ix[k] === undefined);
+  if (missing.length) throw new Error("Product Only is missing columns: " + missing.join(", "));
+  const at = (c, k) => c[ix[k]];
+  const byKey = new Map();
+  for (const r of ((payload.table && payload.table.rows) || [])) {
+    const c = r.c || [];
+    const dateStr = cellText(at(c, "DATE_GROUP")).trim().slice(0, 10), sku = cellText(at(c, "PRODUCT_ID")).trim();
+    if (!dateStr || !sku) continue;
+    const key = dateStr + "|" + sku;
+    let o = byKey.get(key);
+    if (!o) {
+      const d = new Date(dateStr);   // same parsing as parseMainSheet, so every date cut-off behaves the same
+      o = { date: dateStr, monthYear: isNaN(d.getTime()) ? "Unknown Month" : d.toLocaleString("en-US", { month: "long", year: "numeric" }), timestamp: isNaN(d.getTime()) ? 0 : d.getTime(),
+        merchantId: "", merchantName: "All merchants", sku, productName: (ix["PRODUCT_NAME"] === undefined ? "" : cellText(at(c, "PRODUCT_NAME")).trim()) || (nameBySku && nameBySku.get(sku)) || "",
+        category: (categoryBySku && categoryBySku.get(sku)) || "Uncategorized", acmName: "Unassigned", source: "productOnly" };
+      Object.keys(PO_COLS).forEach(k => { o[k] = 0; });
+      byKey.set(key, o);
+    }
+    Object.keys(PO_COLS).forEach(k => { o[k] += cellNumber(at(c, PO_COLS[k])); });
+  }
+  const rows = Array.from(byKey.values());
+  rows.forEach(o => {   // ratios are not stored in the query per product-day after merging, so they are the plain ratios of the sums (same definitions as the Main columns)
+    const div = (a, b) => (b > 0 ? a / b : 0);
+    o.crPcs = div(o.confirmedPieces, o.placedPieces); o.drPcs = div(o.deliveredPieces, o.confirmedPieces); o.ndrPcs = div(o.deliveredPieces, o.placedPieces);
+    o.placedAsp = div(o.placedGmv, o.placedPieces); o.deliveredAsp = div(o.deliveredGmv, o.deliveredPieces); o.ppmPerPiece = div(o.ppm, o.deliveredPieces);
+  });
+  return rows;
+}
+// "main" | "po": which rows the product-level + category pages read. Product Only is used whenever it is loaded; the Settings switch can force Main.
+// A Merchant-role user always reads Main (their own merchant's rows) — Product Only is company-wide.
+function productMode() {
+  let forced = ""; try { forced = localStorage.getItem("poMode") || ""; } catch (e) {}
+  let scoped = false; try { scoped = !!(window.TowerCore && window.TowerCore.merchantScope && window.TowerCore.merchantScope()); } catch (e) {}
+  return (forced === "main" || scoped || !(state.productOnlyRows && state.productOnlyRows.length)) ? "main" : "po";
+}
+function productLevelRows() { return productMode() === "po" ? state.productOnlyRows : (state.allParsedRows || []); }
+// Over View cards (numbers, Pipeline Velocity, Avg Placed Pcs, category chart, top products): rows of the selected month.
+// Product Only is used for every month it holds; a month it does not hold (older months) keeps coming from the Main rows.
+// With an ACM filter, or for a Merchant-role user, they stay on Main (Product Only has no ACM / merchant).
+// `rows` = the Main rows already filtered by the month / ACM filters (what updateDashboard receives).
+function overviewRowsFor(rows) {
+  if (productMode() !== "po") return rows;
+  const acm = $("acmSelect") ? $("acmSelect").value : "All"; if (acm !== "All") return rows;
+  const m = $("monthSelect") ? $("monthSelect").value : "";
+  const po = state.productOnlyRows, poMonths = new Set(po.map(r => r.monthYear));
+  if (m) return poMonths.has(m) ? po.filter(r => r.monthYear === m) : rows;
+  return po.concat(rows.filter(r => !poMonths.has(r.monthYear)));
+}
+// Main vs Product Only totals per month (for the reconciliation table in Control > Settings)
+function productSourceCheck() {
+  const sum = (rows) => { const o = {}; (rows || []).forEach(r => { const m = r.monthYear; const e = o[m] || (o[m] = { placedPieces: 0, deliveredPieces: 0, placedOrders: 0, deliveredOrders: 0, deliveredGmv: 0, cm3: 0, ppm: 0 });
+    Object.keys(e).forEach(k => { e[k] += r[k] || 0; }); }); return o; };
+  const a = sum(state.allParsedRows), b = sum(state.productOnlyRows);
+  return Object.keys(b).filter(m => a[m]).sort((x, y) => new Date(x) - new Date(y)).map(m => ({ month: m, main: a[m], po: b[m] }));
+}
+function poSettingsCardHtml() {
+  const has = !!(state.productOnlyRows && state.productOnlyRows.length), mode = productMode();
+  let forced = ""; try { forced = localStorage.getItem("poMode") || ""; } catch (e) {}
+  const lab = { placedPieces: "Placed pieces", deliveredPieces: "Delivered pieces", placedOrders: "Placed orders", deliveredOrders: "Delivered orders", deliveredGmv: "Delivered GMV", cm3: "CM3", ppm: "PPM" };
+  const fmt = (v) => Math.round(v).toLocaleString("en-US");
+  let table = '<div class="tw-muted">Product Only has not loaded on this device (the Worker needs the new version, or the query failed) — the pages are on Main.</div>';
+  if (has) {
+    const chk = productSourceCheck();
+    table = chk.length ? '<div class="table-responsive" style="margin-top:10px"><table class="data-table" style="width:100%"><thead><tr><th>Month</th><th>Metric</th><th class="num">Main</th><th class="num">Product Only</th><th class="num">Difference</th></tr></thead><tbody>' +
+      chk.map(c => Object.keys(lab).map((k, i) => { const d = c.main[k] ? ((c.po[k] - c.main[k]) / c.main[k]) * 100 : 0;
+        return "<tr><td>" + (i === 0 ? c.month : "") + "</td><td>" + lab[k] + '</td><td class="num">' + fmt(c.main[k]) + '</td><td class="num">' + fmt(c.po[k]) + '</td><td class="num" style="font-weight:700;color:var(--' + (Math.abs(d) < 0.5 ? "green" : (Math.abs(d) < 3 ? "orange" : "red")) + ')">' + (d > 0 ? "+" : "") + d.toFixed(1) + "%</td></tr>"; }).join("")).join("") + "</tbody></table></div>"
+      : '<div class="tw-muted">No month is in both sources yet.</div>';
+  }
+  return '<div class="tw-card" id="poCard" style="margin-top:14px"><h3>Product &amp; category pages — data source</h3>' +
+    '<div class="tw-muted">PPM Analyst / Products, Analyst / Single, CM3 Analyst / Products, Commercial Plan, Targets (category numbers), the Overview category chart, the Supply Chain pages and Planner DOH read the <b>Product Only</b> query. Match, merchant and ACM pages are not affected. Orders in Product Only are counted once per order (Main adds an order to every product inside it).</div>' +
+    '<div style="display:flex;gap:18px;margin:12px 0;flex-wrap:wrap"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="radio" name="poMode" value="po"' + (forced !== "main" ? " checked" : "") + '> Product Only' + (has ? "" : " (not loaded)") + '</label>' +
+    '<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="radio" name="poMode" value="main"' + (forced === "main" ? " checked" : "") + '> Main (previous behaviour)</label><span class="tw-muted" id="poNow">Now reading: ' + (mode === "po" ? "Product Only" : "Main") + " · saved on this browser</span></div>" + table + "</div>";
+}
+function poSettingsWire(host) {
+  host.querySelectorAll('input[name="poMode"]').forEach(r => { r.onchange = function () {
+    try { localStorage.setItem("poMode", r.value); } catch (e) {}
+    const n = document.getElementById("poNow"); if (n) n.textContent = "Now reading: " + (productMode() === "po" ? "Product Only" : "Main") + " · saved on this browser";
+    try { applyFilters(); } catch (e) {}
+  }; });
+}
+// ==== PRODUCT-ONLY END ====
+
 // SKU_ID -> مجموع TOTAL_COUNT لصفوف Condition = "Good item" (شيت WareHouse: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE, Condition, TOTAL_COUNT)
 function parseWarehouseGoodStock(payload) {
   const map = new Map();
@@ -4742,42 +4992,56 @@ async function applyFilters() {
 // كل خطوة، فمتصفح المستخدم متجمدش (freeze) وهو بيحمّل الداتا الجديدة، خصوصاً
 // في اللحظة اللي بيجيب فيها snapshot جديد ويبني كل الجداول من الأول.
 async function updateDashboard(rows) {
-  const metrics = computeMetrics(rows);
+  // v1.17.1: نفس الخطوات بنفس الترتيب بالظبط — بس بقى فيه yield بين كل خطوة تقيلة والتانية (مش كل
+  // مجموعة)، فأطول وقت المتصفح ممكن يقفه هو وقت خطوة واحدة، والضغطات/التنقل بيتنفذوا ما بينهم.
+  // لو اتنادت تاني (فلتر جديد / داتا جديدة) وهي لسه شغالة، القديمة بتقف عند أول yield بدل ما الاتنين يكملوا
+  const tok = updateDashboard._tok = (updateDashboard._tok || 0) + 1;
+  const Y = async () => { await yieldToMainThread(); return tok !== updateDashboard._tok; };
+  const isActive = (id) => { const el = $(id); return !!(el && el.classList.contains("active-view")); };
+  const ovRows = overviewRowsFor(rows);   // Over View cards read Product Only (see overviewRowsFor); every table below keeps `rows`
+  const metrics = computeMetrics(ovRows);
   if($("deliveredGmvVal")) $("deliveredGmvVal").textContent = fmtMoneyCompact(metrics.deliveredGmv);
   if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: ${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
   if($("crVal")) $("crVal").textContent = fmtPct(metrics.cr);
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
-  renderOverviewHero(rows, metrics); renderPipelineChart(rows); renderCategoryChart(rows);
+  renderOverviewHero(ovRows, metrics); if (await Y()) return;
+  renderPipelineChart(ovRows); if (await Y()) return;
+  renderOvTopProducts(ovRows); renderOvCategoryContr(ovRows);
   if (!state._ovStTrendDone && $("ovStTrendChart")) { state._ovStTrendDone = true; setTimeout(() => renderSellthroughTrendChart(OV_ST_TREND_CFG), 60); }
-  await yieldToMainThread();
-  prepareMerchantTableData(rows); prepareAcmTableData(rows); prepareMpSalesPlanData(); prepareInventoryTableData(rows);
-  await yieldToMainThread();
-  if ($("viewTargetsCommercial") && $("viewTargetsCommercial").classList.contains("active-view")) renderTargetsCommercialView();
-  if ($("viewCommercialDebundlized") && $("viewCommercialDebundlized").classList.contains("active-view")) prepareCommercialDebundlizedData();
-  if ($("viewPurchasePlan") && $("viewPurchasePlan").classList.contains("active-view")) preparePurchasePlanData();
-  if ($("viewCm3AnalystProducts") && $("viewCm3AnalystProducts").classList.contains("active-view")) prepareCm3AnalystProductsData();
-  if ($("viewPpmAnalystProducts") && $("viewPpmAnalystProducts").classList.contains("active-view")) preparePpmAnalystProductsData();
-  if ($("viewPpmAnalystSingle") && $("viewPpmAnalystSingle").classList.contains("active-view")) preparePpmAnalystSingleData();
-  if ($("viewProductsMatchesAnalyst") && $("viewProductsMatchesAnalyst").classList.contains("active-view")) prepareProductsMatchesAnalystData();
-  // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
-  if ($("viewCm3Analyst") && $("viewCm3Analyst").classList.contains("active-view")) { renderCm3TargetView(); renderCm3AnalystView(); }
-  await yieldToMainThread();
-  if ($("viewMpMatches") && $("viewMpMatches").classList.contains("active-view")) prepareMpMatchesData();
-  if ($("viewMpNewMatches") && $("viewMpNewMatches").classList.contains("active-view")) prepareMpNewMatchesData();
-  if ($("viewMpDeclineWatch") && $("viewMpDeclineWatch").classList.contains("active-view")) prepareMpDeclineWatchData();
-  if ($("viewSpFeedback") && $("viewSpFeedback").classList.contains("active-view")) prepareSpFeedbackData();
-  // الأقسام دي مكنتش بترندر تلقائي مع باقي الفلاتر (كانت بس بترندر أول ما
-  // تتفتح من القائمة) — ضفتها هنا عشان فلتر الـ Date Range الجديد (وأي فلتر
-  // تاني فوق الصفحة) يفضل شغال عليها لايف لو كانت هي التاب المفتوح دلوقتي.
-  if ($("viewAvailabilityLocking") && $("viewAvailabilityLocking").classList.contains("active-view")) prepareAvailabilityLockingData();
-  if ($("viewAllocationLocking") && $("viewAllocationLocking").classList.contains("active-view")) prepareAllocationLockingData();
-  if ($("viewHealthyUnlocking") && $("viewHealthyUnlocking").classList.contains("active-view")) prepareHealthyUnlockingData();
-  if ($("viewPoorMatches") && $("viewPoorMatches").classList.contains("active-view")) preparePoorMatchesData();
-  if ($("viewIncMerchants") && $("viewIncMerchants").classList.contains("active-view")) renderIncentiveMerchantsPanel();
-  await yieldToMainThread();
-  applyTableSearchAndSort();
-  try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) {} applyMerchantSearchAndSort(); applySegSearchAndSort(); applyInventorySearchAndSort();
+  if (await Y()) return;
+  prepareMerchantTableData(rows); if (await Y()) return;
+  prepareAcmTableData(rows); if (await Y()) return;
+  prepareMpSalesPlanData(); if (await Y()) return;
+  prepareInventoryTableData(rows); if (await Y()) return;
+  const steps = [
+    ["viewTargetsCommercial", () => renderTargetsCommercialView()],
+    ["viewCommercialDebundlized", () => prepareCommercialDebundlizedData()],
+    ["viewPurchasePlan", () => preparePurchasePlanData()],
+    ["viewCm3AnalystProducts", () => prepareCm3AnalystProductsData()],
+    ["viewPpmAnalystProducts", () => preparePpmAnalystProductsData()],
+    ["viewPpmAnalystSingle", () => preparePpmAnalystSingleData()],
+    ["viewProductsMatchesAnalyst", () => prepareProductsMatchesAnalystData()],
+    // CM3 Target بقت سكشن جوه CM3 Analyst — لازم الاتنين يترندروا مع بعض.
+    ["viewCm3Analyst", () => { renderCm3TargetView(); renderCm3AnalystView(); }],
+    ["viewMpMatches", () => prepareMpMatchesData()],
+    ["viewMpNewMatches", () => prepareMpNewMatchesData()],
+    ["viewMpDeclineWatch", () => prepareMpDeclineWatchData()],
+    ["viewSpFeedback", () => prepareSpFeedbackData()],
+    // الأقسام دي بترندر مع الفلاتر لو هي التاب المفتوح دلوقتي (عشان فلتر الـ Date Range وأي فلتر فوق الصفحة).
+    ["viewAvailabilityLocking", () => prepareAvailabilityLockingData()],
+    ["viewAllocationLocking", () => prepareAllocationLockingData()],
+    ["viewHealthyUnlocking", () => prepareHealthyUnlockingData()],
+    ["viewPoorMatches", () => preparePoorMatchesData()],
+    ["viewIncMerchants", () => renderIncentiveMerchantsPanel()]
+  ];
+  for (const [id, fn] of steps) { if (isActive(id)) { fn(); if (await Y()) return; } }
+  applyTableSearchAndSort(); if (await Y()) return;
+  try { renderAcmTargetsView(); } catch (e) {} if (await Y()) return;
+  try { renderMerchantTargetsView(); } catch (e) {} if (await Y()) return;
+  applyMerchantSearchAndSort(); if (await Y()) return;
+  applySegSearchAndSort(); if (await Y()) return;
+  applyInventorySearchAndSort();
 }
 
 // v1.17.0 — Overview "Delivered GMV" Run Rate up to YESTERDAY: today is still in progress, so when the data
@@ -5015,6 +5279,13 @@ function renderPaginatedInventoryTable() {
 }
 
 function prepareAcmTableData(rows) {
+  // v1.18.0 — orders + Delivered GMV per ACM come from Merchant Segmentation (the owner chose it as the GMV definition);
+  // flip ACM_USES_MERCHANT_ONLY to read Merchant Only (Egypt, daily) instead. Months older than the query
+  // (Jan-Aug) come from the history tab (FORECAST_HISTORY_GID) through the merchant -> current ACM link.
+  const moAcm = merchantOnlyByAcm();
+  const __selMonthAcm = $("monthSelect") ? $("monthSelect").value : "";
+  let __histAcm = false;
+  if (!moAcm && __selMonthAcm && hist.months.indexOf(__selMonthAcm) >= 0) { __histAcm = true; histLoadMonth(__selMonthAcm); rows = hist.rows.get(__selMonthAcm) || []; }
   window.__acmRows = rows;
   const map = new Map();
   // Metric cutoffs (Settings): CR بيحسب على الأوردرات الأقدم من D-cr، و DR على الأقدم من D-dr.
@@ -5037,9 +5308,9 @@ function prepareAcmTableData(rows) {
   // v1.15.38: أرقام الأوردرات (Placed/Confirmed/Delivered/Delivered GMV) بتتقرا من كويري Merchant Segmentation
   // (Metabase) مجمّعة بالـ ACM — بدل الشيت الرئيسي (Main). CM3 و PPM لسه من Main (مش في الكويري).
   // لو الكويري فاضية بنفضل على Main.
-  if ((state.merchantSegSourceRows || []).length) {
-    const segByAcm = new Map();
-    (state.merchantTableData || []).forEach(mm => {
+  if (!__histAcm && (moAcm || (state.merchantSegSourceRows || []).length)) {
+    const segByAcm = moAcm || new Map();
+    if (!moAcm) (state.merchantTableData || []).forEach(mm => {
       const nm = mm.acm; if (!nm || nm === "Unassigned") return;
       if (!segByAcm.has(nm)) segByAcm.set(nm, { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0 });
       const e = segByAcm.get(nm); e.placed += mm.placed || 0; e.confirmed += mm.confirmed || 0; e.delivered += mm.delivered || 0; e.deliveredGmv += mm.deliveredGmv || 0;
@@ -5192,7 +5463,7 @@ function acmTgtGroups() {
     { t: "Delivered GMV", c: "blue", w: K.gmv.weight, cols: [
       C("targetGmv", "Target", "Sum of this ACM's merchants' full-month GMV targets."),
       C("mtdTargetGmv", "MTD Target", "Full-month GMV target pro-rated to the days elapsed up to yesterday."),
-      C("deliveredGmv", "Actual", "Delivered GMV so far this month (Segmentation query)."),
+      C("deliveredGmv", "Actual", (ACM_USES_MERCHANT_ONLY ? "Delivered GMV so far this month (Merchant Only query, Egypt)." : "Delivered GMV so far this month (Merchant Segmentation query).")),
       C("runRate", "Run Rate (EOM)", "Projected end-of-month delivered GMV at the current daily pace."),
       C("gmvMtdPct", "Ach % (MTD)", "Actual \u00f7 MTD target (full-month target pro-rated to the days elapsed up to yesterday)."),
       C("gmvScore", "Score", "Points earned out of this KPI's weight (" + K.gmv.weight + "), from the MTD Ach %.")
@@ -5241,7 +5512,7 @@ function wireTgtHead(kind) {
 }
 function acmMerchantRows(a) {
   const B = ACM_GRP_BORDER; const K = state.acmKpis; const key = normalizeName(a.name);
-  const list = (state.merchantTableData || []).filter(m => normalizeName(m.tgtAcm || m.acm) === key && (m.targetGmv > 0 || m.deliveredGmv > 0 || m.placed > 0)).sort((x, y) => (y.targetGmv - x.targetGmv) || (y.deliveredGmv - x.deliveredGmv));
+  const list = acmMerchantList(key);
   const bg = "background:rgba(120,140,170,.08);";
   const out = list.map(m => {
     const tr = document.createElement("tr"); const hasG = m.targetGmv > 0;
@@ -5822,16 +6093,49 @@ function renderPipelineChart(rows) {
   });
 }
 
-function renderCategoryChart(rows) {
-  const catCanvas = document.getElementById('categoryChart'); if(!catCanvas) return; const ctx = catCanvas.getContext('2d');
-  const catData = {}; rows.forEach(r => { if(!catData[r.category]) catData[r.category] = 0; catData[r.category] += r.confirmedOrders; });
-  const sortedCats = Object.keys(catData).map(key => ({ category: key, value: catData[key] })).sort((a, b) => b.value - a.value);
-  const labels = sortedCats.map(item => item.category); const dataValues = sortedCats.map(item => item.value);
-  if (categoryChartInst) categoryChartInst.destroy();
-  categoryChartInst = new Chart(ctx, {
-    type: 'bar',
-    data: { labels: labels, datasets: [{ label: 'Confirmed Demand', data: dataValues, backgroundColor: '#8b5cf6', borderRadius: 4 }] },
-    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1e293b', titleColor: '#f8fafc', bodyColor: '#c4b5fd', borderColor: '#334155', borderWidth: 1, padding: 10, displayColors: false } }, scales: { x: { grid: { color: '#1e293b', borderDash: [4, 4], drawBorder: false }, ticks: { callback: (v) => v >= 1000 ? (v/1000)+'k' : v } }, y: { grid: { display: false, drawBorder: false }, ticks: { color: '#e2e8f0', font: { weight: '500' } } } } }
+// Over View — "Top Products": the 10 products with the most Delivered GMV, each with its share of the total Delivered GMV of the same rows.
+function renderOvTopProducts(rows) {
+  const host = $("ovTopProducts"); if (!host) return;
+  const by = new Map(); let total = 0;
+  rows.forEach(r => {
+    const g = r.deliveredGmv || 0; total += g;
+    if (!r.sku) return;
+    let e = by.get(r.sku); if (!e) { e = { sku: r.sku, name: "", category: "", gmv: 0, pcs: 0 }; by.set(r.sku, e); }
+    e.gmv += g; e.pcs += r.deliveredPieces || 0; if (!e.name && r.productName) e.name = r.productName; if (!e.category && r.category && r.category !== "Uncategorized") e.category = r.category;
+  });
+  const top = Array.from(by.values()).filter(e => e.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 10);
+  const sub = $("ovTopProductsSub"); if (sub) sub.textContent = top.length ? `Top ${top.length} by Delivered GMV · share of all ${fmtMoneyCompact(total)}` : "Top products by Delivered GMV";
+  if (!top.length) { host.innerHTML = '<div class="ov-empty">No delivered GMV for this selection.</div>'; return; }
+  const maxShare = top[0].gmv / total;
+  host.innerHTML = '<div class="ov-top-h"><span>#</span><span>Product</span><span class="r">Delivered GMV</span><span>Share of GMV</span><span class="r">Pieces</span></div>' + top.map((e, i) => {
+    const share = total > 0 ? e.gmv / total : 0;
+    return `<div class="ov-top-r"><span class="ov-top-i">${i + 1}</span>` +
+      `<span class="ov-top-n"><b title="${escapeHtml(e.name || e.sku)}">${escapeHtml(e.name || e.sku)}</b><small>${escapeHtml(e.sku)}${e.category ? " · " + escapeHtml(e.category) : ""}</small></span>` +
+      `<span class="r">${fmtMoneyCompact(e.gmv)}</span>` +
+      `<span class="ov-top-b"><i style="width:${(maxShare > 0 ? (share / maxShare) * 100 : 0).toFixed(1)}%"></i><em>${(share * 100).toFixed(1)}%</em></span>` +
+      `<span class="r">${fmtInt.format(Math.round(e.pcs))}</span></div>`;
+  }).join("");
+}
+
+// Over View — category contribution: a pie of each category's share (%) of the total Delivered GMV of the same rows (the slices add up to 100%).
+const OV_CAT_COLORS = ["#8b5cf6", "#34d399", "#60a5fa", "#fbbf24", "#f472b6", "#fb923c", "#2dd4bf", "#a3e635", "#f87171", "#818cf8", "#e879f9", "#94a3b8"];
+function ovCatColor(i) { return i < OV_CAT_COLORS.length ? OV_CAT_COLORS[i] : `hsl(${Math.round((i * 137.508) % 360)}, 62%, 56%)`; }
+function renderOvCategoryContr(rows) {
+  const cv = document.getElementById("ovCatChart"); if (!cv || typeof Chart === "undefined") return;
+  const by = {}; let total = 0;
+  rows.forEach(r => { const g = r.deliveredGmv || 0; if (!g) return; const c = r.category || "Uncategorized"; by[c] = (by[c] || 0) + g; total += g; });
+  const cats = Object.keys(by).map(k => ({ category: k, gmv: by[k], pct: total > 0 ? (by[k] / total) * 100 : 0 })).sort((a, b) => b.gmv - a.gmv);
+  const sub = $("ovCatSub"); if (sub) sub.textContent = cats.length ? `Share of Delivered GMV (${fmtMoneyCompact(total)}) · ${cats.length} categories` : "Share of Delivered GMV by category";
+  const lg = $("ovCatLegend");
+  if (lg) lg.innerHTML = cats.length ? cats.map((c, i) => `<div class="ov-pie-li"><i style="background:${ovCatColor(i)}"></i><span title="${escapeHtml(c.category)}">${escapeHtml(c.category)}</span><b>${c.pct.toFixed(1)}%</b></div>`).join("") : '<div class="ov-empty">No delivered GMV for this selection.</div>';
+  if (categoryChartInst) { categoryChartInst.destroy(); categoryChartInst = null; }
+  if (!cats.length) return;
+  categoryChartInst = new Chart(cv.getContext("2d"), {
+    type: "pie",
+    data: { labels: cats.map(c => c.category), datasets: [{ label: "Share of Delivered GMV", data: cats.map(c => +c.pct.toFixed(2)), backgroundColor: cats.map((c, i) => ovCatColor(i)), borderColor: "rgba(15,23,42,.55)", borderWidth: 1 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: "#1e293b", titleColor: "#f8fafc", bodyColor: "#c4b5fd", borderColor: "#334155", borderWidth: 1, padding: 10,
+        callbacks: { label: (ctx) => ` ${cats[ctx.dataIndex].pct.toFixed(2)}% · ${fmtMoneyCompact(cats[ctx.dataIndex].gmv)}` } } } }
   });
 }
 
@@ -5916,6 +6220,7 @@ function histLoadMonth(label) {
         const act = (id) => { const v = document.getElementById(id); return v && v.classList.contains("active-view"); };
         if (act("viewCm3Analyst")) { renderCm3TargetView(); renderCm3AnalystView(); }
         if (act("viewPoorMatches")) preparePoorMatchesData();
+        if (act("viewAcmPerformance") || act("viewAcmTargets")) { try { applyFilters(); } catch (e) {} }
       }, 500);
     });
 }
@@ -6391,7 +6696,7 @@ function tcUpdateKpiCard(prefix, targetPct, actualPct) {
 function renderTargetsCommercialView() {
   const cat = state.tcCategory || "grand total";
   const targetRow = state.commercialTargets ? state.commercialTargets[cat] : null;
-  const actuals = computeCommercialActuals(state.allParsedRows || []);
+  const actuals = computeCommercialActuals(productLevelRows());
   const actualRow = actuals[cat];
 
   if ($("tcTableTitle")) $("tcTableTitle").textContent = `Targets Commercial — ${TC_CATEGORY_LABELS[cat] || cat}`;
@@ -7066,7 +7371,7 @@ function computeCommercialDebundlized(opts) {
     }
   });
 
-  const mainRowsAll = state.allParsedRows || [];
+  const mainRowsAll = productLevelRows();
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
   const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialDebundlized")) && (selectedAcm === "All" || r.acmName === selectedAcm));
@@ -7856,7 +8161,7 @@ function cm3apSeriesFmtCell(v, fmt) {
 
 function buildCm3ApSeriesData(periodMode) {
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = (state.allParsedRows || []).filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
+  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
   if (!rows.length) return { skuList: [], periodLabels: [] };
 
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
@@ -7948,7 +8253,7 @@ function buildCm3AnalystProductsData(periodMode) {
   // بيحترم فلتر الشهر العام اللي فوق الموقع (نفس شيت monthSelect المستخدم في كل
   // سكشن تاني) — لو مفيش شهر مختار (All Months) بيدي كل الداتا زي ما هي.
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
-  const rows = (state.allParsedRows || []).filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
+  const rows = productLevelRows().filter(r => rowMatchesPeriod(r, selectedMonth, "cm3AnalystProducts"));
   if (!rows.length) return { products: [], latestPeriod: null, prevPeriod: null };
   const cm3Cutoff = getCm3LagCutoffTimestamp(rows);
   const crCutoff = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين المستخدمين لـ CR% في أي مكان تاني
@@ -8003,7 +8308,7 @@ function buildCm3AnalystProductsData(periodMode) {
   // المختار)، عشان لو لسه في أول الشهر وفيه أسبوع واحد بس، المقارنة تبقى مع آخر
   // أيام الشهر اللي قبله بدل ما تفضل فاضية.
   let maxTs = 0; rows.forEach(r => { if (r.timestamp > maxTs) maxTs = r.timestamp; });
-  (state.allParsedRows || []).forEach(r => {
+  productLevelRows().forEach(r => {
     if (!r.sku || r.timestamp > maxTs) return;
     const rd = new Date(r.timestamp); rd.setHours(0, 0, 0, 0);
     const wPeriod = cm3apPeriodKeyForRow(rd, "weekly");
@@ -16711,6 +17016,8 @@ const GID_LABELS = {
   [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
+  [MERCHANT_ONLY_GID]: "Merchant Only (ACM Performance / Target ACM)",
+  [PRODUCT_ONLY_GID]: "Product Only (product + category pages)",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
   [SUPPLY_REPACK_GID]: "Repack (Supply Conversion)",
@@ -16897,7 +17204,19 @@ async function fetchAllSheetsSnapshot() {
   // v1.3.48: ACM مش موجود في Main بتاع Metabase — بنبنيه من Merchant Segmentation / Merchant SKU Daily.
   const merchantSegRowsNow = merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows;
   const merchantSkuDailyRowsNow = merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows;
+  // v1.18.0 — Merchant Only (ACM pages). If it fails to load / parse, the previous rows stay and the ACM pages fall back to the old source.
+  let merchantOnlyRowsNow = state.merchantOnlyRows || [];
+  if (ACM_USES_MERCHANT_ONLY) try { const moPayload = sheets[MERCHANT_ONLY_GID]; if (moPayload) merchantOnlyRowsNow = parseMerchantOnlySheet(moPayload); else if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
+  catch (e) { console.warn("[Merchant Only]", e && e.message || e); if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
   applyMerchantAcmToMainRows(allParsedRows, buildMerchantAcmMap(merchantSegRowsNow, merchantSkuDailyRowsNow));
+
+  // v1.18.0 — Product Only (product / category pages). If it fails to load / parse, the previous rows stay and the pages read Main.
+  let productOnlyRowsNow = state.productOnlyRows || [];
+  try {
+    const poPayload = sheets[PRODUCT_ONLY_GID];
+    if (poPayload) { const pi = prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload) : state.metabaseProductsInfo; productOnlyRowsNow = parseProductOnlySheet(poPayload, buildCategoryBySku(allParsedRows, pi), buildNameBySku(allParsedRows, pi)); }
+    else if (staleGids.indexOf(PRODUCT_ONLY_GID) < 0) staleGids.push(PRODUCT_ONLY_GID);
+  } catch (e) { console.warn("[Product Only]", e && e.message || e); if (staleGids.indexOf(PRODUCT_ONLY_GID) < 0) staleGids.push(PRODUCT_ONLY_GID); }
 
   // شيت CAT_TARGETS_GID بيتقرا مرة واحدة بس (parseCommercialTargetsSheet)،
   // و categoryTargets (المستخدم في CM3 Analyst) بقى مشتق من نفس النتيجة.
@@ -16934,6 +17253,8 @@ async function fetchAllSheetsSnapshot() {
     merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     merchantSegHistoryRows: [], // v1.3.48: أرشيف شهور Merchant Segmentation اتشال
+    merchantOnlyRows: merchantOnlyRowsNow, // v1.18.0 — Merchant Only (ACM Performance / Target ACM)
+    productOnlyRows: productOnlyRowsNow, // v1.18.0 — Product Only (product + category pages)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     supplyRepackRows: supplyRepackPayload ? parseSupplyRepackSheet(supplyRepackPayload) : state.supplyRepackRows,
     repackMap: warehouseRepackPayload ? parseWarehouseRepackSheet(warehouseRepackPayload) : state.repackMap, // <-- Purchase Plan (Repack column)
@@ -17014,8 +17335,8 @@ function userScopedRows(rows) {
 }
 // Merchant scope for every other data set: a Merchant only keeps the rows of their own Merchant ID / its SKUs.
 // The full data is kept in state._scopeFull so switching role (View as) or logging out restores it.
-const SCOPE_ARR_SKU = { inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "sku" };
-const SCOPE_ARR_MID = { acmSalesPlanData: "tagerId", availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", incentiveMerchantsRows: "merchantId" };
+const SCOPE_ARR_SKU = { productOnlyRows: "sku", inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "sku" };
+const SCOPE_ARR_MID = { acmSalesPlanData: "tagerId", availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", merchantOnlyRows: "merchantId", incentiveMerchantsRows: "merchantId" };
 const SCOPE_OBJ_SKU = ["inventoryMap", "productsMap", "singleSkuTargets"];
 const SCOPE_OBJ_MID = ["merchantTargets", "merchantSegmentsMap"];
 const SCOPE_MAP_SKU = ["cogsMap", "repackMap"];
@@ -17107,6 +17428,8 @@ function applySnapshotToState(snapshot) {
   state.merchantSkuDailyRows = snapshot.merchantSkuDailyRows || state.merchantSkuDailyRows || [];
   state.merchantSegSourceRows = snapshot.merchantSegSourceRows || state.merchantSegSourceRows || [];
   state.merchantSegHistoryRows = snapshot.merchantSegHistoryRows || state.merchantSegHistoryRows || [];
+  state.merchantOnlyRows = snapshot.merchantOnlyRows || state.merchantOnlyRows || [];
+  state.productOnlyRows = snapshot.productOnlyRows || state.productOnlyRows || [];
   state.supplyRepackRows = snapshot.supplyRepackRows || state.supplyRepackRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
@@ -17163,17 +17486,28 @@ async function renderCurrentState() {
 //  - Manual refresh (button, isManualRefresh=true): always attempts a fresh
 //    fetch. If it fails, falls back to whatever cache is available instead
 //    of wiping the screen with an error.
+// v1.17.1: الشغل اللي في الخلفية (حفظ الكاش، رفع النسخة المشتركة، الباك أب) بيستنى لحظة فاضية
+// عند المتصفح، فمايقطعش ضغطة أو تنقل بين التابات.
+function whenIdle(timeout = 4000) {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout });
+    else setTimeout(resolve, 300);
+  });
+}
 async function loadData(isManualRefresh = false) {
   const loadingEl = $("loadingState"); const errorEl = $("errorState"); const errorMsg = $("errorMsgText");
-  let cache = await loadDataFromCache();
-  let paintedFromCache = false;
+  // v1.17.1: لو الداتا معروضة أصلاً (البولينج كل شوية / الرفرش)، مش بنقرا الكاش من IndexedDB ونرسمه
+  // تاني قبل الداتا الجديدة — ده كان بيعمل رندر كامل زيادة (وقراية نسخة الداتا كلها) في كل مزامنة.
+  const onScreen = !!(state.allParsedRows && state.allParsedRows.length) && state._shownFingerprint !== undefined;
+  let cache = onScreen ? null : await loadDataFromCache();
+  let paintedFromCache = onScreen;
 
   // v1.17.0 — cold start. Nothing cached in this browser (first visit, cleared
   // data, a different machine) used to mean zeros on screen for the whole sheet
   // load. Pull the last snapshot somebody else already loaded, paint it, and
   // keep it locally — the background sync right below still runs as normal, so
   // what is on screen is never more than one sync behind.
-  if (!cache) {
+  if (!cache && !onScreen) {
     setSyncStatus("Loading the latest numbers…");
     const shared = await fetchSharedSnapshot();
     if (shared) {
@@ -17187,12 +17521,15 @@ async function loadData(isManualRefresh = false) {
   if (cache) {
     if (!isManualRefresh || !(state.allParsedRows && state.allParsedRows.length)) {
       applySnapshotToState(cache.data);
+      state._shownFingerprint = cache.fingerprint || computeSnapshotFingerprint(cache.data);
       await renderCurrentState();
     }
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) errorEl.classList.add("hidden");
     setSyncStatus(isManualRefresh ? "Refreshing… (showing current data)" : `Cached — ${formatCacheTimestamp(cache.savedAt)}`);
     paintedFromCache = true;
+  } else if (onScreen) {
+    if (isManualRefresh) setSyncStatus("Refreshing… (showing current data)");
   } else {
     if (loadingEl) loadingEl.classList.remove("hidden");
     if (errorEl) errorEl.classList.add("hidden");
@@ -17205,10 +17542,13 @@ async function loadData(isManualRefresh = false) {
     // داعي نعمل toast "Synchronized" ولا نغير حالة الـ sync — يفضل الشكل هادي
     // زي ما هو، ونكتفي بتحديث الكاش بصمت. الـ toast/رسالة "Live — updated"
     // بيظهروا بس لو فعلاً حصل تغيير في الداتا.
-    const dataChanged = !paintedFromCache || !cache || cache.fingerprint !== freshFingerprint;
+    const shownFp = onScreen ? state._shownFingerprint : (cache && cache.fingerprint);
+    const dataChanged = !paintedFromCache || !shownFp || shownFp !== freshFingerprint;
     applySnapshotToState(snapshot);
+    state._shownFingerprint = freshFingerprint;
     await renderCurrentState();
-    saveDataToCache(snapshot);
+    // v1.17.1: حفظ الكاش (نسخة كاملة من الداتا جوه IndexedDB) بيستنى لحد ما المتصفح يفضى
+    whenIdle().then(() => saveDataToCache(snapshot));
     ensureIrqDataLoaded(); // v1.3.53: شيتات العراق في الخلفية (مش بتحجب أي حاجة)
     // فire-and-forget بالنسبة لباقي loadData() (متستناش قبل ما تكمل)، لكن
     // اتعمل sequence هنا (backup الأول وبعدين publish) بدل ما الاتنين يطلقوا
@@ -17232,7 +17572,7 @@ async function loadData(isManualRefresh = false) {
       // على نفس الـ Apps Script deployment. الدورة الجديدة بتتأجل لحد ما القديمة
       // تخلص بدل ما تتجاهل خالص، عشان آخر نسخة من الداتا برضه توصل للـ backup/API.
       if (loadData._bgChainTail === undefined) loadData._bgChainTail = Promise.resolve();
-      loadData._bgChainTail = loadData._bgChainTail.then(() =>
+      loadData._bgChainTail = loadData._bgChainTail.then(() => whenIdle()).then(() =>
         // The shared snapshot goes first and is the cheapest of the three (one
         // POST to the Worker, no Apps Script involved), so whoever opens the
         // dashboard next gets these numbers even if the two below are still running.
@@ -17272,8 +17612,8 @@ async function loadData(isManualRefresh = false) {
     console.error("System Sync Error:", error);
     scheduleSyncRetry(error && error.message ? error.message : String(error));
     if (paintedFromCache) {
-      // Already showing cached data — just report the failed sync quietly.
-      setSyncStatus(`Sync failed — retrying… (cache from ${formatCacheTimestamp(cache.savedAt)})`);
+      // Already showing data — just report the failed sync quietly.
+      setSyncStatus(cache ? `Sync failed — retrying… (cache from ${formatCacheTimestamp(cache.savedAt)})` : "Sync failed — retrying… (showing the last loaded numbers)");
       return;
     }
     if (cache) {
@@ -17446,9 +17786,39 @@ cancelDownloadBtn.addEventListener("click", () => {
     downloadModal.classList.add("hidden");
 });
 
+// v1.17.1 — كل دالة رندر في الداونلود ← عنصر جوه الصفحة بتاعتها (عشان نعرف هي في نفس صفحة الجدول المطلوب ولا لأ)
+const EXPORT_TABLE_ANCHORS = {
+  fcRenderSkuTable: "fcSkuTableBody", renderIncentiveMerchantsPanel: "viewIncMerchants", renderPaginatedAcmTable: "acmTableBody",
+  renderPaginatedAllocationLockingTable: "alcTableBody", renderPaginatedAvailabilityLockingTable: "alLockTableBody",
+  renderPaginatedCdzTable: "cdzTableBody", renderPaginatedCm3AnalystTable: "analystTableBody", renderPaginatedHealthyUnlockingTable: "huMatchesTableBody",
+  renderPaginatedInventoryTable: "inventoryTableBody", renderPaginatedMerchantTable: "merchantTableBody", renderPaginatedMpMatchesTable: "mpMatchesTableBody",
+  renderPaginatedMpNewMatchesTable: "mpNewMatchesTableBody", renderPaginatedMpSalesPlanTable: "mpSalesPlanTableBody", renderPaginatedMpStoppedTable: "mpStoppedTableBody",
+  renderPaginatedPmaTable: "pmaTableBody", renderPaginatedPoorMatchesTable: "poorMatchesTableBody", renderPaginatedPpmAnalystSingleTable: "ppmAnalystSingleTableBody",
+  renderPaginatedPpmAnalystTable: "ppmAnalystTableBody", renderPaginatedPurchasePlanTable: "purchasePlanTableBody", renderPaginatedSegTable: "segTableBody",
+  renderPaginatedSellthroughTable: "sellthroughTableBody", renderWeeklyInventoryTable: "wiWeekTableBody", renderCm3apActiveTable: "cm3apTableBody",
+  renderAcmTargetsView: "viewAcmTargets", renderMerchantTargetsView: "viewMerchantTargets", spfRender: "spfTableBody"
+};
 confirmDownloadBtn.addEventListener("click", () => {
     if (!selectedTableForDownload) return;
     downloadModal.classList.add("hidden");
+    // v1.17.4: الداونلود بقى شغل في الخلفية (ExportJobs تحت) — بيرجع على طول، والشاشة فاضية تتحرك.
+    ExportJobs.enqueue({ el: selectedTableForDownload.el, title: selectedTableForDownload.title });
+});
+
+// الطريقة القديمة (كل الصفوف مرة واحدة) — بقت احتياطي بس للجداول اللي مالهاش ترقيم صفحات معروف.
+function __legacyFullExport(job) { return new Promise((resolve, reject) => {
+    const selectedTableForDownload = job;
+    // v1.17.1: بس جداول الصفحة اللي فيها الجدول المطلوب هي اللي بتتعرض كاملة وقت الداونلود
+    // (كانت كل جداول الداش بورد — حوالي 27 جدول، منهم 20 ألف صف — بتترسم كاملة مرتين في كل داونلود).
+    // والشغل كله بيبدأ بعد ما الفريم يترسم، فالزرار بيلحق يكتب "Preparing…" والمودال يقفل.
+    const __expSec = selectedTableForDownload.el && selectedTableForDownload.el.closest ? selectedTableForDownload.el.closest(".view-section") : null;
+    const __expOn = (fn) => {
+      if (!__expSec) return true;
+      const anchor = EXPORT_TABLE_ANCHORS[fn]; if (!anchor) return true;
+      const el = document.getElementById(anchor); if (!el) return true;
+      return (el.classList.contains("view-section") ? el : el.closest(".view-section")) === __expSec;
+    };
+    requestAnimationFrame(() => setTimeout(() => { try {
     
     // Save current pagination states
     const originalPage = {
@@ -17491,42 +17861,44 @@ confirmDownloadBtn.addEventListener("click", () => {
     window.__dashExport = true; window.dispatchEvent(new Event("dash:export-start"));
     const originalSpfPage = (typeof spfState !== "undefined") ? spfState.page : 0;
     SPF_PAGE_SIZE = 999999; if (typeof spfState !== "undefined") spfState.page = 0;
-    if (typeof spfRender === "function") spfRender();
+    if (typeof spfRender === "function" && __expOn("spfRender")) spfRender();
 
-    if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
-    if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
-    if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
-    if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
-    if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
-    if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
-    if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
-    if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
-    try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) { }
-    if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
-    if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
-    if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
-    if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
-    if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
-    if (typeof renderPaginatedMpStoppedTable === 'function') renderPaginatedMpStoppedTable();
-    if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
-    if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
-    if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
-    if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
-    if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
-    if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
-    if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
-    if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
-    if (typeof renderIncentiveMerchantsPanel === 'function') renderIncentiveMerchantsPanel();
+    if (typeof renderPaginatedPurchasePlanTable === 'function' && __expOn('renderPaginatedPurchasePlanTable')) renderPaginatedPurchasePlanTable();
+    if (typeof fcRenderSkuTable === 'function' && __expOn('fcRenderSkuTable')) { try { fcRenderSkuTable(); } catch (e) { } }
+    if (typeof renderPaginatedInventoryTable === 'function' && __expOn('renderPaginatedInventoryTable')) renderPaginatedInventoryTable();
+    if (typeof renderPaginatedPpmAnalystTable === 'function' && __expOn('renderPaginatedPpmAnalystTable')) renderPaginatedPpmAnalystTable();
+    if (typeof renderPaginatedPpmAnalystSingleTable === 'function' && __expOn('renderPaginatedPpmAnalystSingleTable')) renderPaginatedPpmAnalystSingleTable();
+    if (typeof renderPaginatedPmaTable === 'function' && __expOn('renderPaginatedPmaTable')) renderPaginatedPmaTable();
+    if (typeof renderPaginatedAcmTable === 'function' && __expOn('renderPaginatedAcmTable')) renderPaginatedAcmTable();
+    if (typeof renderPaginatedMerchantTable === 'function' && __expOn('renderPaginatedMerchantTable')) renderPaginatedMerchantTable();
+    try { if (__expOn('renderAcmTargetsView')) renderAcmTargetsView(); if (__expOn('renderMerchantTargetsView')) renderMerchantTargetsView(); } catch (e) { }
+    if (typeof renderPaginatedSegTable === 'function' && __expOn('renderPaginatedSegTable')) renderPaginatedSegTable();
+    if (typeof renderPaginatedCm3AnalystTable === 'function' && __expOn('renderPaginatedCm3AnalystTable')) renderPaginatedCm3AnalystTable();
+    if (typeof renderPaginatedSellthroughTable === 'function' && __expOn('renderPaginatedSellthroughTable')) renderPaginatedSellthroughTable();
+    if (typeof renderPaginatedMpMatchesTable === 'function' && __expOn('renderPaginatedMpMatchesTable')) renderPaginatedMpMatchesTable();
+    if (typeof renderPaginatedMpNewMatchesTable === 'function' && __expOn('renderPaginatedMpNewMatchesTable')) renderPaginatedMpNewMatchesTable();
+    if (typeof renderPaginatedMpStoppedTable === 'function' && __expOn('renderPaginatedMpStoppedTable')) renderPaginatedMpStoppedTable();
+    if (typeof renderPaginatedPoorMatchesTable === 'function' && __expOn('renderPaginatedPoorMatchesTable')) renderPaginatedPoorMatchesTable();
+    if (typeof renderPaginatedAvailabilityLockingTable === 'function' && __expOn('renderPaginatedAvailabilityLockingTable')) renderPaginatedAvailabilityLockingTable();
+    if (typeof renderPaginatedAllocationLockingTable === 'function' && __expOn('renderPaginatedAllocationLockingTable')) renderPaginatedAllocationLockingTable();
+    if (typeof renderPaginatedHealthyUnlockingTable === 'function' && __expOn('renderPaginatedHealthyUnlockingTable')) renderPaginatedHealthyUnlockingTable();
+    if (typeof renderPaginatedMpSalesPlanTable === 'function' && __expOn('renderPaginatedMpSalesPlanTable')) renderPaginatedMpSalesPlanTable();
+    if (typeof renderPaginatedCdzTable === 'function' && __expOn('renderPaginatedCdzTable')) renderPaginatedCdzTable();
+    if (typeof renderCm3apActiveTable === 'function' && __expOn('renderCm3apActiveTable')) renderCm3apActiveTable();
+    if (typeof renderWeeklyInventoryTable === 'function' && __expOn('renderWeeklyInventoryTable')) renderWeeklyInventoryTable();
+    if (typeof renderIncentiveMerchantsPanel === 'function' && __expOn('renderIncentiveMerchantsPanel')) renderIncentiveMerchantsPanel();
 
     // Wait for DOM to render all rows
-    setTimeout(() => {
-        downloadTableAsCsv(selectedTableForDownload.el, selectedTableForDownload.title);
+    setTimeout(() => { let __rows = 0, __err = null; try {
+        __rows = downloadTableAsCsv(selectedTableForDownload.el, selectedTableForDownload.title);
+      } catch (e) { __err = e; }
+      try {
         
         // Restore pagination
         PAGE_SIZE = 10;
         window.__dashExport = false; window.dispatchEvent(new Event("dash:export-end"));
         state.purchasePlanPage = originalPage.purchasePlan; fcState.page = originalPage.fc;
-        SPF_PAGE_SIZE = 25; if (typeof spfState !== "undefined") spfState.page = originalSpfPage; if (typeof spfRender === "function") spfRender();
+        SPF_PAGE_SIZE = 25; if (typeof spfState !== "undefined") spfState.page = originalSpfPage; if (typeof spfRender === "function" && __expOn("spfRender")) spfRender();
         state.page = originalPage.acm;
         state.pageMerchant = originalPage.merchant;
         state.pageSeg = originalPage.seg;
@@ -17550,32 +17922,221 @@ confirmDownloadBtn.addEventListener("click", () => {
         state.incentiveMerchantsPage = originalPage.incMerch;
         state.incentiveMerchantsPageSize = originalIncMerchPageSize;
 
-        if (typeof renderPaginatedPurchasePlanTable === 'function') renderPaginatedPurchasePlanTable();
-        if (typeof fcRenderSkuTable === 'function') { try { fcRenderSkuTable(); } catch (e) { } }
-        if (typeof renderPaginatedInventoryTable === 'function') renderPaginatedInventoryTable();
-        if (typeof renderPaginatedAcmTable === 'function') renderPaginatedAcmTable();
-        if (typeof renderPaginatedMerchantTable === 'function') renderPaginatedMerchantTable();
-        try { renderAcmTargetsView(); renderMerchantTargetsView(); } catch (e) { }
-        if (typeof renderPaginatedSegTable === 'function') renderPaginatedSegTable();
-        if (typeof renderPaginatedCm3AnalystTable === 'function') renderPaginatedCm3AnalystTable();
-        if (typeof renderPaginatedSellthroughTable === 'function') renderPaginatedSellthroughTable();
-        if (typeof renderPaginatedMpMatchesTable === 'function') renderPaginatedMpMatchesTable();
-        if (typeof renderPaginatedMpNewMatchesTable === 'function') renderPaginatedMpNewMatchesTable();
-        if (typeof renderPaginatedMpStoppedTable === 'function') renderPaginatedMpStoppedTable();
-        if (typeof renderPaginatedPoorMatchesTable === 'function') renderPaginatedPoorMatchesTable();
-        if (typeof renderPaginatedAvailabilityLockingTable === 'function') renderPaginatedAvailabilityLockingTable();
-        if (typeof renderPaginatedAllocationLockingTable === 'function') renderPaginatedAllocationLockingTable();
-        if (typeof renderPaginatedHealthyUnlockingTable === 'function') renderPaginatedHealthyUnlockingTable();
-        if (typeof renderPaginatedMpSalesPlanTable === 'function') renderPaginatedMpSalesPlanTable();
-        if (typeof renderPaginatedCdzTable === 'function') renderPaginatedCdzTable();
-        if (typeof renderCm3apActiveTable === 'function') renderCm3apActiveTable();
-        if (typeof renderPaginatedPpmAnalystTable === 'function') renderPaginatedPpmAnalystTable();
-        if (typeof renderPaginatedPpmAnalystSingleTable === 'function') renderPaginatedPpmAnalystSingleTable();
-        if (typeof renderPaginatedPmaTable === 'function') renderPaginatedPmaTable();
-        if (typeof renderWeeklyInventoryTable === 'function') renderWeeklyInventoryTable();
-        if (typeof renderIncentiveMerchantsPanel === 'function') renderIncentiveMerchantsPanel();
+        if (typeof renderPaginatedPurchasePlanTable === 'function' && __expOn('renderPaginatedPurchasePlanTable')) renderPaginatedPurchasePlanTable();
+        if (typeof fcRenderSkuTable === 'function' && __expOn('fcRenderSkuTable')) { try { fcRenderSkuTable(); } catch (e) { } }
+        if (typeof renderPaginatedInventoryTable === 'function' && __expOn('renderPaginatedInventoryTable')) renderPaginatedInventoryTable();
+        if (typeof renderPaginatedAcmTable === 'function' && __expOn('renderPaginatedAcmTable')) renderPaginatedAcmTable();
+        if (typeof renderPaginatedMerchantTable === 'function' && __expOn('renderPaginatedMerchantTable')) renderPaginatedMerchantTable();
+        try { if (__expOn('renderAcmTargetsView')) renderAcmTargetsView(); if (__expOn('renderMerchantTargetsView')) renderMerchantTargetsView(); } catch (e) { }
+        if (typeof renderPaginatedSegTable === 'function' && __expOn('renderPaginatedSegTable')) renderPaginatedSegTable();
+        if (typeof renderPaginatedCm3AnalystTable === 'function' && __expOn('renderPaginatedCm3AnalystTable')) renderPaginatedCm3AnalystTable();
+        if (typeof renderPaginatedSellthroughTable === 'function' && __expOn('renderPaginatedSellthroughTable')) renderPaginatedSellthroughTable();
+        if (typeof renderPaginatedMpMatchesTable === 'function' && __expOn('renderPaginatedMpMatchesTable')) renderPaginatedMpMatchesTable();
+        if (typeof renderPaginatedMpNewMatchesTable === 'function' && __expOn('renderPaginatedMpNewMatchesTable')) renderPaginatedMpNewMatchesTable();
+        if (typeof renderPaginatedMpStoppedTable === 'function' && __expOn('renderPaginatedMpStoppedTable')) renderPaginatedMpStoppedTable();
+        if (typeof renderPaginatedPoorMatchesTable === 'function' && __expOn('renderPaginatedPoorMatchesTable')) renderPaginatedPoorMatchesTable();
+        if (typeof renderPaginatedAvailabilityLockingTable === 'function' && __expOn('renderPaginatedAvailabilityLockingTable')) renderPaginatedAvailabilityLockingTable();
+        if (typeof renderPaginatedAllocationLockingTable === 'function' && __expOn('renderPaginatedAllocationLockingTable')) renderPaginatedAllocationLockingTable();
+        if (typeof renderPaginatedHealthyUnlockingTable === 'function' && __expOn('renderPaginatedHealthyUnlockingTable')) renderPaginatedHealthyUnlockingTable();
+        if (typeof renderPaginatedMpSalesPlanTable === 'function' && __expOn('renderPaginatedMpSalesPlanTable')) renderPaginatedMpSalesPlanTable();
+        if (typeof renderPaginatedCdzTable === 'function' && __expOn('renderPaginatedCdzTable')) renderPaginatedCdzTable();
+        if (typeof renderCm3apActiveTable === 'function' && __expOn('renderCm3apActiveTable')) renderCm3apActiveTable();
+        if (typeof renderPaginatedPpmAnalystTable === 'function' && __expOn('renderPaginatedPpmAnalystTable')) renderPaginatedPpmAnalystTable();
+        if (typeof renderPaginatedPpmAnalystSingleTable === 'function' && __expOn('renderPaginatedPpmAnalystSingleTable')) renderPaginatedPpmAnalystSingleTable();
+        if (typeof renderPaginatedPmaTable === 'function' && __expOn('renderPaginatedPmaTable')) renderPaginatedPmaTable();
+        if (typeof renderWeeklyInventoryTable === 'function' && __expOn('renderWeeklyInventoryTable')) renderWeeklyInventoryTable();
+        if (typeof renderIncentiveMerchantsPanel === 'function' && __expOn('renderIncentiveMerchantsPanel')) renderIncentiveMerchantsPanel();
+      } finally { if (__err) reject(__err); else resolve(__rows); }
     }, 150);
-});
+} catch (e) { reject(e); } }, 0));
+}); }
+
+// ============================================================================================
+// v1.17.4 — Export في الخلفية
+// بدل ما الجدول كله (لحد 20 ألف صف في الـ Sellthrough) يترسم مرة واحدة والشاشة تتجمد، بنرسمه حتة حتة
+// (300 صف كل مرة) بنفس دالة الرندر بتاعته بالظبط — فالـ CSV طالع نفس اللي كان بيطلع — وبين كل حتة
+// والتانية المتصفح بياخد نفسه: تقدر تتنقل وتدوس وتعمل أي حاجة. والتقدم بيظهر في كارت فوق (Downloading … %).
+// الجدول اللي بيتصدّر بيفضل باين زي ما هو (نسخة ثابتة منه)، والأصلي بيشتغل مستخبي ورا الكواليس.
+// ============================================================================================
+const ExportJobs = (() => {
+  let chain = Promise.resolve();
+  let lastInput = 0;
+  ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"].forEach(ev => window.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true, capture: true }));
+  // بين كل حتة والتانية المتصفح بيخلص أي ضغطة/رسم مستني الأول، وبعدين نكمّل
+  const yieldNow = () => {
+    try { if (window.scheduler && typeof scheduler.postTask === "function") return scheduler.postTask(() => {}, { priority: "user-visible" }); } catch (e) {}
+    return new Promise(r => setTimeout(r, 0));
+  };
+  // دالة الرندر + متغير الصفحة + حجم الصفحة لكل جدول
+  const P = (render, get, set, size) => ({ render, get, set, size: size || { get: () => PAGE_SIZE, set: v => { PAGE_SIZE = v; } } });
+  const PAGERS = {
+    renderPaginatedSellthroughTable: P(() => renderPaginatedSellthroughTable(), () => state.sellthroughPage, v => { state.sellthroughPage = v; }),
+    renderPaginatedPurchasePlanTable: P(() => renderPaginatedPurchasePlanTable(), () => state.purchasePlanPage, v => { state.purchasePlanPage = v; }),
+    renderPaginatedInventoryTable: P(() => renderPaginatedInventoryTable(), () => state.pageInventory, v => { state.pageInventory = v; }),
+    renderPaginatedPpmAnalystTable: P(() => renderPaginatedPpmAnalystTable(), () => ppmAnalystState.page, v => { ppmAnalystState.page = v; }),
+    renderPaginatedPpmAnalystSingleTable: P(() => renderPaginatedPpmAnalystSingleTable(), () => ppmAnalystSingleState.page, v => { ppmAnalystSingleState.page = v; }),
+    renderPaginatedPmaTable: P(() => renderPaginatedPmaTable(), () => pmaState.page, v => { pmaState.page = v; }),
+    renderPaginatedAcmTable: P(() => renderPaginatedAcmTable(), () => state.page, v => { state.page = v; }),
+    renderPaginatedMerchantTable: P(() => renderPaginatedMerchantTable(), () => state.pageMerchant, v => { state.pageMerchant = v; }),
+    renderPaginatedSegTable: P(() => renderPaginatedSegTable(), () => state.pageSeg, v => { state.pageSeg = v; }),
+    renderPaginatedCm3AnalystTable: P(() => renderPaginatedCm3AnalystTable(), () => analystState.page, v => { analystState.page = v; }),
+    renderPaginatedMpMatchesTable: P(() => renderPaginatedMpMatchesTable(), () => mpMatchesState.page, v => { mpMatchesState.page = v; }),
+    renderPaginatedMpNewMatchesTable: P(() => renderPaginatedMpNewMatchesTable(), () => mpNewMatchesState.page, v => { mpNewMatchesState.page = v; }),
+    renderPaginatedMpStoppedTable: P(() => renderPaginatedMpStoppedTable(), () => mpStoppedState.page, v => { mpStoppedState.page = v; }),
+    renderPaginatedPoorMatchesTable: P(() => renderPaginatedPoorMatchesTable(), () => poorMatchesState.page, v => { poorMatchesState.page = v; }),
+    renderPaginatedAvailabilityLockingTable: P(() => renderPaginatedAvailabilityLockingTable(), () => availabilityLockingState.page, v => { availabilityLockingState.page = v; }),
+    renderPaginatedAllocationLockingTable: P(() => renderPaginatedAllocationLockingTable(), () => allocationLockingState.page, v => { allocationLockingState.page = v; }),
+    renderPaginatedHealthyUnlockingTable: P(() => renderPaginatedHealthyUnlockingTable(), () => healthyUnlockingState.page, v => { healthyUnlockingState.page = v; }),
+    renderPaginatedMpSalesPlanTable: P(() => renderPaginatedMpSalesPlanTable(), () => state.mpSalesPlanPage, v => { state.mpSalesPlanPage = v; }),
+    renderPaginatedCdzTable: P(() => renderPaginatedCdzTable(), () => state.cdzPage, v => { state.cdzPage = v; }),
+    renderCm3apActiveTable: P(() => renderCm3apActiveTable(), () => cm3apState.page, v => { cm3apState.page = v; }),
+    fcRenderSkuTable: P(() => fcRenderSkuTable(), () => fcState.page, v => { fcState.page = v; }),
+    spfRender: P(() => spfRender(), () => spfState.page, v => { spfState.page = v; }, { get: () => SPF_PAGE_SIZE, set: v => { SPF_PAGE_SIZE = v; } }),
+    renderIncentiveMerchantsPanel: P(() => renderIncentiveMerchantsPanel(), () => state.incentiveMerchantsPage, v => { state.incentiveMerchantsPage = v; },
+      { get: () => state.incentiveMerchantsPageSize, set: v => { state.incentiveMerchantsPageSize = v; } }),
+    acmTgt: P(() => renderTgtView("acm"), () => tgtViews.acm.page, v => { tgtViews.acm.page = v; }),
+    merchantTgt: P(() => renderTgtView("merchant"), () => tgtViews.merchant.page, v => { tgtViews.merchant.page = v; })
+  };
+  const PAGER_ANCHOR = Object.assign({}, EXPORT_TABLE_ANCHORS, { acmTgt: "acmTgtBody", merchantTgt: "merchantTgtBody" });
+  function findPager(table) {
+    for (const k in PAGERS) {
+      const a = PAGER_ANCHOR[k]; if (!a) continue;
+      const el = document.getElementById(a);
+      if (el && table.contains(el)) return PAGERS[k];
+    }
+    return null;
+  }
+
+  // ---------- toast UI (كارت فوق: Downloading … %)
+  let stack = null;
+  function toast(title) {
+    if (!stack) { stack = document.createElement("div"); stack.className = "exp-stack"; stack.setAttribute("aria-live", "polite"); document.body.appendChild(stack); }
+    const el = document.createElement("div");
+    el.className = "exp-toast";
+    el.innerHTML = '<div class="exp-ic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg></div>' +
+      '<div class="exp-main"><div class="exp-top"><b class="exp-t"></b><span class="exp-p"></span></div><div class="exp-s"></div><div class="exp-bar"><i></i></div></div>' +
+      '<button type="button" class="exp-x" title="Cancel" aria-label="Cancel export">×</button>';
+    el.querySelector(".exp-t").textContent = "Downloading " + title;
+    stack.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("in"));
+    const api = {
+      el, cancelled: false,
+      set(pct, sub) {
+        const bar = el.querySelector(".exp-bar i");
+        if (pct == null) { el.classList.add("indet"); el.querySelector(".exp-p").textContent = ""; }
+        else { el.classList.remove("indet"); bar.style.transform = "scaleX(" + Math.max(0.02, Math.min(1, pct / 100)) + ")"; el.querySelector(".exp-p").textContent = Math.round(pct) + "%"; }
+        if (sub != null) el.querySelector(".exp-s").textContent = sub;
+      },
+      done(ok, sub) {
+        el.classList.remove("indet"); el.classList.add(ok ? "ok" : "bad");
+        el.querySelector(".exp-t").textContent = (ok ? "Downloaded " : (sub === "Cancelled" ? "Cancelled " : "Couldn't download ")) + title;
+        el.querySelector(".exp-bar i").style.transform = "scaleX(1)";
+        el.querySelector(".exp-p").textContent = ok ? "✓" : "";
+        el.querySelector(".exp-s").textContent = sub || "";
+        el.querySelector(".exp-x").title = "Close";
+        api.close(ok ? 4200 : 9000);
+      },
+      close(after) { clearTimeout(api._t); api._t = setTimeout(() => { el.classList.remove("in"); el.classList.add("out"); setTimeout(() => el.remove(), 260); }, after || 0); }
+    };
+    el.querySelector(".exp-x").addEventListener("click", () => { if (el.classList.contains("ok") || el.classList.contains("bad")) api.close(0); else api.cancelled = true; });
+    return api;
+  }
+  const fmtN = (n) => Number(n).toLocaleString("en-US");
+
+  // ---------- page-by-page export
+  async function chunked(job, pager, ui) {
+    const table = job.el;
+    const head = __csvHeaderLine(table);
+    const lines = head !== null ? [head] : [];
+    // اللي انت شايفه بيفضل ثابت: نسخة من الجدول (من غير ids) مكانه، والأصلي بيشتغل جوه حاجة مستخبية جنبه
+    const frozen = table.cloneNode(true);
+    frozen.removeAttribute("id"); frozen.querySelectorAll("[id]").forEach(e => e.removeAttribute("id"));
+    frozen.classList.add("exp-frozen");
+    const hide = document.createElement("div"); hide.className = "exp-offstage"; hide.setAttribute("aria-hidden", "true");
+    const parent = table.parentNode;
+    parent.insertBefore(frozen, table); parent.insertBefore(hide, table); hide.appendChild(table);
+    // عداد الصفوف / رقم الصفحة اللي حوالين الجدول بيفضلوا زي ما هم
+    const scope = frozen.closest(".view-section") || document.body;
+    const keep = Array.from(scope.querySelectorAll("[id]")).filter(e => !e.children.length && !hide.contains(e) && /page|row|count|showing|total/i.test(e.id)).map(e => [e, e.textContent, e.disabled]);
+    const restoreTexts = () => keep.forEach(([e, t, d]) => { if (e.textContent !== t) e.textContent = t; if (d !== undefined && e.disabled !== d) e.disabled = d; });
+    const savedPage = pager.get(), savedSize = pager.size.get();
+    let rows = 0;
+    try {
+    // حجم الحتة بيتظبط لوحده: الهدف إن كل حتة تاخد ~15ms عشان الشاشة ماتحسش بيها.
+    // بيتضاعف/يتنص بس، فـ (عدد الصفوف اللي خلصت ÷ الحجم) دايمًا رقم صفحة صحيح.
+    let size = 64, done = 0, totalGuess = 0, first = true;
+    const seenFirst = new Set();
+    for (;;) {
+      if (ui.cancelled) break;
+      // أول ما تلمس الماوس/الكيبورد الحتة بتصغر على طول (من غير ما تستنى الحتة الجاية تتقاس)
+      if ((performance.now() - lastInput) < 1000) while (size > 32) size = size / 2;
+      const k = done / size;
+      const t0 = performance.now();
+      pager.size.set(size); pager.set(k);
+      let pageInfo = "";
+      try {
+        pager.render();
+        if (first) { // "Page 1 of N" بعد أول رندر = عدد الصفحات بالحجم ده → تقدير لعدد الصفوف عشان الـ %
+          for (const [e] of keep) { const m = (e.textContent || "").match(/Page\s*\d+\s*(?:of|\/)\s*([\d,]+)/i); if (m) { pageInfo = m[1]; break; } }
+        }
+      } finally { pager.size.set(savedSize); pager.set(savedPage); restoreTexts(); }
+      if (!table.isConnected) throw new Error("the table was rebuilt while exporting — try again");
+      if (first) { totalGuess = pageInfo ? (parseInt(pageInfo.replace(/,/g, ""), 10) || 0) * size : 0; first = false; }
+      const tb = table.querySelector("tbody");
+      const trs = tb ? Array.from(tb.querySelectorAll("tr")) : [];
+      const head1 = trs.length ? trs[0].textContent : "";
+      if (done > 0 && (trs.length === 0 || seenFirst.has(head1))) break; // صفحة اتكررت (الرندر بيرجع لآخر صفحة لو عدّينا الآخر)
+      seenFirst.add(head1);
+      const chunkLines = __csvBodyLines(table);
+      Array.prototype.push.apply(lines, chunkLines); rows += chunkLines.length;
+      if (trs.length < size) { ui.set(totalGuess ? 99 : null, fmtN(rows) + " rows"); break; }
+      done += size;
+      if (totalGuess) { if (done >= totalGuess) break; ui.set(Math.min(99, (done / totalGuess) * 100), fmtN(rows) + " of ~" + fmtN(totalGuess) + " rows"); }
+      else ui.set(null, fmtN(rows) + " rows…");
+      const ms = performance.now() - t0;
+      // وانت شغال على الداش بورد: حتت صغيرة (~30ms) عشان كل ضغطة تترد على طول.
+      // ولو سايبها (مفيش ماوس/كيبورد من ثانية): حتت أكبر (~90ms) عشان يخلص أسرع.
+      const budget = (performance.now() - lastInput) > 1000 ? 90 : 30;
+      if (ms > budget * 1.4 && size > 8) size = size / 2;
+      else if (ms < budget / 2.2 && size < 2048 && done % (size * 2) === 0) size = size * 2;
+      await yieldNow();
+    }
+    } finally {
+      // نرجّع الجدول الأصلي مكانه ونرسمه تاني على الصفحة اللي كنت فيها
+      if (frozen.isConnected) frozen.replaceWith(table); else table.remove();
+      hide.remove();
+      try { pager.render(); } catch (e) { console.error(e); }
+    }
+    if (ui.cancelled) return { cancelled: true };
+    ui.set(100, "Saving file…");
+    await yieldNow();
+    __saveCsv(lines, job.title);
+    return { rows };
+  }
+
+  async function run(job, ui) {
+    const pager = job.el && job.el.isConnected ? findPager(job.el) : null;
+    try {
+      let res;
+      if (pager) res = await chunked(job, pager, ui);
+      else { ui.set(null, "Preparing…"); await new Promise(r => requestAnimationFrame(() => setTimeout(r, 30))); const n = await __legacyFullExport(job); res = { rows: n }; }
+      if (res.cancelled) ui.done(false, "Cancelled");
+      else ui.done(true, fmtN(res.rows || 0) + " rows · " + (job.title || "Export") + ".csv");
+    } catch (e) {
+      console.error("[Export] failed:", e);
+      ui.done(false, "Couldn't export — " + (e && e.message ? e.message : "unknown error"));
+    }
+  }
+
+  return {
+    enqueue(job) {
+      const ui = toast(job.title || "table");
+      ui.set(null, "Waiting…");
+      chain = chain.then(() => run(job, ui), () => run(job, ui));
+      return chain;
+    }
+  };
+})();
 
 // أي خلية (td/th) فيها رقم/فلوس متحسب بـ fmtIntCell / fmtPctCell /
 // fmtMoneyCompactCell / fmtCm3MoneyCell بيبقى جواها span بيلف نفس النص المعروض ومعاه
@@ -17594,85 +18155,91 @@ confirmDownloadBtn.addEventListener("click", () => {
 // بندمج قيم كل عمود من كل صفوف العناوين في اسم واحد مفهوم
 // ("Placed Pieces - MTD Target") — عشان صف العناوين النهائي يطلع بنفس عدد
 // أعمدة صفوف البيانات بالظبط، ومحاذي صح.
-function downloadTableAsCsv(tableEl, fileName) {
-    const csvEscape = (val) => '"' + String(val).replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ").trim() + '"';
-    const cellExportValue = (cell) => {
-        const rawEl = cell.querySelector("[data-raw]");
-        if (rawEl) {
-            const exportVal = rawEl.getAttribute("data-export");
-            if (exportVal !== null && exportVal !== "") return exportVal;
-            const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
-            return Number.isFinite(rawVal) ? String(rawVal) : "0";
+// v1.17.4: نفس منطق الداونلود بالظبط — بس متقسم لدوال صغيرة عشان التصدير في الخلفية (صفحة صفحة) يستخدمها.
+function __csvEscape(val) { return '"' + String(val).replace(/"/g, '""').replace(/(\r\n|\n|\r)/gm, " ").trim() + '"'; }
+function __cellExportValue(cell) {
+    const rawEl = cell.querySelector("[data-raw]");
+    if (rawEl) {
+        const exportVal = rawEl.getAttribute("data-export");
+        if (exportVal !== null && exportVal !== "") return exportVal;
+        const rawVal = parseFloat(rawEl.getAttribute("data-raw"));
+        return Number.isFinite(rawVal) ? String(rawVal) : "0";
+    }
+    // خلية فيها نص بس (من غير عناصر جواها) بنقرا الـ textContent — نفس النتيجة، ومن غير ما نجبر المتصفح
+    // يحسب الـ layout بتاع جدول كامل. innerText بس للخلايا اللي فيها عناصر.
+    const plain = cell.childElementCount === 0;
+    const readText = () => plain ? (cell.textContent || "").replace(/\s+/g, " ") : (cell.innerText || cell.textContent || "");
+    const txt = readText().trim();
+    // خلايا العملة (EGP/EGY/ج.م) اللي مالهاش data-raw: ننزلها رقم صافي بدون عملة.
+    const mm = txt.match(/^(-?)\s*(?:(?:EGP|EGY|LE|L\.E\.?|ج\.?\s?م\.?)\s*)?(-?)\s*([\d][\d,]*(?:\.\d+)?)\s*([KkMm]?)\s*(?:EGP|EGY|LE|ج\.?\s?م\.?)?$/);
+    if (mm && /EGP|EGY|LE\b|L\.E|ج/i.test(txt)) {
+        let v = parseFloat(mm[3].replace(/,/g, ""));
+        const u = mm[4].toUpperCase();
+        if (u === "K") v *= 1e3; else if (u === "M") v *= 1e6;
+        if (mm[1] === "-" || mm[2] === "-") v = -v;
+        return String(v);
+    }
+    return readText();
+}
+function __csvHeaderLine(tableEl) {
+    const thead = tableEl.querySelector("thead");
+    if (!thead) return null;
+    const headerRows = Array.from(thead.querySelectorAll("tr"));
+    const grid = headerRows.map(() => []);
+    headerRows.forEach((tr, rowIdx) => {
+        let colIdx = 0;
+        Array.from(tr.children).forEach(cell => {
+            while (grid[rowIdx][colIdx] !== undefined) colIdx++;
+            const text = (cell.innerText || cell.textContent || "").trim();
+            const colspan = parseInt(cell.getAttribute("colspan") || "1", 10) || 1;
+            const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10) || 1;
+            for (let r = 0; r < rowspan; r++) {
+                if (!grid[rowIdx + r]) grid[rowIdx + r] = [];
+                for (let c = 0; c < colspan; c++) { grid[rowIdx + r][colIdx + c] = text; }
+            }
+            colIdx += colspan;
+        });
+    });
+    const totalCols = Math.max(0, ...grid.map(r => r.length));
+    const flatHeaders = [];
+    for (let c = 0; c < totalCols; c++) {
+        const parts = [];
+        for (let r = 0; r < headerRows.length; r++) {
+            const v = grid[r] ? grid[r][c] : undefined;
+            if (v && parts[parts.length - 1] !== v) parts.push(v);
         }
-        const txt = (cell.innerText || cell.textContent || "").trim();
-        // خلايا العملة (EGP/EGY/ج.م) اللي مالهاش data-raw: ننزلها رقم صافي بدون عملة.
-        const mm = txt.match(/^(-?)\s*(?:(?:EGP|EGY|LE|L\.E\.?|ج\.?\s?م\.?)\s*)?(-?)\s*([\d][\d,]*(?:\.\d+)?)\s*([KkMm]?)\s*(?:EGP|EGY|LE|ج\.?\s?م\.?)?$/);
-        if (mm && /EGP|EGY|LE\b|L\.E|ج/i.test(txt)) {
-            let v = parseFloat(mm[3].replace(/,/g, ""));
-            const u = mm[4].toUpperCase();
-            if (u === "K") v *= 1e3; else if (u === "M") v *= 1e6;
-            if (mm[1] === "-" || mm[2] === "-") v = -v;
-            return String(v);
-        }
-        return cell.innerText || cell.textContent || "";
-    };
-
-    let csv = [];
+        flatHeaders.push(parts.join(" - "));
+    }
+    return flatHeaders.map(__csvEscape).join(",");
+}
+// صفوف البيانات: من الـ tbody لو موجود (الحالة العادية في كل جداولنا)، وإلا (نادرًا، جدول من غير
+// thead/tbody صريحين) بنرجع لكل الصفوف. صفوف الـ Bundle Expand بتاعة Weekly Inventory بتتشال.
+function __csvBodyLines(tableEl) {
     const thead = tableEl.querySelector("thead");
     const tbody = tableEl.querySelector("tbody");
-
-    if (thead) {
-        const headerRows = Array.from(thead.querySelectorAll("tr"));
-        const grid = headerRows.map(() => []);
-        headerRows.forEach((tr, rowIdx) => {
-            let colIdx = 0;
-            Array.from(tr.children).forEach(cell => {
-                while (grid[rowIdx][colIdx] !== undefined) colIdx++;
-                const text = (cell.innerText || cell.textContent || "").trim();
-                const colspan = parseInt(cell.getAttribute("colspan") || "1", 10) || 1;
-                const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10) || 1;
-                for (let r = 0; r < rowspan; r++) {
-                    if (!grid[rowIdx + r]) grid[rowIdx + r] = [];
-                    for (let c = 0; c < colspan; c++) { grid[rowIdx + r][colIdx + c] = text; }
-                }
-                colIdx += colspan;
-            });
-        });
-        const totalCols = Math.max(0, ...grid.map(r => r.length));
-        const flatHeaders = [];
-        for (let c = 0; c < totalCols; c++) {
-            const parts = [];
-            for (let r = 0; r < headerRows.length; r++) {
-                const v = grid[r] ? grid[r][c] : undefined;
-                if (v && parts[parts.length - 1] !== v) parts.push(v);
-            }
-            flatHeaders.push(parts.join(" - "));
-        }
-        csv.push(flatHeaders.map(csvEscape).join(","));
-    }
-
-    // صفوف البيانات: من الـ tbody لو موجود (الحالة العادية في كل جداولنا)،
-    // وإلا (نادرًا، جدول من غير thead/tbody صريحين) بنرجع لكل الصفوف زي
-    // ما كانت الطريقة القديمة، عشان مفيش جدول يفضل من غير داونلود خالص.
-    // صفوف الـ Bundle Expand بتاعة Weekly Inventory (لما تدوس على سهم الـ SKU
-    // بيفتحلك تحتها جدول فرعي بالبندلز) بتتشال من الداونلود — دي مش صف "Single
-    // SKU" حقيقي، وجواها جدول متداخل تاني هيلخبط أعمدة الـ CSV لو اتضم معاها.
     const bodyRows = (tbody ? Array.from(tbody.querySelectorAll("tr")) : (thead ? [] : Array.from(tableEl.querySelectorAll("tr"))))
         .filter(tr => !tr.classList.contains("wi-bundle-expand-row"));
-    bodyRows.forEach(tr => {
-        const cells = Array.from(tr.querySelectorAll("td, th"));
-        const row = cells.map(cellExportValue);
-        csv.push(row.map(csvEscape).join(","));
-    });
-
-    const csvFile = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv.join("\n")], {type: "text/csv;charset=utf-8;"});
+    return bodyRows.map(tr => Array.from(tr.querySelectorAll("td, th")).map(__cellExportValue).map(__csvEscape).join(","));
+}
+function __saveCsv(lines, fileName) {
+    const csvFile = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), lines.join("\n")], {type: "text/csv;charset=utf-8;"});
     const downloadLink = document.createElement("a");
     downloadLink.download = (fileName || "Export") + ".csv";
-    downloadLink.href = window.URL.createObjectURL(csvFile);
+    const url = window.URL.createObjectURL(csvFile);
+    downloadLink.href = url;
     downloadLink.style.display = "none";
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
+}
+function downloadTableAsCsv(tableEl, fileName) {
+    const csv = [];
+    const head = __csvHeaderLine(tableEl);
+    if (head !== null) csv.push(head);
+    Array.prototype.push.apply(csv, __csvBodyLines(tableEl));
+    __saveCsv(csv, fileName);
+    return csv.length - (head !== null ? 1 : 0);
 }
 
 // -------------------------------------------------------------------------
@@ -17851,7 +18418,7 @@ function dohFmtDate(ms) {
 
 function dohComputeRows(params) {
   const DAY = 86400000;
-  const mainRows = state.allParsedRows || [];
+  const mainRows = productLevelRows();
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
   const ydayMs = todayMs - DAY;

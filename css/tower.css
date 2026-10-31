@@ -771,3 +771,66 @@ body.tw-mscope .ov-row:has(#ovStTrendChart), body.tw-mscope .ov-row:has(#ovStock
 .tg-auto ul { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text2); display: grid; gap: 3px; }
 .tg-auto b { color: var(--text); font-weight: 600; }
 .tg-drop.slim { min-height: 0; padding: 12px; margin-top: 10px; }
+
+/* v1.17.1 — role chip keeps its role colour in light mode too (the light-theme select rule was painting it white) */
+html[data-theme] select.tw-rolechip { background-color: var(--rc, var(--accent)) !important; color: #04121f !important; -webkit-text-fill-color: #04121f !important; border: 0 !important; }
+
+/* v1.17.4 — Export in the background: progress cards at the top + the table stays put while it works */
+.exp-offstage { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; contain: strict; }
+.exp-frozen { pointer-events: none; }
+.exp-stack { position: fixed; z-index: 120; top: 84px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 24px)); pointer-events: none; }
+.exp-toast {
+  pointer-events: auto; display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--line2, var(--line)); box-shadow: 0 18px 44px -18px rgba(0,0,0,.6);
+  opacity: 0; transform: translateY(-10px) scale(.98); transition: opacity .22s ease, transform .32s cubic-bezier(.22,1,.36,1);
+}
+.exp-toast.in { opacity: 1; transform: none; }
+.exp-toast.out { opacity: 0; transform: translateY(-8px) scale(.98); }
+.exp-ic { flex: none; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.exp-toast.ok .exp-ic { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.exp-toast.bad .exp-ic { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.exp-main { flex: 1; min-width: 0; }
+.exp-top { display: flex; align-items: baseline; gap: 10px; }
+.exp-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exp-p { font-size: 12px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.exp-toast.ok .exp-p { color: var(--green); }
+.exp-s { margin-top: 2px; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exp-bar { margin-top: 8px; height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--text) 9%, transparent); overflow: hidden; position: relative; }
+.exp-bar i { position: absolute; inset: 0; border-radius: 4px; background: var(--accent); transform-origin: left; transform: scaleX(.02); transition: transform .25s ease; }
+.exp-toast.ok .exp-bar i { background: var(--green); }
+.exp-toast.bad .exp-bar i { background: var(--orange); }
+.exp-toast.indet .exp-bar i { width: 35%; transform: none; transition: none; animation: expIndet 1.1s cubic-bezier(.4,0,.2,1) infinite; }
+@keyframes expIndet { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.exp-x { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--text-dim); font-size: 18px; line-height: 1; cursor: pointer; }
+.exp-x:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .exp-toast, .exp-bar i { transition: none; } .exp-toast.indet .exp-bar i { animation: none; } }
+.exp-offstage table { table-layout: fixed !important; width: 4000px !important; }
+.exp-offstage * { transition: none !important; animation: none !important; }
+
+/* Over View — Top Products + Category Contribution (new row under Sellthrough & Inbound / Avg Placed Pcs) */
+.ov-top { padding: 2px 4px 4px; font-size: 13px; }
+.ov-top-h, .ov-top-r { display: grid; grid-template-columns: 28px minmax(0, 1.7fr) 104px minmax(120px, 1fr) 76px; gap: 12px; align-items: center; }
+.ov-top-h { padding: 4px 0 8px; color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.ov-top-r { padding: 9px 0; border-top: 1px solid var(--line); }
+.ov-top .r { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-top-i { color: var(--text-dim); font-weight: 700; }
+.ov-top-n { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ov-top-n b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-top-n small { color: var(--text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-top-b { position: relative; height: 20px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.ov-top-b i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgba(139, 92, 246, .55), rgba(139, 92, 246, .9)); border-radius: 6px; }
+.ov-top-b em { position: relative; font-style: normal; font-size: 11px; font-weight: 700; padding-left: 8px; line-height: 20px; }
+.ov-empty { padding: 24px 4px; color: var(--text-dim); font-size: 13px; }
+.ov-pie { display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 2px; }
+.ov-pie-c { position: relative; height: 240px; }
+.ov-pie-l { max-height: 220px; overflow-y: auto; padding-right: 4px; display: grid; grid-template-columns: 1fr; gap: 2px; }
+.ov-pie-li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.ov-pie-li i { width: 10px; height: 10px; border-radius: 3px; }
+.ov-pie-li span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-pie-li b { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .ov-top-h, .ov-top-r { grid-template-columns: 24px minmax(0, 1fr) 90px 64px; } .ov-top-h span:nth-child(4), .ov-top-r .ov-top-b { display: none; } }
+body.tw-mscope .ov-row:has(#ovCatChart) { grid-template-columns: 1fr; }
+/* Text fields in the plan tables (Importation POs, Exclude SKUs) are wider so a list of values is not cut off */
+.tg-num.wide:has(input[data-k="text"]) { display: flex; width: 100%; max-width: 340px; margin-left: auto; }
+.tg-num.wide input[data-k="text"] { width: 100%; min-width: 0; text-align: left; }
+.tg-kpi-t td.n:has(input[data-k="text"]) { width: 340px; }

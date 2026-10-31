@@ -10,8 +10,11 @@
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/tower.css" />
   <link rel="stylesheet" href="css/cpa.css" />
+  <link rel="stylesheet" href="css/glass.css" />
   <link rel="icon" type="image/png" href="logo.png" />
 <script>try{if(localStorage.getItem("twTheme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
+<script>/* v1.17.7: Glass is the default look for everybody; applied before the first paint so there is no flash of the old look. glView2 = "off" means Classic. */
+(function(){var d=document.documentElement;try{if(localStorage.getItem("glView2")!=="off"){d.classList.add("gl","gl-liquid");var w=(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4)||(navigator.deviceMemory&&navigator.deviceMemory<=4)||localStorage.getItem("glLite2")==="1";if(w)d.classList.add("gl-lite")}}catch(e){d.classList.add("gl","gl-liquid")}})();</script>
 </head>
 <body>
   <script src="js/auth.js"></script>
@@ -45,6 +48,7 @@
           </a>
           <div class="nav-submenu hidden" id="merchantsSubmenu">
             <a class="nav-item-sub" id="navMerchantTargets">Merchant Targets</a>
+            <a class="nav-item-sub nav-hub-child" id="navSegmentationPanel">Segmentation Panel</a>
             <a class="nav-item-sub" id="navMerchantPerf">Merchant Performance</a>
             <a class="nav-item-sub" id="navMerchantCpa">RE-CPA</a>
           </div>
@@ -69,6 +73,8 @@
           </a>
           <div class="nav-submenu hidden" id="supplyChainSubmenu">
             <a class="nav-item-sub nav-hub-child" id="navScAging">Inventory Aging</a>
+            <a class="nav-item-sub nav-hub-child" id="navSellthroughPanel">Sellthrough Rate Panel</a>
+            <a class="nav-item-sub nav-hub-child" id="navWeeklyInventory">Inventory &amp; Inbound</a>
             <a class="nav-item-sub nav-hub-child" id="navScSkus">SKU Analysis</a>
             <a class="nav-item-sub nav-hub-child" id="navScActions">Action Plan</a>
             <a class="nav-item-sub" id="navPurchasePlan">Purchase Plan</a>
@@ -109,9 +115,6 @@
             <span class="nav-caret" id="navAdminCaret">▼</span>
           </a>
           <div class="nav-submenu hidden" id="adminSubmenu">
-            <a class="nav-item-sub nav-hub-child" id="navSegmentationPanel">Segmentation Panel</a>
-            <a class="nav-item-sub nav-hub-child" id="navSellthroughPanel">Sellthrough Rate Panel</a>
-            <a class="nav-item-sub nav-hub-child" id="navWeeklyInventory">Inventory &amp; Inbound</a>
             <a class="nav-item-sub nav-hub-child" id="navForecastModel">Forecast Model</a>
           </div>
         </div>
@@ -233,19 +236,29 @@
               </div>
             </div>
           </div>
-          <section class="mt-4">
+          <div class="ov-row">
+            <div class="panel hover-glow">
+              <div class="panel-head-modern">
+                <div class="panel-title-wrapper border-green">
+                  <h2>Top Products</h2>
+                  <p id="ovTopProductsSub">Top products by Delivered GMV</p>
+                </div>
+              </div>
+              <div class="ov-top" id="ovTopProducts"></div>
+            </div>
             <div class="panel chart-panel hover-glow">
               <div class="panel-head-modern">
                 <div class="panel-title-wrapper border-purple">
-                  <h2>Category Demand Breakdown</h2>
-                  <p>Total demand by product category (Confirmed)</p>
+                  <h2>Category Contribution</h2>
+                  <p id="ovCatSub">Share of Delivered GMV by category</p>
                 </div>
               </div>
-              <div class="chart-container">
-                <canvas id="categoryChart"></canvas>
+              <div class="ov-pie">
+                <div class="ov-pie-c"><canvas id="ovCatChart"></canvas></div>
+                <div class="ov-pie-l" id="ovCatLegend"></div>
               </div>
             </div>
-          </section>
+          </div>
         </div>
         <!-- INVENTORY SECTION -->
         <div id="viewInventory" class="view-section hidden">
@@ -3274,8 +3287,10 @@
   <script src="js/app.js"></script>
   <script src="js/commercial.js"></script>
   <script src="js/control.js"></script>
+  <script src="js/usage.js"></script>
   <script src="js/loop.js"></script>
   <script src="js/cpa-core.js"></script>
   <script src="js/cpa.js"></script>
+  <script src="js/glass.js"></script>
 </body>
 </html>

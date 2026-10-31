@@ -59,7 +59,7 @@
   }
   function renderTargetsNew() {
     buildTargets(); if (!$("tcNew")) return;
-    var actuals = computeCommercialActuals(state.allParsedRows || []), tgt = state.commercialTargets || {};
+    var actuals = computeCommercialActuals(typeof productLevelRows === "function" ? productLevelRows() : (state.allParsedRows || [])), tgt = state.commercialTargets || {};
     var sm = $("monthSelect") ? $("monthSelect").value : ""; $("cxRange").textContent = sm || "All time";
     var core = ["targetCr", "targetDr", "targetPpmPct", "targetCm3Pct", "targetGmv", "dlvPiecesTarget"];
     $("cxCatCards").innerHTML = CATS.map(function (c) {

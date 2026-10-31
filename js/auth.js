@@ -305,6 +305,10 @@
     .auth-spin{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:authSpin .7s linear infinite;}
     @keyframes authSpin{to{transform:rotate(360deg)}}
     .auth-footnote{text-align:center;margin-top:18px;font-size:12px;color:var(--text-dim,#74839a);}
+    .auth-ind{display:none;}
+    .auth-caps{display:none;align-items:center;gap:6px;margin-top:6px;font-size:12px;font-weight:600;color:var(--orange,#fbbf24);}
+    .auth-caps.on{display:flex;}
+    .auth-caps svg{width:14px;height:14px;flex:none;}
     @media (max-width:860px){
       #authOverlay{grid-template-columns:1fr;}
       .auth-hero{display:none;}
@@ -358,6 +362,7 @@
           <h2 class="auth-title" id="authTitle">Welcome back</h2>
           <p class="auth-sub" id="authSub">Sign in to open the dashboard.</p>
           <div class="auth-tabs" role="tablist">
+            <span class="auth-ind" aria-hidden="true"></span>
             <button type="button" class="auth-tab active" data-tab="login" role="tab">Login</button>
             <button type="button" class="auth-tab" data-tab="signup" role="tab">Sign Up</button>
           </div>
@@ -439,6 +444,19 @@
           ? "Join with your work email. New accounts are approved by an admin."
           : "Sign in to open the dashboard.";
       });
+    });
+
+    // Caps Lock warning under every password field (works in Glass and Classic)
+    const CAPS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 12h4v5h8v-5h4z"/><path d="M8 21h8"/></svg>';
+    overlay.querySelectorAll(".auth-form input").forEach((input) => {
+      if (!/password|confirm/i.test(input.id)) return;
+      const hint = document.createElement("div");
+      hint.className = "auth-caps"; hint.setAttribute("role", "status"); hint.innerHTML = CAPS_ICON + "<span>Caps Lock is on</span>";
+      const anchor = input.closest(".auth-password-wrap") || input;
+      anchor.insertAdjacentElement("afterend", hint);
+      const check = (e) => { try { hint.classList.toggle("on", !!(e.getModifierState && e.getModifierState("CapsLock"))); } catch (err) {} };
+      input.addEventListener("keydown", check); input.addEventListener("keyup", check);
+      input.addEventListener("blur", () => hint.classList.remove("on"));
     });
 
     // Show/hide password
@@ -752,12 +770,15 @@
       border-radius:20px;padding:7px 14px 7px 10px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35);
       transition:border-color .2s;font-family:inherit;}
     .presence-pill:hover{border-color:#3f3f46;}
-    .presence-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;
-      box-shadow:0 0 0 0 rgba(34,197,94,0.55);animation:presencePulse 2s infinite;}
+    .presence-dot{position:relative;width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;}
+    /* v1.17.5: نفس النبضة بالظبط، بس بـ transform/opacity بدل box-shadow — كانت بتخلي التوب بار يترسم
+       من الأول 60 مرة في الثانية طول ما الداش بورد مفتوحة. دلوقتي كارت الشاشة هو اللي بيحركها. */
+    .presence-dot::after{content:"";position:absolute;inset:0;border-radius:50%;background:rgba(34,197,94,0.55);
+      animation:presencePulse 2s infinite;will-change:transform,opacity;pointer-events:none;}
     @keyframes presencePulse{
-      0%{box-shadow:0 0 0 0 rgba(34,197,94,0.55);}
-      70%{box-shadow:0 0 0 6px rgba(34,197,94,0);}
-      100%{box-shadow:0 0 0 0 rgba(34,197,94,0);}
+      0%{transform:scale(1);opacity:1;}
+      70%{transform:scale(2.5);opacity:0;}
+      100%{transform:scale(2.5);opacity:0;}
     }
     .presence-count{font-size:12px;font-weight:700;color:#fafafa;}
     .presence-label{font-size:11px;font-weight:600;color:#a1a1aa;letter-spacing:0.3px;}

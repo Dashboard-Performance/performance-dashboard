@@ -1,0 +1,447 @@
+/* Glass view (preview) — كل حاجة هنا تحت html.gl، فلو قفلت الزرار الداش بورد بترجع زي ما هي بالظبط.
+   Loaded AFTER tower.css + cpa.css. JS side: js/glass.js */
+
+html.gl {
+  --gl-rail: 66px;
+  --gl-gap: 14px;
+  --gl-card: rgba(14, 22, 34, .62);
+  --gl-card-strong: rgba(10, 16, 26, .86);
+  --gl-edge: rgba(255, 255, 255, .09);
+  --gl-edge-hi: rgba(255, 255, 255, .16);
+  --gl-sheen: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 42%);
+  --gl-blur: blur(18px) saturate(140%);
+  --gl-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 18px 40px -22px rgba(0,0,0,.75);
+  --gl-pill-bg: #f4f7fb; --gl-pill-ink: #07101b;
+  --gl-bg-img: url("../img/glass-bg-dark.jpg");
+}
+html.gl[data-theme="light"] {
+  --gl-card: rgba(255, 255, 255, .66);
+  --gl-card-strong: rgba(255, 255, 255, .9);
+  --gl-edge: rgba(255, 255, 255, .75);
+  --gl-edge-hi: rgba(255, 255, 255, .95);
+  --gl-sheen: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 50%);
+  --gl-shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 14px 34px -20px rgba(30, 50, 90, .28);
+  --gl-pill-bg: #0e1a2e; --gl-pill-ink: #ffffff;
+  --gl-bg-img: url("../img/glass-bg-light.jpg");
+}
+
+/* ---------- backdrop ----------
+   الخلفية على layer ثابتة لوحدها (مش background-attachment: fixed اللي بيخلي المتصفح يرسم الصفحة كلها
+   من الأول مع كل سكرول). والصورة نفسها متضببة أصلاً، فالكروت مش محتاجة backdrop-filter عشان تبان إزاز. */
+html.gl { background: var(--bg); }
+html.gl body { background: transparent !important; }
+html.gl body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--gl-bg-img) center / cover no-repeat; transform: translateZ(0);
+}
+html.gl.gl-plain body::before { display: none; }
+
+/* ---------- floating icon rail ---------- */
+@media (min-width: 861px) {
+  html.gl .sidebar {
+    position: fixed; z-index: 40; top: var(--gl-gap); bottom: var(--gl-gap); left: var(--gl-gap);
+    width: var(--gl-rail) !important; min-width: 0; height: auto !important; max-height: none; padding: 10px 0 12px; border-radius: 24px;
+    background: var(--gl-card);
+    border: 1px solid var(--gl-edge) !important; box-shadow: var(--gl-shadow);
+    overflow: visible; align-items: center; contain: layout style;
+  }
+  html.gl .sidebar-brand { border: 0; padding: 4px 0 10px; display: flex; justify-content: center; width: 100%; }
+  html.gl .brand-title { gap: 0; }
+  html.gl .brand-title .bt-name { display: none; }
+  html.gl .sidebar-nav { flex: 1 1 auto; min-height: 0; padding: 6px 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  html.gl .sidebar-nav::-webkit-scrollbar { display: none; }
+  html.gl .nav-dropdown-wrapper { display: contents; }
+  html.gl .sidebar .nav-item {
+    width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: 50%;
+    font-size: 0; color: var(--text2); flex: none; gap: 0;
+  }
+  html.gl .sidebar .nav-item .nav-icon { width: 20px; height: 20px; background: none !important; box-shadow: none !important; display: grid; place-items: center; }
+  html.gl .sidebar .nav-item .nav-icon svg { width: 20px; height: 20px; }
+  html.gl .sidebar .nav-item .nav-caret, html.gl .sidebar .nav-item::before { display: none !important; }
+  html.gl .sidebar .nav-item:hover { background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--text); }
+  html.gl .sidebar .nav-item.gl-on {
+    background: var(--gl-pill-bg); color: var(--gl-pill-ink);
+    box-shadow: 0 6px 18px -8px rgba(0,0,0,.55), 0 0 0 4px color-mix(in srgb, var(--gl-pill-bg) 14%, transparent);
+  }
+  html.gl .sidebar .nav-item.gl-on .nav-icon { color: var(--gl-pill-ink); }
+  html.gl .sidebar .nav-submenu { display: none !important; }
+  html.gl .sidebar-footer { display: none; }
+  html.gl .gl-me {
+    margin-top: auto; width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer; flex: none;
+    font: 700 12px/1 Inter, system-ui, sans-serif; color: #fff;
+    background: linear-gradient(145deg, #fb7185, #f43f5e); box-shadow: 0 0 0 2px var(--gl-edge-hi);
+    position: relative;
+  }
+  html.gl .gl-me::after { content: ""; position: absolute; right: 0; bottom: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--panel); }
+  html.gl .gl-me.gl-bad::after { background: var(--orange); }
+  html.gl .main { margin-left: calc(var(--gl-rail) + var(--gl-gap) * 2); }
+}
+html:not(.gl) .gl-me, html:not(.gl) .gl-float { display: none !important; }
+@media (max-width: 860px) { .gl-me { display: none !important; } }
+
+/* tooltip + flyout + user panel live on <body> (the rail's blur would clip them) */
+.gl-float {
+  position: fixed; z-index: 60; pointer-events: none; opacity: 0; transform: translateX(-6px);
+  transition: opacity .16s var(--ease), transform .16s var(--ease);
+}
+.gl-float.show { opacity: 1; transform: none; pointer-events: auto; }
+.gl-tip {
+  padding: 6px 11px; border-radius: 9px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--gl-pill-bg); color: var(--gl-pill-ink); box-shadow: 0 8px 22px -10px rgba(0,0,0,.6);
+}
+.gl-fly, .gl-user {
+  min-width: 220px; max-height: calc(100vh - 40px); overflow-y: auto; padding: 8px; border-radius: 18px;
+  background: var(--gl-card-strong); backdrop-filter: var(--gl-blur); -webkit-backdrop-filter: var(--gl-blur);
+  border: 1px solid var(--gl-edge); box-shadow: 0 24px 60px -24px rgba(0,0,0,.7);
+}
+.gl-fly h4 { margin: 4px 10px 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0; }
+.gl-fly button {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; cursor: pointer;
+  padding: 9px 10px; border-radius: 10px; background: transparent; color: var(--text2); font: 500 13px/1.2 Inter, system-ui, sans-serif;
+  transition: background .12s var(--ease), color .12s var(--ease);
+}
+.gl-fly button:hover, .gl-fly button:focus-visible { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.gl-fly button.on { color: var(--text); font-weight: 600; }
+.gl-fly button::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
+.gl-fly button.on::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.gl-user { width: 270px; padding: 4px; }
+.gl-user .sidebar-footer { display: block !important; border: 0 !important; padding: 12px !important; }
+
+/* ---------- topbar: floating glass bar ---------- */
+html.gl .topbar {
+  margin: var(--gl-gap) var(--gl-gap) 0 0; top: var(--gl-gap); border-radius: 20px; min-height: 60px;
+  background: var(--gl-card); backdrop-filter: var(--gl-blur); -webkit-backdrop-filter: var(--gl-blur);
+  border: 1px solid var(--gl-edge); box-shadow: var(--gl-shadow);
+}
+html.gl .content { padding: 22px var(--gl-gap) 60px 0; }
+@media (max-width: 860px) {
+  html.gl .topbar { margin: 10px 10px 0; top: 10px; }
+  html.gl .content { padding: 16px 10px 60px; }
+}
+
+/* ---------- glass surfaces (no backdrop-filter: the blurred backdrop already gives the glass look, for free) ---------- */
+html.gl .metric-card, html.gl .panel, html.gl .seg-section-card, html.gl .cx-kpi, html.gl .cx-cat, html.gl .cx-tile, html.gl .cx-mini, html.gl .ov-hero, html.gl .tw-card {
+  background: var(--gl-sheen), var(--gl-card) !important;
+  border: 1px solid var(--gl-edge) !important; border-radius: 20px; box-shadow: var(--gl-shadow) !important;
+}
+html.gl .ov-hero { background: var(--gl-sheen), linear-gradient(160deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%), var(--gl-card) !important; }
+html.gl .tw-card[style*="fbbf24"] { border-color: color-mix(in srgb, var(--orange) 55%, transparent) !important; }
+html.gl .metric-card:hover { border-color: var(--gl-edge-hi) !important; }
+/* الجداول: خلفية شبه صلبة — الأرقام الصغيرة تتقري */
+html.gl .table-responsive, html.gl .tw-scroll, html.gl .table-panel, html.gl .table-section { background: var(--gl-card-strong); border-radius: 14px; }
+html.gl .data-table thead th { background: color-mix(in srgb, var(--panel2) 92%, transparent); }
+html.gl .panel .metric-card, html.gl .panel .panel, html.gl .ov-hero .ov-tile { background: color-mix(in srgb, var(--text) 3%, transparent) !important; }
+html.gl .ov-hero .ov-tile { border-radius: 0; box-shadow: none !important; border-color: var(--gl-edge) !important; }
+html.gl .modal > *:not(.modal) { border-radius: 20px; }
+html.gl select:not(.tw-rolechip), html.gl input:not([type="checkbox"]):not([type="radio"]), html.gl .btn-outline, html.gl .btn:not(.btn-primary) {
+  background-color: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+/* Control pages: نفس عرض باقي الصفحات (كانت واقفة عند 1180px) */
+html.gl .tw-page, html.gl .tg-page { max-width: none !important; }
+/* People / Permissions / Roles: segmented بدل الخط اللي تحت */
+html.gl .tw-uts { border-bottom: 0; gap: 4px; padding: 4px; width: max-content; max-width: 100%; border-radius: 14px; background: var(--gl-card); border: 1px solid var(--gl-edge); }
+html.gl .tw-ut { padding: 8px 16px; border-radius: 10px; font-size: 13px; }
+html.gl .tw-ut:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+html.gl .tw-ut.on { background: var(--gl-pill-bg); color: var(--gl-pill-ink); }
+html.gl .tw-ut.on::after { display: none; }
+
+/* ---------- hub tabs: sliding pill ---------- */
+html.gl .tw-tabs { position: relative; isolation: isolate; background: var(--gl-card); border: 1px solid var(--gl-edge) !important; border-radius: 16px; padding: 5px; width: max-content; max-width: 100%; }
+html.gl .tw-tabs .tw-tab { position: relative; z-index: 1; border-radius: 11px; }
+html.gl .tw-tabs .tw-tab.on { background: transparent !important; box-shadow: none !important; color: var(--gl-pill-ink) !important; }
+html.gl .gl-ind { position: absolute; z-index: 0; top: 0; left: 0; border-radius: 11px; background: var(--gl-pill-bg); box-shadow: 0 6px 16px -8px rgba(0,0,0,.5); pointer-events: none; will-change: transform; transition: transform .42s cubic-bezier(.3,1.25,.4,1), width .42s cubic-bezier(.3,1.25,.4,1); }
+
+/* ---------- page change ----------
+   الحركة نفسها في js/glass.js (Web Animations: transform + opacity بس، على الـ compositor).
+   هنا السكشن بس بيعمل fade سريع من غير ما يتزحلق — عشان مايبقاش فيه حركتين فوق بعض. */
+html.gl .view-section { transform: none !important; transition: none !important; }
+html.gl .view-section:not(.hidden) { opacity: 1; }
+
+/* glass toggle button in the topbar */
+.gl-toggle svg { transition: transform .3s var(--ease); }
+html.gl .gl-toggle { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line2)) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.gl .view-section { transition: none !important; }
+  html.gl .gl-ind, .gl-float { transition: none !important; }
+}
+
+/* Control: شريط Save changes بقى كارت عائم بدل الشريط الأبيض اللي على عرض الصفحة */
+html.gl .tw-savebar {
+  bottom: var(--gl-gap); padding: 10px 14px; border-radius: 16px; width: max-content; max-width: 100%;
+  background: var(--gl-card-strong); border: 1px solid var(--gl-edge); box-shadow: 0 18px 40px -22px rgba(0,0,0,.55);
+  backdrop-filter: var(--gl-blur); -webkit-backdrop-filter: var(--gl-blur);
+}
+
+/* ======================================================================
+   Page transitions (v1.17.3) — View Transitions API
+   المتصفح بياخد صورة من الصفحة القديمة، والجديدة بتبقى live — والاتنين بيتحركوا على الـ GPU.
+   - السايدبار والتوب بار ثابتين (الـ indicator والعنوان بيتحركوا لوحدهم)
+   - التابات اللي فوق ثابتة، والـ pill بتتزحلق
+   - المحتوى: القديم بيمشي بسرعة، والجديد بيدخل من الاتجاه الصح بحركة بتهدى في الآخر
+   ====================================================================== */
+/* الأسماء بتتحط بس وقت الـ transition — عشان .content مايبقاش stacking context طول الوقت (المودالز جواه) */
+@media (min-width: 861px) {
+  html.gl.gl-vt-run .sidebar { view-transition-name: gl-rail; }
+  html.gl.gl-vt-run .topbar { view-transition-name: gl-top; }
+  html.gl.gl-vt-run #twTabs:not(.tw-off) { view-transition-name: gl-tabs; }
+  html.gl.gl-vt-run .content { view-transition-name: gl-main; }
+}
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-old(gl-rail), ::view-transition-old(gl-top), ::view-transition-old(gl-tabs) { animation: none; opacity: 0; }
+::view-transition-new(gl-rail), ::view-transition-new(gl-top), ::view-transition-new(gl-tabs) { animation: none; }
+::view-transition-group(gl-rail), ::view-transition-group(gl-top), ::view-transition-group(gl-tabs) { animation-duration: .38s; animation-timing-function: cubic-bezier(.22,1,.36,1); }
+
+::view-transition-group(gl-main) { animation: none; }
+::view-transition-image-pair(gl-main) { isolation: auto; }
+::view-transition-old(gl-main) { animation: glOutDown .2s cubic-bezier(.4,0,1,1) both; mix-blend-mode: normal; }
+::view-transition-new(gl-main) { animation: glInDown .52s cubic-bezier(.22,1,.36,1) .04s both; mix-blend-mode: normal; }
+html[data-gl-dir="up"]::view-transition-old(gl-main) { animation-name: glOutUp; }
+html[data-gl-dir="up"]::view-transition-new(gl-main) { animation-name: glInUp; }
+html[data-gl-dir="right"]::view-transition-old(gl-main) { animation-name: glOutLeft; }
+html[data-gl-dir="right"]::view-transition-new(gl-main) { animation-name: glInRight; }
+html[data-gl-dir="left"]::view-transition-old(gl-main) { animation-name: glOutRight; }
+html[data-gl-dir="left"]::view-transition-new(gl-main) { animation-name: glInLeft; }
+
+/* من القايمة (لقسم تحت): القديم يطلع لفوق ويصغر سنة، والجديد يطلع من تحت */
+@keyframes glOutDown { to { opacity: 0; transform: translate3d(0,-14px,0) scale(.985); } }
+@keyframes glInDown  { 0% { opacity: 0; transform: translate3d(0,22px,0) scale(.985); } 35% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes glOutUp   { to { opacity: 0; transform: translate3d(0,14px,0) scale(.985); } }
+@keyframes glInUp    { 0% { opacity: 0; transform: translate3d(0,-22px,0) scale(.985); } 35% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+/* بين التابات */
+@keyframes glOutLeft  { to { opacity: 0; transform: translate3d(-36px,0,0); } }
+@keyframes glInRight  { 0% { opacity: 0; transform: translate3d(48px,0,0); } 35% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes glOutRight { to { opacity: 0; transform: translate3d(36px,0,0); } }
+@keyframes glInLeft   { 0% { opacity: 0; transform: translate3d(-48px,0,0); } 35% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+
+/* جوه الـ transition السكشن مايعملش fade لوحده (الـ transition هو اللي بيحرّك) */
+html.gl.gl-vt-run .view-section:not(.hidden) { opacity: 1 !important; transition: none !important; }
+
+/* السايدبار: الدايرة البيضا بتتزحلق للقسم الجديد */
+@media (min-width: 861px) {
+  html.gl .sidebar-nav { position: relative; }
+  html.gl .gl-rail-ind {
+    position: absolute; z-index: 0; top: 0; left: 0; width: 44px; height: 44px; border-radius: 50%; pointer-events: none;
+    background: var(--gl-pill-bg); box-shadow: 0 6px 18px -8px rgba(0,0,0,.55), 0 0 0 4px color-mix(in srgb, var(--gl-pill-bg) 14%, transparent);
+    transition: transform .5s cubic-bezier(.3,1.2,.4,1), opacity .2s; will-change: transform;
+  }
+  html.gl .sidebar .nav-item { position: relative; z-index: 1; transition: color .25s ease, background .15s ease; }
+  html.gl .sidebar .nav-item.gl-on { background: transparent; box-shadow: none; }
+}
+html:not(.gl) .gl-rail-ind { display: none; }
+
+/* خط التحميل تحت التوب بار (تبديل صفحة / رفرش) */
+.gl-progress { position: fixed; z-index: 30; height: 2px; border-radius: 2px; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity .25s ease; }
+.gl-progress.on { opacity: 1; }
+.gl-progress i { position: absolute; inset: 0; width: 40%; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: glProg 1.1s cubic-bezier(.4,0,.2,1) infinite; }
+@keyframes glProg { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+html:not(.gl) .gl-progress { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  html.gl .gl-rail-ind, .gl-progress i { transition: none !important; animation: none !important; }
+}
+
+/* Export cards in the glass look */
+html.gl .exp-stack { top: calc(var(--gl-gap) + 74px); }
+html.gl .exp-toast { background: var(--gl-card-strong); border-color: var(--gl-edge); border-radius: 18px; backdrop-filter: var(--gl-blur); -webkit-backdrop-filter: var(--gl-blur); }
+
+/* ======================================================================
+   Liquid Glass (v1.17.5) — html.gl.gl-liquid
+   1) سُمك الإزاز: حافة فاتحة فوق وتحت + لمعة داخلية خفيفة (ثابتة، من غير تكلفة)
+   2) Lens: الحواف بتكسر اللي وراها (js/glass.js بيعمل SVG map على مقاس كل عنصر) — Chrome/Edge
+   3) Light: لمعة على الحافة وإضاءة جوه الكارت بتمشي مع الماوس (العنصر اللي تحت الماوس بس)
+   ====================================================================== */
+html.gl.gl-liquid {
+  --gl-rim: rgba(255, 255, 255, .55);
+  --gl-glow: rgba(255, 255, 255, .045);
+  --gl-thick: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.05), inset 1px 0 0 rgba(255,255,255,.05), inset -1px 0 0 rgba(255,255,255,.03), inset 0 18px 30px -24px rgba(255,255,255,.12);
+}
+html.gl.gl-liquid[data-theme="light"] {
+  --gl-rim: color-mix(in srgb, var(--accent) 70%, #fff);
+  --gl-glow: color-mix(in srgb, var(--accent) 7%, transparent);
+  --gl-thick: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(255,255,255,.55), inset 1px 0 0 rgba(255,255,255,.6), inset 0 18px 30px -24px rgba(255,255,255,.9);
+}
+
+/* (1)+(3) الكروت: حافة متدرجة (border-box) + لمعة الماوس على الحافة + إضاءة جوه */
+html.gl.gl-liquid :is(.metric-card, .seg-section-card, .cx-kpi, .cx-cat, .cx-tile, .cx-mini, .ov-hero, .tw-card, .panel, .tw-stat, .tw-dstat) {
+  border-color: transparent !important;
+  background:
+    var(--gl-sheen) padding-box,
+    linear-gradient(var(--gl-card), var(--gl-card)) padding-box,
+    linear-gradient(165deg, var(--gl-edge-hi), var(--gl-edge) 35%, var(--gl-edge) 70%, var(--gl-edge-hi)) border-box !important;
+  box-shadow: var(--gl-thick), var(--gl-shadow) !important;
+}
+html.gl.gl-liquid .ov-hero {
+  background:
+    var(--gl-sheen) padding-box,
+    linear-gradient(160deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%) padding-box,
+    linear-gradient(var(--gl-card), var(--gl-card)) padding-box,
+    linear-gradient(165deg, var(--gl-edge-hi), var(--gl-edge) 35%, var(--gl-edge) 70%, var(--gl-edge-hi)) border-box !important;
+}
+/* الكروت اللي جوه كروت تانية تفضل بسيطة */
+html.gl.gl-liquid :is(.panel, .ov-hero, .tw-card) :is(.metric-card, .panel, .tw-stat, .tw-dstat) {
+  box-shadow: none !important; border-color: var(--gl-edge) !important;
+  background: color-mix(in srgb, var(--text) 3%, transparent) !important;
+}
+html.gl.gl-liquid .ov-hero .ov-tile { background: transparent !important; }
+
+/* (1)+(2)+(3) السايدبار والتوب بار والقوايم العائمة: Lens + حافة بتلمع مع الماوس */
+html.gl.gl-liquid :is(.sidebar, .topbar, .gl-fly, .gl-user, .tw-tabs, .exp-toast, .auth-card) {
+  border-color: transparent !important;
+  background:
+    var(--gl-sheen) padding-box,
+    linear-gradient(var(--gl-lq-fill, var(--gl-card)), var(--gl-lq-fill, var(--gl-card))) padding-box,
+    linear-gradient(165deg, var(--gl-edge-hi), var(--gl-edge) 35%, var(--gl-edge) 70%, var(--gl-edge-hi)) border-box !important;
+  box-shadow: var(--gl-thick), var(--gl-shadow) !important;
+}
+html.gl.gl-liquid :is(.gl-fly, .gl-user, .exp-toast) { --gl-lq-fill: var(--gl-card-strong); }
+/* مع الـ Lens الإزاز بيبقى أنضف (blur أقل) عشان الكسر يبان — وأكتر شفافية سنة */
+html.gl.gl-liquid.gl-lens .topbar { --gl-lq-fill: color-mix(in srgb, var(--panel) 42%, transparent); -webkit-backdrop-filter: blur(7px) saturate(170%); backdrop-filter: blur(7px) var(--gl-lens,) saturate(170%); }
+html.gl.gl-liquid.gl-lens .sidebar { --gl-lq-fill: color-mix(in srgb, var(--panel) 38%, transparent); backdrop-filter: blur(3px) var(--gl-lens,) saturate(160%); }
+html.gl.gl-liquid.gl-lens :is(.gl-fly, .gl-user) { --gl-lq-fill: color-mix(in srgb, var(--panel) 70%, transparent); backdrop-filter: blur(10px) var(--gl-lens,) saturate(170%); }
+html.gl.gl-liquid[data-theme="light"].gl-lens .topbar { --gl-lq-fill: rgba(255,255,255,.5); }
+html.gl.gl-liquid[data-theme="light"].gl-lens .sidebar { --gl-lq-fill: rgba(255,255,255,.45); }
+html.gl.gl-liquid[data-theme="light"].gl-lens :is(.gl-fly, .gl-user) { --gl-lq-fill: rgba(255,255,255,.78); }
+
+/* الدايرة والـ pill بقوا "قطرة إزاز": لمعة فوق وظل جوه */
+html.gl.gl-liquid .gl-rail-ind, html.gl.gl-liquid .gl-ind {
+  background: radial-gradient(120% 90% at 30% 20%, rgba(255,255,255,.95), var(--gl-pill-bg) 60%) !important;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.9), inset 0 -2px 4px rgba(0,0,0,.12), 0 8px 20px -8px rgba(0,0,0,.6), 0 0 0 4px color-mix(in srgb, var(--gl-pill-bg) 12%, transparent) !important;
+}
+html.gl.gl-liquid[data-theme="light"] .gl-rail-ind, html.gl.gl-liquid[data-theme="light"] .gl-ind {
+  background: radial-gradient(120% 90% at 30% 20%, #3b4a63, var(--gl-pill-bg) 60%) !important;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.35), inset 0 -2px 4px rgba(0,0,0,.25), 0 8px 20px -8px rgba(15,30,60,.45) !important;
+}
+/* حالة الزرار: Liquid / Glass / Classic */
+.gl-toggle[data-mode="glass"] svg { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 70%, transparent)); }
+html:not(.gl) .gl-toggle { color: var(--text2); }
+
+@media (prefers-reduced-motion: reduce) { html.gl.gl-liquid :is(.gl-rail-ind, .gl-ind) { transition: none !important; } }
+
+/* اللمعة اللي بتمشي مع الماوس: طبقتين صغيرين فوق الكارت، بيتحركوا بـ transform بس (على كارت الشاشة) */
+.gl-light { position: fixed; z-index: 2; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .25s ease; contain: strict; }
+.gl-light.on { opacity: 1; }
+.gl-light > i { position: absolute; left: 0; top: 0; width: 420px; height: 420px; border-radius: 50%; will-change: transform;
+  background: radial-gradient(closest-side, var(--gl-glow, rgba(255,255,255,.045)), transparent); }
+.gl-light-rim { padding: 1px; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.gl-light-rim > i { width: 180px; height: 180px; background: radial-gradient(closest-side, var(--gl-rim, rgba(255,255,255,.55)), transparent); }
+html:not(.gl-liquid) .gl-light, html.gl-lite .gl-light { display: none; }
+
+/* خط التحميل: الأنيميشن شغال بس وهو ظاهر */
+.gl-progress:not(.on) i { animation: none; }
+
+
+/* ======================================================================
+   Login (v1.17.7) — html.gl: نفس خلفية الداش بورد + نورين متحركين + كارت إزاز تخين
+   ====================================================================== */
+html.gl #authOverlay { background: transparent !important; isolation: isolate; overflow-x: hidden; }
+html.gl #authOverlay::before, html.gl #authOverlay::after {
+  content: ""; position: fixed; z-index: -1; width: 64vmax; height: 64vmax; border-radius: 50%; pointer-events: none; will-change: transform; opacity: .6;
+}
+html.gl #authOverlay::before { left: -20vmax; top: -24vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent, #2dd4a8) 46%, transparent), transparent 70%); animation: glAuthLightA 24s ease-in-out infinite alternate; }
+html.gl #authOverlay::after { right: -22vmax; bottom: -28vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--purple, #a78bfa) 44%, transparent), transparent 70%); animation: glAuthLightB 28s ease-in-out infinite alternate; }
+@keyframes glAuthLightA { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(16vmax, 11vmax, 0) scale(1.18); } }
+@keyframes glAuthLightB { from { transform: translate3d(0, 0, 0) scale(1.1); } to { transform: translate3d(-14vmax, -10vmax, 0) scale(.94); } }
+
+/* الكارت: سُمك + حواف بتلمع (باقي القواعد من html.gl.gl-liquid فوق) + دخول ناعم */
+html.gl .auth-card { border-radius: 26px; padding: 36px 34px 30px; position: relative; animation: glAuthCard .75s cubic-bezier(.2, .8, .2, 1) both; }
+html.gl.gl-liquid .auth-card { --gl-lq-fill: color-mix(in srgb, var(--panel, #0b111a) 52%, transparent); -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%); }
+html.gl.gl-liquid.gl-lens .auth-card { backdrop-filter: blur(9px) var(--gl-lens,) saturate(165%); }
+html.gl[data-theme="light"].gl-liquid .auth-card { --gl-lq-fill: rgba(255, 255, 255, .55); }
+@keyframes glAuthCard { from { opacity: 0; transform: translateY(18px) scale(.975); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* Login / Sign Up: pill بتتزحلق زي تابات الداش بورد */
+html.gl .auth-tabs { position: relative; isolation: isolate; background: var(--gl-card); border-color: var(--gl-edge); }
+html.gl .auth-tab { position: relative; z-index: 1; }
+html.gl .auth-tab:hover { color: var(--text, #f6f8fb); }
+html.gl .auth-tab.active { background: transparent; box-shadow: none; color: var(--gl-pill-ink); }
+html.gl .auth-ind {
+  display: block; position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 9px;
+  background: radial-gradient(120% 90% at 30% 20%, rgba(255,255,255,.95), var(--gl-pill-bg) 60%);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.9), inset 0 -2px 4px rgba(0,0,0,.12), 0 8px 20px -8px rgba(0,0,0,.6);
+  transition: transform .42s cubic-bezier(.2, .8, .2, 1);
+}
+html.gl[data-theme="light"] .auth-ind { background: radial-gradient(120% 90% at 30% 20%, #3b4a63, var(--gl-pill-bg) 60%); box-shadow: inset 0 1px 1px rgba(255,255,255,.35), inset 0 -2px 4px rgba(0,0,0,.25), 0 8px 20px -8px rgba(15,30,60,.45); }
+html.gl .auth-tabs:has(.auth-tab[data-tab="signup"].active) .auth-ind { transform: translateX(100%); }
+
+/* الخانات: إزاز، ولما تكتب فيها بيظهر نور بلون الداش بورد */
+html.gl .auth-form input, html.gl .auth-form select {
+  background: color-mix(in srgb, var(--text, #fff) 5%, transparent); border: 1px solid var(--gl-edge-hi);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  transition: border-color .2s, box-shadow .28s, background .2s;
+}
+html.gl .auth-form input:focus, html.gl .auth-form select:focus {
+  border-color: color-mix(in srgb, var(--accent, #2dd4a8) 75%, transparent); background: color-mix(in srgb, var(--accent, #2dd4a8) 7%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #2dd4a8) 22%, transparent), 0 0 24px -4px color-mix(in srgb, var(--accent, #2dd4a8) 55%, transparent);
+}
+
+/* زرار Login: قطرة ملونة، لمعة بتعدي عليه، وهو بيحمّل اللمعة رايحة جاية */
+html.gl .auth-submit {
+  position: relative; overflow: hidden; border-radius: 14px; color: var(--accent-ink, #04251d);
+  background: radial-gradient(120% 130% at 30% 12%, color-mix(in srgb, var(--accent, #2dd4a8) 55%, #fff), var(--accent, #2dd4a8) 58%, color-mix(in srgb, var(--accent, #2dd4a8) 72%, #000));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.75), inset 0 -3px 6px rgba(0,0,0,.18), 0 14px 28px -12px color-mix(in srgb, var(--accent, #2dd4a8) 75%, transparent);
+}
+html.gl .auth-submit::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%; opacity: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.6), transparent); transform: translateX(0) skewX(-18deg);
+}
+html.gl .auth-submit:hover:not(:disabled)::after { animation: glAuthSweep .85s ease; }
+html.gl .auth-submit:disabled::after { opacity: 1; animation: glAuthSweepLoop 1.15s ease-in-out infinite alternate; }
+@keyframes glAuthSweep { from { transform: translateX(0) skewX(-18deg); opacity: 1; } to { transform: translateX(520%) skewX(-18deg); opacity: 1; } }
+@keyframes glAuthSweepLoop { from { transform: translateX(0) skewX(-18deg); } to { transform: translateX(520%) skewX(-18deg); } }
+
+/* الناحية الشمال: الكلام بيظهر سطر ورا سطر */
+html.gl .auth-hero { position: relative; }
+html.gl .auth-hero > .auth-logo, html.gl .auth-hero > h1, html.gl .auth-hero > p, html.gl .auth-points li {
+  opacity: 0; transform: translateY(16px); animation: glAuthRise .8s cubic-bezier(.2, .7, .2, 1) forwards;
+}
+html.gl .auth-hero > .auth-logo { animation-delay: .10s; }
+html.gl .auth-hero > h1 { animation-delay: .28s; }
+html.gl .auth-hero > p { animation-delay: .46s; }
+html.gl .auth-points li:nth-child(1) { animation-delay: .64s; }
+html.gl .auth-points li:nth-child(2) { animation-delay: .80s; }
+html.gl .auth-points li:nth-child(3) { animation-delay: .96s; }
+@keyframes glAuthRise { to { opacity: 1; transform: none; } }
+/* الكلمة الملونة في العنوان: لمعة بتعدي عليها كل كام ثانية */
+html.gl .auth-hero h1 span {
+  /* الجريدينت أطول من الكلمة (260%) وفي الراحة بنقف على الطرف اللي كله accent (100%) — عشان النص يتغطى بالكامل ومايتقطعش */
+  background: linear-gradient(100deg, var(--accent, #2dd4a8) 0, var(--accent, #2dd4a8) 38%, #ffffff 50%, var(--accent, #2dd4a8) 62%, var(--accent, #2dd4a8) 100%) 100% 0 / 260% 100% no-repeat;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  animation: glAuthWord 7s ease-in-out 1.6s infinite;
+}
+html.gl[data-theme="light"] .auth-hero h1 span { background-image: linear-gradient(100deg, var(--accent, #2dd4a8) 0, var(--accent, #2dd4a8) 38%, #9aeed7 50%, var(--accent, #2dd4a8) 62%, var(--accent, #2dd4a8) 100%); }
+@keyframes glAuthWord { 0%, 55% { background-position: 100% 0; } 100% { background-position: 0% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.gl #authOverlay::before, html.gl #authOverlay::after, html.gl .auth-submit::after, html.gl .auth-hero h1 span { animation: none !important; }
+  html.gl .auth-hero > *, html.gl .auth-points li { opacity: 1 !important; transform: none !important; }
+  html.gl .auth-hero h1 span { background-position: 100% 0; }
+}
+
+/* ---------- Light + Glass: the glass has to be seen ----------
+   The old light background was a muddy grey, so a white card on it looked like a flat milky box. Now: a bright aurora behind the cards
+   (colour shows through the translucent cards = it reads as glass), a rim that catches the light at the corners, and a coloured soft shadow.
+   Still no backdrop-filter on the cards (that is what made scrolling heavy) — the effect comes from the layers. */
+html.gl[data-theme="light"] {
+  --gl-card: rgba(255, 255, 255, .50);
+  --gl-card-strong: rgba(255, 255, 255, .88);
+  --gl-edge: rgba(120, 150, 215, .42);
+  --gl-edge-hi: rgba(255, 255, 255, .98);
+  --gl-sheen: linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(255, 255, 255, 0) 52%);
+  --gl-shadow: 0 0 0 1px rgba(70, 100, 165, .07), 0 22px 46px -22px rgba(50, 80, 155, .42), 0 6px 14px -8px rgba(50, 80, 155, .16);
+}
+html.gl[data-theme="light"] body::before {
+  background:
+    radial-gradient(52% 46% at 6% 6%, rgba(96, 190, 255, .62), transparent 62%),
+    radial-gradient(48% 52% at 96% 4%, rgba(80, 225, 175, .62), transparent 62%),
+    radial-gradient(54% 56% at 86% 96%, rgba(176, 150, 255, .62), transparent 62%),
+    radial-gradient(44% 46% at 4% 94%, rgba(255, 176, 108, .5), transparent 62%),
+    radial-gradient(40% 36% at 50% 46%, rgba(255, 255, 255, .55), transparent 70%),
+    linear-gradient(160deg, #eef4ff 0%, #e6eefb 48%, #eaf2fb 100%);
+}
+html.gl.gl-liquid[data-theme="light"] {
+  --gl-thick: inset 0 1.5px 0 rgba(255, 255, 255, 1), inset 0 -1px 0 rgba(255, 255, 255, .7), inset 1px 0 0 rgba(255, 255, 255, .8), inset -1px 0 0 rgba(255, 255, 255, .5), inset 0 26px 34px -26px rgba(255, 255, 255, .95);
+}
+html.gl.gl-liquid[data-theme="light"] :is(.sidebar, .topbar, .tw-tabs) { --gl-lq-fill: rgba(255, 255, 255, .42); }
