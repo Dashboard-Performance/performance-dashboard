@@ -24,7 +24,7 @@
 - **لاج التنقل بين التابات:** الـ View Transition (انتقال الصفحة كلها) كان بيعمل فريمز واقفة لحد 217ms عند كل تبديل. اتقفل افتراضياً، والصفحة الجديدة بتدخل بحركة السكشن العادية (نفس الاتجاه والتوقيت تقريباً، من غير ما القديمة تتحرك لبرّا). قياس في متصفح تجريبي: 10 فريمز فوق 100ms ← صفر، زي Classic بالظبط. لو عايز تجرّب الانتقال القديم: في الـ Console اكتب `localStorage.setItem("glVT","1")` وبعدين Reload.
 
 **Over View (بعد التسليم)**
-- كروت الأرقام فوق (Placed / Confirmed / Delivered Pieces و Delivered GMV و CR / DR / NDR) و Pipeline Velocity و Avg Placed Pcs بقت بتتقرا من **Product Only**. أي شهر مش موجود في Product Only (الأقدم من الشهر اللي فات) بيفضل من Main. وفي All Months بيتجمعوا من غير تكرار. لو اختارت ACM معين أو المستخدم Merchant، بيفضل على Main. جدول التجار والـ ACM والإنفنتوري لسه على Main.
+- كروت الأرقام فوق (Placed / Confirmed / Delivered Pieces و Delivered GMV و CR / DR / NDR) و Avg Placed Pcs بقت بتتقرا من **Product Only** (الـ Pipeline Velocity فضل على **Main / Matches** زي ما كان). أي شهر مش موجود في Product Only (الأقدم من الشهر اللي فات) بيفضل من Main. وفي All Months بيتجمعوا من غير تكرار. لو اختارت ACM معين أو المستخدم Merchant، بيفضل على Main. جدول التجار والـ ACM والإنفنتوري لسه على Main.
 - **Category Demand Breakdown اتشال.**
 - صف جديد تحت: **Top Products** (أعلى 10 منتجات بالـ Delivered GMV ونسبة كل واحد) على الشمال تحت Sellthrough & Inbound، و **Category Contribution** (Pie Chart لنسبة كل كاتيجوري من الـ Delivered GMV) تحت Avg Placed Pcs. الـ GMV هنا هو Delivered GMV زي الكارت اللي فوق.
 

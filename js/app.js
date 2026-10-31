@@ -4443,7 +4443,7 @@ function productMode() {
   return (forced === "main" || scoped || !(state.productOnlyRows && state.productOnlyRows.length)) ? "main" : "po";
 }
 function productLevelRows() { return productMode() === "po" ? state.productOnlyRows : (state.allParsedRows || []); }
-// Over View cards (numbers, Pipeline Velocity, Avg Placed Pcs, category chart, top products): rows of the selected month.
+// Over View cards (numbers, Avg Placed Pcs, category chart, top products): rows of the selected month. Pipeline Velocity is NOT here: it reads Main (Matches).
 // Product Only is used for every month it holds; a month it does not hold (older months) keeps coming from the Main rows.
 // With an ACM filter, or for a Merchant-role user, they stay on Main (Product Only has no ACM / merchant).
 // `rows` = the Main rows already filtered by the month / ACM filters (what updateDashboard receives).
@@ -5006,7 +5006,7 @@ async function updateDashboard(rows) {
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
   if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
   renderOverviewHero(ovRows, metrics); if (await Y()) return;
-  renderPipelineChart(ovRows); if (await Y()) return;
+  renderPipelineChart(rows); if (await Y()) return;   // Pipeline Velocity stays on Main (Matches), like before
   renderOvTopProducts(ovRows); renderOvCategoryContr(ovRows);
   if (!state._ovStTrendDone && $("ovStTrendChart")) { state._ovStTrendDone = true; setTimeout(() => renderSellthroughTrendChart(OV_ST_TREND_CFG), 60); }
   if (await Y()) return;
