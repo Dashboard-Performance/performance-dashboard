@@ -5180,6 +5180,16 @@ function getSegBadgeClass(segment) {
   return "seg-inactive";
 }
 
+// "Yesterday", "last 3 days" ... are the days right BEFORE the latest day of the selection. With the month filter on a month that has just started
+// (the 1st / 2nd), the filtered rows hold only the first day or two of the new month, so those days belong to the previous month and are filtered out:
+// every "yesterday" figure came out 0. These windows therefore read the days from the full data (same ACM filter), ending at the latest day of the
+// selection. An older month is unchanged (its whole window lies inside it). A custom date range of the section stays exactly that range.
+function recentWindowRows(sectionKey, selectionRows, fromMs, toMs) {
+  if (sectionKey && getActiveDateRangeFilter(sectionKey)) return selectionRows;
+  const acm = $("acmSelect") ? $("acmSelect").value : "All";
+  return (state.allParsedRows || selectionRows).filter(r => r.timestamp >= fromMs && r.timestamp < toMs && (acm === "All" || r.acmName === acm));
+}
+
 function prepareInventoryTableData(rows) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0,0,0,0); const todayMs = today.getTime();
@@ -5220,6 +5230,11 @@ function prepareInventoryTableData(rows) {
     entry.aspGmv += (r.deliveredGmv || 0); entry.aspPieces += (r.deliveredPieces || 0);
     const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0); const rTime = rDate.getTime();
     if(r.placedOrders > 0) entry.totalActiveDays.add(rTime);
+  });
+  // yesterday / last 3 / 5 / 15 days — from the days before the latest day, even when they are in the previous month (see recentWindowRows)
+  recentWindowRows("", rows, d15Ms, todayMs + 86400000).forEach(r => {
+    const entry = map.get(r.sku); if (!entry) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0); const rTime = rDate.getTime();
     if (rTime === ydayMs) { entry.placedYday += r.placedOrders; entry.confYday += r.confirmedOrders; }
     if (rTime >= d3Ms) entry.conf3d += r.confirmedOrders;
     if (rTime >= d15Ms) entry.conf15d += r.confirmedOrders;
@@ -5316,7 +5331,7 @@ function prepareAcmTableData(rows) {
   // v1.15.38: أرقام الأوردرات (Placed/Confirmed/Delivered/Delivered GMV) بتتقرا من كويري Merchant Segmentation
   // (Metabase) مجمّعة بالـ ACM — بدل الشيت الرئيسي (Main). CM3 و PPM لسه من Main (مش في الكويري).
   // لو الكويري فاضية بنفضل على Main.
-  if (!__histAcm && (moAcm || (state.merchantSegSourceRows || []).length)) {
+  if (!__histAcm && (moAcm || merchantSegRowsAll().length)) {
     const segByAcm = moAcm || new Map();
     if (!moAcm) (state.merchantTableData || []).forEach(mm => {
       const nm = mm.acm; if (!nm || nm === "Unassigned") return;
@@ -5578,9 +5593,17 @@ function wireTgtViews() {
 // معندوش صف في شيت الـ Segmentation للشهر/الفترة المختارة مش هيظهر خالص في
 // التلات جداول دي حتى لو عنده أوردرات في الشيت الرئيسي.
 // -------------------------------------------------------------------------
+// The Merchant Segmentation query returns the CURRENT month only. Closed months come from their tabs (MERCHANT_SEG_ARCHIVE_GIDS, state.merchantSegHistoryRows);
+// for the same (merchant + month) the closed-month tab wins (it is the final number). Every page that reads merchant / ACM actuals from Segmentation uses this.
+function merchantSegRowsAll() {
+  const base = state.merchantSegSourceRows || [], hist = state.merchantSegHistoryRows || [];
+  if (!hist.length) return base;
+  const keys = new Set(hist.map(r => r.merchantId + "|" + r.monthYear));
+  return base.filter(r => !keys.has(r.merchantId + "|" + r.monthYear)).concat(hist);
+}
 function buildMerchantAggFromSegmentation(selectedMonthStr) {
   const map = new Map();
-  (state.merchantSegSourceRows || []).forEach(r => {
+  merchantSegRowsAll().forEach(r => {
     if (!r.merchantId) return;
     if (selectedMonthStr && r.monthYear !== selectedMonthStr) return;
     if (!map.has(r.merchantId)) {
@@ -5707,17 +5730,7 @@ function prepareIncentiveMerchantsData() {
   // كمان — من غير ما يمس جدول Merchant Segmentation & Projections (اللي لسه
   // بيستخدم merchantSegSourceRows لوحده). دمج آمن: لو شهر اتكرر في الاتنين
   // بنمنع التكرار بمفتاح (merchantId + monthYear).
-  const segRows = (() => {
-    const base = state.merchantSegSourceRows || [];
-    const hist = state.merchantSegHistoryRows || [];
-    if (!hist.length) return base;
-    // الأرشيف (History) هو الرقم النهائي للشهر المقفول، أما الشيت الأساسي لقطة بتتحدّث لحد ما يتقفل الشهر
-    // وممكن تفضل قديمة (مثلاً Confirmed 2,085 بدل 2,160 النهائي). فلو نفس (تاجر + شهر) موجود في الاتنين نفضّل الـ History.
-    const histKeys = new Set(hist.map(r => r.merchantId + "|" + r.monthYear));
-    const merged = base.filter(r => !histKeys.has(r.merchantId + "|" + r.monthYear));
-    hist.forEach(r => merged.push(r));
-    return merged;
-  })();
+  const segRows = merchantSegRowsAll();   // current month (query) + closed months (their tabs, which win for the same merchant + month)
 
   // Period follows the section's date filter (startDate_/endDate_incentiveMerchants).
   // With no filter → the current month, exactly as before. With a filter → every
@@ -15153,7 +15166,8 @@ function computeAvailabilityLocking(sectionKey) {
   // DOH بتاع الـ Remaining Pieces في كل قفل: كام يوم هتقضي القطع المتبقية
   // لو التاجر ده استمر يطلب بنفس معدل آخر 3 أيام.
   const d3DemandByMerchantSingle = new Map();
-  mainRows.forEach(r => {
+  const recentRows = recentWindowRows(sectionKey, mainRows, d3Start, ydayEnd);   // the days before the latest day, also when they are in the previous month
+  recentRows.forEach(r => {
     if (!r.sku || r.timestamp < ydayStart || r.timestamp >= ydayEnd) return;
     const mappings = productMap.get(r.sku);
     if (!mappings || !mappings.length) return;
@@ -15167,7 +15181,7 @@ function computeAvailabilityLocking(sectionKey) {
       }
     });
   });
-  mainRows.forEach(r => {
+  recentRows.forEach(r => {
     if (!r.sku || r.timestamp < d3Start || r.timestamp >= ydayEnd || !r.merchantId) return;
     const mappings = productMap.get(r.sku);
     if (!mappings || !mappings.length) return;
@@ -17352,11 +17366,18 @@ async function fetchAllSheetsSnapshot() {
   // v1.3.48: ACM مش موجود في Main بتاع Metabase — بنبنيه من Merchant Segmentation / Merchant SKU Daily.
   const merchantSegRowsNow = merchantSegPayload ? parseMerchantSegmentationSheet(merchantSegPayload) : state.merchantSegSourceRows;
   const merchantSkuDailyRowsNow = merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows;
+  // Closed months for Incentive Merchants and the merchant / ACM pages (MERCHANT_SEG_ARCHIVE_GIDS). If a tab did not load this time, keep what was loaded before.
+  const merchantSegHistoryNow = (() => {
+    const got = MERCHANT_SEG_ARCHIVE_GIDS.filter(g => sheets[g]);
+    if (!got.length) return state.merchantSegHistoryRows || [];
+    const out = []; got.forEach(g => { try { parseMerchantSegmentationSheet(sheets[g]).forEach(r => out.push(r)); } catch (e) { console.warn("[Merchant Segmentation archive] parse", g, e); } });
+    return out.length ? out : (state.merchantSegHistoryRows || []);
+  })();
   // v1.18.0 — Merchant Only (ACM pages). If it fails to load / parse, the previous rows stay and the ACM pages fall back to the old source.
   let merchantOnlyRowsNow = state.merchantOnlyRows || [];
   if (ACM_USES_MERCHANT_ONLY) try { const moPayload = sheets[MERCHANT_ONLY_GID]; if (moPayload) merchantOnlyRowsNow = parseMerchantOnlySheet(moPayload); else if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
   catch (e) { console.warn("[Merchant Only]", e && e.message || e); if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
-  applyMerchantAcmToMainRows(allParsedRows, buildMerchantAcmMap(merchantSegRowsNow, merchantSkuDailyRowsNow));
+  applyMerchantAcmToMainRows(allParsedRows, buildMerchantAcmMap(merchantSegRowsNow.concat(merchantSegHistoryNow), merchantSkuDailyRowsNow));   // the newest month wins per merchant; closed-month tabs add the merchants that have not sold yet this month
 
   // v1.18.0 — Product Only (product / category pages). If it fails to load / parse, the previous rows stay and the pages read Main.
   let productOnlyRowsNow = state.productOnlyRows || [];
@@ -17400,13 +17421,7 @@ async function fetchAllSheetsSnapshot() {
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
-    // Closed months for Incentive Merchants (MERCHANT_SEG_ARCHIVE_GIDS). If a tab did not load this time, keep what was loaded before.
-    merchantSegHistoryRows: (() => {
-      const got = MERCHANT_SEG_ARCHIVE_GIDS.filter(g => sheets[g]);
-      if (!got.length) return state.merchantSegHistoryRows || [];
-      const out = []; got.forEach(g => { try { parseMerchantSegmentationSheet(sheets[g]).forEach(r => out.push(r)); } catch (e) { console.warn("[Merchant Segmentation archive] parse", g, e); } });
-      return out.length ? out : (state.merchantSegHistoryRows || []);
-    })(),
+    merchantSegHistoryRows: merchantSegHistoryNow, // closed months (Incentive Merchants + the merchant / ACM pages for those months)
     merchantOnlyRows: merchantOnlyRowsNow, // v1.18.0 — Merchant Only (ACM Performance / Target ACM)
     productOnlyRows: productOnlyRowsNow, // v1.18.0 — Product Only (product + category pages)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
