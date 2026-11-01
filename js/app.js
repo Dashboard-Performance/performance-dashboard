@@ -86,7 +86,11 @@ const PRODUCT_ONLY_GID = "7100000002";
 // المستخدم لسه يقدر يغيّر لأي شهر من فلتر التاريخ فوق الجدول عادي. خليها "" لو
 // يومًا عايزها ترجع تفتح على الشهر الحالي تلقائيًا زي الأول. الصيغة لازم تطابق
 // شكل الشهر المعروض بالظبط: "Month YYYY" (زي "September 2026").
-const INCENTIVE_DEFAULT_MONTH = ""; // فاضية = الشهر الحالي تلقائيًا (من تاب Merchant Segmentation 620123165)
+const INCENTIVE_DEFAULT_MONTH = "October 2026"; // "" = الشهر الحالي تلقائيًا (من كويري Merchant Segmentation) — دلوقتي أكتوبر 2026 (أرقامه النهائية من تاب 2125522926)
+// Incentive Merchants — أرقام الشهور المقفولة: تابات في نفس الـ Google Sheet بنفس أعمدة كويري Merchant Segmentation (MONTH, COUNTRY, TAGER_ID, …, CONFIRMED, …).
+// الكويري بترجّع الشهر الحالي بس، فالشهر اللي فات بيتقرا من هنا. لو نفس (تاجر + شهر) موجود في الاتنين، تاب الشهر المقفول هو اللي بيتاخد.
+// 2125522926 = أكتوبر 2026 (النهائي). لما يتقفل شهر جديد ضيف تابه هنا.
+const MERCHANT_SEG_ARCHIVE_GIDS = ["2125522926"];
 
 // شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
 // في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
@@ -17158,7 +17162,8 @@ const GID_LABELS = {
   [IRQ_INBOUND_GID]: "IRQ Inbound",
   [IRQ_BEGIN_INV_GID]: "IRQ Beginning Inventory",
   [IRQ_COGS_GID]: "IRQ COGS",
-  [IRQ_INVENTORY_GID]: "IRQ Inventory (inv-IRQ)"
+  [IRQ_INVENTORY_GID]: "IRQ Inventory (inv-IRQ)",
+  "2125522926": "Incentive Merchants — October 2026 actuals (closed month)"
 };
 
 // v1.3.48: fetchConfirmedByDayViaWorker اتشالت — Confirmed by Day بيتقرا من Metabase.
@@ -17282,6 +17287,13 @@ async function fetchAllSheetsSnapshot() {
     }
   }
 
+  // Incentive Merchants — الشهور المقفولة (MERCHANT_SEG_ARCHIVE_GIDS): نفس الـ Google Sheet، بتتحمل مباشرة (gviz). لو فشلت بتتحسب "not refreshed" ويفضل آخر نسخة محفوظة.
+  for (const g of MERCHANT_SEG_ARCHIVE_GIDS) {
+    if (sheets[g]) continue;
+    try { sheets[g] = await loadSheetWithRetry(g); }
+    catch (err) { console.warn("[Merchant Segmentation archive] " + g + " failed:", err); if (staleGids.indexOf(g) < 0) staleGids.push(g); }
+  }
+
   // v1.3.48: كل مصادر Metabase (Main + 10 شيتات تانية) بتتحمل هنا — بتغطي أي نسخة
   // قديمة جاية من Apps Script لنفس الـ GIDs. Main بالذات: لو Metabase فشل
   // بنمسح أي نسخة Apps Script قديمة عمدًا (زي ما كان بيحصل مع الـ Worker) عشان
@@ -17384,7 +17396,13 @@ async function fetchAllSheetsSnapshot() {
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
-    merchantSegHistoryRows: [], // v1.3.48: أرشيف شهور Merchant Segmentation اتشال
+    // Closed months for Incentive Merchants (MERCHANT_SEG_ARCHIVE_GIDS). If a tab did not load this time, keep what was loaded before.
+    merchantSegHistoryRows: (() => {
+      const got = MERCHANT_SEG_ARCHIVE_GIDS.filter(g => sheets[g]);
+      if (!got.length) return state.merchantSegHistoryRows || [];
+      const out = []; got.forEach(g => { try { parseMerchantSegmentationSheet(sheets[g]).forEach(r => out.push(r)); } catch (e) { console.warn("[Merchant Segmentation archive] parse", g, e); } });
+      return out.length ? out : (state.merchantSegHistoryRows || []);
+    })(),
     merchantOnlyRows: merchantOnlyRowsNow, // v1.18.0 — Merchant Only (ACM Performance / Target ACM)
     productOnlyRows: productOnlyRowsNow, // v1.18.0 — Product Only (product + category pages)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
