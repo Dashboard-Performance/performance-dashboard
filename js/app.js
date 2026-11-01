@@ -2234,6 +2234,8 @@ function setSyncStatus(text, detail) {
   const el = $("sidebarUpdated");
   if (!el) return;
   el.textContent = text;
+  // The refresh verdict is kept in an attribute (green dot on the avatar reads it): "Last sync: <time>" written later by a screen update must not change it.
+  el.dataset.sync = (/^(Live|Up to date)\b/i.test(String(text).trim()) && !/⚠|not refreshed|fail|retry|error/i.test(String(text))) ? "ok" : "stale";
   if (detail) el.title = detail;
   else if (el.title && el.title.indexOf("Last error:") !== 0) el.title = "";
 }
@@ -5008,7 +5010,9 @@ async function updateDashboard(rows) {
   if($("deliveredGmvRunRate")) $("deliveredGmvRunRate").textContent = `Run Rate: ${fmtMoneyCompact(metrics.deliveredGmvRunRate)} by EOM`;
   if($("crVal")) $("crVal").textContent = fmtPct(metrics.cr);
   if($("drVal")) $("drVal").textContent = fmtPct(metrics.dr);
-  if($("sidebarUpdated")) $("sidebarUpdated").textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
+  // "Last sync: <time>" is only the clock of this screen update — it must NOT replace a warning about sources that were not refreshed
+  // (⚠ … cached from …, Refreshing…, Sync failed…), otherwise the sidebar says everything is fine while some data is still old.
+  { const el = $("sidebarUpdated"); if (el && !/⚠|not refreshed|cached|Cached|Refreshing|Loading|fail|retry/i.test(el.textContent || "")) el.textContent = `Last sync: ${new Date().toLocaleTimeString()}`; }
   renderOverviewHero(ovRows, metrics); if (await Y()) return;
   renderPipelineChart(ovRows); if (await Y()) return;
   renderOvTopProducts(ovRows); renderOvCategoryContr(ovRows);

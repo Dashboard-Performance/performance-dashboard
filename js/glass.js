@@ -156,14 +156,17 @@
     // YELLOW = something is not refreshed: still loading / refreshing, showing cached numbers, a sheet that did not refresh (⚠), or a failed sync that is retrying.
     var syncDot = function () {
       var t = (st ? st.textContent : "").trim();
-      if (t && !/^Last sync/i.test(t)) {   // "Last sync: …" is only the clock text written after a filter change — it does not change the refresh state
-        var fresh = /^(Live|Up to date)\b/i.test(t) && !/⚠|not refreshed|fail|retry|error/i.test(t);
+      // setSyncStatus() (app.js) records the verdict in data-sync; "Last sync: …" (written by a screen update) never changes it.
+      var v = st && st.dataset ? st.dataset.sync : "";
+      if (!v && t && !/^Last sync/i.test(t)) v = (/^(Live|Up to date)\b/i.test(t) && !/⚠|not refreshed|fail|retry|error/i.test(t)) ? "ok" : "stale";
+      if (v) {
+        var fresh = v === "ok";
         me.classList.toggle("gl-bad", !fresh);
         syncLabel = fresh ? "Account & sync · all refreshed" : "Account & sync · " + (/Loading|Refreshing/i.test(t) ? "refreshing…" : /not refreshed|⚠/.test(t) ? "something is not refreshed" : "not refreshed yet");
       }
       if (/Refreshing|Loading the latest/i.test(t)) progress(true); else if (prog && prog.classList.contains("on")) progress(false);
     };
-    if (st) new MutationObserver(syncDot).observe(st, { childList: true, characterData: true, subtree: true });
+    if (st) new MutationObserver(syncDot).observe(st, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["data-sync"] });
     syncDot();
   }
   function toggleUser(force) {
