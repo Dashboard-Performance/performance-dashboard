@@ -831,6 +831,10 @@ function isDateRangeFilterActive(sectionKey) { return !!getActiveDateRangeFilter
 // selectedMonth) المستخدم في كل مكان تقريبًا بيقرا من MAIN_GID — لو السكشن
 // (sectionKey) ده عنده رينج تاريخ مختار، بيتجاهل الشهر تمامًا ويرجع بس
 // الصفوف جوه الرينج؛ وإلا بيرجع لنفس شرط الشهر الأصلي زي ما هو.
+// v1.18.0 — N calendar days before/after a day (00:00 local). "x - N * 86400000" lost or gained an hour
+// in the week the clock changes (Cairo, end of October / end of April), so "yesterday" or "last 3 days"
+// missed a day there. Every rolling window below uses this instead.
+function dayShift(ms, n) { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + n); return d.getTime(); }
 function rowMatchesPeriod(r, selectedMonth, sectionKey) {
   const dateFilter = getActiveDateRangeFilter(sectionKey);
   if (dateFilter) return r.timestamp >= dateFilter.startTs && r.timestamp <= dateFilter.endTs;
@@ -840,6 +844,8 @@ function rowMatchesPeriod(r, selectedMonth, sectionKey) {
 // تحترم monthSelect (زي PPM Analyst/Single وHealthy Unlocking) — لو السكشن
 // ده عنده رينج تاريخ مختار بياخد بيه، وإلا بيرجع لنفس منطق الشهر الحالي
 // المثبّت زي ما هو.
+// v1.18.0 — Analyst / Single and Analyst / Products: the month picked at the top; Overall ("") = the current month, as before.
+function topMonthOrCurrent(currentMonthYear) { const v = $("monthSelect") ? $("monthSelect").value : ""; return v || currentMonthYear; }
 function getMonthOrRangeRows(mainRowsAll, currentMonthYear, sectionKey) {
   const dateFilter = getActiveDateRangeFilter(sectionKey);
   if (dateFilter) return (mainRowsAll || []).filter(r => r.timestamp >= dateFilter.startTs && r.timestamp <= dateFilter.endTs);
@@ -2206,12 +2212,15 @@ async function publishInvCategory() {
   }
 }
 
-async function publishSupplyConversion() {
+async function publishSupplyConversion(opts) {
   if (!DATA_API_URL) return { ok: false, error: "DATA_API_URL not configured" };
   var C = window.TowerCore;
   if (!C || typeof C.supplyConversionExport !== "function") return { ok: false, error: "Supply Chain module not loaded" };
   const payload = C.supplyConversionExport();
   if (!payload || !payload.rows || !payload.rows.length) return { ok: false, error: "nothing computed yet" };
+  // v1.18.0 — the automatic send (after every refresh) only sends the latest month. An older month picked at the top
+  // goes to the sheet only with the "Send to sheet" button, so someone looking at October never overwrites the live month.
+  if (payload.latest === false && !(opts && opts.manual)) return { ok: false, skipped: "older month on screen" };
   try {
     await fetch(DATA_API_URL, {
       method: "POST",
@@ -2290,7 +2299,7 @@ function getCm3LagCutoffTimestamp(rows) {
   rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return 0;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
-  return latestDate.getTime() - (CM3_LAG_DAYS * 86400000);
+  return dayShift(latestDate.getTime(), -CM3_LAG_DAYS);
 }
 function isCm3RowEligible(row, cutoffTs, sectionKey) {
   // فلتر الرينج العام شغال -> ملغيين أي Cutoff/Lag خالص (راجع تعليق
@@ -2673,7 +2682,7 @@ function getLagCutoffTimestamp(rows, lagDays) {
   rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   if (!latestTs) return 0;
   const latestDate = new Date(latestTs); latestDate.setHours(0, 0, 0, 0);
-  return latestDate.getTime() - (lagDays * 86400000);
+  return dayShift(latestDate.getTime(), -lagDays);
 }
 function isRowEligibleForLag(row, cutoffTs, sectionKey) {
   if (isDateRangeFilterActive(sectionKey)) return true;
@@ -3000,7 +3009,7 @@ function buildDebundledStockDohIndex(mainRows, windowDays) {
   windowDays = windowDays || 3;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const dWindowStart = todayMs - (windowDays * 86400000);
+  const dWindowStart = dayShift(todayMs, -windowDays);
 
   const stockByProductId = new Map();
   (state.debundleMap || []).forEach(r => {
@@ -3142,13 +3151,13 @@ function preparePpmAnalystProductsData() {
   // "الشهر ده" = الشهر الحقيقي الحالي (تاريخ الجهاز)، بنفس فورمات monthYear
   // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
   const now = new Date();
-  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentMonthYear = topMonthOrCurrent(now.toLocaleString('en-US', { month: 'long', year: 'numeric' }));
   const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "ppmProducts");
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const crCutoffMs = todayMs - (2 * 86400000);
-  const drCutoffMs = todayMs - (5 * 86400000);
+  const crCutoffMs = dayShift(todayMs, -2);
+  const drCutoffMs = dayShift(todayMs, -5);
   // CM3/TOTAL CM3/CM3% — بطلب صريح، نفس منطق PPM Analyst/Single بالظبط:
   // كات أوف الـ CM3 (CM3_LAG_DAYS يوم) بس على العمود ده، باقي الأعمدة (زي
   // فوق) من غير أي كات أوف.
@@ -3219,9 +3228,9 @@ function preparePpmAnalystProductsData() {
   // مدار آخر 3/7/15 يوم كامل قبل النهاردة، من غير ما نحسب النهاردة نفسه لأن
   // يومه لسه ماخلصش. بنستخدم mainRowsAll (مش monthRows) عشان نطاق الـ 15 يوم
   // ميتقصش لو إحنا في أول الشهر.
-  const d3Start = todayMs - (3 * 86400000);
-  const d7Start = todayMs - (7 * 86400000);
-  const d15Start = todayMs - (15 * 86400000);
+  const d3Start = dayShift(todayMs, -3);
+  const d7Start = dayShift(todayMs, -7);
+  const d15Start = dayShift(todayMs, -15);
   const confirmed3dBySku = new Map();
   const confirmed7dBySku = new Map();
   const confirmed15dBySku = new Map();
@@ -3394,7 +3403,7 @@ function preparePpmAnalystSingleData() {
   const mainRowsAll = productLevelRows();
 
   const now = new Date();
-  const currentMonthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentMonthYear = topMonthOrCurrent(now.toLocaleString('en-US', { month: 'long', year: 'numeric' }));
   const monthRows = getMonthOrRangeRows(mainRowsAll, currentMonthYear, "ppmSingle");
 
   const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
@@ -3476,8 +3485,8 @@ function preparePpmAnalystSingleData() {
   // ميتقصش لو إحنا في أول الشهر.
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const d3Start = todayMs - (3 * 86400000);
-  const d7Start = todayMs - (7 * 86400000);
+  const d3Start = dayShift(todayMs, -3);
+  const d7Start = dayShift(todayMs, -7);
   const confirmed3dBySingle = new Map();
   const confirmed7dBySingle = new Map();
   // ASP DELIVERED (10D) — بطلب صريح: نجمع Delivered GMV و Delivered Pieces على
@@ -3522,7 +3531,7 @@ function preparePpmAnalystSingleData() {
   const lastInboundTsBySku = new Map();
   (state.inboundRows || []).forEach(r => { if (r.sku && r.rcvTs && r.rcvTs > (lastInboundTsBySku.get(r.sku) || 0)) lastInboundTsBySku.set(r.sku, r.rcvTs); });
   const confNd = (days) => {
-    const st = todayMs - days * 86400000; const map = new Map();
+    const st = dayShift(todayMs, -days); const map = new Map();
     mainRowsAll.forEach(r => {
       if (!r.sku) return;
       const dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); const t = dd.getTime();
@@ -3732,7 +3741,7 @@ function buildPpmAnalystSingleDailyRows() {
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const windowStartMs = todayMs - (ANALYST_SINGLE_DAILY_WINDOW_DAYS * 86400000);
+  const windowStartMs = dayShift(todayMs, -ANALYST_SINGLE_DAILY_WINDOW_DAYS);
 
   const { productMap: bundleProductMap, singlesList } = buildDebundleProductMap(state.debundleMap, state.cogsMap);
   const mappingsFor = (sku) => {
@@ -5193,7 +5202,7 @@ function recentWindowRows(sectionKey, selectionRows, fromMs, toMs) {
 function prepareInventoryTableData(rows) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0,0,0,0); const todayMs = today.getTime();
-  const ydayMs = todayMs - 86400000; const d3Ms = todayMs - (3 * 86400000); const d5Ms = todayMs - (5 * 86400000); const d15Ms = todayMs - (15 * 86400000);
+  const ydayMs = dayShift(todayMs, -1); const d3Ms = dayShift(todayMs, -3); const d5Ms = dayShift(todayMs, -5); const d15Ms = dayShift(todayMs, -15);
   // الـ cutoff بيتحسب من أحدث تاريخ في كل داتا Main (مش من الشهر المختار) — وإلا آخر
   // أيام الشهر المختار (P06) كانت بتتشال من الـ CM3 حتى لو الداتا اللي بعدها موجودة.
   const cm3Cutoff = getCm3LagCutoffTimestamp((state.allParsedRows && state.allParsedRows.length) ? state.allParsedRows : rows);
@@ -7016,8 +7025,9 @@ function prepareMpSalesPlanData() {
     const elapsedDays = today.getDate() || 1;
     const daysUntilYesterday = Math.max(1, elapsedDays - 1);
 
-    const startThisWeek = today.getTime() - (7 * 86400000);
-    const startLastWeek = today.getTime() - (14 * 86400000);
+    const startThisWeek = dayShift(today.getTime(), -7);
+    const startLastWeek = dayShift(today.getTime(), -14);
+    const wowRows = recentWindowRows("mpSalesPlan", perfRows, startLastWeek, today.getTime() + 86400000);
 
     // CR%/DR%/ASP الفعليين لكل ماتش (SKU × Merchant) — جايين من
     // MERCHANT_SKU_DAILY_GID (عمود CR_2_DAY / DR_5_DAYS / ASP)، مفتاح الماتش
@@ -7074,6 +7084,12 @@ function prepareMpSalesPlanData() {
                     raw.delivered += r.deliveredPieces;
                     if (isCm3RowEligible(r, cm3CutoffTs, "mpSalesPlan")) raw.deliveredGmv += r.deliveredGmv;
                 }
+            }
+        });
+        // WoW (this week / last week) — from the 14 days before the latest day, even when they are in the previous month (see recentWindowRows)
+        wowRows.forEach(r => {
+            if (r.sku === plan.productId && r.merchantId === plan.tagerId) {
+                const rTime = new Date(r.timestamp).setHours(0,0,0,0);
                 if (rTime >= startThisWeek) raw.thisWeekConfirmed += r.confirmedPieces;
                 else if (rTime >= startLastWeek && rTime < startThisWeek) raw.lastWeekConfirmed += r.confirmedPieces;
             }
@@ -7403,7 +7419,7 @@ function computeCommercialPlan(opts) {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const d3Ms = todayMs - (3 * 86400000); // Avg Last 3 Days Confirmed
+  const d3Ms = dayShift(todayMs, -3); // Avg Last 3 Days Confirmed
   const elapsedDays = today.getDate() || 1;
   const currentMonthDays = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const daysUntilYesterday = Math.max(1, elapsedDays - 1);
@@ -7451,7 +7467,6 @@ function computeCommercialPlan(opts) {
     // فوق فاضلين زي ما هم (شاملين انهارده) لأي حساب تاني محتاج الإجمالي
     // الحقيقي (زي pendingConfirmed/Expected Returns تحت).
     if (rTime < todayMs) { b.mtdPlaced += r.placedPieces; b.mtdConfirmed += r.confirmedPieces; b.mtdDelivered += r.deliveredPieces; }
-    if (rTime >= d3Ms) b.conf3d += r.confirmedPieces;
     if (isRowEligibleForLag(r, crCutoffTs, "commercialPlan")) { b.crPlaced += r.placedPieces; b.crConfirmed += r.confirmedPieces; }
     if (isRowEligibleForLag(r, cm3CutoffTs, "commercialPlan")) { b.drConfirmed += r.confirmedPieces; b.drDelivered += r.deliveredPieces; }
     else {
@@ -7481,6 +7496,12 @@ function computeCommercialPlan(opts) {
       dEntry.gmv += (r.placedGmv || 0); dEntry.pieces += (r.placedPieces || 0);
       b.placedByDate.set(rTime, dEntry);
     }
+  });
+  // Avg Last 3 Days Confirmed — from the days before the latest day, even when they are in the previous month (see recentWindowRows)
+  recentWindowRows("commercialPlan", rows, d3Ms, todayMs + 86400000).forEach(r => {
+    if (!r.sku || !skuList.has(r.sku)) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    if (rDate.getTime() >= d3Ms) getBucket(r.sku).conf3d += r.confirmedPieces;
   });
 
   const targets = state.singleSkuTargets || {};
@@ -7907,7 +7928,7 @@ function computePurchasePlanOverallSingleStats() {
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const d3Ms = todayMs - (3 * 86400000);
+  const d3Ms = dayShift(todayMs, -3);
 
   const buckets = new Map();
   function getBucket(id) {
@@ -7930,13 +7951,19 @@ function computePurchasePlanOverallSingleStats() {
       const qty = mp.quantity || 1;
       const b = getBucket(mp.singleId);
       b.placed += r.placedPieces * qty; b.confirmed += r.confirmedPieces * qty; b.delivered += r.deliveredPieces * qty;
-      if (rTime >= d3Ms) b.conf3d += r.confirmedPieces * qty;
       if (crEligible) { b.crPlaced += r.placedPieces * qty; b.crConfirmed += r.confirmedPieces * qty; }
       if (cm3Eligible) { b.drConfirmed += r.confirmedPieces * qty; b.drDelivered += r.deliveredPieces * qty; }
       else if (ageDaysNear3) { b.pendingConfNear3d += r.confirmedPieces * qty; }
     });
   });
 
+  // Avg Last 3 Days — from the days before the latest day, even when they are in the previous month (see recentWindowRows)
+  recentWindowRows("commercialPlan", rows, d3Ms, todayMs + 86400000).forEach(r => {
+    if (!r.sku) return;
+    const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
+    if (rDate.getTime() < d3Ms) return;
+    (productMap.get(r.sku) || [{ singleId: r.sku, quantity: 1 }]).forEach(mp => { getBucket(mp.singleId).conf3d += r.confirmedPieces * (mp.quantity || 1); });
+  });
   return buckets; // Map(singleId -> {placed, confirmed, delivered, crPlaced, crConfirmed, drConfirmed, drDelivered, conf3d, pendingConfNear3d})
 }
 
@@ -11803,7 +11830,7 @@ function fcBuildPriceIndex() {
     }
     if (eligibleDays < 7) {
       const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-      const from = t0.getTime() - 45 * 86400000;
+      const from = dayShift(t0.getTime(), -45);
       rows = all.filter(r => { const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); return d.getTime() >= from; });
       cutoffTs = getCm3LagCutoffTimestamp(rows);
     }
@@ -12786,7 +12813,7 @@ function prepareWeeklyInventoryWeeks() {
     const mappings = wiDebundleMap.get(cRow.productId);
     (cRow.days || []).forEach((qty, offset) => {
       if (!qty) return;
-      const dayTs = todayTs0 - offset * 86400000;
+      const dayTs = dayShift(todayTs0, -offset);
       if (mappings && mappings.length) {
         mappings.forEach(mp => {
           let m = confirmedBySkuDayFromTab.get(mp.singleId);
@@ -12809,7 +12836,7 @@ function prepareWeeklyInventoryWeeks() {
   // الشباك null عشان wiSumConfirmedInRange يرجع تلقائيًا لحساب Main القديم
   // بدل ما يرجع 0 وهمي من تاب لسه مفيهوش داتا.
   if ((state.confirmedByDayRows || []).length > 0) {
-    state.weeklyInvConfirmedByDayWindowStart = todayTs0 - 30 * 86400000;
+    state.weeklyInvConfirmedByDayWindowStart = dayShift(todayTs0, -30);
     state.weeklyInvConfirmedByDayWindowEnd = todayTs0 + 86399999;
   } else {
     state.weeklyInvConfirmedByDayWindowStart = null;
@@ -13443,7 +13470,7 @@ function wiComputeBundleStatsForSingle(singleId) {
 
   let latestTs = 0; mainRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
-  const d3Ms = todayMs - (3 * 86400000), d15Ms = todayMs - (15 * 86400000), d30Ms = todayMs - (30 * 86400000);
+  const d3Ms = dayShift(todayMs, -3), d15Ms = dayShift(todayMs, -15), d30Ms = dayShift(todayMs, -30);
 
   const results = [];
   bundlesMap.forEach(b => {
@@ -15150,8 +15177,8 @@ function computeAvailabilityLocking(sectionKey) {
 
   let latestTs = 0; mainRows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0); const todayMs = today.getTime();
-  const ydayStart = todayMs - 86400000; const ydayEnd = todayMs; // [إمبارح 00:00, النهاردة 00:00)
-  const d3Start = todayMs - (3 * 86400000); // آخر 3 أيام (Avg Last 3 Days Placed)
+  const ydayStart = dayShift(todayMs, -1); const ydayEnd = todayMs; // [إمبارح 00:00, النهاردة 00:00)
+  const d3Start = dayShift(todayMs, -3); // آخر 3 أيام (Avg Last 3 Days Placed)
 
   // ديماند الأمس موزّع على مستوى Single SKU (× PRODUCT_QUANTITY)، بالظبط
   // زي توزيع القطع (Placed Pieces) في Commercial Plan.
@@ -15436,7 +15463,7 @@ const ALC_TARGET_DOH_DAYS = 7;
 function alcBuildMerchantWindowMaps(mainRows, windowDays, bundleProductMap) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
-  const windowStart = todayMs - (windowDays * 86400000);
+  const windowStart = dayShift(todayMs, -windowDays);
   const debundled = new Map();  // "merchantId||singleId" -> sum confirmed (ديبندلايز)
   const raw = new Map();        // "merchantId||actualSku" -> sum confirmed (زي ما هي)
   (mainRows || []).forEach(r => {
@@ -18594,10 +18621,10 @@ function dohComputeRows(params) {
   // and the page would be empty. Then the day after the LAST day that has data is treated as "today", so "yesterday" = the last day with data.
   let lastDayMs = 0;
   mainRows.forEach(r => { if (!r.timestamp) return; const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); const t = d.getTime(); if (t < todayMs && t > lastDayMs) lastDayMs = t; });
-  const realTodayMs = todayMs, shifted = lastDayMs > 0 && lastDayMs + DAY < todayMs;
-  if (shifted) todayMs = lastDayMs + DAY;
-  const ydayMs = todayMs - DAY;
-  const d3Start = todayMs - 3 * DAY;
+  const realTodayMs = todayMs, shifted = lastDayMs > 0 && dayShift(lastDayMs, 1) < todayMs;
+  if (shifted) todayMs = dayShift(lastDayMs, 1);
+  const ydayMs = dayShift(todayMs, -1);
+  const d3Start = dayShift(todayMs, -3);
   const cutoffMs = todayMs - params.cutoffDays * DAY;
   const winStartMs = cutoffMs - (params.windowDays - 1) * DAY;
 

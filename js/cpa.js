@@ -12,7 +12,7 @@
   function catalog() { if (CAT) return Promise.resolve(CAT); return api("loopCpaCatalog").then(function (j) { CAT = j.items || {}; if (j.cfg) CFG = j.cfg; return CAT; }).catch(function () { CAT = {}; return CAT; }); }
   function rates(sku, mid) {
     var rows = rowsAll(), latest = 0; rows.forEach(function (r) { if (r.timestamp > latest) latest = r.timestamp; });
-    var c = cfg(), from = latest - (c.rateDays || 30) * 864e5, matured = latest - 5 * 864e5;
+    var c = cfg(), from = (typeof dayShift === "function" ? dayShift(latest, -(c.rateDays || 30)) : latest - (c.rateDays || 30) * 864e5), matured = (typeof dayShift === "function" ? dayShift(latest, -5) : latest - 5 * 864e5);
     var P = { p: 0, c: 0, c2: 0, d2: 0, g: 0, dl: 0 }, M = { p: 0, c: 0, c2: 0, d2: 0, g: 0, dl: 0 }, name = "";
     rows.forEach(function (r) {
       if (r.sku !== sku || r.timestamp < from) return;

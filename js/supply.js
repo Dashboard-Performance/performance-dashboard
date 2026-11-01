@@ -39,7 +39,7 @@
     }).catch(function (e) { RET.data = null; RET.err = (e && e.message) || "failed"; })
       .then(function () { RET.loading = false; SC.sig = ""; rerender(); });
   }
-  function sigNow() { try { return [state.allParsedRows.length, (state.productOnlyRows || []).length, typeof productMode === "function" ? productMode() : "", (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
+  function sigNow() { try { return [($("monthSelect") || {}).value || "", state.allParsedRows.length, (state.productOnlyRows || []).length, typeof productMode === "function" ? productMode() : "", (state.inboundRows || []).length, Object.keys(state.inventoryMap || {}).length, state.cogsMap && state.cogsMap.size, (state.debundleMap || []).length, (state.supplyRepackRows || []).length, (state.metabaseSellthroughNeeded || []).length, (state.metabaseBeginningInventory || []).length, impPosSig()].join("|"); } catch (e) { return ""; } }
   // v1.17.0 — the Importation PO list is part of the signature so the table rebuilds when the saved plan arrives or changes
   function impPosSig() { try { var P = window.TaagerPlans; if (!P) return ""; var k = planKey(), h = P.peek("supplyplan", k); var v = h ? h.values : P.SUPPLY_DEF; return String(v.impPos || "") + "~" + String(v.exclEnds || ""); } catch (e) { return ""; } }
   function ageIdx(days) { return days == null ? 4 : days <= 60 ? 0 : days <= 120 ? 1 : days <= 180 ? 2 : days <= 364 ? 3 : 4; } // same bands as the Inventory Aging sheet; no purchase date = Unhealthy
@@ -58,10 +58,23 @@
       var maxTs = 0; main.forEach(function (r) { if (r.timestamp > maxTs) maxTs = r.timestamp; });
       var ref = new Date(maxTs || today), cy = ref.getFullYear(), cmo = ref.getMonth(), elapsed = ref.getDate() || 1, mdays = new Date(cy, cmo + 1, 0).getDate();
       var py = cmo === 0 ? cy - 1 : cy, pmo = cmo === 0 ? 11 : cmo - 1;
+      // v1.18.0 — Supply conversion follows the month filter at the top (Overall = the latest month with data, as before).
+      // A past month is rebuilt from its own rows / receipts / repack / returns / Beginning Inventory and read against its own plan.
+      // The rest of this page (stock, aging, DOH) stays on the latest data — it is stock as of now.
+      var ccy = cy, ccmo = cmo, cref = ref, celapsed = elapsed, cmdays = mdays;
+      (function () {
+        var v = ($("monthSelect") || {}).value || "", d = v ? new Date("1 " + v) : null;
+        if (!d || isNaN(d.getTime()) || (d.getFullYear() === cy && d.getMonth() === cmo)) return;
+        ccy = d.getFullYear(); ccmo = d.getMonth(); cmdays = new Date(ccy, ccmo + 1, 0).getDate();
+        var mx = 0; main.forEach(function (r) { var t = new Date(r.timestamp); if (t.getFullYear() === ccy && t.getMonth() === ccmo && r.timestamp > mx) mx = r.timestamp; });
+        cref = mx ? new Date(mx) : new Date(ccy, ccmo, 1); celapsed = mx ? cref.getDate() : 0;
+      })();
+      var convSame = ccy === cy && ccmo === cmo;
+      SC.convKey = ccy + "-" + String(ccmo + 1).padStart(2, "0"); // the plan (Planned, Importation POs, packaging) is read for this month
       var c3 = {}, c15 = {}, c30 = {}, gA = {}, gL = {}, mtd = {}, dP = {}, dG = {}, dMtd = {};
       main.forEach(function (r) {
         if (!r.sku) return;
-        var d = new Date(r.timestamp), dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); var age = (today - dd.getTime()) / DAY;
+        var d = new Date(r.timestamp), dd = new Date(r.timestamp); dd.setHours(0, 0, 0, 0); var age = Math.round((today - dd.getTime()) / DAY); // whole days (an hour off in the week the clock changes)
         var inCur = d.getFullYear() === cy && d.getMonth() === cmo, inPrev = d.getFullYear() === py && d.getMonth() === pmo;
         var needQ = r.confirmedPieces && ((age >= 1 && age <= 30) || inCur), needG = (inCur || inPrev) && r.confirmedGmv;
         // v1.17.0 — Delivered ASP (last 30 full days): delivered GMV ÷ delivered pieces, bundles split to their singles
@@ -116,7 +129,7 @@
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return; // Single SKUs only
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {};
         var stock = idx.stockByProductId.has(id) ? (+idx.stockByProductId.get(id) || 0) : (+iv.stock || 0), st = idx.singleOverallStats(id), wac = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0;
-        var newest = last[id] || 0, days = newest ? Math.max(0, Math.floor((today - newest) / DAY)) : null, ai = ageIdx(days), q = [0, 0, 0, 0, 0, 0];
+        var newest = last[id] || 0, days = newest ? Math.max(0, Math.round((today - newest) / DAY)) : null, ai = ageIdx(days), q = [0, 0, 0, 0, 0, 0];
         q[ai] = stock; var aging = AGES[ai];
         var a15 = (c15[id] || 0) / 15, a3 = (c3[id] || 0) / 3, doh = a3 === 0 ? stock : stock / a3;
         var tag = doh > 18 ? "5- Overstocked" : doh >= 10 ? "4- Fairly Stocked" : doh === 0 ? "1- OSS" : doh < 5 ? "2- At Risk" : "3- Understocked";
@@ -134,19 +147,35 @@
       });
       // ---- Supply conversion (Targets page) — same waterfall as the Inventory Aging workbook (Working Sheet X/AB/AF/BR):
       // MTD confirmed is consumed from Beginning inventory first, then Purchases, then Returns, then Repack. Values = qty × WAC.
-      var rep = {}; (state.supplyRepackRows || []).forEach(function (r) { if (r.status !== "APPLIED" || !r.ts) return; var d = new Date(r.ts); if (d.getFullYear() === cy && d.getMonth() === cmo) rep[r.sku] = (rep[r.sku] || 0) + (+r.qty || 0); });
-      var rto = {}, mk = ref.toLocaleString("en-US", { month: "long", year: "numeric" });
+      var rep = {}; (state.supplyRepackRows || []).forEach(function (r) { if (r.status !== "APPLIED" || !r.ts) return; var d = new Date(r.ts); if (d.getFullYear() === ccy && d.getMonth() === ccmo) rep[r.sku] = (rep[r.sku] || 0) + (+r.qty || 0); });
+      // the month picked at the top: same maps as above (beg / inM / impM / mtd), built for that month
+      var begC = beg, inMC = inM, impMC = impM, mtdC = mtd;
+      if (!convSame) {
+        begC = {}; inMC = {}; impMC = {}; mtdC = {};
+        (state.metabaseBeginningInventory || []).forEach(function (r) { var d = new Date(r.MONTH); if (isNaN(d.getTime()) || d.getUTCFullYear() !== ccy || d.getUTCMonth() !== ccmo) return; begC[r.PRODUCT_ID] = (begC[r.PRODUCT_ID] || 0) + (+r.QTY || 0); });
+        (state.inboundRows || []).forEach(function (r) {
+          if (!r.sku || !r.rcvTs) return; var d = new Date(r.rcvTs);
+          if (d.getFullYear() !== ccy || d.getMonth() !== ccmo) return;
+          var t = isImpPo(r) ? impMC : inMC; t[r.sku] = (t[r.sku] || 0) + (+r.rcvQty || 0);
+        });
+        main.forEach(function (r) {
+          if (!r.sku || !r.confirmedPieces) return; var d = new Date(r.timestamp);
+          if (d.getFullYear() !== ccy || d.getMonth() !== ccmo) return;
+          mapsFor(r.sku).forEach(function (mp) { mtdC[mp.singleId] = (mtdC[mp.singleId] || 0) + r.confirmedPieces * (mp.quantity || 1); });
+        });
+      }
+      var rto = {};
       // Returns = ACTUAL returns received this month (warehouse scans, "Product is good"), like the Inventory Aging sheet.
-      var retMonth = cy + "-" + String(cmo + 1).padStart(2, "0"); loadActualReturns(retMonth);
+      var retMonth = ccy + "-" + String(ccmo + 1).padStart(2, "0"); loadActualReturns(retMonth);
       if (RET.data && RET.data.month === retMonth) { var rs = RET.data.skus || {}; Object.keys(rs).forEach(function (k) { var id = String(k).trim(); rto[id] = (rto[id] || 0) + (+rs[k] || 0); }); }
       SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
-      var cids = {}; [beg, inM, impM, rto, rep, mtd].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
+      var cids = {}; [begC, inMC, impMC, rto, rep, mtdC].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
       var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
         if (isExcluded(id)) { SC.exclN++; return; } // packaging, not product
         var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
-        var P = mtd[id] || 0, V = beg[id] || 0, Z = inM[id] || 0, I = impM[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
+        var P = mtdC[id] || 0, V = begC[id] || 0, Z = inMC[id] || 0, I = impMC[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
         // MTD confirmed is consumed in order: Beg Inv -> Purchases -> Importation -> Returns -> Repack.
         var X = P === 0 ? 0 : Math.min(V, P),
             AB = Math.min(P - X, Z),
@@ -163,7 +192,7 @@
           a.rep[0] += B * w; a.rep[1] += BR * w;
         });
       });
-      SC.convKey = cy + "-" + String(cmo + 1).padStart(2, "0"); SC.conv = conv; SC.convMonth = ref.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+      SC.conv = conv; SC.convMonth = cref.toLocaleDateString("en-GB", { month: "short", year: "numeric" }); SC.convElapsed = celapsed; SC.convMdays = cmdays; SC.convLatest = convSame;
       var tot = 0, cum = 0, sorted = rows.slice().sort(function (x, y) { return y.inv - x.inv; });
       rows.forEach(function (r) { tot += r.inv; });
       sorted.forEach(function (r) { cum += r.inv; r.abc = r.stock <= 0 ? "-" : cum / (tot || 1) <= 0.8 ? "A" : cum / (tot || 1) <= 0.95 ? "B" : "C"; var L = ACT_LOOKUP[r.abc + "_" + r.fms + "_" + r.quarter]; if (L) { r.action = L[0]; r.channel = L[1]; } });
@@ -211,7 +240,7 @@
     var save = SC.cat; SC.cat = "all";
     var rows = convCalc(); SC.cat = save;
     if (!rows) return null;
-    return { rows: rows, monthKey: SC.convKey || "", monthLabel: SC.convMonth || "", elapsed: SC.elapsed || 0, daysInMonth: SC.mdays || 0,
+    return { rows: rows, monthKey: SC.convKey || "", monthLabel: SC.convMonth || "", elapsed: SC.convElapsed != null ? SC.convElapsed : (SC.elapsed || 0), daysInMonth: SC.convMdays || SC.mdays || 0, latest: SC.convLatest !== false,
              skus: (SC.rows || []).length, excludedEnds: SC.exclEnds || [], excluded: SC.exclN || 0,
              importPos: SC.impPo || [], importLines: SC.impLines || 0, asOf: SC.asOf || "" };
   }
@@ -228,7 +257,7 @@
     var rows = convCalc();
     if (!rows || !rows.length) { say("Nothing to send yet", "bad"); setTimeout(function () { say("Send to sheet"); }, 2600); return; }
     btn.disabled = true; say("Sending\u2026", "busy");
-    window.publishSupplyConversion().then(function (r) {
+    window.publishSupplyConversion({ manual: true }).then(function (r) {
       say(r && r.ok ? "Sent \u2713" : ((r && r.error) || "Failed"), r && r.ok ? "ok" : "bad");
     }, function (e) {
       say((e && e.message) || "Failed", "bad");
@@ -504,6 +533,8 @@
   var _savedSkuPage = 0;
   // v1.17.1: بنعيد البناء بس لو صفحة الـ Supply Chain هي المفتوحة (الداونلود من صفحة تانية مالوش دعوة بيها)
   function scOpen() { var h = current && VIEWS[current] && $(VIEWS[current][0]); return !!(h && !h.classList.contains("hidden")); }
+  // v1.18.0 — Supply conversion follows the month filter: rebuild when it changes while this page is open
+  document.addEventListener("change", function (e) { if (e.target && e.target.id === "monthSelect" && scOpen()) setTimeout(function () { try { rerender(); } catch (er) { } }, 0); });
   window.addEventListener("dash:export-start", function () { _savedSkuPage = SC.sk.page; SC.sk.page = 0; if (scOpen()) try { rerender(); } catch (e) { } });
   window.addEventListener("dash:export-end", function () { SC.sk.page = _savedSkuPage; if (scOpen()) try { rerender(); } catch (e) { } });
   function onClick(e) {
