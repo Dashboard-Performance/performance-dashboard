@@ -18808,6 +18808,8 @@ async function publishPlannerDoh() {
     }
     const msg = (j && j.message) || `HTTP ${res.status}`;
     console.warn("[Planner DOH publish] rejected:", msg);
+    // Apps Script answered too late for the connection (HTTP 524 / "invalid response") — it usually keeps writing and finishes, so this is not a failure to retry.
+    if (/\b524\b|invalid response|timed? ?out/i.test(msg)) return { ok: false, pending: true, error: "Sent — still writing, check the sheet in ~2 min" };
     return { ok: false, error: msg };
   } catch (e) {
     const timedOut = e && e.name === "AbortError";
