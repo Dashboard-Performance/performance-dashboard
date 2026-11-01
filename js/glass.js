@@ -147,13 +147,20 @@
       try { var s = JSON.parse(localStorage.getItem("taagerDashboardSession") || "null"); var n = (s && (s.name || s.email)) || "?"; return n.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0]; }).join("").toUpperCase(); } catch (e) { return "?"; }
     }
     me.textContent = initials();
-    me.addEventListener("mouseenter", function () { if (!user.classList.contains("show")) { tip.textContent = "Account & sync"; tip.classList.add("show"); placeBeside(tip, me); } });
+    var syncLabel = "Account & sync";
+    me.addEventListener("mouseenter", function () { if (!user.classList.contains("show")) { tip.textContent = syncLabel; tip.classList.add("show"); placeBeside(tip, me); } });
     me.addEventListener("mouseleave", hideTip);
     me.addEventListener("click", function () { hideTip(); toggleUser(); });
     var st = document.getElementById("sidebarUpdated");
+    // The dot on the avatar: GREEN = the last refresh finished and every source is up to date ("Live — updated…" / "Up to date…").
+    // YELLOW = something is not refreshed: still loading / refreshing, showing cached numbers, a sheet that did not refresh (⚠), or a failed sync that is retrying.
     var syncDot = function () {
-      var t = st ? st.textContent : "";
-      me.classList.toggle("gl-bad", /fail|retry|error/i.test(t));
+      var t = (st ? st.textContent : "").trim();
+      if (t && !/^Last sync/i.test(t)) {   // "Last sync: …" is only the clock text written after a filter change — it does not change the refresh state
+        var fresh = /^(Live|Up to date)\b/i.test(t) && !/⚠|not refreshed|fail|retry|error/i.test(t);
+        me.classList.toggle("gl-bad", !fresh);
+        syncLabel = fresh ? "Account & sync · all refreshed" : "Account & sync · " + (/Loading|Refreshing/i.test(t) ? "refreshing…" : /not refreshed|⚠/.test(t) ? "something is not refreshed" : "not refreshed yet");
+      }
       if (/Refreshing|Loading the latest/i.test(t)) progress(true); else if (prog && prog.classList.contains("on")) progress(false);
     };
     if (st) new MutationObserver(syncDot).observe(st, { childList: true, characterData: true, subtree: true });

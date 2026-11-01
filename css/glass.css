@@ -73,7 +73,7 @@ html.gl.gl-plain body::before { display: none; }
     position: relative;
   }
   html.gl .gl-me::after { content: ""; position: absolute; right: 0; bottom: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--panel); }
-  html.gl .gl-me.gl-bad::after { background: var(--orange); }
+  html.gl .gl-me.gl-bad::after { background: #facc15; }   /* yellow = something is not refreshed (green = last refresh done) */
   html.gl .main { margin-left: calc(var(--gl-rail) + var(--gl-gap) * 2); }
 }
 html:not(.gl) .gl-me, html:not(.gl) .gl-float { display: none !important; }

@@ -9,15 +9,15 @@
   var C = null, $ = function (id) { return document.getElementById(id); };
   var S = { data: null, err: "", empty: false, seg: "ALL", q: "", sort: "live", dir: -1, page: 0, host: null, bucket: "end", names: null, loading: false };
   var PAGE = 50;
-  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix" };
+  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix", dash: "Forecast Model recipe", blend: "Ens. + recipe", blend_gbm: "GBM + recipe" };
   var BUCKET_LABEL = { "7": "Day 7", "14": "Day 14", "21": "Day 21", "end": "Month end (locked)" };
-  var FEATURE_LABEL = { m1: "Last month", m2: "2 months ago", m3: "3 months ago", m4: "4 months ago", mtd: "Month to date", mtd_rr: "Month-to-date pace", r3: "Pace 3d", r7: "Pace 7d", r14: "Pace 14d", r30: "Pace 30d", r60: "Pace 60d", r90: "Pace 90d",
+  var FEATURE_LABEL = { tsb_b30: "Intermittent-demand rate (TSB .2/.2)", tsb_c30: "Intermittent-demand rate (TSB .5/.1)", dash_ens: "Recent-rate rules average", dash_rate: "Forecast Model recipe (30 days)", m1: "Last month", m2: "2 months ago", m3: "3 months ago", m4: "4 months ago", mtd: "Month to date", mtd_rr: "Month-to-date pace", r3: "Pace 3d", r7: "Pace 7d", r14: "Pace 14d", r30: "Pace 30d", r60: "Pace 60d", r90: "Pace 90d",
     r7_r30: "7d vs 30d", r14_r60: "14d vs 60d", r30_r90: "30d vs 90d", slope30: "30-day trend", cv30: "30-day volatility", zero30: "Zero-sale days", maxshare30: "Spikiness", cr14: "Confirmation rate", dr_mature: "Delivery rate",
     nm1: "Merchants last month", nm2: "Merchants 2 months ago", nm_chg: "Merchants change", top1_1: "Top merchant share", hhi_1: "Merchant concentration", ret_1: "Merchants who stayed", nm_mtd: "Merchants this month", nm14: "Merchants last 14d",
     top1_mtd: "Top merchant still selling", new_mtd: "New merchants' share", inb30: "Inbound 30d", inb90: "Inbound 90d", inb_mtd: "Inbound this month", since_inb: "Days since inbound", inb30_m1: "Inbound vs sales", bi_c: "Stock at month start",
     bi_cover: "Stock cover", avail_pace: "Stock vs pace", miss_pace1: "Last month's miss", miss_pace2: "Miss 2 months ago", miss_ma3_1: "Trend vs 3-mo avg", age_days: "SKU age", since_sale: "Days since last sale", nz_months6: "Months with sales",
     scale: "Size", cat: "Category", p_chg30: "Price change 30d", p_chg90: "Price change 90d", dow_units_m: "Trading days of target month", len_m: "Days in target month", d: "Day of month", frac_c: "Share of month elapsed", len_c: "Days in this month" };
-  var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal"];
+  var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal", "dash", "blend", "blend_gbm"];
 
   function esc(v) { return C && C.esc ? C.esc(v) : String(v == null ? "" : v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function n0(v) { return v == null || isNaN(v) ? "—" : Math.round(v).toLocaleString("en-US"); }

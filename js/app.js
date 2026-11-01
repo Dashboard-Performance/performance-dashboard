@@ -10782,8 +10782,12 @@ function fcAccuracy(rows, bandPct) {
   };
 }
 
-// Segment-A stock ceiling: forecast is capped at (beginning inventory +
-// inbound) × this. See the cap site in build() for the measured rationale.
+// Segment-A stock ceiling (OFF since v1.18.0). It capped a backtest / in-progress month's forecast at (beginning inventory +
+// inbound) × this — but that inbound is what arrived DURING the target month, which is not known when the forecast is made (and the
+// next-month forecast was never capped). So it lifted the backtest accuracy shown here (segment A 50.5% → 57.9% on Apr–Sep 2026) without
+// making any real forecast better; with only the stock known at the start of the month it made A worse (48.8%). Kept switched off so the
+// accuracy on screen is what the next-month forecast really achieves.
+const FC_STOCK_CEILING_ON = false;
 const FC_STOCK_CAP_A = 2.5;
 // v1.17.0 — "Low stock" flag on the SKU Forecast: stock can't cover the forecast AND nothing was received for this many days (display only)
 const FC_LOW_STOCK_INBOUND_DAYS = 40;
@@ -11151,7 +11155,7 @@ function fcRunEngine(sd, today, opts) {
       // left uncapped on purpose: the cap lifts their accuracy metric too but
       // deepens an already-negative bias (would push toward under-buying).
       let stockCap = null;
-      if (seg === "A" && avail) {
+      if (FC_STOCK_CEILING_ON && seg === "A" && avail) {
         const a = avail.get(sku, target.key);
         if (a !== null && a > 0) { stockCap = a * FC_STOCK_CAP_A; if (forecast > stockCap) forecast = stockCap; }
       }
@@ -11974,16 +11978,16 @@ function fcRenderMethod() {
       ["The 30% partner (A)", "That second method is TSB, the intermittent-demand model — fixed, not re-picked each month. It is the weakest single method for segment A on its own (47.8% against the recent-rate rules' 55.8%), which is precisely why it earns the slot: it reads demand in a completely different way, so it corrects errors the recent-window rules all make together. Measured leave-one-out it won that slot in all 7 months independently — 58.75% against 57.60% for re-picking the partner each month. In a blend, being different is worth more than being individually strong."],
       ["Learning from its own errors (B & C)", "A model that tries to predict demand directly loses to the simple rules — tested exhaustively, it earns zero weight. But asking it the other question works: predict how wrong the rule-based forecast will be, then correct by that. A ridge regression reads the same window features plus the price-change signal, trains only on months that finished before the one being forecast, and its correction is shrunk so it can never run away with the number. Measured leave-one-out with a full month of training gap: B 15.0% → 21.1%, C 5.4% → 9.8%, and every single backtest month improves. It is not applied to segment A — there the same correction measured slightly worse, because the rules average, the TSB partner and the stock ceiling have already taken out the systematic error."],
       ["Price changes", "The demand history cannot see a price change: if a SKU was repriced last week, the last 30 days were sold at the old price and every recent-rate rule over- or under-forecasts the coming month. So the forecast is multiplied by (new price ÷ the price the source window actually sold at) raised to −0.6. Both prices are already set and known at the cutoff, so there is no leakage. The elasticity comes from real set-price changes, not from average selling price — measured on ASP it comes out positive (price up, demand up), which is mix contamination and would have told you to raise prices to sell more. On the SKUs that actually repriced: A 62.1% → 63.3%, C 11.9% → 13.0%."],
-      ["Stock ceiling (segment A)", "For a month whose real opening stock is known (every backtest, and the current in-progress month) a segment-A forecast is capped at 2.5× the pieces that could actually be supplied = beginning inventory + inbound. This is an accuracy correction: historically you can't confirm more than you can supply, and it removes wild over-forecasts on SKUs that never had the stock. Measured on 7 real backtest months: segment A per-SKU accuracy 44.9% → 54.2%, bias near zero. B/C left uncapped (it lifts their metric but deepens an already-negative bias). The next-month forecast is NOT capped — see below."],
+      ["Stock ceiling (removed)", "Earlier versions capped a segment-A forecast at 2.5× (beginning inventory + inbound). That inbound arrives during the month being forecast, so it is not known when the forecast is made: it made the backtest accuracy look about 7 points better (segment A 50.5% → 57.9%) without improving any real forecast, and with only the stock known at the start of the month it made A worse. It is switched off, so the accuracy shown here is what the next-month forecast really achieves."],
       ["Model", "Ridge regression per behavior on log(1 + next-month demand), with a pooled fallback. Non-Linear / Volatile uses a hurdle model: probability of selling at all × expected amount."],
       ["Baselines", "Up: max(30-day total, last 10 × 3, last 7 × 4). Down: 0.6 × (first 7 × 4) + 0.4 × (last 14 × 30/14). Steady: 30-day average level. Non-Linear / Volatile: max(max week, max day × 7, 30-day total). Spiky: 30-day total."],
       ["Guardrails", "Up: floor ≥ 0.85× (last 7 × 4). Down: ceiling ≤ 1.10× baseline. Steady: within ±15% of its level. Non-Linear / Volatile: cap ≤ 2.75× 30-day total. Spiky: cap ≤ 1.5× 30-day total."],
-      ["Next month", "Forecast from the last 30 full days of data — and deliberately NOT capped by the stock ceiling. This is the number you buy on: a purchase plan needs true demand, not demand throttled to the stock you happen to hold now (capping it there would make you under-buy). The stock ceiling only ever applies to months whose real opening stock is known, which the future month isn't."]
+      ["Next month", "Forecast from the last 30 full days of data — and never capped by stock. This is the number you buy on: a purchase plan needs true demand, not demand throttled to the stock you happen to hold now (capping it there would make you under-buy). "]
     ];
   if (fcIsM()) {
     // Same engine; the unit is the merchant. Price changes and the stock ceiling are SKU-only ideas, so they are not part of this tab.
     const mCommon = [["Unit", "Each row is one merchant. Its demand is the merchant's Confirmed pieces per day, as sold (the History tab plus the Matches rows — a day that is in both is counted once, Matches wins). This tab uses exactly the same calculations as Forecast Model; only the unit changes from the Single SKU to the merchant."]].concat(common.slice(1));
-    const skip = { "Price changes": 1, "Stock ceiling (segment A)": 1 };
+    const skip = { "Price changes": 1, "Stock ceiling (removed)": 1 };
     el.innerHTML = mCommon.concat(specific.filter(x => !skip[x[0]])).concat(tail).map(([h, b]) => `<p><strong>${h}.</strong> ${fcT(b)}</p>`).join("");
     return;
   }
@@ -12192,7 +12196,7 @@ function fcRenderSegmentTable() {
       parts.push("TSB (intermittent demand)");
     }
     if (!fcIsM()) parts.push("price-change adjustment");   // SKU-only ideas: not used for merchants
-    if (seg === "A" && !fcIsM()) parts.push(`stock ceiling ×${FC_STOCK_CAP_A}`);
+    if (seg === "A" && !fcIsM() && FC_STOCK_CEILING_ON) parts.push(`stock ceiling ×${FC_STOCK_CAP_A}`);
     if (FC_RESID_SEGMENTS[seg]) parts.push("error-correction model");
     return parts.join(" → ");
   };
@@ -12312,7 +12316,7 @@ function fcColumnsBase(res) {
     { key: "prodCat", label: "Category", cls: "truncate-cell", title: "Product category." },
     { key: "cat", label: "Behavior", title: "Demand behavior in the source window: Shifting Up, Shifting Down, Steady, Non-Linear / Volatile, Spiky." },
     { key: "seg", label: "Size", title: "Volume segment from the source window: A = 100+ pieces a month, B = 30 to 99, C = under 30. The forecasting method is chosen per segment." },
-    { key: "method", label: "Method", cls: "truncate-cell", title: "How this SKU's forecast is built. Segment A blends the average of the recent-rate rules with TSB; B and C use TSB. A price-change adjustment, and for A a stock ceiling, are applied on top — and B/C get an error-correction model." },
+    { key: "method", label: "Method", cls: "truncate-cell", title: "How this SKU's forecast is built. Segment A blends the average of the recent-rate rules with TSB; B and C use TSB. A price-change adjustment is applied on top — and B/C get an error-correction model." },
     { key: "srcTotal", label: res.srcColLabel || "Last 30d", num: true, title: res.srcColLabel ? "Confirmed pieces in the source month." : "Confirmed pieces in the 30-day source window." },
     { key: "baseline", label: "Baseline (ref)", num: true, title: "Reference only — does NOT feed the forecast. The rule-of-thumb estimate for this SKU's behavior pattern, kept on screen so you can sanity-check the forecast against something simple and explainable." },
     { key: "ml", label: "ML (ref)", num: true, title: "Reference only — does NOT feed the forecast. What a model predicting demand directly would have said. Tested exhaustively against every weighting: it earns zero weight, so the forecast ignores it. (The model that IS used works differently — it corrects the forecast's own past errors on segments B and C.)" },
@@ -18548,7 +18552,13 @@ function dohComputeRows(params) {
   const DAY = 86400000;
   const mainRows = productLevelRows();
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
+  let todayMs = today.getTime();
+  // The data lags: if nothing has arrived for yesterday yet (a new day / a new month before the daily load), "yesterday" would match no row
+  // and the page would be empty. Then the day after the LAST day that has data is treated as "today", so "yesterday" = the last day with data.
+  let lastDayMs = 0;
+  mainRows.forEach(r => { if (!r.timestamp) return; const d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); const t = d.getTime(); if (t < todayMs && t > lastDayMs) lastDayMs = t; });
+  const realTodayMs = todayMs, shifted = lastDayMs > 0 && lastDayMs + DAY < todayMs;
+  if (shifted) todayMs = lastDayMs + DAY;
   const ydayMs = todayMs - DAY;
   const d3Start = todayMs - 3 * DAY;
   const cutoffMs = todayMs - params.cutoffDays * DAY;
@@ -18612,7 +18622,7 @@ function dohComputeRows(params) {
       dohAvg3: avg3 > 0 ? stock / avg3 : null
     });
   });
-  const meta = { todayMs, ydayMs, d3Start, cutoffMs, winStartMs, params, singles: rows.length };
+  const meta = { todayMs, ydayMs, d3Start, cutoffMs, winStartMs, params, singles: rows.length, shifted, realTodayMs };
   return { rows, meta };
 }
 
@@ -18669,7 +18679,7 @@ function renderDohPlanner() {
   const st = $("dohStatus");
   if (st && m) {
     const flooredN = dohState.rows.filter(r => r.floored).length;
-    st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown${dohState.maxDoh !== null ? ` (DOH Placed × CR < ${dohState.maxDoh})` : ""} · sorted by gap size (Placed × CR vs Avg 3D) · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong> · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
+    st.innerHTML = `<div class="text-dim">${fmtInt.format(dohState.view.length)} of ${fmtInt.format(dohState.rows.length)} Single SKUs shown${dohState.maxDoh !== null ? ` (DOH Placed × CR < ${dohState.maxDoh})` : ""} · sorted by gap size (Placed × CR vs Avg 3D) · Placed Yesterday = <strong>${dohFmtDate(m.ydayMs)}</strong>${m.shifted ? ` <span class="text-orange" title="The data has nothing for ${dohFmtDate(m.realTodayMs - 86400000)} yet (the daily load has not reached it), so the last day that has data is used as yesterday.">(latest day with data — ${dohFmtDate(m.realTodayMs - 86400000)} not loaded yet)</span>` : ""} · Avg 3D = ${dohFmtDate(m.d3Start)} → ${dohFmtDate(m.ydayMs)} · CR/DR/NDR window = <strong>${dohFmtDate(m.winStartMs)} → ${dohFmtDate(m.cutoffMs)}</strong> (${m.params.windowDays} days, last ${m.params.cutoffDays} days excluded) · <span class="text-orange">*</span> CR floored to ${m.params.crFloorTo}% on ${fmtInt.format(flooredN)} SKUs (measured CR ≤ ${m.params.crFloorBelow}% or no placed pieces in the window)</div>`;
   }
   if (m) {
     const V = dohState.view, sum = (k) => V.reduce((s, r) => s + (Number.isFinite(r[k]) ? r[k] : 0), 0);
