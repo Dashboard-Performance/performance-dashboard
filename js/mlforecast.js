@@ -89,7 +89,7 @@
     h += '<div class="mlf-bar"><div class="mlf-seg">' + ["ALL", "A", "B", "C"].map(function (s) { return '<button data-seg="' + s + '" class="' + (S.seg === s ? "on" : "") + '">' + (s === "ALL" ? "All SKUs" : "Segment " + s) + '</button>'; }).join("") + '</div>' +
       '<span class="mlf-dim" style="font-size:12.5px">Data up to <b>' + esc(D.asOf) + '</b> · model published ' + esc(String(D.generatedAt || "").replace("T", " ").replace("Z", " UTC")) + '</span></div>';
     h += '<div class="tw-stats">' +
-      tile("Locked · " + monthName(D.currentMonth), lockTot == null ? "—" : n0(lockTot), D.locked ? "frozen " + esc(D.locked.frozenAt || "") + " · cannot change" : "no frozen number for this month") +
+      tile("Locked · " + monthName(D.currentMonth), lockTot == null ? "—" : n0(lockTot), D.locked ? "frozen " + esc(D.locked.frozenAt || "") + " · cannot change" : "nothing was frozen for " + esc(monthName(D.currentMonth)) + " — the model had not started when the month began") +
       tile("Month-to-date", mtdTot == null ? "—" : n0(mtdTot), "day " + (D.dayOfMonth || "?") + " of " + (D.daysInMonth || "?")) +
       tile("Pace → month end", eomTot == null ? "—" : n0(eomTot), paceTot == null ? "" : '<span class="' + (paceTot >= 0 ? "mlf-up" : "mlf-down") + '">' + (paceTot >= 0 ? "+" : "") + pct(paceTot) + ' vs locked</span>') +
       tile("Live · " + monthName(D.targetMonth), n0(liveTot), "updated daily · locks on the 1st") + '</div>';

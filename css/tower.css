@@ -834,3 +834,6 @@ body.tw-mscope .ov-row:has(#ovCatChart) { grid-template-columns: 1fr; }
 .tg-num.wide:has(input[data-k="text"]) { display: flex; width: 100%; max-width: 340px; margin-left: auto; }
 .tg-num.wide input[data-k="text"] { width: 100%; min-width: 0; text-align: left; }
 .tg-kpi-t td.n:has(input[data-k="text"]) { width: 340px; }
+/* the selected month has no targets of its own */
+.tw-tg-notice { display: none; margin: 0 0 12px; padding: 9px 14px; border-radius: 12px; font-size: 12.5px; line-height: 1.5; color: #facc15; background: rgba(250, 204, 21, .10); border: 1px solid rgba(250, 204, 21, .35); }
+html[data-theme="light"] .tw-tg-notice { color: #92400e; background: #fef3c7; border-color: #fcd34d; }

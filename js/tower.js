@@ -330,6 +330,16 @@ var VIEW_NAV = {
   function selectedMonthKey() { var s = $("monthSelect"); return monthKeyFromLabel(s ? s.value : ""); }
   function monthTitle(key) { var p = key.split("-"); return new Date(+p[0], +p[1] - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" }); }
   function hasRows(p) { return !!(p && p.table && Array.isArray(p.table.rows) && p.table.rows.length); }
+  // A one-line notice under the top bar when the selected month has no targets of its own.
+  function showTargetsNotice(key, missing) {
+    try {
+      var el = document.getElementById("twTargetsNotice");
+      if (!el) { var tb = document.querySelector(".topbar"); if (!tb || !tb.parentNode) return; el = document.createElement("div"); el.id = "twTargetsNotice"; el.className = "tw-tg-notice"; tb.parentNode.insertBefore(el, tb.nextSibling); }
+      if (!missing || !missing.length) { el.style.display = "none"; el.textContent = ""; return; }
+      el.style.display = "block";
+      el.innerHTML = "⚠ No targets uploaded for <b>" + esc(monthTitle(key)) + "</b> yet (" + missing.map(esc).join(", ") + ") — they show as empty until you upload them in <b>Targets Upload</b> (Control).";
+    } catch (e) {}
+  }
   window.TowerTargets = {
     meta: null, activeKey: null, cache: {},
     keyForSelect: selectedMonthKey,
@@ -338,15 +348,22 @@ var VIEW_NAV = {
       key = key || selectedMonthKey();
       var self = this, found = {};
       var get = function (type) { return wfetch("getTargets", { timeout: 9000 }, "&type=" + type).then(function (p) { return hasRows(p) ? p : null; }); };
+      var missing = [];
+      // Targets belong to ONE month. A month that has no upload of its own shows NO targets (an empty table) — it must not show another month's numbers
+      // (the older single upload or the Google Sheet, which still hold last month's targets until they are replaced). Only a failed request keeps the old fallback.
+      // The KPI weights (type "acm") are rules, not monthly numbers, so they keep the older fallback.
       var jobs = TARGET_TYPES.map(function (t) {
-        return get(t.type + "." + key).catch(function () { return null; }).then(function (p) { return p || get(t.type); })
-          .then(function (p) { if (p) found[t.gid] = p; })
-          .catch(function (e) { console.warn("[Tower] targets " + t.type + " failed — using fallback:", e && e.message); });
+        return get(t.type + "." + key).then(function (p) {
+          if (p) { found[t.gid] = p; return; }
+          if (!t.editor) { found[t.gid] = { table: { cols: [], rows: [] }, none: true }; missing.push(t.title); return; }
+          return get(t.type).then(function (q) { if (q) found[t.gid] = q; });
+        }).catch(function (e) { console.warn("[Tower] targets " + t.type + " failed — using fallback:", e && e.message); });
       });
       var metaJob = wfetch("getTargets", { timeout: 6000 }, "&type=meta").then(function (m) { self.meta = m; }).catch(function () {});
-      return Promise.all(jobs.concat([metaJob])).then(function () { self.cache[key] = found; self.activeKey = key; return found; });
+      return Promise.all(jobs.concat([metaJob])).then(function () { self.cache[key] = found; self.missing[key] = missing; self.activeKey = key; showTargetsNotice(key, missing); return found; });
     },
-    forMonth: function (key) { return this.cache[key] ? Promise.resolve(this.cache[key]).then(function (f) { window.TowerTargets.activeKey = key; return f; }) : this.start(key); },
+    missing: {},
+    forMonth: function (key) { return this.cache[key] ? Promise.resolve(this.cache[key]).then(function (f) { window.TowerTargets.activeKey = key; showTargetsNotice(key, window.TowerTargets.missing[key] || []); return f; }) : this.start(key); },
     apply: function (sheets, started) {
       return (started || this.start()).then(function (found) {
         var used = Object.keys(found);
@@ -760,11 +777,11 @@ var VIEW_NAV = {
         pill = '<span class="tg-pill ok" title="Uploaded ' + esc(tgWhen(m.at)) + '">Uploaded · ' + esc(tgWhen(m.at)) + '</span>';
         info = '<div class="tg-meta"><span>' + esc(m.rows) + ' rows · ' + esc(m.file || "") + '</span>' + (m.by ? '<span>by ' + esc(m.by) + '</span>' : "") + '</div>';
       } else if (g) {
-        pill = '<span class="tg-pill warn">Older upload in use</span>';
-        info = '<div class="tg-meta"><span>Nothing for ' + esc(monthTitle(tgMonth)) + ' — using ' + esc(g.rows) + ' rows · ' + esc(g.file || "") + '</span><span>uploaded ' + esc(tgWhen(g.at)) + '</span></div>';
+        pill = '<span class="tg-pill warn">No targets for this month</span>';
+        info = '<div class="tg-meta"><span>Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' — shows empty. An older upload exists (' + esc(g.rows) + ' rows · ' + esc(g.file || "") + ', ' + esc(tgWhen(g.at)) + '): use "Copy older upload to this month" if those are this month\'s targets.</span></div>';
       } else {
-        pill = '<span class="tg-pill">Google Sheet (fallback)</span>';
-        info = '<div class="tg-meta"><span>Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' — still reading the Google Sheet.</span></div>';
+        pill = '<span class="tg-pill warn">No targets for this month</span>';
+        info = '<div class="tg-meta"><span>Nothing uploaded for ' + esc(monthTitle(tgMonth)) + ' — shows empty until you upload (or "Import Google Sheet" if the sheet holds this month\'s targets).</span></div>';
       }
       return '<div class="tg-card ' + st + '" data-t="' + t.type + '">' +
         '<div class="tg-card-h"><span class="tg-ico">' + TG_ICONS.file + '</span>' +
@@ -774,7 +791,8 @@ var VIEW_NAV = {
         '<input type="file" accept=".xlsx,.xls,.csv" hidden data-file="' + t.type + '"></label>' +
         '<div class="tw-msg" data-msg="' + t.type + '"></div><div data-prev="' + t.type + '"></div>' +
         '<div class="tg-acts"><button class="btn small" data-tpl="' + t.type + '">Download current / template</button>' +
-        '<button class="btn small" data-seed="' + t.type + '">Import Google Sheet</button></div></div>';
+        '<button class="btn small" data-seed="' + t.type + '">Import Google Sheet</button>' +
+        (!m && g ? '<button class="btn small" data-copyold="' + t.type + '">Copy older upload to this month</button>' : "") + '</div></div>';
     }).join("");
 
     host.innerHTML = '<div class="tw-page tg-page">' +
@@ -807,6 +825,17 @@ var VIEW_NAV = {
     });
     host.querySelectorAll("[data-tpl]").forEach(function (b) { b.onclick = function () { var t = TARGET_TYPES.filter(function (x) { return x.type === b.dataset.tpl; })[0]; tmsg(t.type, "Preparing file…"); payloadOf(t).then(function (p) { if (!p) throw new Error("No data to export."); return downloadGrid(payloadToGrid(p), "targets_" + t.type + "_" + tgMonth + ".xlsx"); }).then(function () { tmsg(t.type, "Downloaded.", "ok"); }).catch(function (e) { tmsg(t.type, e.message, "err"); }); }; });
     host.querySelectorAll("[data-seed]").forEach(function (b) { b.onclick = function () { seed(TARGET_TYPES.filter(function (x) { return x.type === b.dataset.seed; })); }; });
+    // the older single upload (no month) -> saved as THIS month's targets
+    host.querySelectorAll("[data-copyold]").forEach(function (b) { b.onclick = function () {
+      var type = b.getAttribute("data-copyold"), g = tgLegacy[type] || {};
+      if (!adminKey()) { tmsg(type, "Enter and save the admin key first.", "err"); return; }
+      if (!confirm("Save the older upload (" + (g.rows || "?") + " rows · " + (g.file || "") + ") as the targets of " + monthTitle(tgMonth) + "?")) return;
+      tmsg(type, "Copying…");
+      wfetch("getTargets", { timeout: 15000 }, "&type=" + type).then(function (p) {
+        if (!p || !p.table || !(p.table.rows || []).length) throw new Error("The older upload is empty.");
+        return putTarget(type, p, g.file || "older upload", p.table.rows.length);
+      }).then(function () { tmsg(type, "Saved for " + monthTitle(tgMonth) + " ✓", "ok"); renderTargets(); }).catch(function (e) { tmsg(type, e.message, "err"); });
+    }; });
   }
   function kpiCardHtml(t) {
     var K = tgKpi || KPI_DEFAULT, m = tgMeta[t.type], st = tgStatus(t);
