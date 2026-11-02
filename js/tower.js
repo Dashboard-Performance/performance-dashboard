@@ -21,7 +21,7 @@ var VIEW_NAV = {
     overview: "navOverview", inventory: "navInventory",
     acmTargets: "navAcmTargets", acmPerformance: "navAcmPerf", merchantTargets: "navMerchantTargets", merchantPerformance: "navMerchantPerf", merchantCpa: "navMerchantCpa", mpSalesPlan: "navMpSalesPlan", spFeedback: "navSpFeedback",
     targetsCommercial: "navTargetsCommercial", commercialPlan: "navCommercialPlan", purchasePlan: "navPurchasePlan",
-    cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle",
+    cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle", bundleRecommendations: "navBundleRecommendations",
     productsMatchesAnalyst: "navProductsMatchesAnalyst", scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions",
     cm3Analyst: "navCm3Analyst", poorMatches: "navPoorMatches", availabilityLocking: "navAvailabilityLocking",
     allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking",
@@ -102,7 +102,7 @@ var VIEW_NAV = {
     Object.keys(c.roles).forEach(function (n) {
       var r = c.roles[n]; if (!r || !Array.isArray(r.views)) return;
       var v = r.views, add = function (has, id) { if (v.indexOf(has) >= 0 && v.indexOf(id) < 0) v.push(id); };
-      add("navForecastModel", "navForecastModelMerchant"); add("navCommercialDebundlized", "navCommercialPlan"); /* v1.18.0: nav id renamed to match the tab name */ add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets"); add("navMerchantPerf", "navMerchantCpa"); // v1.17.0: RE-CPA
+      add("navForecastModel", "navForecastModelMerchant"); add("navPpmAnalystSingle", "navBundleRecommendations"); /* v1.18.0: Commercial → Bundle Recommendations */ add("navCommercialDebundlized", "navCommercialPlan"); /* v1.18.0: nav id renamed to match the tab name */ add("navAcmPerf", "navAcmTargets"); add("navMerchantPerf", "navMerchantTargets"); add("navMerchantPerf", "navMerchantCpa"); // v1.17.0: RE-CPA
       if (v.indexOf("navMerchantPerf") >= 0 && v.indexOf("navMerchantsToggle") < 0) v.push("navMerchantsToggle");
     });
     if (!c.defaultRole || !c.roles[c.defaultRole]) c.defaultRole = "Merchant";
@@ -1043,7 +1043,8 @@ var VIEW_NAV = {
       { nav: "navCommercialPlan", view: "commercialPlan", label: "Commercial Plan" },
       { nav: "navCm3AnalystProducts", view: "cm3AnalystProducts", label: "CM3 Analyst / Products" },
       { nav: "navPpmAnalystProducts", view: "ppmAnalystProducts", label: "Analyst / Products" },
-      { nav: "navPpmAnalystSingle", view: "ppmAnalystSingle", label: "Analyst / Single" }
+      { nav: "navPpmAnalystSingle", view: "ppmAnalystSingle", label: "Analyst / Single" },
+      { nav: "navBundleRecommendations", view: "bundleRecommendations", label: "Bundle Recommendations" }
     ] },
     { toggle: "navSupplyChainToggle", title: "Supply Chain", tabs: [
       { nav: "navScAging", view: "scAging", label: "Inventory Aging" },
@@ -1229,7 +1230,7 @@ var VIEW_NAV = {
     inventory: "inventory",
     acmTargets: "target-acm", acmPerformance: "performance-acm", merchantTargets: "merchant-targets", merchantPerformance: "merchant-performance", merchantCpa: "re-cpa", mpSalesPlan: "sales-plan-acm", spFeedback: "sales-plan-feedback",
     targetsCommercial: "targets", commercialPlan: "commercial-plan", purchasePlan: "purchase-plan",
-    cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single",
+    cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single", bundleRecommendations: "bundle-recommendations",
     productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",
     cm3Analyst: "cm3-analyst", poorMatches: "poor-matches", availabilityLocking: "availability-locking",
     allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions",
