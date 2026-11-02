@@ -2460,7 +2460,8 @@ function parseProductsSheet(payload) {
         websiteStatus: cellText(c[3]) || "-",
         isLocked: cellText(c[lockedIdx]) || "-",
         subCategory: cellText(c[14]) || "", // مستخدم في Poor Matches (بنشمارك NDR على مستوى الساب كاتيجوري)
-        category: cellText(c[13]) || "" // fallback لو الـ SKU مش موجود في inventoryMap (مستخدم في Availability Locking)
+        category: cellText(c[13]) || "", // fallback لو الـ SKU مش موجود في inventoryMap (مستخدم في Availability Locking)
+        sc: cellText(c[15]) || "" // SC = the product type under the sub-category (electric shavers, home storage …) — Bundle Recommendations
       };
     }
   }
@@ -2528,10 +2529,9 @@ function deriveCategoryTargetsFromCommercial(commercialTargets) {
 // -------------------------------------------------------------------------
 // TARGETS COMMERCIAL (Commercial dropdown) — بيقرأ من نفس شيت الـ Category
 // Targets (CAT_TARGETS_GID / gid=1656655269) بشكلها الجديد: صف عناوين واحد
-// (Category, Count of SKUs, Daily Target, Total Placed, Contribution %,
-// Total Confirmed, CR %, Total Delivered, DR %, ASP, Total Delivered GMV,
-// Refund Rate, Net Delivered After Refund (Pcs/GMV), CM3, CM3/Piece, CM3%,
-// PPM, PPM/Piece, PPM%) وبعده صف واحد لكل قسم (Consumables/Electronics/
+// (v1.18.0: Category, SKUs with Plan, Daily Target (Pcs/day), Total Placed,
+// Contribution %, Total Confirmed, CR%, Total Delivered, DR%, ASP, NDR%,
+// Delivered GMV, CM3, CM3/Pc, CM3%, PPM, PPM/Pc, PPM%, Adjusted SKUs) وبعده صف واحد لكل قسم (Consumables/Electronics/
 // Fashion/Home/Leisure) + صف Total (= Grand Total). القراءة هنا بتتم
 // بمطابقة نص عنوان كل عمود (مش رقم عمود ثابت) عشان تفضل شغالة حتى لو
 // اتحرك ترتيب الأعمدة في الشيت.
@@ -2539,10 +2539,16 @@ function deriveCategoryTargetsFromCommercial(commercialTargets) {
 const TC_CATEGORY_ORDER = ["consumables", "electronics", "fashion", "home", "leisure", "grand total"];
 // أسماء بديلة لصف الإجمالي زي ما ممكن يتكتب في الشيت (Total / Grand Total).
 const TC_CATEGORY_NAME_ALIASES = { "total": "grand total", "grand total": "grand total" };
-const TC_PCT_KEYS = new Set(["targetContribution", "targetCr", "targetDr", "targetRefundRate", "targetCm3Pct", "targetPpmPct"]);
+const TC_PCT_KEYS = new Set(["targetContribution", "targetCr", "targetDr", "targetNdr", "targetRefundRate", "targetCm3Pct", "targetPpmPct"]);
 // نص عنوان العمود بعد التطبيع (tcNormalize) -> المفتاح الداخلي اللي بنخزنه بيه
 const TC_COLUMN_MAP = {
-  "count of skus": "skuCountTarget",
+  // v1.18.0 sheet layout: Category | SKUs with Plan | Daily Target (Pcs/day) | Total Placed | Contribution % | Total Confirmed | CR% |
+  // Total Delivered | DR% | ASP | NDR% | Delivered GMV | CM3 | CM3/Pc | CM3% | PPM | PPM/Pc | PPM% | Adjusted SKUs  (older names still read)
+  "skus with plan": "skuCountTarget", "count of skus": "skuCountTarget",
+  "adjusted skus": "adjustedSkusTarget",
+  "ndr %": "targetNdr", "ndr%": "targetNdr",
+  "delivered gmv": "targetGmv",
+  "cm3 pc": "targetCm3PerPiece", "ppm pc": "targetPpmPerPiece",
   "daily target": "targetPlacedDaily", "daily target pcs day": "targetPlacedDaily",
   "total placed pcs": "placedPiecesTarget", "total placed": "placedPiecesTarget",
   "contribution": "targetContribution", "contribution %": "targetContribution", "contribution%": "targetContribution",
@@ -2573,7 +2579,9 @@ function tcNormalizeCategoryName(raw) {
 // بسيط في الصياغة). بيدور بالكلمات المفتاحية بدل المطابقة الحرفية.
 function tcFuzzyMatchColumnLabel(label) {
   const has = (s) => label.indexOf(s) !== -1;
+  if (has("adjusted")) return "adjustedSkusTarget";
   if (has("sku")) return "skuCountTarget";
+  if (has("ndr")) return "targetNdr";
   if (has("daily")) return "targetPlacedDaily";
   if (has("contribution")) return "targetContribution";
   if (has("refund") && has("rate")) return "targetRefundRate";
@@ -2723,7 +2731,7 @@ function tcFinalizeBucket(b, grandDeliveredGmv) {
     skuCount: b.skuSet.size,
     placedDaily: b.placed / activeDays,
     confirmedDaily: b.confirmed / activeDays,
-    placed: b.placed, contribution, confirmed: b.confirmed, crPct, delivered: b.delivered, drPct,
+    placed: b.placed, contribution, confirmed: b.confirmed, crPct, delivered: b.delivered, drPct, ndrPct: (crPct * drPct) / 100,
     aspDlv, gmv: b.deliveredGmv,
     cm3: b.cm3, cm3PerPiece, cm3Pct, ppm: b.ppm, ppmPerPiece, ppmPct
   };
@@ -6662,25 +6670,27 @@ const TC_CATEGORY_LABELS = { consumables: "Consumables", electronics: "Electroni
 // مصدر بيانات لايف حالياً (زي الـ Refund/Net-After-Refund، مفيش عمود ريفند
 // في شيت الـ Main) فبيظهر كـ "—" في عمود Actual.
 const TC_METRIC_ROWS = [
-  { label: "Count of SKUs", t: "skuCountTarget", a: "skuCount", fmt: "int" },
+  // v1.18.0 — same order and names as the Category Targets sheet:
+  // Category | SKUs with Plan | Daily Target (Pcs/day) | Total Placed | Contribution % | Total Confirmed | CR% | Total Delivered | DR% | ASP |
+  // NDR% | Delivered GMV | CM3 | CM3/Pc | CM3% | PPM | PPM/Pc | PPM% | Adjusted SKUs
+  { label: "SKUs with Plan", t: "skuCountTarget", a: "skuCount", fmt: "int" },
   { label: "Daily Target (Pcs/day)", t: "targetPlacedDaily", a: "confirmedDaily", fmt: "int" },
-  { label: "Total Placed (Pcs)", t: "placedPiecesTarget", a: "placed", fmt: "int" },
+  { label: "Total Placed", t: "placedPiecesTarget", a: "placed", fmt: "int" },
   { label: "Contribution %", t: "targetContribution", a: "contribution", fmt: "pct" },
-  { label: "Total Confirmed (Pcs)", t: "plannedCnfPieces", a: "confirmed", fmt: "int" },
-  { label: "CR %", t: "targetCr", a: "crPct", fmt: "pct" },
-  { label: "Total Delivered (Pcs)", t: "dlvPiecesTarget", a: "delivered", fmt: "int" },
-  { label: "DR %", t: "targetDr", a: "drPct", fmt: "pct" },
+  { label: "Total Confirmed", t: "plannedCnfPieces", a: "confirmed", fmt: "int" },
+  { label: "CR%", t: "targetCr", a: "crPct", fmt: "pct" },
+  { label: "Total Delivered", t: "dlvPiecesTarget", a: "delivered", fmt: "int" },
+  { label: "DR%", t: "targetDr", a: "drPct", fmt: "pct" },
   { label: "ASP", t: "aspDlvPlanned", a: "aspDlv", fmt: "money" },
-  { label: "Total Delivered GMV", t: "targetGmv", a: "gmv", fmt: "money" },
-  { label: "Refund Rate", t: "targetRefundRate", a: null, fmt: "pct" },
-  { label: "Net Delivered (Pcs) After Refund", t: "netDlvPiecesTarget", a: null, fmt: "int" },
-  { label: "Net Delivered GMV After Refund", t: "netDlvGmvTarget", a: null, fmt: "money" },
+  { label: "NDR%", t: "targetNdr", a: "ndrPct", fmt: "pct" },
+  { label: "Delivered GMV", t: "targetGmv", a: "gmv", fmt: "money" },
   { label: "CM3", t: "targetCm3", a: "cm3", fmt: "money" },
-  { label: "CM3/Piece", t: "targetCm3PerPiece", a: "cm3PerPiece", fmt: "money" },
-  { label: "CM3 %", t: "targetCm3Pct", a: "cm3Pct", fmt: "pct" },
+  { label: "CM3/Pc", t: "targetCm3PerPiece", a: "cm3PerPiece", fmt: "money" },
+  { label: "CM3%", t: "targetCm3Pct", a: "cm3Pct", fmt: "pct" },
   { label: "PPM", t: "targetPpm", a: "ppm", fmt: "money" },
-  { label: "PPM/Piece", t: "targetPpmPerPiece", a: "ppmPerPiece", fmt: "money" },
-  { label: "PPM %", t: "targetPpmPct", a: "ppmPct", fmt: "pct" }
+  { label: "PPM/Pc", t: "targetPpmPerPiece", a: "ppmPerPiece", fmt: "money" },
+  { label: "PPM%", t: "targetPpmPct", a: "ppmPct", fmt: "pct" },
+  { label: "Adjusted SKUs", t: "adjustedSkusTarget", a: null, fmt: "int" }
 ];
 function tcFmtValue(v, fmt) {
   if (v === null || v === undefined) return "—";

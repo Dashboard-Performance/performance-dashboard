@@ -34,7 +34,7 @@ var VIEW_NAV = {
   var TARGET_TYPES = [
     { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "TAGER_ID · Tager_name · Target GMV (Actual) · Target Placed (Actual) — each merchant's ACM is picked up automatically and its target is added to that ACM" },
     { type: "acm", gid: " _Targets_ACM_ ", title: "KPI's Account Manager", desc: "KPI targets & weights used for the ACM Final Weight % (edit below)", editor: true },
-    { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · Daily Target · CR % · DR % · ASP · CM3 · PPM …" },
+    { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · SKUs with Plan · Daily Target (Pcs/day) · Total Placed · Contribution % · Total Confirmed · CR% · Total Delivered · DR% · ASP · NDR% · Delivered GMV · CM3 · CM3/Pc · CM3% · PPM · PPM/Pc · PPM% · Adjusted SKUs" },
     { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target · New Target · Flag" },
     { type: "singlesku", gid: "1620722565", title: "SKU Targets (Bundle & Single)", desc: "Overall SKU tracker — bundle and single SKUs: PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
   ];
