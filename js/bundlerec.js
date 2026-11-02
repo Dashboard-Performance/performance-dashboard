@@ -22,7 +22,7 @@
    Pricing columns (today's prices, Products: Price − Profit − COGS per single):
      • Floor PPM     = the best single alone (or the original bundle for Revive / Variant) — below it, sell the single alone.
      • Ceiling PPM   = the singles sold apart (sum) — at or above it the customer has no reason to buy the bundle.
-     • Suggested PPM = Ceiling × Pricing R · Price before merchant profit = COGS + Suggested.
+     • Suggested PPM = Ceiling × Pricing R · Base Price = COGS + Suggested.
    Pricing R (2 and 3 pieces) — the discount that brings demand AND PPM, learned from your mixed bundles that sell now (Main):
      • each bundle's list R = its list PPM (Price − Profit − its singles' COGS) ÷ the sum of its singles' list PPM;
      • bundles are grouped in list-R bands (<0.50, 0.50-0.60 … ≥1.00); a band's score = the MEDIAN actual PPM per bundle in it
@@ -173,7 +173,7 @@
         ceiling = 0; floor = origList != null ? origList : -Infinity;
         us.forEach(function (u) { ceiling += u.listPpm; if (u.listPpm > floor) floor = u.listPpm; });
       }
-      // Suggested PPM, Price before merchant profit and Base price per SKU are set by price() on the Pricing R
+      // Suggested PPM, Base Price and Base price per SKU are set by price() on the Pricing R
       // (each SKU: its own PPM × the same R, so the bundle's discount is shared in the same proportion)
       out.push({ type: type, key: key, us: us, n: n, why: why, strength: strength, replaced: replaced || null, cogs: cogs, ppm: ppm, ppmPiece: ppm / n, today: today, uplift: ppm - today, minStock: minStock, cats: cats,
         floor: floor, ceiling: ceiling, allList: allList, suggested: null, priceBefore: null, parts: null });
@@ -282,7 +282,7 @@
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Bundle Recommendations</h2>' +
       '<p>Bundles you can run now, built from what already worked together (' + esc(span) + ': history tab + Matches). Only singles that sell on their own and are in stock; only bundles that earn more per order than today.</p></div></div>' +
       '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
-      '<div class="sc-note" style="margin:0 18px 14px">Pricing (today\'s prices, Products: Price − Profit − COGS): price between <b>Floor PPM</b> (the best single alone) and <b>Ceiling PPM</b> (the singles sold apart); <b>Suggested PPM</b> = Ceiling × <b>Pricing R</b> (box below); <b>Price before merchant profit</b> = COGS + Suggested PPM — add the merchant profit on top to get the Selling Price. <b>Base price per SKU</b> = each SKU\'s COGS + its PPM alone × Pricing R (the same discount on every SKU); they add up to Price before merchant profit. <b>Expected PPM / order</b> = what the bundle earns per order at the price you set = its singles\' actual PPM per piece × Pricing R; <b>Uplift</b> = Expected − Today, and only bundles with Uplift &gt; 0 are listed.<br>For reference, the discount your selling bundles give in practice (actual R): <b>2 pieces = ' + (d.R[2] == null ? "—" : d.R[2].toFixed(2)) + '</b> (' + int(d.Rn[2]) + ' bundles) · <b>3 pieces = ' + (d.R[3] == null ? "—" : d.R[3].toFixed(2)) + '</b> (' + int(d.Rn[3]) + ' bundles). A similar single = same product type (Products → SC; else sub-category, else category), the closest price, in stock. Swap / New need their two product types to already sit together in a bundle that sold, and never pair two of the same product type.</div></div>';
+      '<div class="sc-note" style="margin:0 18px 14px">Pricing (today\'s prices, Products: Price − Profit − COGS): price between <b>Floor PPM</b> (the best single alone) and <b>Ceiling PPM</b> (the singles sold apart); <b>Suggested PPM</b> = Ceiling × <b>Pricing R</b> (box below); <b>Base Price</b> = COGS + Suggested PPM — add the merchant profit on top to get the Selling Price. <b>Base price per SKU</b> = each SKU\'s COGS + its PPM alone × Pricing R (the same discount on every SKU); they add up to Base Price. <b>Expected PPM / order</b> = what the bundle earns per order at the price you set = its singles\' actual PPM per piece × Pricing R; <b>Uplift</b> = Expected − Today, and only bundles with Uplift &gt; 0 are listed.<br>For reference, the discount your selling bundles give in practice (actual R): <b>2 pieces = ' + (d.R[2] == null ? "—" : d.R[2].toFixed(2)) + '</b> (' + int(d.Rn[2]) + ' bundles) · <b>3 pieces = ' + (d.R[3] == null ? "—" : d.R[3].toFixed(2)) + '</b> (' + int(d.Rn[3]) + ' bundles). A similar single = same product type (Products → SC; else sub-category, else category), the closest price, in stock. Swap / New need their two product types to already sit together in a bundle that sold, and never pair two of the same product type.</div></div>';
 
     html += pricingPanel(d);
     html += '<div class="panel table-panel hover-glow"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Recommendations</h2><p>All kinds = Revive, then Variant (proven bundles, by pieces sold), then Swap + New (by merchant-months). A single appears in at most 3 Swap / New suggestions.</p></div></div>' +
@@ -297,9 +297,9 @@
       '<th class="num" title="Lowest PPM per order worth pricing at: the best single alone at today\'s pricing (Price − Profit − COGS), or the original bundle for Revive / Variant. Below it, selling the single alone earns more.">Floor PPM</th>' +
       '<th class="num" title="Ceiling PPM × Pricing R (' + rTxt(pricingR(d, 2)) + ' for 2 pieces, ' + rTxt(pricingR(d, 3)) + ' for 3 — see the Pricing R box). Orange = below the Floor.">Suggested PPM</th>' +
       '<th class="num" title="The singles sold apart at today\'s pricing (sum of Price − Profit − COGS). At or above it the customer has no reason to buy the bundle.">Ceiling PPM</th>' +
-      '<th class="num" title="COGS + Suggested PPM = the bundle\'s Selling Price without the merchant profit.">Price before merchant profit</th>' +
+      '<th class="num" title="COGS + Suggested PPM = the bundle\'s Selling Price without the merchant profit.">Base Price</th>' +
       '<th class="num" title="Suggested PPM ÷ pieces.">Suggested PPM / piece</th>' +
-      '<th title="How to price each SKU inside the bundle: PPM in bundle = its PPM alone (today\'s pricing) × Pricing R; Base price = its COGS + PPM in bundle (without the merchant profit). The base prices add up to Price before merchant profit.">Base price per SKU</th>' +
+      '<th title="How to price each SKU inside the bundle: PPM in bundle = its PPM alone (today\'s pricing) × Pricing R; Base price = its COGS + PPM in bundle (without the merchant profit). The base prices add up to Base Price.">Base price per SKU</th>' +
       '<th class="num" title="What you earn per order at the price you set: the singles\' actual delivered PPM per piece × Pricing R. Lower than Suggested PPM when the singles earn less in practice than their list price.">Expected PPM / order</th>' +
       '<th class="num" title="The best actual PPM per delivered order of any of these singles sold alone (and of the original bundle for Revive / Variant).">Today (actual)</th><th class="num" title="Expected PPM / order − Today (actual).">Uplift / order</th><th class="num" title="The lowest stock among the singles.">Min stock</th></tr></thead><tbody id="brBody"></tbody></table></div>' +
       '<div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 18px"><button type="button" class="btn" id="brPrev">Prev</button><span class="text-dim" id="brPageInfo"></span><button type="button" class="btn" id="brNext">Next</button></div></div>';
@@ -356,7 +356,7 @@
   }
 
   function csv() {
-    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Pricing R", "Suggested PPM", "Ceiling PPM", "Price before merchant profit", "Suggested PPM per piece", "Expected PPM per order", "Today (actual)", "Uplift per order", "Min stock"];
+    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Pricing R", "Suggested PPM", "Ceiling PPM", "Base Price", "Suggested PPM per piece", "Expected PPM per order", "Today (actual)", "Uplift per order", "Min stock"];
     [1, 2, 3].forEach(function (k) { head.push("SKU " + k, "SKU " + k + " name", "SKU " + k + " PPM alone", "SKU " + k + " PPM in bundle", "SKU " + k + " COGS", "SKU " + k + " Base price"); });
     var rd = function (v) { return v == null || !isFinite(v) ? "" : Math.round(v); };
     var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };

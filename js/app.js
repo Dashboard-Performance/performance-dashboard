@@ -6226,41 +6226,81 @@ function histAddMonthOptions() {
   sel.innerHTML = '<option value="">All Months</option>' + all.map(m => `<option value="${m}">${m}</option>`).join("");
   sel.value = cur;
 }
+// ---- History months cache (IndexedDB, same DB as the snapshot): the history tab only holds closed months, so every
+// month is kept on this browser after its first load and shown straight away next time. A month saved more than
+// HIST_REFRESH_MS ago is re-read from the sheet in the background (the page keeps the cached copy meanwhile) and the
+// page is refreshed only if that month's numbers actually changed.
+const HIST_REFRESH_MS = 12 * 3600 * 1000;
+const histRefreshed = new Set();
+async function histIdb(mode, key, val) {
+  try {
+    const db = await openCacheDB();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, mode === "get" ? "readonly" : "readwrite"), os = tx.objectStore(IDB_STORE);
+      if (mode === "get") { const rq = os.get(key); rq.onsuccess = () => resolve(rq.result || null); rq.onerror = () => resolve(null); }
+      else { os.put(val, key); tx.oncomplete = () => resolve(true); tx.onerror = () => resolve(false); }
+    });
+  } catch (e) { return null; }
+}
+function histFp(rows) { let a = 0, b = 0, c = 0; (rows || []).forEach(r => { a += r.deliveredPieces || 0; b += r.ppm || 0; c += r.placedPieces || 0; }); return [(rows || []).length, Math.round(a), Math.round(b), Math.round(c)].join("|"); }
+function histWithAcm(rows) { const infoMap = state.merchantInfoMap || new Map(); return rows.map(r => { const i = infoMap.get(r.merchantId); return Object.assign({}, r, { acmName: (i && i.acmName) || r.acmName || "Unassigned" }); }); }
+function histSetMonths(mn, mx) {
+  const mainMonths = new Set((state.allParsedRows || []).map(r => r.monthYear));
+  const out = [];
+  for (let d = new Date(mn.getFullYear(), mn.getMonth(), 1); d <= mx; d.setMonth(d.getMonth() + 1)) {
+    const lab = d.toLocaleString("en-US", { month: "long", year: "numeric" }); if (!mainMonths.has(lab)) out.push(lab);
+  }
+  hist.months = out; histAddMonthOptions();
+}
 async function histInit() {
   if (hist.inited) return; hist.inited = true;
+  const cached = await histIdb("get", "hist:range");
+  if (cached && cached.mn && cached.mx) histSetMonths(new Date(cached.mn), new Date(cached.mx));
   try {
     const p = await fcLoadGvizQuery(FORECAST_HISTORY_GID, "select min(A), max(A)", 60000);
     const c = (p.table.rows[0] || {}).c || [];
     const g = (x) => { const m = /Date\((\d+),(\d+),(\d+)/.exec(x && x.v); return m ? new Date(+m[1], +m[2], +m[3]) : null; };
     const mn = g(c[0]), mx = g(c[1]); if (!mn || !mx) return;
-    const mainMonths = new Set((state.allParsedRows || []).map(r => r.monthYear));
-    const out = [];
-    for (let d = new Date(mn.getFullYear(), mn.getMonth(), 1); d <= mx; d.setMonth(d.getMonth() + 1)) {
-      const lab = d.toLocaleString("en-US", { month: "long", year: "numeric" }); if (!mainMonths.has(lab)) out.push(lab);
-    }
-    hist.months = out; histAddMonthOptions();
-  } catch (e) { hist.inited = false; }
+    histSetMonths(mn, mx); histIdb("put", "hist:range", { mn: mn.getTime(), mx: mx.getTime(), savedAt: Date.now() });
+  } catch (e) { if (!hist.months.length) hist.inited = false; }
+}
+function histRerender() {
+  clearTimeout(hist.timer);
+  hist.timer = setTimeout(() => {
+    const act = (id) => { const v = document.getElementById(id); return v && v.classList.contains("active-view"); };
+    if (act("viewCm3Analyst")) { renderCm3TargetView(); renderCm3AnalystView(); }
+    if (act("viewPoorMatches")) preparePoorMatchesData();
+    if (act("viewAcmPerformance") || act("viewAcmTargets")) { try { applyFilters(); } catch (e) {} }
+    if (act("viewBundleRecommendations") && window.TaagerBundleRec) { try { window.TaagerBundleRec.render(document.getElementById("viewBundleRecommendations")); } catch (e) {} }
+  }, 500);
+}
+function histFetchMonth(label) {
+  const { start, end } = histMonthRange(label);
+  return fcLoadGvizQuery(FORECAST_HISTORY_GID, `select * where A >= date '${cm3Ymd(start)}' and A <= date '${cm3Ymd(end)}'`, 180000).then(payload => parseMainSheet(payload));
 }
 function histLoadMonth(label) {
   if (hist.rows.has(label) || hist.loading.has(label)) return;
   hist.loading.add(label); histBadge();
-  const { start, end } = histMonthRange(label);
-  fcLoadGvizQuery(FORECAST_HISTORY_GID, `select * where A >= date '${cm3Ymd(start)}' and A <= date '${cm3Ymd(end)}'`, 180000)
-    .then(payload => {
-      const infoMap = state.merchantInfoMap || new Map();
-      hist.rows.set(label, parseMainSheet(payload).map(r => { const i = infoMap.get(r.merchantId); return Object.assign({}, r, { acmName: (i && i.acmName) || r.acmName || "Unassigned" }); }));
-    })
-    .catch(() => { hist.rows.set(label, []); })
-    .finally(() => {
-      hist.loading.delete(label); histBadge();
-      clearTimeout(hist.timer);
-      hist.timer = setTimeout(() => {
-        const act = (id) => { const v = document.getElementById(id); return v && v.classList.contains("active-view"); };
-        if (act("viewCm3Analyst")) { renderCm3TargetView(); renderCm3AnalystView(); }
-        if (act("viewPoorMatches")) preparePoorMatchesData();
-        if (act("viewAcmPerformance") || act("viewAcmTargets")) { try { applyFilters(); } catch (e) {} }
-      }, 500);
-    });
+  histIdb("get", "hist:" + label).then(c => {
+    if (c && Array.isArray(c.rows) && c.rows.length) {
+      // instant: the copy saved on this browser
+      hist.rows.set(label, histWithAcm(c.rows));
+      hist.loading.delete(label); histBadge(); histRerender();
+      if (Date.now() - (c.savedAt || 0) > HIST_REFRESH_MS && !histRefreshed.has(label)) {
+        histRefreshed.add(label);
+        histFetchMonth(label).then(rows => {
+          if (!rows.length) return;
+          histIdb("put", "hist:" + label, { savedAt: Date.now(), rows });
+          if (histFp(rows) !== histFp(c.rows)) { hist.rows.set(label, histWithAcm(rows)); histRerender(); }
+        }).catch(() => {});
+      }
+      return;
+    }
+    histFetchMonth(label)
+      .then(rows => { hist.rows.set(label, histWithAcm(rows)); if (rows.length) histIdb("put", "hist:" + label, { savedAt: Date.now(), rows }); })
+      .catch(() => { hist.rows.set(label, []); })
+      .finally(() => { hist.loading.delete(label); histBadge(); histRerender(); });
+  });
 }
 // صفوف الـ history المطلوبة للشهر المختار (أو الرينج لو فيه تاريخ مختار) —
 // اللي لسه ماتحملتش بتتحمل في الخلفية والصفحة بتتحدث لوحدها بعدها.
