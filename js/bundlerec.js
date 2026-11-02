@@ -137,7 +137,9 @@
         suggested = ceiling * R[n];
       }
       out.push({ type: type, key: key, us: us, n: n, why: why, strength: strength, replaced: replaced || null, cogs: cogs, ppm: ppm, ppmPiece: ppm / n, today: today, uplift: ppm - today, minStock: minStock, cats: cats,
-        floor: floor, suggested: suggested, ceiling: ceiling, priceBefore: suggested != null ? cogs + suggested : null });
+        floor: floor, suggested: suggested, ceiling: ceiling, priceBefore: suggested != null ? cogs + suggested : null,
+        // each SKU inside the bundle: its own PPM × the same R, so the bundle's discount is shared in the same proportion
+        parts: allList ? us.map(function (u) { var inB = u.listPpm * R[n]; return { id: u.id, name: u.name, alone: u.listPpm, inBundle: inB, cogs: u.cogs, base: u.cogs + inB }; }) : null });
     };
 
     // 1) Revive proven bundles that cannot run now
@@ -242,7 +244,7 @@
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Bundle Recommendations</h2>' +
       '<p>Bundles you can run now, built from what already worked together (' + esc(span) + ': history tab + Matches). Only singles that sell on their own and are in stock; only bundles that earn more per order than today.</p></div></div>' +
       '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
-      '<div class="sc-note" style="margin:0 18px 14px">Pricing (today\'s prices, Products: Price − Profit − COGS): price between <b>Floor PPM</b> (the best single alone) and <b>Ceiling PPM</b> (the singles sold apart); <b>Suggested PPM</b> = Ceiling × R; <b>Price before merchant profit</b> = COGS + Suggested PPM — add the merchant profit on top to get the Selling Price. Actual PPM / order = the same bundle at what its singles really earned.<br>How a bundle earns: the sum of its singles\' PPM per piece × R. R is learned from the mixed bundles that sell now: <b>2 pieces R = ' + (d.R[2] == null ? "—" : d.R[2].toFixed(2)) + '</b> (' + int(d.Rn[2]) + ' bundles) · <b>3 pieces R = ' + (d.R[3] == null ? "—" : d.R[3].toFixed(2)) + '</b> (' + int(d.Rn[3]) + ' bundles). A similar single = same product type (Products → SC; else sub-category, else category), the closest price, in stock. Swap / New need their two product types to already sit together in a bundle that sold, and never pair two of the same product type.</div></div>';
+      '<div class="sc-note" style="margin:0 18px 14px">Pricing (today\'s prices, Products: Price − Profit − COGS): price between <b>Floor PPM</b> (the best single alone) and <b>Ceiling PPM</b> (the singles sold apart); <b>Suggested PPM</b> = Ceiling × R; <b>Price before merchant profit</b> = COGS + Suggested PPM — add the merchant profit on top to get the Selling Price. <b>Base price per SKU</b> = each SKU\'s COGS + its PPM alone × R (the same discount on every SKU); they add up to Price before merchant profit. Actual PPM / order = the same bundle at what its singles really earned.<br>How a bundle earns: the sum of its singles\' PPM per piece × R. R is learned from the mixed bundles that sell now: <b>2 pieces R = ' + (d.R[2] == null ? "—" : d.R[2].toFixed(2)) + '</b> (' + int(d.Rn[2]) + ' bundles) · <b>3 pieces R = ' + (d.R[3] == null ? "—" : d.R[3].toFixed(2)) + '</b> (' + int(d.Rn[3]) + ' bundles). A similar single = same product type (Products → SC; else sub-category, else category), the closest price, in stock. Swap / New need their two product types to already sit together in a bundle that sold, and never pair two of the same product type.</div></div>';
 
     html += '<div class="panel table-panel hover-glow"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Recommendations</h2><p>All kinds = Revive, then Variant (proven bundles, by pieces sold), then Swap + New (by merchant-months). A single appears in at most 3 Swap / New suggestions.</p></div></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:0 18px 12px">' +
@@ -257,6 +259,8 @@
       '<th class="num" title="Ceiling PPM × R — the discount the mixed bundles that sell give (R = ' + (d.R[2] == null ? "—" : d.R[2].toFixed(2)) + ' for 2 pieces, ' + (d.R[3] == null ? "—" : d.R[3].toFixed(2)) + ' for 3). Orange = below the Floor.">Suggested PPM</th>' +
       '<th class="num" title="The singles sold apart at today\'s pricing (sum of Price − Profit − COGS). At or above it the customer has no reason to buy the bundle.">Ceiling PPM</th>' +
       '<th class="num" title="COGS + Suggested PPM = the bundle\'s Selling Price without the merchant profit.">Price before merchant profit</th>' +
+      '<th class="num" title="Suggested PPM ÷ pieces.">Suggested PPM / piece</th>' +
+      '<th title="How to price each SKU inside the bundle: PPM in bundle = its PPM alone (today\'s pricing) × R; Base price = its COGS + PPM in bundle (without the merchant profit). The base prices add up to Price before merchant profit.">Base price per SKU</th>' +
       '<th class="num" title="What the bundle would earn per order at what its singles really earned (actual delivered PPM per piece × R).">Actual PPM / order</th>' +
       '<th class="num" title="The best actual PPM per delivered order of any of these singles sold alone (and of the original bundle for Revive / Variant).">Today (actual)</th><th class="num">Uplift / order</th><th class="num" title="The lowest stock among the singles.">Min stock</th></tr></thead><tbody id="brBody"></tbody></table></div>' +
       '<div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 18px"><button type="button" class="btn" id="brPrev">Prev</button><span class="text-dim" id="brPageInfo"></span><button type="button" class="btn" id="brNext">Next</button></div></div>';
@@ -266,6 +270,13 @@
   }
 
   function mv(v) { return v == null || !isFinite(v) ? "—" : money(v); }
+  // per SKU: PPM alone → PPM in bundle · COGS · Base price
+  function partsCell(r) {
+    if (!r.parts) return '<span class="text-dim">—</span>';
+    var td = function (t, right, bold) { return '<td style="padding:0 8px 2px 0' + (right ? ';text-align:right' : '') + '">' + (bold ? '<b>' + t + '</b>' : t) + '</td>'; };
+    return '<table style="border-collapse:collapse;font-size:12px;white-space:nowrap"><tr class="text-dim">' + td("SKU") + td("PPM alone", 1) + td("PPM in bundle", 1) + td("COGS", 1) + td("Base price", 1) + '</tr>' +
+      r.parts.map(function (x) { return '<tr title="' + esc(x.name) + '">' + td(esc(x.id)) + td(int(x.alone), 1) + td(int(x.inBundle), 1) + td(int(x.cogs), 1) + td(int(x.base), 1, 1) + '</tr>'; }).join("") + '</table>';
+  }
   function drawBody(host, rows) {
     rows = rows || view(BR.data);
     var pages = Math.max(1, Math.ceil(rows.length / PAGE)); if (BR.page > pages - 1) BR.page = pages - 1;
@@ -277,16 +288,18 @@
         return '<div><b>' + esc(u.name) + '</b> <small class="text-dim">' + esc(u.id) + ' · PPM/pc ' + (u.listPpm == null ? "—" : int(u.listPpm)) + ' (actual ' + int(u.ppmPiece) + ') · stock ' + int(u.stock) + '</small>' + (x ? '<div><small class="text-orange">' + (x.variant ? 'instead of ' + esc(x.fromName) + ' (' + esc(x.from) + ') · ' : 'replaces ' + esc(x.fromName) + ' (' + esc(x.from) + ', no stock) · ') + esc(x.by) + '</small></div>' : '') + '</div>';
       }).join("") + '</td><td><small>' + esc(r.why) + '</small></td><td>' + esc(r.cats.join(" + ")) + '</td><td class="num">' + r.n + '</td><td class="num">' + money(r.cogs) + '</td>' +
         '<td class="num">' + mv(r.floor) + '</td><td class="num' + (r.suggested != null && r.floor != null && r.suggested < r.floor ? ' text-orange' : '') + '"><b>' + mv(r.suggested) + '</b></td><td class="num">' + mv(r.ceiling) + '</td><td class="num"><b>' + mv(r.priceBefore) + '</b></td>' +
+        '<td class="num">' + mv(r.suggested != null ? r.suggested / r.n : null) + '</td><td>' + partsCell(r) + '</td>' +
         '<td class="num">' + money(r.ppm) + '</td><td class="num">' + money(r.today) + '</td><td class="num text-green">+' + int(r.uplift) + '</td><td class="num">' + int(r.minStock) + '</td></tr>';
-    }).join("") : '<tr><td colspan="15" class="text-dim" style="text-align:center;padding:18px">No recommendation matches these filters.</td></tr>';
+    }).join("") : '<tr><td colspan="17" class="text-dim" style="text-align:center;padding:18px">No recommendation matches these filters.</td></tr>';
     var pi = host.querySelector("#brPageInfo"); if (pi) pi.textContent = "Page " + (BR.page + 1) + " of " + pages + " · " + int(rows.length) + " shown";
   }
 
   function csv() {
-    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Suggested PPM", "Ceiling PPM", "Price before merchant profit", "Actual PPM per order", "Today (actual)", "Uplift per order", "Min stock"];
+    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Suggested PPM", "Ceiling PPM", "Price before merchant profit", "Suggested PPM per piece", "Actual PPM per order", "Today (actual)", "Uplift per order", "Min stock"];
+    [1, 2, 3].forEach(function (k) { head.push("SKU " + k, "SKU " + k + " name", "SKU " + k + " PPM alone", "SKU " + k + " PPM in bundle", "SKU " + k + " COGS", "SKU " + k + " Base price"); });
     var rd = function (v) { return v == null || !isFinite(v) ? "" : Math.round(v); };
     var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    var lines = [head.join(",")].concat(rows.map(function (r) { return [TYPE_LABEL[r.type], r.us.map(function (u) { return u.id; }).join(" + "), r.us.map(function (u) { return u.name; }).join(" + "), (r.replaced || []).map(function (x) { return x.from + " → " + x.to; }).join("; "), r.why, r.cats.join(" + "), r.n, Math.round(r.cogs), rd(r.floor), rd(r.suggested), rd(r.ceiling), rd(r.priceBefore), Math.round(r.ppm), Math.round(r.today), Math.round(r.uplift), r.minStock].map(q).join(","); }));
+    var lines = [head.join(",")].concat(rows.map(function (r) { return [TYPE_LABEL[r.type], r.us.map(function (u) { return u.id; }).join(" + "), r.us.map(function (u) { return u.name; }).join(" + "), (r.replaced || []).map(function (x) { return x.from + " → " + x.to; }).join("; "), r.why, r.cats.join(" + "), r.n, Math.round(r.cogs), rd(r.floor), rd(r.suggested), rd(r.ceiling), rd(r.priceBefore), rd(r.suggested != null ? r.suggested / r.n : null), Math.round(r.ppm), Math.round(r.today), Math.round(r.uplift), r.minStock].concat([0, 1, 2].reduce(function (a, k) { var x = r.parts && r.parts[k]; return a.concat(x ? [x.id, x.name, rd(x.alone), rd(x.inBundle), rd(x.cogs), rd(x.base)] : ["", "", "", "", "", ""]); }, [])).map(q).join(","); }));
     var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "bundle-recommendations.csv"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
