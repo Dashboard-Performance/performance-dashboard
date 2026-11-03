@@ -15650,8 +15650,11 @@ function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty 
   // ملحوظة: الدالة دي (alcComputeRowMath) دلوقتي مستخدمة لصفوف الـ Single
   // فقط — صفوف الـ Bundle بقى Final Action بتاعها = 0 ثابت دايمًا (راجع
   // bundleRowKeys.forEach تحت).
-  const rawFinalActionQty = merchantAvg3d > 0 ? (merchantAvg3d * ALC_TARGET_DOH_DAYS) : 0;
-  const finalActionQty = rawFinalActionQty > 0 ? Math.round(crPct > 0 ? (rawFinalActionQty / (crPct / 100)) : rawFinalActionQty) : 0;
+  // v1.18.0 — بطلب صريح: Final Action = نصيب التاجر من الـ Stock (Stock × CONTR%) ÷ CR% بتاعه — عشان القفل بيتسحب مع
+  // الـ Placed مش الـ Confirmed بس. المجموع على نفس الـ SKU ممكن يعدّي الـ Stock (مقبول — قرار صاحب الداشبورد). لو مفيش
+  // CR% (مفيش Placed في الفترة) بيرجع لـ Stock × CONTR% من غير قسمة. (ALC_TARGET_DOH_DAYS مبقاش مستخدم هنا.)
+  const shareOfStock = stock * (contrPct / 100);
+  const finalActionQty = shareOfStock > 0 ? Math.round(crPct > 0 ? (shareOfStock / (crPct / 100)) : shareOfStock) : 0;
 
   return { contrPct, suggestedAllocation, finalActionQty };
 }
@@ -16139,12 +16142,10 @@ function renderPaginatedAllocationLockingTable() {
       <td class="num text-dim">${fmtIntCell(r.overallAvg3d)}</td>
       <td class="num">${fmtPctCell(r.contrPct)}</td>
       <td class="num">${fmtPctCell(r.crPct)}</td>
-      <td class="num">${fmtAllocCell(r.suggestedAllocation)}</td>
       <td class="num font-bold">${r.allocatedQty == null ? "—" : fmtIntCell(r.allocatedQty)}</td>
       <td class="num text-dim" title="${r.type === 'Bundle' ? 'Always 0 for Bundle rows — Availability Locking only ever locks Single SKUs, so there is no usage-tracking source at the bundle grain.' : ''}">${fmtIntCell(r.usedQty)}</td>
       <td class="num text-orange font-bold">${r.remainingPieces == null ? "—" : fmtIntCell(r.remainingPieces)}</td>
       <td class="num text-blue">${fmtAllocCell(r.minBundleAllocation)}</td>
-      <td class="num text-purple">${fmtIntCell(r.merchantAvg3d)}</td>
       <td class="num text-red font-bold">${fmtIntCell(r.finalActionQty)}</td>
       <td class="num text-dim">${r.finalActionDoh === null || r.finalActionDoh === undefined ? "—" : fmtIntCell(r.finalActionDoh)}</td>
     `;
