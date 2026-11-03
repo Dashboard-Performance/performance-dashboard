@@ -7370,6 +7370,7 @@ function renderPaginatedMpSalesPlanTable() {
             <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
             <td class="text-dim">${m.category}</td>
             <td class="font-bold text-purple">${m.acm}</td>
+            <td class="num text-dim" title="Daily placed target (Sales Plan-ACM sheet)">${m.placedDailyTarget ? (Math.abs(m.placedDailyTarget - Math.round(m.placedDailyTarget)) < 0.05 ? fmtIntCell(Math.round(m.placedDailyTarget)) : (+m.placedDailyTarget).toFixed(1)) : '<span class="text-dim">-</span>'}</td>
             ${mpSpMetricCellsHtml(m.metrics.placed, false)}
             ${mpSpMetricCellsHtml(m.metrics.confirmed, false)}
             ${mpSpMetricCellsHtml(m.metrics.delivered, false)}

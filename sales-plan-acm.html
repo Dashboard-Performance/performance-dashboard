@@ -1502,7 +1502,7 @@
                       <th rowspan="2" onclick="sortMpSalesPlan('merchantName')" style="cursor:pointer;" title="Merchant's display name. Click to sort.">Merchant Name</th>
                       <th rowspan="2" onclick="sortMpSalesPlan('category')" style="cursor:pointer;" title="Product category. Click to sort.">Category</th>
                       <th rowspan="2" onclick="sortMpSalesPlan('acm')" style="cursor:pointer;" title="Account/Category Manager owning this SKU × Merchant target. Click to sort.">ACM (Owner)</th>
-                      <th colspan="4" class="center" title="Pieces placed on orders for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Placed Pieces</th>
+                      <th colspan="5" class="center" title="Pieces placed on orders for this SKU × Merchant. No cutoff applied. Group covers Daily Target/MTD Target/Actual/Run Rate/Ach% below.">Placed Pieces</th>
                       <th colspan="4" class="center" title="Pieces confirmed for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Confirmed Pieces</th>
                       <th colspan="4" class="center" title="Pieces delivered for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered Pieces</th>
                       <th colspan="4" class="center" title="Delivered revenue for this SKU × Merchant. No cutoff applied. Group covers MTD Target/Actual/Run Rate/Ach% below.">Delivered GMV</th>
@@ -1514,6 +1514,7 @@
                       <th rowspan="2" onclick="sortMpSalesPlan('mtdAchievedPct')" class="center" style="cursor:pointer;" title="Overall performance tier based on Confirmed Pieces achievement %. Click to sort.">Status</th>
                     </tr>
                     <tr>
+                      <th onclick="sortMpSalesPlan('placedDailyTarget')" class="num text-dim" style="cursor:pointer;" title="Daily placed target for this SKU × Merchant (Daily Targets in the Sales Plan-ACM sheet). MTD Target = Daily Target × days until yesterday. Click to sort.">Daily Target</th>
                       <th onclick="sortMpSalesPlan('placedMtdTarget')" class="num text-dim" style="cursor:pointer;" title="Month-to-date target, prorated from the monthly target by elapsed days.">MTD Target</th>
                       <th onclick="sortMpSalesPlan('placedMtdActual')" class="num" style="cursor:pointer;" title="Actual pieces achieved so far this month. No cutoff applied.">Actual</th>
                       <th onclick="sortMpSalesPlan('placedRunRate')" class="num" style="cursor:pointer;" title="Projected month-end close at the current daily pace.">Run Rate</th>
