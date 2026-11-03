@@ -31,10 +31,10 @@
    Expected PPM / order = the sum of its singles' ACTUAL PPM / piece × the Pricing R = what the bundle earns per order at the price you set;
    Uplift = Expected − Today, and only bundles with Uplift > 0 at your Pricing R are listed (changing the R rebuilds the list).
    CM3 check — the cost lines of the CM3 (like the Bundle CM3 sheet), applied to the PPM of each recommendation:
-     • Cost rates = company-wide, from Product Only (main-product rows of ALL products, actual columns; October 2026 file values if
-       the query has none), each one editable: shipping fee revenue and shipping cost per delivered piece · VAT and marketing as a
-       % of the selling price · packaging / warehouse, inventory provision, CS per confirmed piece · returns per confirmed piece
-       not delivered.
+     • Cost rates = company-wide, from Product Only (main-product rows of ALL products, actual columns; Oct 1 → Nov 2 2026 values
+       if the query has none), PER ORDER, each one editable: shipping fee revenue and shipping cost per delivered order · VAT and
+       marketing as a % of the selling price · packaging / warehouse, inventory provision, CS per confirmed order · returns per
+       confirmed order not delivered.
      • One order at DR r (you pick, 50%): CM3 = PPM + fee − shipping − (VAT% + marketing%) × price − (packaging + provision + CS +
        (1 − r) × returns) ÷ r.
      • Bundle = one order: PPM = Expected PPM / order, price = Base Price + merchant profit (200). Singles = one order EACH: PPM =
@@ -67,9 +67,11 @@
   }
   // CM3 cost rates. Costs are positive numbers (deducted); fee is revenue. Fallback = the October 2026 Product Only file
   // (main-product rows of all products) when the loaded query has none of the columns.
-  var COST_KEYS = [["fee", "Shipping fee revenue / delivered", "+"], ["ship", "Shipping cost / delivered", "−"], ["vat", "VAT % of price", "−%"], ["mk", "Marketing % of price", "−%"],
-    ["pack", "Packaging + warehouse / confirmed", "−"], ["prov", "Inventory provision / confirmed", "−"], ["cs", "CS / confirmed", "−"], ["ret", "Returns / confirmed not delivered", "−"]];
-  var COST_FALLBACK = { fee: 90.43, ship: 56.30, vat: 4.56, mk: 1.08, pack: 12.23, prov: 5.14, cs: 8.95, ret: 30.53 };
+  // Per ORDER (one shipment), not per piece: an order holds 1.26 pieces on average, and the dashboard's Product Only counts every
+  // physical piece, so per-piece rates come out lower than what one order really costs (shipping 49 per piece vs 62 per order).
+  var COST_KEYS = [["fee", "Shipping fee revenue / delivered order", "+"], ["ship", "Shipping cost / delivered order", "−"], ["vat", "VAT % of price", "−%"], ["mk", "Marketing % of price", "−%"],
+    ["pack", "Packaging + warehouse / confirmed order", "−"], ["prov", "Inventory provision / confirmed order", "−"], ["cs", "CS / confirmed order", "−"], ["ret", "Returns / confirmed order not delivered", "−"]];
+  var COST_FALLBACK = { fee: 100.38, ship: 62.49, vat: 4.59, mk: 1.18, pack: 13.46, prov: 4.10, cs: 10.05, ret: 30.20 }; // Product Only, Oct 1 → Nov 2 2026, per order
   function costRates(d) { var o = {}; COST_KEYS.forEach(function (k) { var v = BR.costOv[k[0]]; o[k[0]] = v != null && v !== "" && isFinite(+v) ? +v : d.costs[k[0]]; }); return o; }
   // CM3 of ONE order at delivery rate r: ppm per delivered order, price = the selling price the VAT / marketing % apply to
   function cmOrder(ppm, price, r, R) { return ppm + R.fee - R.ship - (R.vat + R.mk) / 100 * price - (R.pack + R.prov + R.cs + (1 - r) * R.ret) / r; }
@@ -162,16 +164,16 @@
     });
     var pb = { 2: bandsOf(LR[2], BR.minBand), 3: bandsOf(LR[3], BR.minBand) };
     // CM3 per piece of each single as the main product of its own order (Product Only, IS_PRIMARY = true)
-    // company-wide CM3 cost rates from Product Only (main-product rows of all products)
+    // company-wide CM3 cost rates from Product Only (main-product rows of all products); dlv / cnf = ORDERS (main-product rows hold the orders)
     var CK = ["rev", "fee", "ship", "vat", "mk", "pack", "prov", "cs", "ret"], T0 = { dlv: 0, cnf: 0 }; CK.forEach(function (k) { T0[k] = 0; });
     var cmLoaded = false, cmFirst = 0, cmLast = 0;
-    (s.productOnlyRows || []).forEach(function (r) { if (r.pCnf == null || r.p_fee == null) return; cmLoaded = true; T0.dlv += r.pDlv || 0; T0.cnf += r.pCnf || 0;
+    (s.productOnlyRows || []).forEach(function (r) { if (r.pCnf == null || r.p_fee == null) return; cmLoaded = true; T0.dlv += r.deliveredOrders || 0; T0.cnf += r.confirmedOrders || 0;
       CK.forEach(function (k) { T0[k] += r["p_" + k] || 0; });
       if (r.timestamp) { if (!cmFirst || r.timestamp < cmFirst) cmFirst = r.timestamp; if (r.timestamp > cmLast) cmLast = r.timestamp; } });
-    var costs = COST_FALLBACK, costSrc = "the October 2026 file (Product Only has no cost columns yet)";
+    var costs = COST_FALLBACK, costSrc = "Product Only Oct 1 → Nov 2 2026 (the loaded Product Only has no cost columns)";
     if (cmLoaded && T0.dlv > 0 && T0.cnf > T0.dlv && T0.rev > 0) {
       costs = { fee: T0.fee / T0.dlv, ship: -T0.ship / T0.dlv, vat: -T0.vat / T0.rev * 100, mk: -T0.mk / T0.rev * 100, pack: -T0.pack / T0.cnf, prov: -T0.prov / T0.cnf, cs: -T0.cs / T0.cnf, ret: -T0.ret / (T0.cnf - T0.dlv) };
-      costSrc = "Product Only, " + new Date(cmFirst).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " → " + new Date(cmLast).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " (" + int(T0.cnf) + " confirmed, actual DR " + Math.round(T0.dlv / T0.cnf * 100) + "%)";
+      costSrc = "Product Only, " + new Date(cmFirst).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " → " + new Date(cmLast).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " (" + int(T0.cnf) + " confirmed orders, actual DR " + Math.round(T0.dlv / T0.cnf * 100) + "%)";
     }
     var PR = { 2: pricingR({ pb: pb, R: R }, 2), 3: pricingR({ pb: pb, R: R }, 3) }; // the R you price with → Expected PPM / Uplift / the filter
 
@@ -353,7 +355,7 @@
       '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:0 18px 6px">' + (function () { var R = costRates(d); return COST_KEYS.map(function (k) {
         var mine = BR.costOv[k[0]] != null && BR.costOv[k[0]] !== "";
         return '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px" title="From the data: ' + (+d.costs[k[0]]).toFixed(2) + '">' + k[1] + ' <span>' + k[2] + '</span><input data-cost="' + k[0] + '" type="number" step="0.01" min="0" value="' + (+R[k[0]]).toFixed(2) + '" class="date-filter-input' + (mine ? ' text-orange' : '') + '" style="width:80px;min-width:0;flex:0 0 80px"></label>'; }).join(""); })() + '</div>' +
-      '<div class="sc-note" style="margin:0 18px 12px">CM3 of one order at DR ' + BR.dr + '% = PPM + shipping fee − shipping − (VAT% + marketing%) × price − (packaging + provision + CS + (1 − DR) × returns) ÷ DR. <b>Bundle</b> = one order (PPM = Expected PPM / order, price = Base Price + merchant profit). <b>Singles</b> = one order each (PPM = its actual PPM / piece, price = its selling price in Products). Cost rates: ' + esc(d.costSrc) + ' — main-product orders of all products; type your own to change one.</div>' +
+      '<div class="sc-note" style="margin:0 18px 12px">CM3 of one order at DR ' + BR.dr + '% = PPM + shipping fee − shipping − (VAT% + marketing%) × price − (packaging + provision + CS + (1 − DR) × returns) ÷ DR. <b>Bundle</b> = one order (PPM = Expected PPM / order, price = Base Price + merchant profit). <b>Singles</b> = one order each (PPM = its actual PPM / piece, price = its selling price in Products). Cost rates: ' + esc(d.costSrc) + ' — per ORDER (one shipment), main-product orders of all products; type your own to change one.</div>' +
       '<div class="table-responsive"><table class="data-table" id="brTable"><thead><tr><th>#</th><th title="Revive = proven bundle with a replaced single (no stock) · Variant = proven bundle with a similar single · Swap = sold-together pair with a replaced single · New = sold-together pair.">Kind</th><th>Bundle (single SKUs)</th><th>Why</th><th>Category</th>' +
       '<th class="num">Pcs</th><th class="num" title="Sum of the singles\' COGS.">COGS</th>' +
       '<th class="num" title="Lowest PPM per order worth pricing at: the best single alone at today\'s pricing (Price − Profit − COGS), or the original bundle for Revive / Variant. Below it, selling the single alone earns more.">Floor PPM</th>' +
