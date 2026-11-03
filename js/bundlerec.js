@@ -302,6 +302,16 @@
     return pick(function (r) { return r.type === "revive"; }).concat(pick(function (r) { return r.type === "variant"; }), pick(function (r) { return r.type === "swap" || r.type === "fresh"; })).slice(0, top);
   }
 
+  // the dashboard loads its sources after the page may already be drawn (cached copy first, then the fresh load):
+  // while this page is open, re-draw it whenever Matches / Product Only / the debundle map / Products are replaced
+  function srcRefs() { var s = st(); return [s.allParsedRows, s.productOnlyRows, s.debundleMap, s.productsMap, s.inventoryMap, s.cogsMap]; }
+  function watch(host) {
+    BR.refs = srcRefs(); clearInterval(BR.watch);
+    BR.watch = setInterval(function () {
+      if (!host.isConnected || host.classList.contains("hidden")) { clearInterval(BR.watch); return; }
+      var now = srcRefs(); if (now.some(function (x, i) { return x !== BR.refs[i]; })) render(host);
+    }, 2000);
+  }
   function render(host) {
     var h = histState();
     if (!h.ready) {
@@ -309,7 +319,8 @@
       clearTimeout(BR.poll); BR.poll = setTimeout(function () { if (!host.classList.contains("hidden")) render(host); }, 1500); return;
     }
     var d = build(h);
-    if (!d) { host.innerHTML = '<div class="panel" style="padding:18px"><div class="sc-note">Waiting for dashboard data (Matches, Products, COGS, inventory and the debundle map).</div></div>'; return; }
+    watch(host);
+    if (!d) { host.innerHTML = '<div class="panel" style="padding:18px"><div class="sc-note">Waiting for dashboard data (Matches, Products, COGS, inventory and the debundle map). This page fills in by itself.</div></div>'; return; }
     var rows = view(d);
     var span = d.firstTs ? new Date(d.firstTs).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) + " → " + new Date(d.lastTs).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "";
     var avgUp = rows.length ? rows.reduce(function (a, r) { return a + r.uplift; }, 0) / rows.length : 0;
