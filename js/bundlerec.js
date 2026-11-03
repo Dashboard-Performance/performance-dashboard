@@ -30,6 +30,13 @@
      • Auto Pricing R = the median list R of the bundles in the best band. You can type your own R.
    Expected PPM / order = the sum of its singles' ACTUAL PPM / piece × the Pricing R = what the bundle earns per order at the price you set;
    Uplift = Expected − Today, and only bundles with Uplift > 0 at your Pricing R are listed (changing the R rebuilds the list).
+   CM3 check (Product Only query, IS_PRIMARY = true rows = a product sold as the main product of its own order):
+     • Expected CM3 / order = Expected PPM / order + the costs paid ONCE per order (shipping fee revenue, shipping / packaging /
+       warehouse, returns, CS) = the AVERAGE of its singles per piece + the costs that follow the price (VAT, marketing, provision)
+       = the singles' average share of their selling price × (Base Price + merchant profit, 200 by default).
+     • Singles CM3 = the sum of the singles' CM3 per piece (each one as its own order). Δ = Expected − Singles → More / Same / Less.
+     • A single needs ≥ "min delivered" (5) primary pieces in Product Only, else "—".
+   • DR-based: when the query has its *_EXPECTED columns (orders still on the road at the expected delivery rate) they are used.
    Order: Revive, then Variant (by the original bundle's pieces sold), then Swap + New (by merchant-months); a single appears in
    at most 3 Swap / New suggestions so one popular SKU does not fill the list. */
 (function () {
@@ -43,9 +50,9 @@
   function median(a) { a = a.filter(function (x) { return x != null && isFinite(x); }).sort(function (x, y) { return x - y; }); if (!a.length) return null; var m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
   function monthKey(ts) { var d = new Date(ts); return d.getFullYear() * 100 + d.getMonth() + 1; }
 
-  var BR = { sig: "", data: null, type: "all", top: 200, cat: "all", q: "", page: 0, poll: null, rOv: { 2: null, 3: null }, minBand: 5 };
-  try { var sv = JSON.parse(localStorage.getItem("brPricingR") || "null"); if (sv) { BR.rOv = { 2: sv[2] > 0 ? +sv[2] : null, 3: sv[3] > 0 ? +sv[3] : null }; if (sv.min > 0) BR.minBand = Math.round(sv.min); } } catch (e) {}
-  function saveR() { try { localStorage.setItem("brPricingR", JSON.stringify({ 2: BR.rOv[2], 3: BR.rOv[3], min: BR.minBand })); } catch (e) {} }
+  var BR = { sig: "", data: null, type: "all", top: 200, cat: "all", q: "", page: 0, poll: null, rOv: { 2: null, 3: null }, minBand: 5, mp: 200, cmMin: 5, cmSame: 0 };
+  try { var sv = JSON.parse(localStorage.getItem("brPricingR") || "null"); if (sv) { BR.rOv = { 2: sv[2] > 0 ? +sv[2] : null, 3: sv[3] > 0 ? +sv[3] : null }; if (sv.min > 0) BR.minBand = Math.round(sv.min); if (sv.mp >= 0 && sv.mp !== null && sv.mp !== undefined) BR.mp = +sv.mp; if (sv.cmMin > 0) BR.cmMin = Math.round(sv.cmMin); if (sv.cmSame >= 0 && sv.cmSame !== null && sv.cmSame !== undefined) BR.cmSame = +sv.cmSame; } } catch (e) {}
+  function saveR() { try { localStorage.setItem("brPricingR", JSON.stringify({ 2: BR.rOv[2], 3: BR.rOv[3], min: BR.minBand, mp: BR.mp, cmMin: BR.cmMin, cmSame: BR.cmSame })); } catch (e) {} }
   var BANDS = [["<0.50", -Infinity, 0.5], ["0.50-0.60", 0.5, 0.6], ["0.60-0.70", 0.6, 0.7], ["0.70-0.80", 0.7, 0.8], ["0.80-0.90", 0.8, 0.9], ["0.90-1.00", 0.9, 1.0], ["≥1.00", 1.0, Infinity]];
   // band table + best band for one piece count (min = bundles a band needs to win)
   function bandsOf(list, min) {
@@ -62,6 +69,20 @@
     var P = pricingR(d, c.n);
     c.pr = P; c.suggested = c.ceiling != null ? c.ceiling * P : null; c.priceBefore = c.suggested != null ? c.cogs + c.suggested : null;
     c.parts = c.allList ? c.us.map(function (u) { var inB = u.listPpm * P; return { id: u.id, name: u.name, alone: u.listPpm, inBundle: inB, cogs: u.cogs, base: u.cogs + inB }; }) : null;
+    // CM3 check — needs every single in the Product Only CM3 stats and a Base Price
+    var cm = d.cm || {}, st0 = c.us.map(function (u) { return cm[u.id] || null; });
+    c.cm3 = null; c.cm3S = null; c.cm3D = null; c.cm3V = ""; c.cm3Why = !d.cmLoaded ? "no CM3 data (Product Only)" : "";
+    if (d.cmLoaded) {
+      var miss = c.us.filter(function (u, i) { return !st0[i]; }).map(function (u) { return u.id; });
+      if (miss.length) c.cm3Why = "fewer than " + BR.cmMin + " delivered as main product: " + miss.join(", ");
+      else if (c.priceBefore == null) c.cm3Why = "no Base Price";
+      else {
+        var ord = 0, rat = 0, sum = 0; st0.forEach(function (x) { ord += x.ordPc; rat += x.prcRatio; sum += x.cmPc; });
+        ord /= st0.length; rat /= st0.length;
+        c.cm3 = c.ppm + ord + rat * (c.priceBefore + (+BR.mp || 0)); c.cm3S = sum; c.cm3D = c.cm3 - sum;
+        c.cm3V = c.cm3D > BR.cmSame ? "More" : (c.cm3D < -BR.cmSame ? "Less" : "Same");
+      }
+    }
     return c;
   }
   var PAGE = 50;
@@ -75,7 +96,7 @@
     months.forEach(function (m) { if (H.rows.has(m)) { loaded++; rows = rows.concat(H.rows.get(m)); } else if (typeof histLoadMonth === "function") histLoadMonth(m); });
     return { ready: H.inited && loaded === months.length && !H.loading.size, rows: rows, months: months.length, loaded: loaded };
   }
-  function sigNow(h) { var s = st(); try { return [(s.allParsedRows || []).length, h.rows.length, (s.debundleMap || []).length, Object.keys(s.productsMap || {}).length, s.cogsMap && s.cogsMap.size, Object.keys(s.inventoryMap || {}).length, BR.rOv[2], BR.rOv[3], BR.minBand].join("|"); } catch (e) { return ""; } }
+  function sigNow(h) { var s = st(); try { return [(s.allParsedRows || []).length, h.rows.length, (s.debundleMap || []).length, Object.keys(s.productsMap || {}).length, s.cogsMap && s.cogsMap.size, Object.keys(s.inventoryMap || {}).length, BR.rOv[2], BR.rOv[3], BR.minBand, BR.cmMin, (s.productOnlyRows || []).length].join("|"); } catch (e) { return ""; } }
 
   function build(h) {
     var sg = sigNow(h); if (BR.data && sg === BR.sig) return BR.data; BR.sig = sg;
@@ -131,6 +152,10 @@
       LR[n].push({ id: id, lr: (+b.price - (+b.profit || 0) - bc) / sl, orders: t.mo, ppm: t.mppm });
     });
     var pb = { 2: bandsOf(LR[2], BR.minBand), 3: bandsOf(LR[3], BR.minBand) };
+    // CM3 per piece of each single as the main product of its own order (Product Only, IS_PRIMARY = true)
+    var cmAgg = {}, cmLoaded = false;
+    var cmExp = false; (s.productOnlyRows || []).forEach(function (r) { if (r.pDlv == null || !r.sku) return; cmLoaded = true; if (r.pExp) cmExp = true; var a = cmAgg[r.sku] || (cmAgg[r.sku] = { dlv: 0, rev: 0, cm3: 0, ord: 0, prc: 0 }); a.dlv += r.pDlv || 0; a.rev += r.pRev || 0; a.cm3 += r.pCm3 || 0; a.ord += r.pOrd || 0; a.prc += r.pPrc || 0; });
+    var cm = {}; Object.keys(cmAgg).forEach(function (k) { var a = cmAgg[k]; if (a.dlv >= BR.cmMin && a.rev > 0) cm[k] = { dlv: a.dlv, cmPc: a.cm3 / a.dlv, ordPc: a.ord / a.dlv, prcRatio: a.prc / a.rev }; });
     var PR = { 2: pricingR({ pb: pb, R: R }, 2), 3: pricingR({ pb: pb, R: R }, 3) }; // the R you price with → Expected PPM / Uplift / the filter
 
     // which KINDS of product go together = sub-category pairs (category pairs when a sub-category is missing) that already
@@ -240,7 +265,7 @@
     }
 
     var cats = {}; out.forEach(function (c) { c.cats.forEach(function (x) { cats[x] = 1; }); });
-    return (BR.data = { cands: out, R: R, Rn: Rn, LR: LR, pb: pb, P: PR, cats: Object.keys(cats).sort(), capped: capped, firstTs: firstTs, lastTs: lastTs, histMonths: h.months, singles: S.size,
+    return (BR.data = { cands: out, R: R, Rn: Rn, LR: LR, pb: pb, P: PR, cm: cm, cmLoaded: cmLoaded, cmExp: cmExp, cats: Object.keys(cats).sort(), capped: capped, firstTs: firstTs, lastTs: lastTs, histMonths: h.months, singles: S.size,
       counts: { revive: out.filter(function (c) { return c.type === "revive"; }).length, variant: out.filter(function (c) { return c.type === "variant"; }).length, fresh: out.filter(function (c) { return c.type === "fresh"; }).length, swap: out.filter(function (c) { return c.type === "swap"; }).length } });
   }
 
@@ -292,6 +317,11 @@
       '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto">Show top <input id="brTop" type="number" min="1" value="' + BR.top + '" class="date-filter-input" style="width:80px;min-width:0;flex:0 0 80px"></label>' +
       '<input id="brQ" type="search" class="date-filter-input" style="flex:0 1 240px;min-width:160px" placeholder="Search SKU ID or name" value="' + esc(BR.q) + '">' +
       '<button type="button" class="tw-exp" id="brCsv">Export CSV</button></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:0 18px 12px"><b>CM3 check</b>' +
+      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Merchant profit (avg) <input id="brMp" type="number" min="0" value="' + BR.mp + '" class="date-filter-input" style="width:80px;min-width:0;flex:0 0 80px"></label>' +
+      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Min delivered (main product) <input id="brCmMin" type="number" min="1" value="' + BR.cmMin + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"></label>' +
+      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">"Same" within ± EGP <input id="brCmSame" type="number" min="0" value="' + BR.cmSame + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"></label>' +
+      '<small class="text-dim">' + (d.cmLoaded ? 'Product Only: ' + int(Object.keys(d.cm).length) + ' singles with enough deliveries as the main product of their own order · ' + (d.cmExp ? 'DR-based (the query\'s EXPECTED columns: orders still on the road counted at the expected delivery rate)' : 'actual deliveries (the query has no EXPECTED columns)') + '.' : 'Product Only has no CM3 columns yet (IS_PRIMARY, GROSS_DELIVERED_REVENUE, shipping, VAT …) — the CM3 columns show "—".') + ' VAT / marketing are a % of the price → Base Price + merchant profit.</small></div>' +
       '<div class="table-responsive"><table class="data-table" id="brTable"><thead><tr><th>#</th><th title="Revive = proven bundle with a replaced single (no stock) · Variant = proven bundle with a similar single · Swap = sold-together pair with a replaced single · New = sold-together pair.">Kind</th><th>Bundle (single SKUs)</th><th>Why</th><th>Category</th>' +
       '<th class="num">Pcs</th><th class="num" title="Sum of the singles\' COGS.">COGS</th>' +
       '<th class="num" title="Lowest PPM per order worth pricing at: the best single alone at today\'s pricing (Price − Profit − COGS), or the original bundle for Revive / Variant. Below it, selling the single alone earns more.">Floor PPM</th>' +
@@ -301,7 +331,10 @@
       '<th class="num" title="Suggested PPM ÷ pieces.">Suggested PPM / piece</th>' +
       '<th title="How to price each SKU inside the bundle: PPM in bundle = its PPM alone (today\'s pricing) × Pricing R; Base price = its COGS + PPM in bundle (without the merchant profit). The base prices add up to Base Price.">Base price per SKU</th>' +
       '<th class="num" title="What you earn per order at the price you set: the singles\' actual delivered PPM per piece × Pricing R. Lower than Suggested PPM when the singles earn less in practice than their list price.">Expected PPM / order</th>' +
-      '<th class="num" title="The best actual PPM per delivered order of any of these singles sold alone (and of the original bundle for Revive / Variant).">Today (actual)</th><th class="num" title="Expected PPM / order − Today (actual).">Uplift / order</th><th class="num" title="The lowest stock among the singles.">Min stock</th></tr></thead><tbody id="brBody"></tbody></table></div>' +
+      '<th class="num" title="The best actual PPM per delivered order of any of these singles sold alone (and of the original bundle for Revive / Variant).">Today (actual)</th><th class="num" title="Expected PPM / order − Today (actual).">Uplift / order</th><th class="num" title="The lowest stock among the singles.">Min stock</th>' +
+      '<th class="num" title="Expected PPM / order + costs paid once per order (average of the singles: shipping fee, shipping/packaging/warehouse, returns, CS) + costs that follow the price (VAT, marketing, provision: the singles\' % of their price × (Base Price + merchant profit ' + int(BR.mp) + ')). Source: Product Only, main-product rows.">Expected CM3 / order</th>' +
+      '<th class="num" title="Sum of the singles\' CM3 per piece, each sold as the main product of its own order (Product Only).">Singles CM3</th>' +
+      '<th class="num" title="Expected CM3 / order − Singles CM3.">Δ CM3 / order</th><th title="More / Same (within ± ' + int(BR.cmSame) + ' EGP) / Less.">CM3 verdict</th></tr></thead><tbody id="brBody"></tbody></table></div>' +
       '<div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 18px"><button type="button" class="btn" id="brPrev">Prev</button><span class="text-dim" id="brPageInfo"></span><button type="button" class="btn" id="brNext">Next</button></div></div>';
     host.innerHTML = html;
     drawBody(host, rows);
@@ -350,17 +383,19 @@
       }).join("") + '</td><td><small>' + esc(r.why) + '</small></td><td>' + esc(r.cats.join(" + ")) + '</td><td class="num">' + r.n + '</td><td class="num">' + money(r.cogs) + '</td>' +
         '<td class="num">' + mv(r.floor) + '</td><td class="num' + (r.suggested != null && r.floor != null && r.suggested < r.floor ? ' text-orange' : '') + '"><b>' + mv(r.suggested) + '</b></td><td class="num">' + mv(r.ceiling) + '</td><td class="num"><b>' + mv(r.priceBefore) + '</b></td>' +
         '<td class="num">' + mv(r.suggested != null ? r.suggested / r.n : null) + '</td><td>' + partsCell(r) + '</td>' +
-        '<td class="num">' + money(r.ppm) + '</td><td class="num">' + money(r.today) + '</td><td class="num text-green">+' + int(r.uplift) + '</td><td class="num">' + int(r.minStock) + '</td></tr>';
-    }).join("") : '<tr><td colspan="17" class="text-dim" style="text-align:center;padding:18px">No recommendation matches these filters.</td></tr>';
+        '<td class="num">' + money(r.ppm) + '</td><td class="num">' + money(r.today) + '</td><td class="num text-green">+' + int(r.uplift) + '</td><td class="num">' + int(r.minStock) + '</td>' +
+        (r.cm3 == null ? '<td class="num text-dim" colspan="4" title="' + esc(r.cm3Why) + '"><small>— ' + esc(r.cm3Why) + '</small></td>' :
+          '<td class="num"><b>' + money(r.cm3) + '</b></td><td class="num">' + money(r.cm3S) + '</td><td class="num ' + (r.cm3D >= 0 ? 'text-green' : 'text-orange') + '">' + (r.cm3D >= 0 ? '+' : '−') + int(Math.abs(r.cm3D)) + '</td><td><b class="' + (r.cm3V === "More" ? 'text-green' : (r.cm3V === "Less" ? 'text-orange' : '')) + '">' + r.cm3V + '</b></td>') + '</tr>';
+    }).join("") : '<tr><td colspan="21" class="text-dim" style="text-align:center;padding:18px">No recommendation matches these filters.</td></tr>';
     var pi = host.querySelector("#brPageInfo"); if (pi) pi.textContent = "Page " + (BR.page + 1) + " of " + pages + " · " + int(rows.length) + " shown";
   }
 
   function csv() {
-    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Pricing R", "Suggested PPM", "Ceiling PPM", "Base Price", "Suggested PPM per piece", "Expected PPM per order", "Today (actual)", "Uplift per order", "Min stock"];
+    var rows = view(BR.data), head = ["Kind", "Bundle SKUs", "Bundle names", "Replaced single", "Why", "Category", "Pieces", "COGS", "Floor PPM", "Pricing R", "Suggested PPM", "Ceiling PPM", "Base Price", "Suggested PPM per piece", "Expected PPM per order", "Today (actual)", "Uplift per order", "Min stock", "Expected CM3 per order", "Singles CM3", "Delta CM3 per order", "CM3 verdict", "CM3 note"];
     [1, 2, 3].forEach(function (k) { head.push("SKU " + k, "SKU " + k + " name", "SKU " + k + " PPM alone", "SKU " + k + " PPM in bundle", "SKU " + k + " COGS", "SKU " + k + " Base price"); });
     var rd = function (v) { return v == null || !isFinite(v) ? "" : Math.round(v); };
     var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    var lines = [head.join(",")].concat(rows.map(function (r) { return [TYPE_LABEL[r.type], r.us.map(function (u) { return u.id; }).join(" + "), r.us.map(function (u) { return u.name; }).join(" + "), (r.replaced || []).map(function (x) { return x.from + " → " + x.to; }).join("; "), r.why, r.cats.join(" + "), r.n, Math.round(r.cogs), rd(r.floor), r.pr == null ? "" : (+r.pr).toFixed(3), rd(r.suggested), rd(r.ceiling), rd(r.priceBefore), rd(r.suggested != null ? r.suggested / r.n : null), Math.round(r.ppm), Math.round(r.today), Math.round(r.uplift), r.minStock].concat([0, 1, 2].reduce(function (a, k) { var x = r.parts && r.parts[k]; return a.concat(x ? [x.id, x.name, rd(x.alone), rd(x.inBundle), rd(x.cogs), rd(x.base)] : ["", "", "", "", "", ""]); }, [])).map(q).join(","); }));
+    var lines = [head.join(",")].concat(rows.map(function (r) { return [TYPE_LABEL[r.type], r.us.map(function (u) { return u.id; }).join(" + "), r.us.map(function (u) { return u.name; }).join(" + "), (r.replaced || []).map(function (x) { return x.from + " → " + x.to; }).join("; "), r.why, r.cats.join(" + "), r.n, Math.round(r.cogs), rd(r.floor), r.pr == null ? "" : (+r.pr).toFixed(3), rd(r.suggested), rd(r.ceiling), rd(r.priceBefore), rd(r.suggested != null ? r.suggested / r.n : null), Math.round(r.ppm), Math.round(r.today), Math.round(r.uplift), r.minStock, rd(r.cm3), rd(r.cm3S), rd(r.cm3D), r.cm3V, r.cm3Why].concat([0, 1, 2].reduce(function (a, k) { var x = r.parts && r.parts[k]; return a.concat(x ? [x.id, x.name, rd(x.alone), rd(x.inBundle), rd(x.cogs), rd(x.base)] : ["", "", "", "", "", ""]); }, [])).map(q).join(","); }));
     var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "bundle-recommendations.csv"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
@@ -376,6 +411,9 @@
     var setR = function (n) { return function (e) { var v = parseFloat(e.target.value); BR.rOv[n] = v > 0 ? v : null; saveR(); re(); }; };
     on("brR2", "change", setR(2)); on("brR3", "change", setR(3));
     on("brMin", "change", function (e) { BR.minBand = Math.max(1, Math.round(+e.target.value || 5)); saveR(); re(); });
+    on("brMp", "change", function (e) { var v = parseFloat(e.target.value); BR.mp = v >= 0 ? v : 200; saveR(); re(); });
+    on("brCmMin", "change", function (e) { BR.cmMin = Math.max(1, Math.round(+e.target.value || 5)); saveR(); re(); });
+    on("brCmSame", "change", function (e) { var v = parseFloat(e.target.value); BR.cmSame = v >= 0 ? v : 0; saveR(); re(); });
     on("brRAuto", "click", function () { BR.rOv = { 2: null, 3: null }; saveR(); re(); });
     on("brPrev", "click", function () { if (BR.page > 0) { BR.page--; drawBody(host); } });
     on("brNext", "click", function () { BR.page++; drawBody(host); });
