@@ -35,8 +35,11 @@
        warehouse, returns, CS) = the AVERAGE of its singles per piece + the costs that follow the price (VAT, marketing, provision)
        = the singles' average share of their selling price × (Base Price + merchant profit, 200 by default).
      • Singles CM3 = the sum of the singles' CM3 per piece (each one as its own order). Δ = Expected − Singles → More / Same / Less.
-     • A single needs ≥ "min delivered" (5) primary pieces in Product Only, else "—".
-   • DR-based: when the query has its *_EXPECTED columns (orders still on the road at the expected delivery rate) they are used.
+     • A single needs ≥ "min delivered" ÷ DR confirmed primary pieces in Product Only, else "—".
+   • DR%: you pick it (50% by default), the same for the bundle and its singles. Delivered = confirmed × DR. Per SKU (actual
+     columns): shipping fee / shipping, VAT, marketing per delivered piece; packaging, warehouse, provision, CS per confirmed
+     piece; returns per confirmed piece not delivered. CM3 / delivered pc at DR r = PPM + fs + VAT/mkt + (cnf + (1 − r) × ret) ÷ r
+     (= the query's CM3 exactly at the SKU's own actual DR). "Min delivered" 5 at DR 50% = 10 confirmed.
    Order: Revive, then Variant (by the original bundle's pieces sold), then Swap + New (by merchant-months); a single appears in
    at most 3 Swap / New suggestions so one popular SKU does not fill the list. */
 (function () {
@@ -50,9 +53,9 @@
   function median(a) { a = a.filter(function (x) { return x != null && isFinite(x); }).sort(function (x, y) { return x - y; }); if (!a.length) return null; var m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
   function monthKey(ts) { var d = new Date(ts); return d.getFullYear() * 100 + d.getMonth() + 1; }
 
-  var BR = { sig: "", data: null, type: "all", top: 200, cat: "all", q: "", page: 0, poll: null, rOv: { 2: null, 3: null }, minBand: 5, mp: 200, cmMin: 5, cmSame: 0 };
-  try { var sv = JSON.parse(localStorage.getItem("brPricingR") || "null"); if (sv) { BR.rOv = { 2: sv[2] > 0 ? +sv[2] : null, 3: sv[3] > 0 ? +sv[3] : null }; if (sv.min > 0) BR.minBand = Math.round(sv.min); if (sv.mp >= 0 && sv.mp !== null && sv.mp !== undefined) BR.mp = +sv.mp; if (sv.cmMin > 0) BR.cmMin = Math.round(sv.cmMin); if (sv.cmSame >= 0 && sv.cmSame !== null && sv.cmSame !== undefined) BR.cmSame = +sv.cmSame; } } catch (e) {}
-  function saveR() { try { localStorage.setItem("brPricingR", JSON.stringify({ 2: BR.rOv[2], 3: BR.rOv[3], min: BR.minBand, mp: BR.mp, cmMin: BR.cmMin, cmSame: BR.cmSame })); } catch (e) {} }
+  var BR = { sig: "", data: null, type: "all", top: 200, cat: "all", q: "", page: 0, poll: null, rOv: { 2: null, 3: null }, minBand: 5, mp: 200, cmMin: 5, cmSame: 0, dr: 50 };
+  try { var sv = JSON.parse(localStorage.getItem("brPricingR") || "null"); if (sv) { BR.rOv = { 2: sv[2] > 0 ? +sv[2] : null, 3: sv[3] > 0 ? +sv[3] : null }; if (sv.min > 0) BR.minBand = Math.round(sv.min); if (sv.mp >= 0 && sv.mp !== null && sv.mp !== undefined) BR.mp = +sv.mp; if (sv.cmMin > 0) BR.cmMin = Math.round(sv.cmMin); if (sv.cmSame >= 0 && sv.cmSame !== null && sv.cmSame !== undefined) BR.cmSame = +sv.cmSame; if (sv.dr > 0 && sv.dr <= 100) BR.dr = +sv.dr; } } catch (e) {}
+  function saveR() { try { localStorage.setItem("brPricingR", JSON.stringify({ 2: BR.rOv[2], 3: BR.rOv[3], min: BR.minBand, mp: BR.mp, cmMin: BR.cmMin, cmSame: BR.cmSame, dr: BR.dr })); } catch (e) {} }
   var BANDS = [["<0.50", -Infinity, 0.5], ["0.50-0.60", 0.5, 0.6], ["0.60-0.70", 0.6, 0.7], ["0.70-0.80", 0.7, 0.8], ["0.80-0.90", 0.8, 0.9], ["0.90-1.00", 0.9, 1.0], ["≥1.00", 1.0, Infinity]];
   // band table + best band for one piece count (min = bundles a band needs to win)
   function bandsOf(list, min) {
@@ -63,23 +66,28 @@
     var best = null; rows.forEach(function (r) { if (r.ok && r.score != null && (!best || r.score > best.score)) best = r; });
     return { rows: rows, best: best, auto: best ? best.r : median(list.map(function (x) { return x.lr; })), count: list.length };
   }
+  // CM3 per delivered piece of a single at delivery rate r (its own actual costs per delivered / confirmed / not-delivered piece)
+  function cmAt(x, r) { return x.ppmPc + x.fsPc + x.ratio * x.revPc + (x.cnfPc + (1 - r) * x.undPc) / r; }
   function pricingR(d, n) { return BR.rOv[n] > 0 ? BR.rOv[n] : (d.pb[n].auto != null ? d.pb[n].auto : d.R[n]); }
   // Suggested / Base prices on the Pricing R (Expected PPM / Uplift use the same R — set in build)
   function price(d, c) {
     var P = pricingR(d, c.n);
     c.pr = P; c.suggested = c.ceiling != null ? c.ceiling * P : null; c.priceBefore = c.suggested != null ? c.cogs + c.suggested : null;
     c.parts = c.allList ? c.us.map(function (u) { var inB = u.listPpm * P; return { id: u.id, name: u.name, alone: u.listPpm, inBundle: inB, cogs: u.cogs, base: u.cogs + inB }; }) : null;
-    // CM3 check — needs every single in the Product Only CM3 stats and a Base Price
-    var cm = d.cm || {}, st0 = c.us.map(function (u) { return cm[u.id] || null; });
-    c.cm3 = null; c.cm3S = null; c.cm3D = null; c.cm3V = ""; c.cm3Why = !d.cmLoaded ? "no CM3 data (Product Only)" : "";
+    // CM3 check at the DR% you pick (same DR for the bundle and its singles) — needs every single in the Product Only stats
+    var cm = d.cm || {}, r = Math.min(1, Math.max(0.01, (+BR.dr || 50) / 100)), needCnf = BR.cmMin / r;
+    var st0 = c.us.map(function (u) { var x = cm[u.id]; return x && x.cnf >= needCnf ? x : null; });
+    c.cm3 = null; c.cm3S = null; c.cm3D = null; c.cm3V = ""; c.cm3Why = !d.cmLoaded ? d.cmNote : "";
     if (d.cmLoaded) {
       var miss = c.us.filter(function (u, i) { return !st0[i]; }).map(function (u) { return u.id; });
-      if (miss.length) c.cm3Why = "fewer than " + BR.cmMin + " delivered as main product: " + miss.join(", ");
+      if (miss.length) c.cm3Why = "fewer than " + int(Math.ceil(needCnf)) + " confirmed as main product (= " + BR.cmMin + " delivered at DR " + BR.dr + "%): " + miss.join(", ");
       else if (c.priceBefore == null) c.cm3Why = "no Base Price";
       else {
-        var ord = 0, rat = 0, sum = 0; st0.forEach(function (x) { ord += x.ordPc; rat += x.prcRatio; sum += x.cmPc; });
-        ord /= st0.length; rat /= st0.length;
-        c.cm3 = c.ppm + ord + rat * (c.priceBefore + (+BR.mp || 0)); c.cm3S = sum; c.cm3D = c.cm3 - sum;
+        var n = st0.length, fs = 0, rat = 0, cnf = 0, und = 0, sum = 0;
+        st0.forEach(function (x) { fs += x.fsPc; rat += x.ratio; cnf += x.cnfPc; und += x.undPc; sum += cmAt(x, r); });
+        // one order: shipping fee / shipping, packaging, CS, returns = the singles' average; VAT + marketing = their % × the bundle price
+        c.cm3 = c.ppm + fs / n + (rat / n) * (c.priceBefore + (+BR.mp || 0)) + (cnf / n + (1 - r) * und / n) / r;
+        c.cm3S = sum; c.cm3D = c.cm3 - sum;
         c.cm3V = c.cm3D > BR.cmSame ? "More" : (c.cm3D < -BR.cmSame ? "Less" : "Same");
       }
     }
@@ -96,10 +104,11 @@
     months.forEach(function (m) { if (H.rows.has(m)) { loaded++; rows = rows.concat(H.rows.get(m)); } else if (typeof histLoadMonth === "function") histLoadMonth(m); });
     return { ready: H.inited && loaded === months.length && !H.loading.size, rows: rows, months: months.length, loaded: loaded };
   }
-  function sigNow(h) { var s = st(); try { return [(s.allParsedRows || []).length, h.rows.length, (s.debundleMap || []).length, Object.keys(s.productsMap || {}).length, s.cogsMap && s.cogsMap.size, Object.keys(s.inventoryMap || {}).length, BR.rOv[2], BR.rOv[3], BR.minBand, BR.cmMin, (s.productOnlyRows || []).length].join("|"); } catch (e) { return ""; } }
+  function sigNow(h) { var s = st(); try { return [(s.allParsedRows || []).length, h.rows.length, (s.debundleMap || []).length, Object.keys(s.productsMap || {}).length, s.cogsMap && s.cogsMap.size, Object.keys(s.inventoryMap || {}).length, BR.rOv[2], BR.rOv[3], BR.minBand, (s.productOnlyRows || []).length].join("|"); } catch (e) { return ""; } }
 
   function build(h) {
-    var sg = sigNow(h); if (BR.data && sg === BR.sig) return BR.data; BR.sig = sg;
+    var sg = sigNow(h), poNow = st().productOnlyRows;
+    if (BR.data && sg === BR.sig && BR.poRef === poNow) return BR.data; BR.sig = sg; BR.poRef = poNow;
     var s = st(), pm = s.productsMap || {}, cogsMap = s.cogsMap || new Map(), inv = s.inventoryMap || {};
     var main = (typeof allSkuRows === "function" ? allSkuRows() : (s.allParsedRows || []));   // bundles + singles -> Main (Matches)
     var deb = s.debundleMap || [];
@@ -154,8 +163,10 @@
     var pb = { 2: bandsOf(LR[2], BR.minBand), 3: bandsOf(LR[3], BR.minBand) };
     // CM3 per piece of each single as the main product of its own order (Product Only, IS_PRIMARY = true)
     var cmAgg = {}, cmLoaded = false;
-    var cmExp = false; (s.productOnlyRows || []).forEach(function (r) { if (r.pDlv == null || !r.sku) return; cmLoaded = true; if (r.pExp) cmExp = true; var a = cmAgg[r.sku] || (cmAgg[r.sku] = { dlv: 0, rev: 0, cm3: 0, ord: 0, prc: 0 }); a.dlv += r.pDlv || 0; a.rev += r.pRev || 0; a.cm3 += r.pCm3 || 0; a.ord += r.pOrd || 0; a.prc += r.pPrc || 0; });
-    var cm = {}; Object.keys(cmAgg).forEach(function (k) { var a = cmAgg[k]; if (a.dlv >= BR.cmMin && a.rev > 0) cm[k] = { dlv: a.dlv, cmPc: a.cm3 / a.dlv, ordPc: a.ord / a.dlv, prcRatio: a.prc / a.rev }; });
+    (s.productOnlyRows || []).forEach(function (r) { if (r.pCnf == null || !r.sku) return; cmLoaded = true; var a = cmAgg[r.sku] || (cmAgg[r.sku] = { dlv: 0, cnf: 0, rev: 0, ppm: 0, fs: 0, prc: 0, cnfC: 0, ret: 0 });
+      a.dlv += r.pDlv || 0; a.cnf += r.pCnf || 0; a.rev += r.pRev || 0; a.ppm += r.pPpm || 0; a.fs += r.pFs || 0; a.prc += r.pPrc || 0; a.cnfC += r.pCnfC || 0; a.ret += r.pRet || 0; });
+    var cm = {}; Object.keys(cmAgg).forEach(function (k) { var a = cmAgg[k]; if (!(a.dlv > 0) || !(a.cnf > 0) || !(a.rev > 0)) return;
+      cm[k] = { dlv: a.dlv, cnf: a.cnf, actDr: a.dlv / a.cnf, ppmPc: a.ppm / a.dlv, fsPc: a.fs / a.dlv, revPc: a.rev / a.dlv, ratio: a.prc / a.rev, cnfPc: a.cnfC / a.cnf, undPc: a.cnf > a.dlv ? a.ret / (a.cnf - a.dlv) : 0 }; });
     var PR = { 2: pricingR({ pb: pb, R: R }, 2), 3: pricingR({ pb: pb, R: R }, 3) }; // the R you price with → Expected PPM / Uplift / the filter
 
     // which KINDS of product go together = sub-category pairs (category pairs when a sub-category is missing) that already
@@ -265,7 +276,12 @@
     }
 
     var cats = {}; out.forEach(function (c) { c.cats.forEach(function (x) { cats[x] = 1; }); });
-    return (BR.data = { cands: out, R: R, Rn: Rn, LR: LR, pb: pb, P: PR, cm: cm, cmLoaded: cmLoaded, cmExp: cmExp, cats: Object.keys(cats).sort(), capped: capped, firstTs: firstTs, lastTs: lastTs, histMonths: h.months, singles: S.size,
+    return (BR.data = { cands: out, R: R, Rn: Rn, LR: LR, pb: pb, P: PR, cm: cm, cmLoaded: cmLoaded, cmNote: (function () {
+      var po = s.productOnlyRows || [], inf = s.productOnlyCmInfo;
+      if (!po.length) return "Product Only is not loaded yet";
+      if (inf && inf.missing && inf.missing.length) return "Product Only has no " + inf.missing.join(", ") + " column(s)";
+      return "Product Only rows are from an older load — press Refresh";
+    })(), cats: Object.keys(cats).sort(), capped: capped, firstTs: firstTs, lastTs: lastTs, histMonths: h.months, singles: S.size,
       counts: { revive: out.filter(function (c) { return c.type === "revive"; }).length, variant: out.filter(function (c) { return c.type === "variant"; }).length, fresh: out.filter(function (c) { return c.type === "fresh"; }).length, swap: out.filter(function (c) { return c.type === "swap"; }).length } });
   }
 
@@ -319,9 +335,10 @@
       '<button type="button" class="tw-exp" id="brCsv">Export CSV</button></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:0 18px 12px"><b>CM3 check</b>' +
       '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Merchant profit (avg) <input id="brMp" type="number" min="0" value="' + BR.mp + '" class="date-filter-input" style="width:80px;min-width:0;flex:0 0 80px"></label>' +
-      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Min delivered (main product) <input id="brCmMin" type="number" min="1" value="' + BR.cmMin + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"></label>' +
+      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">DR% <input id="brDr" type="number" min="1" max="100" step="1" value="' + BR.dr + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"></label>' +
+      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Min delivered <input id="brCmMin" type="number" min="1" value="' + BR.cmMin + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"> <small>= ' + int(Math.ceil(BR.cmMin / ((+BR.dr || 50) / 100))) + ' confirmed at ' + BR.dr + '%</small></label>' +
       '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">"Same" within ± EGP <input id="brCmSame" type="number" min="0" value="' + BR.cmSame + '" class="date-filter-input" style="width:70px;min-width:0;flex:0 0 70px"></label>' +
-      '<small class="text-dim">' + (d.cmLoaded ? 'Product Only: ' + int(Object.keys(d.cm).length) + ' singles with enough deliveries as the main product of their own order · ' + (d.cmExp ? 'DR-based (the query\'s EXPECTED columns: orders still on the road counted at the expected delivery rate)' : 'actual deliveries (the query has no EXPECTED columns)') + '.' : 'Product Only has no CM3 columns yet (IS_PRIMARY, GROSS_DELIVERED_REVENUE, shipping, VAT …) — the CM3 columns show "—".') + ' VAT / marketing are a % of the price → Base Price + merchant profit.</small></div>' +
+      '<small class="text-dim">' + (d.cmLoaded ? 'CM3 at DR ' + BR.dr + '% for the bundle and its singles (Product Only, main-product rows, actual costs): delivered = confirmed × DR; shipping fee / shipping, VAT, marketing per delivered piece · packaging, warehouse, provision, CS per confirmed piece · returns per confirmed piece not delivered. ' + int(Object.keys(d.cm).filter(function (k) { return d.cm[k].cnf >= BR.cmMin / ((+BR.dr || 50) / 100); }).length) + ' singles have enough confirmed.' : 'CM3 check is off: ' + esc(d.cmNote) + '.') + ' VAT / marketing are a % of the price → Base Price + merchant profit.</small></div>' +
       '<div class="table-responsive"><table class="data-table" id="brTable"><thead><tr><th>#</th><th title="Revive = proven bundle with a replaced single (no stock) · Variant = proven bundle with a similar single · Swap = sold-together pair with a replaced single · New = sold-together pair.">Kind</th><th>Bundle (single SKUs)</th><th>Why</th><th>Category</th>' +
       '<th class="num">Pcs</th><th class="num" title="Sum of the singles\' COGS.">COGS</th>' +
       '<th class="num" title="Lowest PPM per order worth pricing at: the best single alone at today\'s pricing (Price − Profit − COGS), or the original bundle for Revive / Variant. Below it, selling the single alone earns more.">Floor PPM</th>' +
@@ -332,8 +349,8 @@
       '<th title="How to price each SKU inside the bundle: PPM in bundle = its PPM alone (today\'s pricing) × Pricing R; Base price = its COGS + PPM in bundle (without the merchant profit). The base prices add up to Base Price.">Base price per SKU</th>' +
       '<th class="num" title="What you earn per order at the price you set: the singles\' actual delivered PPM per piece × Pricing R. Lower than Suggested PPM when the singles earn less in practice than their list price.">Expected PPM / order</th>' +
       '<th class="num" title="The best actual PPM per delivered order of any of these singles sold alone (and of the original bundle for Revive / Variant).">Today (actual)</th><th class="num" title="Expected PPM / order − Today (actual).">Uplift / order</th><th class="num" title="The lowest stock among the singles.">Min stock</th>' +
-      '<th class="num" title="Expected PPM / order + costs paid once per order (average of the singles: shipping fee, shipping/packaging/warehouse, returns, CS) + costs that follow the price (VAT, marketing, provision: the singles\' % of their price × (Base Price + merchant profit ' + int(BR.mp) + ')). Source: Product Only, main-product rows.">Expected CM3 / order</th>' +
-      '<th class="num" title="Sum of the singles\' CM3 per piece, each sold as the main product of its own order (Product Only).">Singles CM3</th>' +
+      '<th class="num" title="At DR ' + BR.dr + '%: Expected PPM / order + one order\'s shipping fee / shipping (average of the singles) + VAT and marketing (the singles\' % of their price × (Base Price + merchant profit ' + int(BR.mp) + ')) + (packaging, warehouse, provision, CS per confirmed + returns × (1 − DR)) ÷ DR (average of the singles). Source: Product Only, main-product rows.">Expected CM3 / order</th>' +
+      '<th class="num" title="Sum of the singles\' CM3 per delivered piece at DR ' + BR.dr + '%, each sold as the main product of its own order (their own actual costs, Product Only).">Singles CM3</th>' +
       '<th class="num" title="Expected CM3 / order − Singles CM3.">Δ CM3 / order</th><th title="More / Same (within ± ' + int(BR.cmSame) + ' EGP) / Less.">CM3 verdict</th></tr></thead><tbody id="brBody"></tbody></table></div>' +
       '<div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 18px"><button type="button" class="btn" id="brPrev">Prev</button><span class="text-dim" id="brPageInfo"></span><button type="button" class="btn" id="brNext">Next</button></div></div>';
     host.innerHTML = html;
@@ -412,6 +429,7 @@
     on("brR2", "change", setR(2)); on("brR3", "change", setR(3));
     on("brMin", "change", function (e) { BR.minBand = Math.max(1, Math.round(+e.target.value || 5)); saveR(); re(); });
     on("brMp", "change", function (e) { var v = parseFloat(e.target.value); BR.mp = v >= 0 ? v : 200; saveR(); re(); });
+    on("brDr", "change", function (e) { var v = parseFloat(e.target.value); BR.dr = v > 0 && v <= 100 ? v : 50; saveR(); re(); });
     on("brCmMin", "change", function (e) { BR.cmMin = Math.max(1, Math.round(+e.target.value || 5)); saveR(); re(); });
     on("brCmSame", "change", function (e) { var v = parseFloat(e.target.value); BR.cmSame = v >= 0 ? v : 0; saveR(); re(); });
     on("brRAuto", "click", function () { BR.rOv = { 2: null, 3: null }; saveR(); re(); });

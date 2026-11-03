@@ -4422,19 +4422,21 @@ const PO_COLS = {
   ppm: "TOTAL_PPM_DELIVERED", cm3: "TOTAL_CM3_DELIVERED"
 };
 // CM3 parts, IS_PRIMARY = true rows only (the product is the main product of its own order) — used by Bundle Recommendations
-// (CM3 check). Optional: when a column is missing the page just shows "—".
-//   ord = paid once per order: shipping fee revenue, shipping / packaging / warehouse, returns, CS
-//   prc = follows the selling price: VAT, marketing, inventory provision  (kept with the revenue so it can be a % of the price)
+// (CM3 check), which re-computes the CM3 at the delivery rate the user picks. ACTUAL columns only. Each line is kept with
+// what it follows in the data (checked on October 2026: tightest per-unit spread):
+//   fs  = per DELIVERED piece: shipping fee revenue (+ non-delivered addback) and shipping cost
+//   prc = % of the delivered selling price: VAT, marketing
+//   cnf = per CONFIRMED piece: packaging, warehouse, storage, inbound packaging, compensation, inventory provision, CS
+//   ret = per confirmed piece NOT delivered: returns, refunds
+// At the actual DR these add back exactly to TOTAL_CM3_DELIVERED. Optional: when a column is missing the page shows "—".
 const PO_CM3_PARTS = {
   rev: ["GROSS_DELIVERED_REVENUE"], ppm: ["TOTAL_PPM_DELIVERED"], cm3: ["TOTAL_CM3_DELIVERED"],
-  ord: ["OPS_AND_SHIPPING_REVENUE_DELIVERED", "NONDELIVERED_REVENUE_ADDBACK_DELIVERED", "SHIPPING_COST_DELIVERED", "PACKAGING_COST_DELIVERED", "WAREHOUSE_SALARIES_COST_DELIVERED",
-    "STORAGE_COST_DELIVERED", "INBOUND_PACKAGING_COST_DELIVERED", "COMPENSATION_COST_DELIVERED", "RETURN_COST_DELIVERED", "REFUND_COST_DELIVERED", "TOTAL_CS_COST_DELIVERED", "TELESALES_PROFIT_DELIVERED"],
-  prc: ["VAT_COST_DELIVERED", "TOTAL_MARKETING_COST_DELIVERED", "INVENTORY_PROVISION_COST_DELIVERED"]
+  fs: ["OPS_AND_SHIPPING_REVENUE_DELIVERED", "NONDELIVERED_REVENUE_ADDBACK_DELIVERED", "SHIPPING_COST_DELIVERED"],
+  prc: ["VAT_COST_DELIVERED", "TOTAL_MARKETING_COST_DELIVERED"],
+  cnf: ["PACKAGING_COST_DELIVERED", "WAREHOUSE_SALARIES_COST_DELIVERED", "STORAGE_COST_DELIVERED", "INBOUND_PACKAGING_COST_DELIVERED", "COMPENSATION_COST_DELIVERED",
+    "INVENTORY_PROVISION_COST_DELIVERED", "TOTAL_CS_COST_DELIVERED", "TELESALES_PROFIT_DELIVERED"],
+  ret: ["RETURN_COST_DELIVERED", "REFUND_COST_DELIVERED"]
 };
-// DR-based: the query's *_EXPECTED columns project the confirmed orders still on the road with the expected delivery rate,
-// so the open days (and the current month) are not read as if those orders were never delivered. Used whenever the query has
-// all of them; the revenue is TOTAL_SELLING_DELIVERED_EXPECTED and the pieces DLV_PIECES_EXPECTED.
-const PO_CM3_EXP = { dlv: "DLV_PIECES_EXPECTED", rev: ["TOTAL_SELLING_DELIVERED_EXPECTED"] };
 function buildCategoryBySku(mainRows, productsInfoRows) {
   const m = new Map();
   (mainRows || []).forEach(r => { if (r.sku && r.category && r.category !== "Uncategorized" && !m.has(r.sku)) m.set(r.sku, r.category); });
@@ -4455,11 +4457,10 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
   const missing = ["DATE_GROUP", "PRODUCT_ID"].concat(Object.keys(PO_COLS).map(k => PO_COLS[k])).filter(k => ix[k] === undefined);
   if (missing.length) throw new Error("Product Only is missing columns: " + missing.join(", "));
   const at = (c, k) => c[ix[k]];
-  const hasCm = ix["IS_PRIMARY"] !== undefined && ["GROSS_DELIVERED_REVENUE", "TOTAL_CM3_DELIVERED", "OPS_AND_SHIPPING_REVENUE_DELIVERED", "SHIPPING_COST_DELIVERED", "VAT_COST_DELIVERED"].every(k => ix[k] !== undefined);
-  const expCols = [PO_CM3_EXP.dlv].concat(PO_CM3_EXP.rev, [].concat(PO_CM3_PARTS.ppm, PO_CM3_PARTS.cm3, PO_CM3_PARTS.ord, PO_CM3_PARTS.prc).map(k => k + "_EXPECTED"));
-  const useExp = hasCm && expCols.every(k => ix[k] !== undefined);
-  const cmCol = (k) => (useExp ? k + "_EXPECTED" : k);
-  const cmSum = (c, list) => list.reduce((a, k) => a + (ix[cmCol(k)] === undefined ? 0 : cellNumber(at(c, cmCol(k)))), 0);
+  const cmNeed = ["IS_PRIMARY", "CNF_PIECES_ACTUAL", "GROSS_DELIVERED_REVENUE", "TOTAL_CM3_DELIVERED", "OPS_AND_SHIPPING_REVENUE_DELIVERED", "SHIPPING_COST_DELIVERED", "VAT_COST_DELIVERED", "PACKAGING_COST_DELIVERED", "RETURN_COST_DELIVERED", "TOTAL_CS_COST_DELIVERED"];
+  const hasCm = cmNeed.every(k => ix[k] !== undefined);
+  try { state.productOnlyCmInfo = { hasCm, missing: cmNeed.filter(k => ix[k] === undefined) }; } catch (e) {}
+  const cmSum = (c, list) => list.reduce((a, k) => a + (ix[k] === undefined ? 0 : cellNumber(at(c, k))), 0);
   const byKey = new Map();
   for (const r of ((payload.table && payload.table.rows) || [])) {
     const c = r.c || [];
@@ -4473,13 +4474,14 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
         merchantId: "", merchantName: "All merchants", sku, productName: (ix["PRODUCT_NAME"] === undefined ? "" : cellText(at(c, "PRODUCT_NAME")).trim()) || (nameBySku && nameBySku.get(sku)) || "",
         category: (categoryBySku && categoryBySku.get(sku)) || "Uncategorized", acmName: "Unassigned", source: "productOnly" };
       Object.keys(PO_COLS).forEach(k => { o[k] = 0; });
-      if (hasCm) { o.pExp = useExp; o.pDlv = 0; o.pRev = 0; o.pPpm = 0; o.pCm3 = 0; o.pOrd = 0; o.pPrc = 0; }
+      if (hasCm) { o.pDlv = 0; o.pCnf = 0; o.pRev = 0; o.pPpm = 0; o.pCm3 = 0; o.pFs = 0; o.pPrc = 0; o.pCnfC = 0; o.pRet = 0; }
       byKey.set(key, o);
     }
     Object.keys(PO_COLS).forEach(k => { o[k] += cellNumber(at(c, PO_COLS[k])); });
     if (hasCm && /^(true|yes|1)$/i.test(cellText(at(c, "IS_PRIMARY")).trim())) {
-      o.pDlv += cellNumber(at(c, useExp ? PO_CM3_EXP.dlv : "DLV_PIECES_ACTUAL")); o.pRev += useExp ? cellNumber(at(c, PO_CM3_EXP.rev[0])) : cmSum(c, PO_CM3_PARTS.rev); o.pPpm += cmSum(c, PO_CM3_PARTS.ppm);
-      o.pCm3 += cmSum(c, PO_CM3_PARTS.cm3); o.pOrd += cmSum(c, PO_CM3_PARTS.ord); o.pPrc += cmSum(c, PO_CM3_PARTS.prc);
+      o.pDlv += cellNumber(at(c, "DLV_PIECES_ACTUAL")); o.pCnf += cellNumber(at(c, "CNF_PIECES_ACTUAL"));
+      o.pRev += cmSum(c, PO_CM3_PARTS.rev); o.pPpm += cmSum(c, PO_CM3_PARTS.ppm); o.pCm3 += cmSum(c, PO_CM3_PARTS.cm3);
+      o.pFs += cmSum(c, PO_CM3_PARTS.fs); o.pPrc += cmSum(c, PO_CM3_PARTS.prc); o.pCnfC += cmSum(c, PO_CM3_PARTS.cnf); o.pRet += cmSum(c, PO_CM3_PARTS.ret);
     }
   }
   const rows = Array.from(byKey.values());
