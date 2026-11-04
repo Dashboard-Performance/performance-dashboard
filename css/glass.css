@@ -149,6 +149,9 @@ html.gl .tw-ut.on::after { display: none; }
 html.gl .tw-tabs { position: relative; isolation: isolate; background: var(--gl-card); border: 1px solid var(--gl-edge) !important; border-radius: 16px; padding: 5px; width: max-content; max-width: 100%; }
 html.gl .tw-tabs .tw-tab { position: relative; z-index: 1; border-radius: 11px; }
 html.gl .tw-tabs .tw-tab.on { background: transparent !important; box-shadow: none !important; color: var(--gl-pill-ink) !important; }
+/* v1.18.0 — only the hub bar (#twTabs) gets the sliding pill; any other tab row (Command Loop sub-tabs …) paints its own
+   pill, otherwise the active tab was dark text on a dark background and looked empty */
+html.gl .tw-tabs:not(#twTabs) .tw-tab.on { background: var(--gl-pill-bg) !important; color: var(--gl-pill-ink) !important; box-shadow: 0 4px 14px -8px rgba(0,0,0,.6) !important; }
 html.gl .gl-ind { position: absolute; z-index: 0; top: 0; left: 0; border-radius: 11px; background: var(--gl-pill-bg); box-shadow: 0 6px 16px -8px rgba(0,0,0,.5); pointer-events: none; will-change: transform; transition: transform .42s cubic-bezier(.3,1.25,.4,1), width .42s cubic-bezier(.3,1.25,.4,1); }
 
 /* ---------- page change ----------

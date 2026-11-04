@@ -182,7 +182,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent); box-sha
 .tw-field > label:first-child { display: block; font-size: 12px; font-weight: 650; color: var(--text2); margin-bottom: 6px; }
 .tw-field textarea { resize: vertical; }
 .tw-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; } .tw-chips.dis, .tw-people.dis { opacity: .4; pointer-events: none; }
-.tw-chip { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--line2); background: var(--panel); font-size: 12px; font-weight: 600; cursor: pointer; transition: .15s var(--ease); }
+.tw-chip { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--line2); background: var(--panel); font-size: 12px; font-weight: 600; cursor: pointer; transition: .15s var(--ease); color: var(--text); }
 .tw-chip.on { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); border-color: var(--accent); color: var(--text); }
 .tw-people { max-height: 190px; overflow-y: auto; border: 1px solid var(--line2); border-radius: 10px; padding: 6px; margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=hidden]), textarea { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 9px; }

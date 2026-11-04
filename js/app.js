@@ -15637,7 +15637,7 @@ function alcBuildMerchantRawSkuCr(monthRows, crCutoffTs, sectionKey) {
 // usedQty بيتبعت =0 لصفوف الـ Bundle دايمًا من الكولر (مفيش مصدر استخدام
 // فعلي على مستوى Bundle خالص — Availability Locking بيقفل Singles بس).
 // -------------------------------------------------------------------------
-function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty }) {
+function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty, remaining }) {
   // Suggested Allocation = توزيع الـ Stock الحالي على التاجر بنسبة مساهمته
   // (CONTR%) في الديماند الـ overall. ده الرقم الوحيد "المحسوب" فعليًا في
   // السلسلة دي (مش مسحوب من أي مصدر خام) — وهو نفسه اللي "Min Bundle
@@ -15665,9 +15665,13 @@ function alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d, crPct, usedQty 
   // الـ Placed مش الـ Confirmed بس. المجموع على نفس الـ SKU ممكن يعدّي الـ Stock (مقبول — قرار صاحب الداشبورد). لو مفيش
   // CR% (مفيش Placed في الفترة) بيرجع لـ Stock × CONTR% من غير قسمة. (ALC_TARGET_DOH_DAYS مبقاش مستخدم هنا.)
   const shareOfStock = stock * (contrPct / 100);
-  const finalActionQty = shareOfStock > 0 ? Math.round(crPct > 0 ? (shareOfStock / (crPct / 100)) : shareOfStock) : 0;
+  // v1.18.0 — بطلب صريح: Final Action = الإجراء الفعلي = الكمية اللي المفروض تبقى مقفولة (Stock × CONTR% ÷ CR%) ناقص اللي
+  // لسه فاضل في القفل الحالي (Remaining Pieces). موجب = زوّد القفل بالكمية دي · سالب = القفل أكبر من نصيبه (ممكن يتقلل) ·
+  // التاجر اللي مالوش قفل (Unlocked) Remaining = 0 → الكمية كلها. lockTarget = الكمية الكلية اللي المفروض تكون مقفولة.
+  const lockTarget = shareOfStock > 0 ? Math.round(crPct > 0 ? (shareOfStock / (crPct / 100)) : shareOfStock) : 0;
+  const finalActionQty = lockTarget - Math.round(remaining || 0);
 
-  return { contrPct, suggestedAllocation, finalActionQty };
+  return { contrPct, suggestedAllocation, finalActionQty, lockTarget };
 }
 
 function computeAllocationLocking() {
@@ -15967,7 +15971,7 @@ function computeAllocationLocking() {
     baseRows.forEach(r => {
       const { tagerId, lockStatus, l, stock, category, skuName, merchantAvg3d, crPct, usedQty, merchantName } = r;
 
-      const math = alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d: overallAvg3dForTable, crPct, usedQty });
+      const math = alcComputeRowMath({ stock, merchantAvg3d, overallAvg3d: overallAvg3dForTable, crPct, usedQty, remaining: l ? (l.remainingPieces || 0) : 0 });
 
       // نسجل الـ suggestedAllocation النهائي بتاع الصف ده فورًا — عشان أي صف
       // Bundle (أو صف Single تاني بيدور على sibling) يقدر يلاقيه في
@@ -15981,7 +15985,8 @@ function computeAllocationLocking() {
       // crPct <= 0، finalActionQty أصلاً رجع للرقم الخام من غير قسمة (راجع
       // alcComputeRowMath)، فمفيش عامل نضربه هنا (factor = 1) عشان النتيجة
       // تفضل ~7 برضه بدل ما ترجع 0.
-      const finalActionDoh = merchantAvg3d > 0 ? Math.round((math.finalActionQty / merchantAvg3d) * (crPct > 0 ? (crPct / 100) : 1)) : null;
+      // أيام التغطية بعد الإجراء: القفل كله (Remaining + Final Action = lockTarget) ÷ متوسط التاجر، بعد الـ CR%
+      const finalActionDoh = merchantAvg3d > 0 ? Math.round((math.lockTarget / merchantAvg3d) * (crPct > 0 ? (crPct / 100) : 1)) : null;
 
       pendingRows.push({
         // Allocated Qty / Remaining Pieces: Locked = خام 100% من صف القفل l
@@ -15990,7 +15995,7 @@ function computeAllocationLocking() {
         type: "Single", lockStatus, singleId, skuName, category, tagerId, merchantName,
         stock: Math.round(stock || 0), merchantAvg3d, overallAvg3d: overallAvg3dForTable, contrPct: math.contrPct, crPct,
         suggestedAllocation: math.suggestedAllocation, allocatedQty: l ? l.allocatedQty : null, usedQty,
-        remainingPieces: l ? l.remainingPieces : null, finalActionQty: math.finalActionQty,
+        remainingPieces: l ? l.remainingPieces : null, finalActionQty: math.finalActionQty, lockTarget: math.lockTarget,
         finalActionDoh
       });
     });
@@ -16157,7 +16162,7 @@ function renderPaginatedAllocationLockingTable() {
       <td class="num text-dim" title="${r.type === 'Bundle' ? 'Always 0 for Bundle rows — Availability Locking only ever locks Single SKUs, so there is no usage-tracking source at the bundle grain.' : ''}">${fmtIntCell(r.usedQty)}</td>
       <td class="num text-orange font-bold">${r.remainingPieces == null ? "—" : fmtIntCell(r.remainingPieces)}</td>
       <td class="num text-blue">${fmtAllocCell(r.minBundleAllocation)}</td>
-      <td class="num text-red font-bold">${fmtIntCell(r.finalActionQty)}</td>
+      <td class="num font-bold ${r.finalActionQty > 0 ? 'text-red' : (r.finalActionQty < 0 ? 'text-green' : 'text-dim')}" title="${r.type === 'Bundle' ? '' : 'Lock should be ' + fmtInt.format(r.lockTarget || 0) + ' (Stock × CONTR% ÷ CR%) − ' + fmtInt.format(r.remainingPieces || 0) + ' still in the lock'}">${r.finalActionQty > 0 ? '+' : ''}${fmtIntCell(r.finalActionQty)}</td>
       <td class="num text-dim">${r.finalActionDoh === null || r.finalActionDoh === undefined ? "—" : fmtIntCell(r.finalActionDoh)}</td>
     `;
     tbody.appendChild(tr);

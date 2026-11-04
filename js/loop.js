@@ -71,12 +71,16 @@
       if (ev.lock && ev.lock.avgPlaced != null) kv.push(["Avg placed / day", ev.lock.avgPlaced]);
       kv.push(["Product CR", P.cr == null ? "—" : P.cr + "%"]);
       kv.push(["Needed for " + P.days + " days", fmtN(P.need) + " (placed " + P.placedDay + "/day × " + P.days + " − " + fmtN(ev.lock ? ev.lock.rem : 0) + " left)"]);
-      if (P.stock != null) {
+      if (P.stock != null && P.target != null) {
+        // v1.18.0 — share of the stock (same rule as Allocation Locking → Final Action): Stock × CONTR% ÷ the merchant's CR − what is left in the lock
         kv.push(["Stock (single)", fmtN(P.stock) + (P.doh != null ? " · DOH " + P.doh : "")]);
-        kv.push(["Kept for other sellers", fmtN(P.others) + " (" + P.othersN + " seller" + (P.othersN === 1 ? "" : "s") + ", " + P.days + " days)"]);
-        kv.push(["Free stock → max increase", fmtN(P.free) + " → " + fmtN(P.cap) + " placed"]);
+        kv.push(["Merchant share (CONTR%)", P.contr + "% of the confirmed pieces on this SKU (" + P.sellers + " seller" + (P.sellers === 1 ? "" : "s") + ", " + P.days + " days) → " + fmtN(P.share) + " pcs of the stock"]);
+        kv.push(["Merchant CR", (P.crM == null ? "—" : P.crM + "%") + " → the lock should be " + fmtN(P.share) + (P.crM ? " ÷ " + P.crM + "%" : "") + " ≈ " + fmtN(P.target) + " placed"]);
+        kv.push(["Final action", fmtN(P.target) + " − " + fmtN(ev.lock ? ev.lock.rem : 0) + " still in the lock = " + (P.action > 0 ? "+" : "") + fmtN(P.action) + (P.action < 0 ? " (the lock is above its share)" : "")]);
+      } else if (P.stock != null) {
+        kv.push(["Stock (single)", fmtN(P.stock) + (P.doh != null ? " · DOH " + P.doh : "")]);
       } else kv.push(["Stock (single)", "not in Inventory — not capped"]);
-      kv.push(["Suggested increase", fmtN(P.suggest) + (P.capped ? (P.suggest > 0 ? " (capped by stock)" : " — no free stock: raise PO / transfer first") : "")]);
+      kv.push(["Suggested increase", fmtN(P.suggest) + (P.target != null ? (P.suggest > 0 ? " (its share of the stock)" : " — its share is already in the lock: raise PO / transfer first") : (P.capped ? " (capped by stock)" : ""))]);
     } else if (ev.suggestedQty != null) kv.push(["Suggested increase", fmtN(ev.suggestedQty)]);
     if (ev.askedQty != null) kv.push(["Merchant asked", (ev.kind || "") + " " + fmtN(ev.askedQty) + (ev.note ? " — " + ev.note : "")]);
     if (t.score_after != null) kv.push(["Score after follow-up", t.score_after]);
@@ -84,7 +88,7 @@
     if (ev.locksNote) {
       var LS = ev.lockStock || {};
       kv.push(["Locks waiting for this stock", ev.locksNote]);
-      if (LS.stock != null) kv.push(["Stock → kept for other sellers → free", fmtN(LS.stock) + " → " + fmtN(LS.others) + " → " + fmtN(LS.free)]);
+      if (LS.stock != null) kv.push(["Stock → merchant share → lock should be", fmtN(LS.stock) + " → " + (LS.contr != null ? LS.contr + "% = " + fmtN(LS.share) : "—") + " → " + (LS.target != null ? fmtN(LS.target) + " placed" : "—")]);
     }
     if (kv.length) h += '<div class="tw-kv">' + kv.map(function (x) { return '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>'; }).join("") + '</div>';
     if (ev.locksWaiting && ev.locksWaiting.length) h += '<div class="tw-muted" style="margin:10px 0 4px">These lock tasks open for Marketplace as soon as there is free stock:</div><table class="tw-table"><thead><tr><th>Merchant</th><th>ACM</th><th class="r">Lock left</th><th class="r">Confirmed / day</th><th class="r">Needed (7d)</th></tr></thead><tbody>' +
