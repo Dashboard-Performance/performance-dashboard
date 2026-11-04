@@ -489,6 +489,8 @@
   function normRole(r) { return String(r || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
   function roleInTeam(role, team) { var r = normRole(role), t = normRole(team); return !!t && (r === t || (" " + r + " ").indexOf(" " + t + " ") >= 0); }
   function isLate(t) { return t.slaHoursLeft != null && t.slaHoursLeft < 0 && ["open", "in_progress"].indexOf(t.status) >= 0; }
+  // which team an automatic task kind (routing reason) goes to — same rule as the Worker's teamOf()
+  function reasonTeam(route, secTeam) { return route && route.team ? String(route.team) : ((secTeam || {})[route && route.section] || ""); }
   function renderTeams(host) {
     host.innerHTML = '<div class="tw-page"><div class="tw-card tw-muted">Loading the teams…</div></div>';
     Promise.all([api("loopConfig"), api("loopAdminList", undefined, "&days=30")]).then(function (res) {
@@ -511,6 +513,48 @@
           '<div class="lp-card-m">' + esc(t.reasonLabel || "") + ' · ' + esc(navLabel(t.section)) + (t.tager_id ? " · Merchant " + esc(t.tager_id) : "") + (t.product_id ? " · SKU " + esc(t.product_id) : "") + (t.impact ? " · <b>" + fmtEgp(t.impact) + "/day</b>" : "") + " · " + esc(ago(t.created_at)) + '</div>' +
           (CLOSED.indexOf(t.status) < 0 ? '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="tw-muted">Assigned to</span><select data-reassign="' + esc(t.id) + '" style="max-width:260px">' + opts + foreign + '</select></div>' : "") + '</div>';
       }
+      var cfg = cfgJ.config || {}, reasons = cfgJ.reasons || {};
+      var kindsOf = function (team) { var R = cfg.routing || {}; return Object.keys(R).filter(function (k) { return reasonTeam(R[k], secTeam) === team; }); };
+      function controlsHtml(team) {
+        var R = cfg.routing || {}, kinds = kindsOf(team), on = kinds.filter(function (k) { return R[k].enabled; });
+        var test = cfg.testMode && cfg.testMode.on;
+        return '<div class="tw-card"><div class="tw-ch"><div><h3 style="margin:0">Automatic tasks for ' + esc(team) + '</h3><div class="tw-muted">' + on.length + ' of ' + kinds.length + ' kinds are on. The engine makes tasks only for the kinds that are on (manual tasks are always allowed). Click a kind to turn it on / off.</div></div></div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">' + (kinds.length ? kinds.map(function (k) { return '<button class="btn small' + (R[k].enabled ? " btn-primary" : "") + '" data-kind="' + esc(k) + '" title="' + esc(k) + ' → ' + esc(navLabel(R[k].section)) + '">' + (R[k].enabled ? "● " : "○ ") + esc((reasons[k] && reasons[k].label) || k) + '</button>'; }).join("") : '<span class="tw-muted">No automatic task kind goes to this team.</span>') + '</div>' +
+          '<div class="tw-toolbar" style="gap:8px"><button class="btn small" data-tc="on">Turn on all for ' + esc(team) + '</button><button class="btn small" data-tc="off">Turn off all for ' + esc(team) + '</button><button class="btn small" data-tc="only">Only ' + esc(team) + ' (turn the other teams off)</button>' +
+          '<span class="lp-grow"></span><button class="btn small danger" data-tc="clear">Clear ' + esc(team) + ' tasks</button><button class="btn small danger" data-tc="clearAll">Clear ALL tasks</button><button class="btn btn-primary small" data-tc="run">Generate tasks now</button></div>' +
+          (test ? '<div class="lp-test" style="margin-top:10px"><b>TEST MODE is on</b> — new tasks reach only ' + esc((cfg.testMode.recipients || []).join(", ")) + '. Turn it off in Command Loop → Overview when you are ready.</div>' : "") +
+          '<div class="tw-msg" id="ttCtlMsg" style="margin-top:8px"></div></div>';
+      }
+      function saveCfg(change, label) {
+        var next = JSON.parse(JSON.stringify(cfg)); change(next.routing || {});
+        msg("Saving…");
+        return api("loopConfigPut", { config: next }).then(function (j) { cfg = j.config || next; C.logActivity("settings", "Team Tasks: " + label); draw(); msg("Saved ✓ " + label, true); }).catch(function (e) { msg(e.message, false, true); });
+      }
+      function msg(t, ok, err) { var el = $("ttCtlMsg"); if (el) { el.className = "tw-msg" + (ok ? " ok" : err ? " err" : ""); el.textContent = t; } }
+      function clearTasks(teamOrAll) {
+        msg("Reading every task (last 365 days)…");
+        api("loopAdminList", undefined, "&days=365").then(function (j) {
+          var all = j.tasks || [], ids = all.filter(function (t) { return teamOrAll === "*" || teamOfTask(t) === teamOrAll; }).map(function (t) { return t.id; });
+          if (!ids.length) { msg("No tasks to clear.", true); return; }
+          if (!confirm("Delete " + ids.length + " task(s)" + (teamOrAll === "*" ? " of ALL teams" : " of " + teamOrAll) + " and their history for good? (open, done and closed — manual ones too)")) { msg(""); return; }
+          var chunks = []; for (var i = 0; i < ids.length; i += 1000) chunks.push(ids.slice(i, i + 1000));
+          return chunks.reduce(function (pr, ch) { return pr.then(function () { return api("loopDelete", { ids: ch }, "", 60000); }); }, Promise.resolve()).then(function () {
+            C.logActivity("settings", "Team Tasks: cleared " + ids.length + " task(s)", teamOrAll === "*" ? "all teams" : teamOrAll); invalidate(); reload();
+          });
+        }).catch(function (e) { msg(e.message, false, true); });
+      }
+      function wireControls(team) {
+        var R = cfg.routing || {};
+        host.querySelectorAll("[data-kind]").forEach(function (b) { b.onclick = function () { var k = b.getAttribute("data-kind"), v = !R[k].enabled; saveCfg(function (r) { r[k].enabled = v; }, ((reasons[k] && reasons[k].label) || k) + (v ? " on" : " off")); }; });
+        host.querySelectorAll("[data-tc]").forEach(function (b) { b.onclick = function () {
+          var a = b.getAttribute("data-tc");
+          if (a === "on" || a === "off") return saveCfg(function (r) { kindsOf(team).forEach(function (k) { r[k].enabled = a === "on"; }); }, team + ": all automatic kinds " + a);
+          if (a === "only") { if (!confirm("Turn ON every automatic task kind of " + team + " and turn OFF the kinds of every other team?")) return; return saveCfg(function (r) { Object.keys(r).forEach(function (k) { var tm = reasonTeam(r[k], secTeam); if (tm) r[k].enabled = tm === team; }); }, "only " + team + " gets automatic tasks"); }
+          if (a === "clear") return clearTasks(team);
+          if (a === "clearAll") return clearTasks("*");
+          if (a === "run") { b.disabled = true; msg("Running the engine… (up to a few minutes)"); return api("loopRun", {}, "", 180000).then(function (j) { C.logActivity("settings", "Team Tasks: engine run", (j.run && j.run.created || 0) + " new"); invalidate(); msg("Done ✓ " + ((j.run && j.run.created) || 0) + " new task(s)" + (j.run && j.run.heldBack ? " · " + j.run.heldBack + " waiting for the next run (daily cap)" : ""), true); setTimeout(reload, 900); }).catch(function (e) { b.disabled = false; msg(e.message, false, true); }); }
+        }; });
+      }
       function draw() {
         var team = TT.team, members = membersOf(team), q = TT.q.toLowerCase();
         var list = (byTeam[team] || []).filter(function (t) { if (!TT.closed && CLOSED.indexOf(t.status) >= 0) return false; return !q || (t.title + " " + (t.tager_id || "") + " " + (t.product_id || "") + " " + (t.assignee || "") + " " + (t.merchant_name || "") + " " + (t.product_name || "")).toLowerCase().indexOf(q) >= 0; }).sort(sortTasks);
@@ -525,6 +569,7 @@
           '<input id="ttQ" type="search" placeholder="Search task / merchant / SKU / person" value="' + esc(TT.q) + '"><label class="tw-check"><input type="checkbox" id="ttC"' + (TT.closed ? " checked" : "") + '> Show closed (30d)</label><button class="btn btn-primary" id="ttNew">+ New task</button></div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px">' + kpi("Members", members.length) + kpi("Active tasks", all.active) + kpi("Late", all.late, all.late ? "lp-late" : "") + kpi("Not assigned to a person", all.unassigned) + kpi("Closed (30d)", all.closed) + '</div>' +
           (members.length ? "" : '<div class="tw-msg" style="margin-top:10px">Nobody has the role "' + esc(team) + '" in Users &amp; Roles yet — give people this role to see them here and assign them tasks.</div>') + '</div>' +
+          controlsHtml(team) +
           '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px">' + groups.map(function (g) {
             var s = stats(g.items);
             return '<div class="tw-card" style="margin:0"><div class="tw-ch"><div><h3 style="margin:0">' + esc(g.label) + '</h3><div class="tw-muted">' + esc(g.sub) + '</div></div><div style="text-align:right"><b>' + s.active + '</b> active' + (s.late ? ' · <span class="lp-late">' + s.late + ' late</span>' : "") + (TT.closed && s.closed ? ' · ' + s.closed + ' closed' : "") + '</div></div>' +
@@ -532,6 +577,7 @@
               (g.items.length ? g.items.map(function (t) { return row(t, members); }).join("") : '<div class="tw-muted">No tasks.</div>') + '</div>';
           }).join("") + '</div></div>';
         host.querySelectorAll("[data-team]").forEach(function (b) { b.onclick = function () { TT.team = b.getAttribute("data-team"); draw(); }; });
+        wireControls(team);
         $("ttQ").oninput = function () { TT.q = this.value; var p = this.selectionStart; draw(); var el = $("ttQ"); el.focus(); try { el.setSelectionRange(p, p); } catch (e) {} };
         $("ttC").onchange = function () { TT.closed = this.checked; draw(); };
         $("ttNew").onclick = function () { teamTaskModal(team, members, "", reload, secTeam); };

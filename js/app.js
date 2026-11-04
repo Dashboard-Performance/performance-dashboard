@@ -1181,7 +1181,8 @@ async function loadAndRenderSyncStatus() {
       const j = await r.json();
       if (!j.success) throw new Error(j.message || "failed");
       if (j.publishError) say(`Saved v${j.latest.version} to GitHub, but the site was NOT updated: ${j.publishError}`, true);
-      else say(`Uploaded v${j.latest.version} ✓ — site updated (${j.published.files} files, commit ${j.published.commit}). Vercel will redeploy in ~1 minute; then hard-refresh.`);
+      else if (j.published && j.published.unchanged) say(`Uploaded v${j.latest.version} ✓ — nothing changed on the site (all ${j.published.files} files are the same as on GitHub).`);
+      else say(`Uploaded v${j.latest.version} ✓ — site updated (${j.published.changed != null ? j.published.changed + " changed of " : ""}${j.published.files} files, commit ${j.published.commit}). Vercel will redeploy in ~1 minute; then hard-refresh.`);
       loadInfo();
     } catch (e) { say("Upload failed: " + (e.message || e), true); }
     finally { upBtn.disabled = false; }
