@@ -76,11 +76,11 @@
         kv.push(["Stock (single)", fmtN(P.stock) + (P.doh != null ? " · DOH " + P.doh : "")]);
         kv.push(["Merchant share (CONTR%)", P.contr + "% of the confirmed pieces on this SKU (" + P.sellers + " seller" + (P.sellers === 1 ? "" : "s") + ", " + P.days + " days) → " + fmtN(P.share) + " pcs of the stock"]);
         kv.push(["Merchant CR", (P.crM == null ? "—" : P.crM + "%") + " → the lock should be " + fmtN(P.share) + (P.crM ? " ÷ " + P.crM + "%" : "") + " ≈ " + fmtN(P.target) + " placed"]);
-        kv.push(["Final action", fmtN(P.target) + " − " + fmtN(ev.lock ? ev.lock.rem : 0) + " still in the lock = " + (P.action > 0 ? "+" : "") + fmtN(P.action) + (P.action < 0 ? " (the lock is above its share)" : "")]);
+        kv.push(["Final action (set on the system)", fmtN(P.target) + " + " + fmtN(ev.lock ? ev.lock.rem : 0) + " still in the lock = " + fmtN(P.action)]);
       } else if (P.stock != null) {
         kv.push(["Stock (single)", fmtN(P.stock) + (P.doh != null ? " · DOH " + P.doh : "")]);
       } else kv.push(["Stock (single)", "not in Inventory — not capped"]);
-      kv.push(["Suggested increase", fmtN(P.suggest) + (P.target != null ? (P.suggest > 0 ? " (its share of the stock)" : " — its share is already in the lock: raise PO / transfer first") : (P.capped ? " (capped by stock)" : ""))]);
+      kv.push(["Suggested increase", fmtN(P.suggest) + (P.target != null ? (P.suggest > 0 ? " (its share of the stock)" : " — no stock share: raise PO / transfer first") : (P.capped ? " (capped by stock)" : ""))]);
     } else if (ev.suggestedQty != null) kv.push(["Suggested increase", fmtN(ev.suggestedQty)]);
     if (ev.askedQty != null) kv.push(["Merchant asked", (ev.kind || "") + " " + fmtN(ev.askedQty) + (ev.note ? " — " + ev.note : "")]);
     if (t.score_after != null) kv.push(["Score after follow-up", t.score_after]);
