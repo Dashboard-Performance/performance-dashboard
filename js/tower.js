@@ -1081,6 +1081,7 @@ var VIEW_NAV = {
       { nav: "navLoopTasks", view: "loopTasks", label: "My Tasks" },
       { nav: "navTowerAlerts", view: "towerAlerts", label: "Alerts Centre" },
       { nav: "navLoopControl", view: "loopControl", label: "Command Loop" },
+      { nav: "navLoopTeams", view: "loopTeams", label: "Team Tasks" },
       { nav: "navTowerSettings", view: "towerSettings", label: "Settings" },
       { nav: "navTowerActivity", view: "towerActivity", label: "Activity Log" },
       { nav: "navTowerUsage", view: "towerUsage", label: "Usage Log" },

@@ -14273,8 +14273,17 @@ if ($("nextPageMpStopped")) $("nextPageMpStopped").addEventListener("click", () 
 const DW_TOP_N = 20;
 const DW_MIN_DROP_PCS = 3;     // أقل نزول بالقطع عشان الماتش يدخل الترتيب (يتفادى الضوضاء)
 const DW_KEY_DRIVER_SHARE = 50; // % من نزول الـ SKU
-// Avg Placed Target (قطع/يوم) لكل شهر — حدّثه أول كل شهر. المفتاح YYYY-MM.
+// Avg Placed Target (قطع/يوم) لكل شهر. المفتاح YYYY-MM. لو الشهر مش مكتوب هنا، بيتحسب لوحده من Category Targets
+// (Grand Total → Total Placed، تارجت الشهر الحالي) ÷ عدد أيام الشهر — زي "Placed (pcs) of 208,699" في Targets scorecard.
 const DW_AVG_PLACED_TARGETS = { "2026-10": 5429 };
+function dwDailyPlacedTarget(monthKey, now) {
+  if (DW_AVG_PLACED_TARGETS[monthKey]) return { value: DW_AVG_PLACED_TARGETS[monthKey], src: "fixed" };
+  const gt = (state.commercialTargets || {})["grand total"] || {};
+  const monthly = +gt.placedPiecesTarget || 0;
+  if (!(monthly > 0)) return { value: 0, src: "" };
+  const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return { value: monthly / days, src: "Category Targets: " + fmtInt.format(Math.round(monthly)) + " ÷ " + days + " days", monthly, days };
+}
 // Merchants مستبعدين من الـ Decline Matches بالكامل (الـ Drop والإجماليات والـ MTD Lost). الـ Avg Placed الفعلي بيفضل بيحسبهم.
 const DW_EXCLUDED_MERCHANTS = new Set(["1160154"]);
 const dwState = { all: [], view: [], totalDrop: 0, dateLabel: "" };
@@ -14377,7 +14386,8 @@ function dwComputeAll() {
     });
   }
   const monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-  dwState.mtd = { days: mtdDays, placed: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, gain: mtdGain, target: DW_AVG_PLACED_TARGETS[monthKey] || 0 };
+  const dwT = dwDailyPlacedTarget(monthKey, now);
+  dwState.mtd = { days: mtdDays, placed: mtdPlaced, avgActual: mtdDays ? mtdPlaced / mtdDays : 0, lost: mtdLost, gain: mtdGain, target: dwT.value, targetSrc: dwT.src };
   dwState.lostGmvTotal = lostGmvTotal;
   dwState.all = out; dwState.totalDrop = totalDrop; dwState.dateLabel = dwYesterdayLabel();
 }
@@ -14463,7 +14473,7 @@ function renderMpDeclineWatch() {
   set("dwMtdLost", m.days ? (net >= 0 ? "+" : "−") + fmtInt.format(Math.abs(Math.round(net))) : "—");
   { const el = $("dwMtdLost"); if (el) { el.classList.remove("text-red", "text-green"); el.style.color = m.days ? (net >= 0 ? "#067647" : "#B42318") : ""; } }
   set("dwMtdLostSub", m.days ? `Net vs previous 4-day avg · Lost −${fmtInt.format(Math.round(m.lost))} · Gained +${fmtInt.format(Math.round(m.gain || 0))} · ${m.days} full day${m.days > 1 ? "s" : ""}` : "No full day yet this month");
-  if (!m.target) { set("dwTargetGap", "—"); set("dwTargetSub", "Set DW_AVG_PLACED_TARGETS for this month"); }
+  if (!m.target) { set("dwTargetGap", "—"); set("dwTargetSub", "No Placed target for this month — fill Total Placed of Grand Total in Category Targets"); }
   else if (!m.days) { set("dwTargetGap", "—"); set("dwTargetSub", "Target " + fmtInt.format(m.target) + "/day · no full day yet"); }
   else {
     const gap = m.avgActual - m.target;

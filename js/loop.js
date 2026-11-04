@@ -1,5 +1,7 @@
 /* Taager Command Loop (v1.17.0) — My Tasks (everyone), task strip on top of every section,
    and Command Loop control (Admin / Country Manager only: every number, every task).
+   v1.18.0 — Team Tasks (Admin / Country Manager): per team (Commercial · Supply Chain · Marketplace · Account Manager) its
+   members (role = team), the tasks on each person, the tasks the whole team owns, + new task for the team / a person, reassign.
    Needs tower.js (window.TowerCore). Server side: cloudflare-worker/loop.js + loop-api.js. */
 (function () {
   "use strict";
@@ -478,10 +480,100 @@
     $("lpReset").onclick = function () { if (!confirm("Reset ALL Command Loop settings (scoring, routing, merchant notifications, exclusions) to the defaults?")) return; api("loopConfigReset", {}).then(function () { CFG = null; C.logActivity("settings", "Command Loop settings reset to defaults"); renderControl($("viewLoopControl")); }); };
   }
 
+  // ---------------------------------------------------------------- Team Tasks (Admin / Country Manager)
+  // Pick a team (the 4 teams of the Command Loop: Commercial · Supply Chain · Marketplace · Account Manager), see its members
+  // (users whose role is the team), what each one has on them, and the tasks the whole team owns (no person yet).
+  // Create a task for the team or for one person, reassign with one click. Same tasks as Command Loop / My Tasks.
+  var TT = { team: "", q: "", closed: false };
+  var CLOSED = ["resolved", "auto_cleared", "cancelled", "upgraded"];
+  function normRole(r) { return String(r || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+  function roleInTeam(role, team) { var r = normRole(role), t = normRole(team); return !!t && (r === t || (" " + r + " ").indexOf(" " + t + " ") >= 0); }
+  function isLate(t) { return t.slaHoursLeft != null && t.slaHoursLeft < 0 && ["open", "in_progress"].indexOf(t.status) >= 0; }
+  function renderTeams(host) {
+    host.innerHTML = '<div class="tw-page"><div class="tw-card tw-muted">Loading the teams…</div></div>';
+    Promise.all([api("loopConfig"), api("loopAdminList", undefined, "&days=30")]).then(function (res) {
+      var cfgJ = res[0], listJ = res[1];
+      var teams = (cfgJ.teams || []).filter(function (t) { return ["Commercial", "Supply Chain", "Marketplace", "Account Manager"].indexOf(t) >= 0; });
+      if (!teams.length) teams = ["Commercial", "Supply Chain", "Marketplace", "Account Manager"];
+      var secTeam = cfgJ.sectionTeam || {}, tasks = listJ.tasks || [], users = (listJ.users || []).filter(function (u) { return ["Admin", "Country Manager"].indexOf(u.role) < 0; });
+      if (!TT.team || teams.indexOf(TT.team) < 0) TT.team = teams[0];
+      var membersOf = function (team) { return users.filter(function (u) { return roleInTeam(u.role, team); }); };
+      var teamOfTask = function (t) {
+        if (t.assignee) { var u = users.filter(function (x) { return x.email === t.assignee; })[0]; if (u) { for (var i = 0; i < teams.length; i++) if (roleInTeam(u.role, teams[i])) return teams[i]; } }
+        return secTeam[t.section] || "";
+      };
+      var stats = function (list) { var a = 0, l = 0, c = 0, un = 0; list.forEach(function (t) { if (CLOSED.indexOf(t.status) >= 0) c++; else { a++; if (isLate(t)) l++; if (!t.assignee) un++; } }); return { active: a, late: l, closed: c, unassigned: un }; };
+      var byTeam = {}; teams.forEach(function (t) { byTeam[t] = []; }); tasks.forEach(function (t) { var tm = teamOfTask(t); if (byTeam[tm]) byTeam[tm].push(t); });
+      function row(t, members) {
+        var opts = '<option value="">Whole team</option>' + members.map(function (u) { return '<option value="' + esc(u.email) + '"' + (t.assignee === u.email ? " selected" : "") + '>' + esc(u.email) + '</option>'; }).join("");
+        var foreign = t.assignee && !members.some(function (u) { return u.email === t.assignee; }) ? '<option value="' + esc(t.assignee) + '" selected>' + esc(t.assignee) + '</option>' : "";
+        return '<div class="lp-card ' + sevClass(t) + '" style="margin:0 0 8px"><div class="lp-card-h"><a class="lp-a" data-task="' + esc(t.id) + '"><b>' + esc(t.title || t.reasonLabel || t.reason) + '</b></a>' + pill(t.status) + (t.priority > 0 ? '<span class="tw-pill warn">' + (["", "Raised", "High", "Urgent"][Math.min(3, t.priority)]) + '</span>' : "") + '<span class="lp-grow"></span>' + sla(t) + '</div>' +
+          '<div class="lp-card-m">' + esc(t.reasonLabel || "") + ' · ' + esc(navLabel(t.section)) + (t.tager_id ? " · Merchant " + esc(t.tager_id) : "") + (t.product_id ? " · SKU " + esc(t.product_id) : "") + (t.impact ? " · <b>" + fmtEgp(t.impact) + "/day</b>" : "") + " · " + esc(ago(t.created_at)) + '</div>' +
+          (CLOSED.indexOf(t.status) < 0 ? '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="tw-muted">Assigned to</span><select data-reassign="' + esc(t.id) + '" style="max-width:260px">' + opts + foreign + '</select></div>' : "") + '</div>';
+      }
+      function draw() {
+        var team = TT.team, members = membersOf(team), q = TT.q.toLowerCase();
+        var list = (byTeam[team] || []).filter(function (t) { if (!TT.closed && CLOSED.indexOf(t.status) >= 0) return false; return !q || (t.title + " " + (t.tager_id || "") + " " + (t.product_id || "") + " " + (t.assignee || "") + " " + (t.merchant_name || "") + " " + (t.product_name || "")).toLowerCase().indexOf(q) >= 0; }).sort(sortTasks);
+        var all = stats(byTeam[team] || []);
+        var chips = teams.map(function (t) { var s = stats(byTeam[t] || []); return '<button class="btn small' + (t === team ? " btn-primary" : "") + '" data-team="' + esc(t) + '">' + esc(t) + ' · ' + s.active + (s.late ? " · " + s.late + " late" : "") + '</button>'; }).join("");
+        var kpi = function (l, v, cls) { return '<div class="tw-card" style="flex:1 1 140px;margin:0"><div class="tw-muted">' + l + '</div><div style="font-size:24px;font-weight:700" class="' + (cls || "") + '">' + v + '</div></div>'; };
+        var groups = [{ key: "", label: "Whole team — not assigned to a person yet", sub: "everyone in " + team + " sees these", items: list.filter(function (t) { return !t.assignee; }) }];
+        members.forEach(function (u) { groups.push({ key: u.email, label: u.email, sub: (u.role || "") + (u.acm ? " · ACM " + u.acm : ""), items: list.filter(function (t) { return t.assignee === u.email; }) }); });
+        var others = list.filter(function (t) { return t.assignee && !members.some(function (u) { return u.email === t.assignee; }); });
+        if (others.length) groups.push({ key: "__o", label: "Assigned outside this team", sub: "the person is not in " + team, items: others });
+        host.innerHTML = '<div class="tw-page"><div class="tw-card"><div class="tw-toolbar"><div style="display:flex;gap:8px;flex-wrap:wrap">' + chips + '</div><span class="lp-grow"></span>' +
+          '<input id="ttQ" type="search" placeholder="Search task / merchant / SKU / person" value="' + esc(TT.q) + '"><label class="tw-check"><input type="checkbox" id="ttC"' + (TT.closed ? " checked" : "") + '> Show closed (30d)</label><button class="btn btn-primary" id="ttNew">+ New task</button></div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px">' + kpi("Members", members.length) + kpi("Active tasks", all.active) + kpi("Late", all.late, all.late ? "lp-late" : "") + kpi("Not assigned to a person", all.unassigned) + kpi("Closed (30d)", all.closed) + '</div>' +
+          (members.length ? "" : '<div class="tw-msg" style="margin-top:10px">Nobody has the role "' + esc(team) + '" in Users &amp; Roles yet — give people this role to see them here and assign them tasks.</div>') + '</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px">' + groups.map(function (g) {
+            var s = stats(g.items);
+            return '<div class="tw-card" style="margin:0"><div class="tw-ch"><div><h3 style="margin:0">' + esc(g.label) + '</h3><div class="tw-muted">' + esc(g.sub) + '</div></div><div style="text-align:right"><b>' + s.active + '</b> active' + (s.late ? ' · <span class="lp-late">' + s.late + ' late</span>' : "") + (TT.closed && s.closed ? ' · ' + s.closed + ' closed' : "") + '</div></div>' +
+              (g.key && g.key !== "__o" ? '<button class="btn small" data-newfor="' + esc(g.key) + '" style="margin:6px 0 10px">+ Task for this person</button>' : "") +
+              (g.items.length ? g.items.map(function (t) { return row(t, members); }).join("") : '<div class="tw-muted">No tasks.</div>') + '</div>';
+          }).join("") + '</div></div>';
+        host.querySelectorAll("[data-team]").forEach(function (b) { b.onclick = function () { TT.team = b.getAttribute("data-team"); draw(); }; });
+        $("ttQ").oninput = function () { TT.q = this.value; var p = this.selectionStart; draw(); var el = $("ttQ"); el.focus(); try { el.setSelectionRange(p, p); } catch (e) {} };
+        $("ttC").onchange = function () { TT.closed = this.checked; draw(); };
+        $("ttNew").onclick = function () { teamTaskModal(team, members, "", reload, secTeam); };
+        host.querySelectorAll("[data-newfor]").forEach(function (b) { b.onclick = function () { teamTaskModal(team, members, b.getAttribute("data-newfor"), reload, secTeam); }; });
+        host.querySelectorAll("[data-task]").forEach(function (a) { a.onclick = function () { openTask(a.getAttribute("data-task"), reload); }; });
+        host.querySelectorAll("[data-reassign]").forEach(function (s) { s.onchange = function () {
+          var id = s.getAttribute("data-reassign"), to = s.value || null; s.disabled = true;
+          api("loopAdminUpdate", { ids: [id], set: { assignee: to } }).then(function () { C.logActivity("settings", "Team Tasks: reassigned", id + " → " + (to || "whole team")); invalidate(); reload(); }).catch(function (e) { s.disabled = false; alert(e.message); });
+        }; });
+      }
+      function reload() { renderTeams(host); }
+      draw();
+    }).catch(function (e) { host.innerHTML = '<div class="tw-page"><div class="tw-card"><div class="tw-msg err">' + esc(e.message) + '</div></div></div>'; });
+  }
+  function teamTaskModal(team, members, who, done, secTeam) {
+    // the pages of this team (Command Loop: section → team) — a task on one of them belongs to the team
+    var secs = C.viewOptions().filter(function (o) { return (secTeam || {})[C.viewNav[o.view]] === team; });
+    if (!secs.length) secs = C.viewOptions();
+    var m = document.createElement("div"); m.className = "tw-modal";
+    m.innerHTML = '<div class="tw-mback"></div><div class="tw-mbox"><div class="tw-mhead"><h3>New task · ' + esc(team) + '</h3><button class="tw-x" data-x aria-label="Close">✕</button></div><div class="tw-mbody">' +
+      '<div class="tw-field"><label>Title</label><input id="ttT" placeholder="What needs to be done"></div>' +
+      '<div class="tw-mgrid"><div class="tw-field"><label>Assign to</label><select id="ttA"><option value="">Whole team (' + esc(team) + ')</option>' + members.map(function (u) { return '<option value="' + esc(u.email) + '"' + (u.email === who ? " selected" : "") + '>' + esc(u.email) + '</option>'; }).join("") + '</select></div>' +
+      '<div class="tw-field"><label>Page it belongs to</label><select id="ttS">' + secs.map(function (o) { return '<option value="' + esc(C.viewNav[o.view]) + '">' + esc(o.label) + '</option>'; }).join("") + '</select></div>' +
+      '<div class="tw-field"><label>Merchant ID (optional)</label><input id="ttM"></div><div class="tw-field"><label>SKU (optional)</label><input id="ttK"></div>' +
+      '<div class="tw-field"><label>Due in (hours)</label><input id="ttD" type="number" value="48" min="1"></div><div class="tw-field"><label>Priority</label><select id="ttP"><option value="0">Normal</option><option value="1">Raised</option><option value="2">High</option><option value="3">Urgent</option></select></div></div>' +
+      '<div class="tw-field"><label>Details</label><textarea id="ttN" rows="3"></textarea></div><div class="tw-msg" id="ttMsg"></div></div>' +
+      '<div class="tw-mfoot"><button class="btn" data-x>Cancel</button><button class="btn btn-primary" id="ttGo">Create</button></div></div>';
+    document.body.appendChild(m);
+    var close = function () { m.remove(); }; m.querySelectorAll("[data-x], .tw-mback").forEach(function (x) { x.onclick = close; });
+    $("ttGo").onclick = function () {
+      if (!$("ttT").value.trim()) { $("ttMsg").className = "tw-msg err"; $("ttMsg").textContent = "Write a title."; return; }
+      $("ttGo").disabled = true;
+      api("loopCreate", { title: $("ttT").value, section: $("ttS").value, assignee: $("ttA").value, mid: $("ttM").value, sku: $("ttK").value, dueHours: +$("ttD").value, priority: +$("ttP").value, note: $("ttN").value })
+        .then(function () { C.logActivity("settings", "Team Tasks: new task (" + team + ")", $("ttT").value); invalidate(); close(); done(); })
+        .catch(function (e) { $("ttGo").disabled = false; $("ttMsg").className = "tw-msg err"; $("ttMsg").textContent = e.message; });
+    };
+  }
   // ---------------------------------------------------------------- boot
   function boot() {
     C = window.TowerCore; if (!C || !C.registerView || !$("towerSubmenu")) { setTimeout(boot, 300); return; }
     C.registerView("loopTasks", { sectionId: "viewLoopTasks", navId: "navLoopTasks", label: "My Tasks", sub: "Your tasks from the Command Loop", open: true, render: renderMyTasks });
+    C.registerView("loopTeams", { sectionId: "viewLoopTeams", navId: "navLoopTeams", label: "Team Tasks", sub: "Every team, its people and the tasks on each one — Admin / Country Manager", render: renderTeams });
     C.registerView("loopControl", { sectionId: "viewLoopControl", navId: "navLoopControl", label: "Command Loop", sub: "Scores, routing, merchant notifications and every task — Admin / Country Manager", render: renderControl });
     try { C.applyNav && C.applyNav(); } catch (e) {}
     var orig = window.switchView;
