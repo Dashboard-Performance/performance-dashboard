@@ -24,7 +24,7 @@ var VIEW_NAV = {
     cm3AnalystProducts: "navCm3AnalystProducts", ppmAnalystProducts: "navPpmAnalystProducts", ppmAnalystSingle: "navPpmAnalystSingle", bundleRecommendations: "navBundleRecommendations",
     productsMatchesAnalyst: "navProductsMatchesAnalyst", scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions",
     cm3Analyst: "navCm3Analyst", poorMatches: "navPoorMatches", availabilityLocking: "navAvailabilityLocking",
-    allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking",
+    allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking", skuLockReview: "navSkuLockReview", merchantLockReview: "navMerchantLockReview",
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
     weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner"
@@ -1072,7 +1072,9 @@ var VIEW_NAV = {
       { label: "Locking", tabs: [
         { nav: "navAvailabilityLocking", view: "availabilityLocking", label: "Availability Locking" },
         { nav: "navAllocationLocking", view: "allocationLocking", label: "Allocation Locking" },
-        { nav: "navHealthyUnlocking", view: "healthyUnlocking", label: "Unlocking Action's" }
+        { nav: "navHealthyUnlocking", view: "healthyUnlocking", label: "Unlocking Action's" },
+        { nav: "navSkuLockReview", view: "skuLockReview", label: "SKU Lock Review" },
+        { nav: "navMerchantLockReview", view: "merchantLockReview", label: "Merchant Lock Review" }
       ] }
     ] },
     { toggle: "navTowerToggle", title: "Control", tabs: [
@@ -1234,7 +1236,7 @@ var VIEW_NAV = {
     cm3AnalystProducts: "cm3-analyst-products", ppmAnalystProducts: "analyst-products", ppmAnalystSingle: "analyst-single", bundleRecommendations: "bundle-recommendations",
     productsMatchesAnalyst: "matches-single", scAging: "inventory-aging", scSkus: "sku-analysis", scActions: "action-plan",
     cm3Analyst: "cm3-analyst", poorMatches: "poor-matches", availabilityLocking: "availability-locking",
-    allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions",
+    allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions", skuLockReview: "sku-lock-review", merchantLockReview: "merchant-lock-review",
     mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
     incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
     weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh"

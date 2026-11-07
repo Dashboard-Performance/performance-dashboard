@@ -36,7 +36,7 @@
     navMerchantTargets: "merchantTargets", navMerchantPerf: "merchantPerformance", navMerchantCpa: "merchantCpa",
     navMpSalesPlan: "mpSalesPlan", navSpFeedback: "spFeedback", navTargetsCommercial: "targetsCommercial",
     navCommercialPlan: "commercialPlan", navPurchasePlan: "purchasePlan", navCm3AnalystProducts: "cm3AnalystProducts",
-    navPpmAnalystProducts: "ppmAnalystProducts", navPpmAnalystSingle: "ppmAnalystSingle", navBundleRecommendations: "bundleRecommendations", navProductsMatchesAnalyst: "productsMatchesAnalyst",
+    navPpmAnalystProducts: "ppmAnalystProducts", navPpmAnalystSingle: "ppmAnalystSingle", navBundleRecommendations: "bundleRecommendations", navSkuLockReview: "skuLockReview", navMerchantLockReview: "merchantLockReview", navProductsMatchesAnalyst: "productsMatchesAnalyst",
     navScAging: "scAging", navScSkus: "scSkus", navScActions: "scActions", navCm3Analyst: "cm3Analyst", navPoorMatches: "poorMatches",
     navAvailabilityLocking: "availabilityLocking", navAllocationLocking: "allocationLocking", navHealthyUnlocking: "healthyUnlocking",
     navMpMatches: "mpMatches", navMpNewMatches: "mpNewMatches", navMpDeclineWatch: "mpDeclineWatch", navIncMerchants: "incentiveMerchants",

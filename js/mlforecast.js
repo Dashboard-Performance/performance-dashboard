@@ -16,7 +16,13 @@
     nm1: "Merchants last month", nm2: "Merchants 2 months ago", nm_chg: "Merchants change", top1_1: "Top merchant share", hhi_1: "Merchant concentration", ret_1: "Merchants who stayed", nm_mtd: "Merchants this month", nm14: "Merchants last 14d",
     top1_mtd: "Top merchant still selling", new_mtd: "New merchants' share", inb30: "Inbound 30d", inb90: "Inbound 90d", inb_mtd: "Inbound this month", since_inb: "Days since inbound", inb30_m1: "Inbound vs sales", bi_c: "Stock at month start",
     bi_cover: "Stock cover", avail_pace: "Stock vs pace", miss_pace1: "Last month's miss", miss_pace2: "Miss 2 months ago", miss_ma3_1: "Trend vs 3-mo avg", age_days: "SKU age", since_sale: "Days since last sale", nz_months6: "Months with sales",
-    scale: "Size", cat: "Category", p_chg30: "Price change 30d", p_chg90: "Price change 90d", dow_units_m: "Trading days of target month", len_m: "Days in target month", d: "Day of month", frac_c: "Share of month elapsed", len_c: "Days in this month" };
+    scale: "Size", cat: "Category", p_chg30: "Price change 30d", p_chg90: "Price change 90d", dow_units_m: "Trading days of target month", len_m: "Days in target month", d: "Day of month", frac_c: "Share of month elapsed", len_c: "Days in this month",
+    inb_n180: "Buys in last 180d", inb_n365: "Buys in last 365d", inb_gap_med: "Days between buys", inb_due: "Buy due (days since ÷ usual gap)", inb_mon6: "Months with a buy (of 6)",
+    inb_buy_sell180: "Bought vs sold (180d)", inb_last_cover: "Last buy ÷ daily sales", inb_first_age: "Days since first buy" };
+  var SPLIT_LABEL = { under_inbound: ["Under-forecast · stock was bought in the month", "Sales jumped after a buy — no inbound plan, so the model only knows the buying pattern"],
+    under_demand: ["Under-forecast · stock was there", "Demand rose with stock on hand"], over_demand: ["Over-forecast · stock was there", "Demand fell with stock on hand"],
+    empty_restocked: ["Empty at month start · restocked", "No stock on day 1, a buy arrived in the month"], empty_no_restock: ["Empty at month start · no restock", "No stock and nothing arrived"],
+    stockout: ["Ran out in the month", "Out of stock ≥ 30% of the days, forecast above actual"], no_stock_data: ["Not in the Stock Archive", ""] };
   var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal", "dash", "blend", "blend_gbm"];
 
   function esc(v) { return C && C.esc ? C.esc(v) : String(v == null ? "" : v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -101,6 +107,9 @@
     // month by month (the old months, as the model would have forecast them)
     h += '<div class="tw-card"><div class="mlf-bar" style="margin-top:0"><span><b>Past months, month by month</b><span class="mlf-dim"> · what the model would have forecast, compared with what really happened (all SKUs)</span></span><div class="mlf-seg">' +
       ["7", "14", "21", "end"].map(function (b) { return '<button data-bk="' + b + '" class="' + (S.bucket === b ? "on" : "") + '">' + (BUCKET_LABEL[b] || b).replace(" (locked)", "") + '</button>'; }).join("") + '</div></div>' + monthTable(D, S.bucket) + '</div>';
+    // where the error comes from (Stock Archive months only)
+    var es = (D.accuracy || {}).errorSplit;
+    if (es && es.length) h += '<div class="tw-card"><div class="tw-card-h"><b>Where the error comes from</b><span class="mlf-dim"> · month-end forecast, split with the Stock Archive (months it covers)</span></div>' + splitTable(es) + '</div>';
     // what the model looks at most
     if (D.importance && D.importance.length) {
       var mx = D.importance[0][1] || 1;
@@ -127,7 +136,7 @@
     host.innerHTML = h; wire(D, list);
     if (keepFocus) { var qi = $("mlfQ"); qi.focus(); try { qi.setSelectionRange(caret, caret); } catch (e) {} }
   }
-  function dataLine(D) { var d = D.data || {}, a = []; if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.source) a.push("source: " + d.source); if (d.merchants) a.push(n0(d.merchants) + " merchants"); if (d.inboundSkus) a.push("inbound for " + n0(d.inboundSkus) + " SKUs"); if (d.inbound === false) a.push("no inbound data"); if (d.beginInventory === false) a.push("no beginning inventory"); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); if (d.overlap && d.overlap.days) a.push("history tab vs Product Only on " + d.overlap.days + " shared days: " + (d.overlap.ratio == null ? "n/a" : "ratio " + (+d.overlap.ratio).toFixed(3) + " (1.000 = identical)")); if (d.stale) a.push("WARNING: " + d.stale); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
+  function dataLine(D) { var d = D.data || {}, a = []; if (d.inboundFrom) a.push("buying pattern from " + d.inboundFrom); if (d.stockArchiveDays) a.push(n0(d.stockArchiveDays) + " days of Stock Archive"); if (D.stockCap && D.stockCap.skus) a.push("stock cap on " + n0(D.stockCap.skus) + " SKUs (no buy for > " + D.stockCap.noInboundDays + " days → ≤ " + D.stockCap.stockX + "× stock)"); if (d.skus != null) a.push(n0(d.skus) + " Single SKUs"); if (d.firstDay) a.push("daily from " + d.firstDay); if (d.source) a.push("source: " + d.source); if (d.merchants) a.push(n0(d.merchants) + " merchants"); if (d.inboundSkus) a.push("inbound for " + n0(d.inboundSkus) + " SKUs"); if (d.inbound === false) a.push("no inbound data"); if (d.beginInventory === false) a.push("no beginning inventory"); if (d.categories === false) a.push("no categories"); if (d.prices === false) a.push("no price history"); if (d.overlap && d.overlap.days) a.push("history tab vs Product Only on " + d.overlap.days + " shared days: " + (d.overlap.ratio == null ? "n/a" : "ratio " + (+d.overlap.ratio).toFixed(3) + " (1.000 = identical)")); if (d.stale) a.push("WARNING: " + d.stale); return a.length ? a.join(", ") : "daily confirmed pieces per Single SKU"; }
 
   function accTable(acc, segKey, champ) {
     var b = Object.keys(acc).length; if (!b) return '<div class="mlf-empty">Not enough finished months to run a backtest yet.</div>';
@@ -151,6 +160,19 @@
         return '<tr><td>' + esc(monthName(r.month)) + '</td><td class="num">' + n0(r.actual) + '</td><td class="num">' + n0(r.ensF) + '</td><td class="num ' + (bias == null ? "" : bias >= 0 ? "mlf-up" : "mlf-down") + '">' + (bias == null ? "—" : (bias >= 0 ? "+" : "") + pct(bias)) + '</td>' +
           cols.map(function (c) { return '<td class="num' + (c[0] === bk2 ? " best" : "") + '">' + pct(r[c[0]]) + '</td>'; }).join("") + '</tr>';
       }).join("") + '</tbody></table></div><p class="mlf-note">Each month is forecast only with what was known on that day of the month before it. Accuracy = 1 − total absolute error ÷ total actual pieces. Green = best of the four on that month.</p>';
+  }
+  function splitTable(es) {
+    var keys = Object.keys(SPLIT_LABEL);
+    var h = '<div class="table-responsive"><table class="mlf-t"><thead><tr><th>Reason</th>' + es.map(function (r) { return '<th class="num">' + esc(monthName(r.month)) + ' · share of error</th><th class="num">Actual → forecast</th>'; }).join("") + '</tr></thead><tbody>';
+    keys.forEach(function (k) {
+      if (!es.some(function (r) { return r.classes && r.classes[k]; })) return;
+      h += '<tr><td><b>' + esc(SPLIT_LABEL[k][0]) + '</b><br><span class="mlf-dim" style="font-size:11.5px">' + esc(SPLIT_LABEL[k][1]) + '</span></td>' + es.map(function (r) {
+        var c = (r.classes || {})[k]; if (!c) return '<td class="num mlf-dim">—</td><td class="num mlf-dim">—</td>';
+        return '<td class="num"><b>' + pct(c.share) + '</b> <span class="mlf-dim">(' + n0(c.n) + ' SKUs)</span></td><td class="num">' + n0(c.actual) + ' → ' + n0(c.forecast) + '</td>';
+      }).join("") + '</tr>';
+    });
+    h += '<tr><td class="mlf-dim">Accuracy that month</td>' + es.map(function (r) { return '<td class="num"><b>' + pct(r.accuracy) + '</b></td><td></td>'; }).join("") + '</tr>';
+    return h + '</tbody></table></div><p class="mlf-note">Each month uses the model that would have been chosen from the 3 months before it. Share = that group\'s absolute error ÷ all the error that month. Stock is read from the Stock_Archive tab (daily from 23 Aug 2026), so older months are not split.</p>';
   }
   function lockedTable(la) {
     if (!la.length) return '<div class="mlf-empty">Nothing to score yet: a frozen forecast is scored once its month has finished. The first one is frozen on the 1st of the next month.</div>';
