@@ -45,4 +45,34 @@ SHEET_ID = "1Vg8P1EL5y_FqQSR7_uDI1XtB-gDe0Bkj7IqbiOzNgxA"
 # 2) Worker secret RESEND_API_KEY, 3) set MAIL_FROM below, e.g.
 #    MAIL_FROM = "Taager Dashboard <no-reply@yourdomain.com>"
 MAIL_FROM = "Taager Dashboard <no-reply@mail.taager.app>"
+DECLINE_DIGEST = "on"   # v1.17.0 Decline Matches daily email from the dashboard (12:00 Cairo): "test" = only DIGEST_TEST_TO · "on" = whole team · "off"
+DIGEST_TEST_TO = "youssef.hanafy@taager.com"
+PLANNER_DOH_EXPORT = "on"   # Planner DOH -> planning sheet, 11:00 Cairo
+SUPPLY_CONVERSION_EXPORT = "on"   # v1.17.0 — Supply conversion -> its own sheet every day at 11:30 Cairo ("off" to stop)
+INV_CATEGORY_EXPORT = "on"   # v1.17.0 — Inventory & DOH per category -> its own tab every day at 11:45 Cairo ("off" to stop)
 DASHBOARD_URL = "https://center-control.taager.app/"   # the link inside invite emails
+
+# v1.16.2 — Merchant invites: the merchant portal address. Merchant-role invites create the portal account and email a link to it.
+PORTAL_URL = "https://merchants.taager.app"
+
+# v1.17.0 — Shared snapshot (cold start). The dashboard pushes the gzipped snapshot here and
+# anyone opening it with an empty browser cache paints from it instantly instead of waiting
+# out the full sheet load. Create the bucket once:
+#   npx wrangler r2 bucket create taager-dashboard-snapshot
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "taager-dashboard-snapshot"
+
+[observability]
+enabled = true
+
+# v1.17.0 — Command Loop
+# 1) npx wrangler d1 create taager-command-loop   → paste the database_id below
+[[d1_databases]]
+binding = "LOOP_DB"
+database_name = "taager-command-loop"
+database_id = "44178cfb-2469-4f79-a213-f39ef10a4c6a"
+
+# The scoring engine reads the whole Main query twice a day (Workers Paid plan — the portal already needs it).
+[limits]
+cpu_ms = 300000

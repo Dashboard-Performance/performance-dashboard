@@ -1,3 +1,6 @@
+import { createLoop } from "./loop-api.js";
+import { createUsage } from "./usage.js";
+import { createMl } from "./ml.js"; // v1.17.8 — Usage Log (who opened the dashboard, when, for how long, which tabs)
 /* ==========================================================================
    Performance Dashboard — Sync Cache Worker (Cloudflare Workers)
    --------------------------------------------------------------------------
@@ -135,20 +138,398 @@ const METABASE_SOURCES = {
   "1409034448": { label: "Products Debundle Map", url: "https://metabase.taager.com/public/question/022be39b-ece7-4252-ba69-62f034369919.json" },
   "1779314157": { label: "Products", url: "https://metabase.taager.com/public/question/7d6164a3-d064-445f-98cf-b55623a25957.json" },
   "2085802038": { label: "Availability Locking", url: "https://metabase.taager.com/public/question/6048f9a4-87b4-4a88-88d9-c2ac5e81e492.json" },
-  "2099497960": { label: "Main", url: "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv" }
+  "2099497960": { label: "Main", url: "https://metabase.taager.com/api/public/card/8ac644f8-153f-4c32-a2fb-98e72d6c9180/query/csv" },
+  // v1.18.0 — Merchant Only: one row per (day x merchant x ACC_MANAGER), current month MTD + the whole previous month. ACM pages read it.
+  "7100000001": { label: "Merchant Only", url: "https://metabase.taager.com/public/question/45b35431-c252-4a93-8021-41ae1fc53d8e.csv" },
+  // v1.18.0 — Product Only: one row per (day x product x IS_PRIMARY), current month MTD + the whole previous month. Product / category pages read it.
+  "7100000002": { label: "Product Only", url: "https://metabase.taager.com/public/question/b55fc346-3f40-4e09-b194-ecdb55b7037b.csv" }
 };
 function metabaseLink(env, gid) {
   if (env.METABASE_LINKS) { try { const o = JSON.parse(env.METABASE_LINKS); if (o[gid]) return String(o[gid]); } catch (e) {} }
   return METABASE_SOURCES[gid] ? METABASE_SOURCES[gid].url : "";
 }
+// v1.17.0 — "last good copy" guard for every Metabase source.
+// When Metabase fails, times out, or returns a result that suddenly shrank (a partial / broken refresh),
+// the dashboard (and the Command Loop engine) get the LAST GOOD copy instead, marked with
+//   X-Data-Source: cache · X-Cached-At: <when it was fetched> · X-Cache-Reason: <why>
+// so the numbers never collapse at once. A smaller result is accepted only after it stays the same for
+// MB_ACCEPT_SMALLER_HOURS (a real change in the query), or when an owner accepts it (action=metabaseAccept).
+const MB_TOTAL_DROP = 0.15;        // total rows fell by more than 15% → suspicious
+const MB_MONTH_DROP = 0.10;        // Main: a month (seen in the last good copy) lost more than 10% of its rows → suspicious
+const MB_ACCEPT_SMALLER_HOURS = 12;
+const MB_SAVE_EVERY_MS = 10 * 60 * 1000;
+const MB_FETCH_TIMEOUT_MS = 170000;
+const MB_MONTHS_GIDS = { "2099497960": true, "7100000001": true, "7100000002": true }; // CSV sources with a date in the first column (per-month check)
+const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function mbMonthOf(txt) {
+  const t = String(txt || "").trim();
+  let m = /^(\d{4})-(\d{1,2})/.exec(t); if (m) return m[1] + "-" + m[2].padStart(2, "0");
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t); if (m) return m[3] + "-" + m[1].padStart(2, "0");
+  m = /^([A-Za-z]{3})[a-z]*\.?\s+\d{1,2},?\s+(\d{4})/.exec(t); if (m && MON[m[1].toLowerCase()]) return m[2] + "-" + String(MON[m[1].toLowerCase()]).padStart(2, "0");
+  return "";
+}
+// Cheap shape of a Metabase answer, straight from the bytes: { ok, kind, rows, months{YYYY-MM: rows}, why }
+function mbShape(bytes, csv, withMonths) {
+  const n = bytes.length; if (!n) return { ok: false, why: "empty answer" };
+  let i = 0; while (i < n && (bytes[i] === 0xEF || bytes[i] === 0xBB || bytes[i] === 0xBF || bytes[i] <= 32)) i++;
+  const c0 = bytes[i];
+  if (csv) {
+    if (c0 === 60 || c0 === 123 || c0 === 91) return { ok: false, why: "not CSV (Metabase error page / JSON)" };
+    let rows = -1, start = i; const months = {}, dec = new TextDecoder(), seen = new Map();
+    for (let j = i; j <= n; j++) {
+      if (j === n || bytes[j] === 10) {
+        if (j > start + 1) {
+          rows++;
+          if (withMonths && rows > 0) {
+            let a = start, b; if (bytes[a] === 34) { a++; b = a; while (b < j && bytes[b] !== 34) b++; } else { b = a; while (b < j && bytes[b] !== 44) b++; }
+            const raw = dec.decode(bytes.subarray(a, Math.min(b, a + 40)));
+            let mo = seen.get(raw); if (mo === undefined) { mo = mbMonthOf(raw); seen.set(raw, mo); }
+            if (mo) months[mo] = (months[mo] || 0) + 1;
+          }
+        }
+        start = j + 1;
+      }
+    }
+    if (rows < 1) return { ok: false, why: "no data rows" };
+    return { ok: true, kind: "csv", rows, months: withMonths ? months : null };
+  }
+  if (c0 !== 91) {
+    if (c0 === 123) { // {"data":{"rows":[...]}} (query/json of a card) or an error object
+      const head = new TextDecoder().decode(bytes.subarray(i, Math.min(n, i + 400)));
+      if (/"(error|status)"\s*:\s*"(failed|.*error)/i.test(head) || !/"rows"/.test(head)) return { ok: false, why: "Metabase error: " + head.replace(/\s+/g, " ").slice(0, 120) };
+    } else return { ok: false, why: "not JSON" };
+  }
+  // count objects at depth 1 of the top-level array (or depth 3 inside data.rows arrays)
+  let depth = 0, inStr = false, esc = false, rows = 0;
+  for (let j = i; j < n; j++) {
+    const ch = bytes[j];
+    if (inStr) { if (esc) esc = false; else if (ch === 92) esc = true; else if (ch === 34) inStr = false; continue; }
+    if (ch === 34) inStr = true;
+    else if (ch === 91 || ch === 123) { if (depth === 1 && (ch === 123 || ch === 91) && c0 === 91) rows++; depth++; }
+    else if (ch === 93 || ch === 125) depth--;
+  }
+  if (c0 === 123) { const t = new TextDecoder().decode(bytes); try { const j = JSON.parse(t); rows = j && j.data && Array.isArray(j.data.rows) ? j.data.rows.length : 0; } catch (e) { return { ok: false, why: "broken JSON" }; } }
+  if (rows < 1) return { ok: false, why: "no data rows" };
+  return { ok: true, kind: "json", rows, months: null };
+}
+// Is the new answer a sudden collapse vs the last good copy? → reason text, or "" when fine.
+// Sources that show the CURRENT month only (they restart from ~0 on the 1st): a smaller answer in a new calendar month (Cairo) is normal, not a failure.
+const MB_MONTH_RESET_GIDS = { "620123165": true }; // Merchant Segmentation
+function cairoMonthOf(ms) { try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit" }).format(new Date(ms)); } catch (e) { return new Date(ms).toISOString().slice(0, 7); } }
+function mbShrunk(shape, good, gid) {
+  if (!good || !good.rows) return "";
+  if (MB_MONTH_RESET_GIDS[gid] && good.at && cairoMonthOf(Date.parse(good.at)) < cairoMonthOf(Date.now())) return "";   // the month changed since the last good copy
+  if (shape.months && good.months) {
+    const ks = Object.keys(good.months).sort(), oldest = ks[0];
+    for (const k of ks) {
+      if (k === oldest && ks.length > 1) continue; // the oldest month may roll out of the query window
+      const was = good.months[k], now = shape.months[k] || 0;
+      if (was >= 50 && now < was * (1 - MB_MONTH_DROP)) return k + " rows fell from " + was.toLocaleString("en-US") + " to " + now.toLocaleString("en-US");
+    }
+    // The query window moves with the calendar ("previous month + this month so far"): on the 1st the whole older month drops out, which is not a failure.
+    // So the total is compared only over the months the new answer still covers.
+    const nk = Object.keys(shape.months).sort();
+    if (nk.length) {
+      const inWindow = ks.filter((k) => k >= nk[0]).reduce((a, k) => a + good.months[k], 0);
+      if (inWindow > 0 && shape.rows < inWindow * (1 - MB_TOTAL_DROP)) return "rows fell from " + inWindow.toLocaleString("en-US") + " to " + shape.rows.toLocaleString("en-US");
+      return "";
+    }
+  }
+  if (shape.rows < good.rows * (1 - MB_TOTAL_DROP)) return "rows fell from " + good.rows.toLocaleString("en-US") + " to " + shape.rows.toLocaleString("en-US");
+  return "";
+}
+async function mbGunzip(buf) { return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer(); }
+async function mbGzipBytes(bytes) { return new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); }
+// → { gz?:ArrayBuffer (cached copy, gzip), bytes?:Uint8Array (live), contentType, source:"live"|"cache", cachedAt, reason, status }
+async function metabaseGuarded(env, gid) {
+  const target = metabaseLink(env, gid); if (!target) return { status: 404 };
+  const csv = /\/csv(\?|$)|\.csv(\?|$)/i.test(target), metaKey = "mb:meta:" + gid, bodyKey = "mb:good:" + gid, susKey = "mb:sus:" + gid;
+  const kv = env.SYNC_CACHE;
+  let good = null; try { good = JSON.parse((await kv.get(metaKey)) || "null"); } catch (e) {}
+  let bytes = null, ct = "", why = "";
+  try {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), MB_FETCH_TIMEOUT_MS);
+    try {
+      const r = await fetch(target, { redirect: "follow", signal: ac.signal });
+      ct = r.headers.get("Content-Type") || (csv ? "text/csv" : "application/json");
+      if (!r.ok) why = "Metabase HTTP " + r.status; else bytes = new Uint8Array(await r.arrayBuffer());
+    } finally { clearTimeout(t); }
+  } catch (e) { why = "Metabase did not answer (" + ((e && e.name === "AbortError") ? "timeout" : (e && e.message) || "network") + ")"; }
+  let shape = null;
+  if (bytes) { shape = mbShape(bytes, csv, !!MB_MONTHS_GIDS[gid]); if (!shape.ok) why = shape.why; }
+  if (shape && shape.ok) {
+    const shrunk = mbShrunk(shape, good, gid);
+    if (shrunk) {
+      // the same smaller answer for MB_ACCEPT_SMALLER_HOURS → accept it as the new normal
+      let sus = null; try { sus = JSON.parse((await kv.get(susKey)) || "null"); } catch (e) {}
+      const now = Date.now();
+      if (!sus || Math.abs(sus.rows - shape.rows) > Math.max(5, sus.rows * 0.02)) { sus = { first: now, rows: shape.rows, why: shrunk }; await kv.put(susKey, JSON.stringify(sus)); }
+      // v1.18.0 — a ONE-row answer is a broken export (Metabase's .json/.csv started returning only the first row of
+      // Beginning Inventory on 1 Nov while the question itself shows every row), never a real change: it is not auto-accepted
+      // after MB_ACCEPT_SMALLER_HOURS. An owner can still accept it on purpose (action=metabaseAccept).
+      const brokenExport = shape.rows <= 1 && good.rows > 1;
+      if ((brokenExport || now - sus.first < MB_ACCEPT_SMALLER_HOURS * 3600e3) && !(await kv.get("mb:accept:" + gid))) why = "incomplete answer (" + shrunk + (brokenExport ? " — one row only, not auto-accepted" : "") + ")";
+    }
+  }
+  if (!why && bytes) {
+    // healthy → keep it as the last good copy (at most every 10 minutes, or right away when it changed)
+    const changed = !good || good.rows !== shape.rows || good.size !== bytes.length;
+    if (changed || !good.at || Date.now() - Date.parse(good.at) > MB_SAVE_EVERY_MS) {
+      try {
+        const gz = await mbGzipBytes(bytes);
+        if (gz.byteLength < 24 * 1024 * 1024) {
+          await kv.put(bodyKey, gz);
+          await kv.put(metaKey, JSON.stringify({ at: new Date().toISOString(), rows: shape.rows, months: shape.months, size: bytes.length, ct }));
+          await kv.delete(susKey); await kv.delete("mb:accept:" + gid);
+        }
+      } catch (e) { console.warn("[metabase guard] could not save last good copy of " + gid + ":", e && e.message); }
+    }
+    return { bytes, contentType: ct, source: "live", status: 200, rows: shape.rows };
+  }
+  // problem → last good copy if we have one
+  const gz = good ? await kv.get(bodyKey, { type: "arrayBuffer" }) : null;
+  if (gz) {
+    await kv.put("mb:last-problem:" + gid, JSON.stringify({ at: new Date().toISOString(), why, rows: shape && shape.ok ? shape.rows : null }));
+    return { gz, contentType: good.ct || ct || (csv ? "text/csv" : "application/json"), source: "cache", cachedAt: good.at, reason: why, status: 200, rows: good.rows };
+  }
+  // nothing saved yet → pass the live answer through (or the error)
+  if (bytes) return { bytes, contentType: ct, source: "live", status: 200, reason: why };
+  return { status: 502, reason: why };
+}
 async function handleMetabaseProxy(url, env) {
-  const target = metabaseLink(env, String(url.searchParams.get("gid") || ""));
-  if (!target) return jsonResponse({ success: false, message: "unknown source" }, 404);
-  const r = await fetch(target, { redirect: "follow" });
+  const gid = String(url.searchParams.get("gid") || "");
+  if (!metabaseLink(env, gid)) return jsonResponse({ success: false, message: "unknown source" }, 404);
+  const g = await metabaseGuarded(env, gid);
   const h = corsHeaders();
-  h["Content-Type"] = r.headers.get("Content-Type") || "application/octet-stream";
-  h["Cache-Control"] = "no-store";
-  return new Response(r.body, { status: r.status, headers: h });
+  h["Cache-Control"] = "no-store, no-transform";
+  h["X-Data-Source"] = g.source || "none";
+  if (g.cachedAt) h["X-Cached-At"] = g.cachedAt;
+  if (g.reason) h["X-Cache-Reason"] = String(g.reason).replace(/[^\x20-\x7E]/g, " ").slice(0, 200);
+  if (g.status !== 200) return new Response(JSON.stringify({ success: false, message: g.reason || "Metabase failed" }), { status: g.status || 502, headers: h });
+  h["Content-Type"] = g.contentType;
+  if (g.gz) { h["Content-Encoding"] = "gzip"; return new Response(g.gz, { status: 200, headers: h, encodeBody: "manual" }); }
+  return new Response(g.bytes, { status: 200, headers: h });
+}
+// Same thing for code inside the Worker (Command Loop engine): a plain Response + where it came from.
+async function metabaseResponse(env, gid) {
+  const g = await metabaseGuarded(env, gid);
+  if (g.status !== 200) throw new Error(g.reason || "Metabase failed (gid " + gid + ")");
+  const body = g.gz ? await mbGunzip(g.gz) : g.bytes;
+  const r = new Response(body, { headers: { "Content-Type": g.contentType || "application/octet-stream" } });
+  r.dataSource = { source: g.source, cachedAt: g.cachedAt || null, reason: g.reason || "" };
+  return r;
+}
+// Owner: "the smaller answer is right — use it now" (e.g. the query was changed on purpose).
+async function handleMetabaseAccept(url, env) {
+  const email = String(url.searchParams.get("email") || "").trim().toLowerCase(), gid = String(url.searchParams.get("gid") || "");
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  if (!metabaseLink(env, gid)) return jsonResponse({ success: false, message: "unknown source" }, 404);
+  await env.SYNC_CACHE.put("mb:accept:" + gid, "1", { expirationTtl: 3600 });
+  return jsonResponse({ success: true, message: "The next answer for " + gid + " will be accepted as the new normal." });
+}
+// v1.17.0 — Decline Matches daily email, sent BY THE DASHBOARD (not from a personal Gmail).
+// The cron (every minute) checks Cairo time; between 12:00 and 14:59 it sends once per day:
+// Apps Script builds the email (same data + design as before) → the Worker sends it with Resend
+// from MAIL_FROM's address (mail.taager.app). If Resend fails it falls back to the old relay.
+// Turn off with DECLINE_DIGEST = "off" in wrangler.toml.
+const DIGEST_HOUR = 12, DIGEST_LAST_HOUR = 14, DIGEST_RETRY_MS = 15 * 60 * 1000, DIGEST_MAX_TRIES = 3;
+function cairoNowParts(d) {
+  const p = {}; new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
+    .formatToParts(d || new Date()).forEach((x) => { p[x.type] = x.value; });
+  return { date: p.year + "-" + p.month + "-" + p.day, hour: Number(p.hour) };
+}
+// DECLINE_DIGEST: "test" = only DIGEST_TEST_TO gets it (default youssef.hanafy@taager.com), the team keeps getting the old email;
+// "on" = the whole team, from the dashboard; "off" = nothing.
+function digestMode(env) { const m = String(env.DECLINE_DIGEST || "test").trim().toLowerCase(); return m === "on" || m === "off" ? m : "test"; }
+function digestTestTo(env) { return String(env.DIGEST_TEST_TO || "youssef.hanafy@taager.com").trim().toLowerCase(); }
+function digestFrom(env) {
+  if (env.DIGEST_FROM) return env.DIGEST_FROM;
+  const m = String(env.MAIL_FROM || "").match(/<([^>]+)>/), addr = m ? m[1] : String(env.MAIL_FROM || "").trim();
+  return addr ? "Marketplace Dashboard <" + addr + ">" : "";
+}
+async function sendDeclineDigest(env, opts) {
+  opts = opts || {};
+  const test = opts.test != null ? !!opts.test : digestMode(env) !== "on";
+  const now = cairoNowParts(opts.now), key = "digest:decline:" + (opts.force ? "manual:" : "") + (test ? "test:" : "") + now.date;
+  let st = null; try { st = JSON.parse((await env.SYNC_CACHE.get(key)) || "null"); } catch (e) {}
+  if (!opts.force) {
+    if (digestMode(env) === "off") return { skipped: "off" };
+    if (now.hour < DIGEST_HOUR || now.hour > DIGEST_LAST_HOUR) return { skipped: "time" };
+    if (st && (st.state === "sent" || st.state === "empty")) return { skipped: "done" };
+    if (st && st.state === "running" && Date.now() - Date.parse(st.at) < 20 * 60 * 1000) return { skipped: "running" };
+    if (st && st.state === "failed" && ((st.tries || 0) >= DIGEST_MAX_TRIES || Date.now() - Date.parse(st.at) < DIGEST_RETRY_MS)) return { skipped: "wait" };
+  }
+  const tries = ((st && st.tries) || 0) + 1, put = (o) => env.SYNC_CACHE.put(key, JSON.stringify(Object.assign({ date: now.date, tries, by: opts.by || "schedule", test }, o)), { expirationTtl: 4 * 86400 })
+    .then(() => env.SYNC_CACHE.put("digest:decline:last", JSON.stringify(Object.assign({ date: now.date, tries, by: opts.by || "schedule", test }, o)), { expirationTtl: 30 * 86400 }));
+  await put({ state: "running", at: new Date().toISOString() });
+  try {
+    const b = await callAppsScriptPost(env, { action: "decline_digest_build", serviceKey: env.SERVICE_KEY || "", test });
+    if (!b || b.success !== true) throw new Error((b && (b.message || b.error)) || "Apps Script did not build the email");
+    if (b.empty) { await put({ state: "empty", at: new Date().toISOString(), note: "No declining matches — nothing sent." }); return { state: "empty" }; }
+    let to = (b.recipients || []).map((x) => String(x).trim().toLowerCase()).filter((x) => /@taager\.com$/.test(x));
+    if (test) { to = [opts.testTo || digestTestTo(env)].filter((x) => /@taager\.com$/.test(x)); b.subject = "[TEST] " + b.subject; }
+    if (!to.length) throw new Error("No recipients");
+    let via = "", why = "";
+    const from = digestFrom(env);
+    if (env.RESEND_API_KEY && from) {
+      const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, subject: b.subject, html: b.html, reply_to: env.DIGEST_REPLY_TO || undefined }) });
+      if (r.ok) via = "dashboard"; else why = "Resend HTTP " + r.status + " " + (await r.text()).slice(0, 200);
+    } else why = "RESEND_API_KEY / MAIL_FROM not set";
+    if (!via) {
+      const rr = await callAppsScriptPost(env, { action: "decline_digest_relay", serviceKey: env.SERVICE_KEY || "", subject: b.subject, html: b.html, testTo: test ? to[0] : undefined });
+      if (!rr || rr.success !== true) throw new Error(why + " · relay: " + ((rr && (rr.message || rr.error)) || "failed"));
+      via = "relay";
+    }
+    const done = { state: "sent", at: new Date().toISOString(), via, rows: b.rows, recipients: to.length, to: test ? to : undefined, subject: b.subject, note: why || undefined };
+    await put(done);
+    return done;
+  } catch (e) {
+    const fail = { state: "failed", at: new Date().toISOString(), message: String((e && e.message) || e).slice(0, 400) };
+    await put(fail);
+    return fail;
+  }
+}
+async function handleDeclineDigestStatus(env) {
+  let last = null; try { last = JSON.parse((await env.SYNC_CACHE.get("digest:decline:last")) || "null"); } catch (e) {}
+  const mode = digestMode(env);
+  return jsonResponse({ success: true, mode, on: mode !== "off", testTo: mode === "test" ? digestTestTo(env) : undefined, hour: DIGEST_HOUR + ":00 Cairo", from: digestFrom(env), resend: !!env.RESEND_API_KEY, last });
+}
+async function handleDeclineDigestSend(request, url, env) {
+  // who is asking: the signed-in staff session (the email in the link is only used when the staff gate is off)
+  let email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (staffGateOn(env)) { const ss = await staffSession(request, url, env, "declineDigestSend"); email = ss && ss.e ? String(ss.e).toLowerCase() : ""; }
+  const test = url.searchParams.get("test") === "1" || digestMode(env) !== "on";
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  let last = null; try { last = JSON.parse((await env.SYNC_CACHE.get("digest:decline:last")) || "null"); } catch (e) {}
+  if (last && last.state === "running" && Date.now() - Date.parse(last.at) < 3 * 60 * 1000) return jsonResponse({ success: false, message: "Already sending — wait a minute." }, 429);
+  const out = await sendDeclineDigest(env, { force: true, by: email, test, testTo: email });
+  return jsonResponse(Object.assign({ success: out.state === "sent" || out.state === "empty" }, out));
+}
+
+// v1.17.0 — Planner DOH (Single SKUs) copied into the planning Google Sheet every day at 11:00 Cairo.
+// The Apps Script computes the table (same rules as the dashboard page) and writes it; the Worker only times it.
+// Retries every 15 min (max 3 tries) until 13:59. Off with PLANNER_DOH_EXPORT = "off".
+const PDOH_HOUR = 11, PDOH_LAST_HOUR = 13;
+async function runPlannerDohExport(env, opts) {
+  opts = opts || {};
+  const now = cairoNowParts(opts.now), key = "export:plannerdoh:" + (opts.force ? "manual:" : "") + now.date;
+  let st = null; try { st = JSON.parse((await env.SYNC_CACHE.get(key)) || "null"); } catch (e) {}
+  if (!opts.force) {
+    if (String(env.PLANNER_DOH_EXPORT || "on").toLowerCase() === "off") return { skipped: "off" };
+    if (now.hour < PDOH_HOUR || now.hour > PDOH_LAST_HOUR) return { skipped: "time" };
+    if (st && st.state === "done") return { skipped: "done" };
+    if (st && st.state === "running" && Date.now() - Date.parse(st.at) < 20 * 60 * 1000) return { skipped: "running" };
+    if (st && st.state === "failed" && ((st.tries || 0) >= 3 || Date.now() - Date.parse(st.at) < 15 * 60 * 1000)) return { skipped: "wait" };
+  }
+  const tries = ((st && st.tries) || 0) + 1;
+  const put = (o) => { const v = JSON.stringify(Object.assign({ date: now.date, tries, by: opts.by || "schedule" }, o)); return env.SYNC_CACHE.put(key, v, { expirationTtl: 4 * 86400 }).then(() => env.SYNC_CACHE.put("export:plannerdoh:last", v, { expirationTtl: 30 * 86400 })); };
+  await put({ state: "running", at: new Date().toISOString() });
+  try {
+    const payload = await pdohLoad(env);
+    if (!payload) throw new Error("The dashboard has not sent a Planner DOH table yet — open Supply Chain → Planner DOH once and it will.");
+    const r = await pdohWrite(env, payload);
+    // sentAt = when the dashboard last sent this table; the daily run only rewrites what it was given.
+    const done = { state: "done", at: new Date().toISOString(), rows: r.rows, yday: r.yday, sentAt: payload.sentAt || "" };
+    await put(done); return done;
+  } catch (e) {
+    const fail = { state: "failed", at: new Date().toISOString(), message: String((e && e.message) || e).slice(0, 400) };
+    await put(fail); return fail;
+  }
+}
+async function handlePlannerDohExport(request, url, env) {
+  let email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (staffGateOn(env)) { const ss = await staffSession(request, url, env, "plannerDohExport"); email = ss && ss.e ? String(ss.e).toLowerCase() : ""; }
+  if (url.searchParams.get("run") !== "1") { let last = null; try { last = JSON.parse((await env.SYNC_CACHE.get("export:plannerdoh:last")) || "null"); } catch (e) {} return jsonResponse({ success: true, hour: PDOH_HOUR + ":00 Cairo", on: String(env.PLANNER_DOH_EXPORT || "on").toLowerCase() !== "off", last }); }
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  const out = await runPlannerDohExport(env, { force: true, by: email });
+  return jsonResponse(Object.assign({ success: out.state === "done" }, out));
+}
+
+// v1.17.0 — Supply conversion (Supply Chain) copied into its own planning sheet every day at 11:30 Cairo.
+// Half an hour after Planner DOH and before the Decline email, so two Apps Script runs never overlap.
+// The Apps Script builds and writes the table (action supply_conversion_export); the Worker only times it.
+// Retries every 15 min (max 3 tries) until 13:59. Off with SUPPLY_CONVERSION_EXPORT = "off".
+const PSC_AT_MIN = 11 * 60 + 30, PSC_LAST_MIN = 13 * 60 + 59;
+function cairoMinutes(d) {
+  const p = {};
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(d || new Date()).forEach((x) => { p[x.type] = x.value; });
+  return Number(p.hour) * 60 + Number(p.minute);
+}
+async function runSupplyConversionExport(env, opts) {
+  opts = opts || {};
+  const now = cairoNowParts(opts.now), mins = cairoMinutes(opts.now);
+  const key = "export:supplyconv:" + (opts.force ? "manual:" : "") + now.date;
+  let st = null; try { st = JSON.parse((await env.SYNC_CACHE.get(key)) || "null"); } catch (e) {}
+  if (!opts.force) {
+    if (String(env.SUPPLY_CONVERSION_EXPORT || "on").toLowerCase() === "off") return { skipped: "off" };
+    if (mins < PSC_AT_MIN || mins > PSC_LAST_MIN) return { skipped: "time" };
+    if (st && st.state === "done") return { skipped: "done" };
+    if (st && st.state === "running" && Date.now() - Date.parse(st.at) < 20 * 60 * 1000) return { skipped: "running" };
+    if (st && st.state === "failed" && ((st.tries || 0) >= 3 || Date.now() - Date.parse(st.at) < 15 * 60 * 1000)) return { skipped: "wait" };
+  }
+  const tries = ((st && st.tries) || 0) + 1;
+  const put = (o) => { const v = JSON.stringify(Object.assign({ date: now.date, tries, by: opts.by || "schedule" }, o)); return env.SYNC_CACHE.put(key, v, { expirationTtl: 4 * 86400 }).then(() => env.SYNC_CACHE.put("export:supplyconv:last", v, { expirationTtl: 30 * 86400 })); };
+  await put({ state: "running", at: new Date().toISOString() });
+  try {
+    const r = await callAppsScriptPost(env, { action: "supply_conversion_export", serviceKey: env.SERVICE_KEY || "" });
+    if (!r || r.success !== true) throw new Error((r && (r.message || r.error)) || "Apps Script did not write the sheet");
+    const done = { state: "done", at: new Date().toISOString(), month: r.month, skus: r.skus };
+    await put(done); return done;
+  } catch (e) {
+    const fail = { state: "failed", at: new Date().toISOString(), message: String((e && e.message) || e).slice(0, 400) };
+    await put(fail); return fail;
+  }
+}
+async function handleSupplyConversionExport(request, url, env) {
+  let email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (staffGateOn(env)) { const ss = await staffSession(request, url, env, "supplyConversionExport"); email = ss && ss.e ? String(ss.e).toLowerCase() : ""; }
+  if (url.searchParams.get("run") !== "1") {
+    let last = null; try { last = JSON.parse((await env.SYNC_CACHE.get("export:supplyconv:last")) || "null"); } catch (e) {}
+    return jsonResponse({ success: true, at: "11:30 Cairo", on: String(env.SUPPLY_CONVERSION_EXPORT || "on").toLowerCase() !== "off", last });
+  }
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  const out = await runSupplyConversionExport(env, { force: true, by: email });
+  return jsonResponse(Object.assign({ success: out.state === "done" }, out));
+}
+
+// v1.17.0 — Supply Chain: ACTUAL returns (warehouse scans, "Product is good") from the Return_Archive_YYYY-MM sheet,
+// read by the Apps Script backend (action actual_returns). Cached 20 min; a failed or suddenly smaller answer keeps the last good copy.
+const RET_FRESH_MS = 20 * 60 * 1000;
+async function handleActualReturns(url, env) {
+  const now = new Date(), cairo = new Date(now.getTime() + 2 * 3600e3);
+  let month = String(url.searchParams.get("month") || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) month = cairo.toISOString().slice(0, 7);
+  const key = "returns:actual:" + month;
+  let good = null; try { good = JSON.parse((await env.SYNC_CACHE.get(key)) || "null"); } catch (e) {}
+  const force = url.searchParams.get("refresh") === "1";
+  if (good && !force && Date.now() - Date.parse(good.at) < RET_FRESH_MS) return jsonResponse(Object.assign({ success: true, source: "live" }, good));
+  let why = "";
+  if (!env.APPS_SCRIPT_URL) why = "APPS_SCRIPT_URL is not set on the Worker";
+  else {
+    try {
+      const j = await callAppsScriptPost(env, { action: "actual_returns", serviceKey: env.SERVICE_KEY || "", month });
+      if (!j || !j.success) why = (j && (j.message || j.error)) || "Apps Script failed";
+      else if (good && good.total > 0 && (j.total || 0) < good.total * 0.85) why = "returns total fell from " + Math.round(good.total).toLocaleString("en-US") + " to " + Math.round(j.total || 0).toLocaleString("en-US");
+      else {
+        const fresh = { at: new Date().toISOString(), month, file: j.file || "", fileUpdated: j.fileUpdated || null, lastScan: j.lastScan || null, rows: j.rows || 0, total: j.total || 0, skus: j.skus || {} };
+        await env.SYNC_CACHE.put(key, JSON.stringify(fresh));
+        return jsonResponse(Object.assign({ success: true, source: "live" }, fresh));
+      }
+    } catch (e) { why = "Apps Script did not answer (" + ((e && e.message) || "network") + ")"; }
+  }
+  if (good) return jsonResponse(Object.assign({ success: true, source: "cache", cachedAt: good.at, reason: why }, good));
+  return jsonResponse({ success: false, month, message: why }, 502);
+}
+async function handleMetabaseStatus(env) {
+  const out = {};
+  for (const gid of Object.keys(METABASE_SOURCES)) {
+    const [m, p] = await Promise.all([env.SYNC_CACHE.get("mb:meta:" + gid), env.SYNC_CACHE.get("mb:last-problem:" + gid)]);
+    const meta = m ? JSON.parse(m) : null;
+    out[gid] = { label: METABASE_SOURCES[gid].label, lastGood: meta ? { at: meta.at, rows: meta.rows } : null, lastProblem: p ? JSON.parse(p) : null };
+  }
+  return jsonResponse({ success: true, sources: out });
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +538,7 @@ async function handleMetabaseProxy(url, env) {
 // env.ADMIN_KEY (wrangler secret put ADMIN_KEY). Values are passed through as
 // raw text (no JSON parse) to stay within the free-plan CPU budget.
 // ---------------------------------------------------------------------------
-const TOWER_TARGET_TYPES = ["merchants", "acm", "category", "salesplan", "singlesku", "meta"];
+const TOWER_TARGET_TYPES = ["merchants", "acm", "category", "salesplan", "singlesku", "meta", "supplyplan", "segplan"]; // v1.17: + monthly plans (js/plans.js)
 // v1.15.17 — each target type is stored per month: "<type>.<YYYY-MM>" (e.g. "merchants.2026-11", "meta.2026-11").
 // The plain "<type>" key (no month) is the older single upload and stays readable as a fallback.
 function towerTargetTypeOk(type) {
@@ -200,6 +581,29 @@ function handleGetTargets(url, env) {
   const type = url.searchParams.get("type") || "";
   if (!towerTargetTypeOk(type)) return jsonResponse({ success: false, message: "Unknown targets type." }, 400);
   return towerReadKv(env, "targets:" + type, "null");
+}
+// v1.16.1 — merchant portal: reads ONLY the Merchant Targets upload (TAGER_ID / name / Target GMV / Target Placed)
+// for one month, with the service key. Month key only ("merchants.YYYY-MM"); the plain "merchants" upload only when no month is asked.
+async function handleGetPortalTargets(request, url, env) {
+  if (!(await serviceOk(request, env))) return jsonResponse({ success: false, message: "Service key required." }, 403);
+  const month = url.searchParams.get("month") || "";
+  // v1.18.0 — strict per month, same as the dashboard: a month that has no upload of its own returns null
+  // (it used to fall back to the older plain upload, so November showed October's targets). No month asked = the plain upload.
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return towerReadKv(env, "targets:merchants." + month, "null");
+  return towerReadKv(env, "targets:merchants", "null");
+}
+// v1.16.2 — merchant portal: alerts addressed to the Merchant role or to one merchant e-mail. Never "all"-only (staff) alerts.
+async function handleGetPortalAlerts(request, url, env) {
+  if (!(await serviceOk(request, env))) return jsonResponse({ success: false, message: "Service key required." }, 403);
+  const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+  const all = await towerLoadAlerts(env);
+  const mine = all.filter((a) => {
+    const au = a.audience || {};
+    if (email && Array.isArray(au.users) && au.users.indexOf(email) >= 0) return true;
+    if (Array.isArray(au.roles) && au.roles.indexOf("Merchant") >= 0) return true;
+    return false;
+  }).slice(0, 50).map((a) => ({ id: a.id, at: a.at, title: a.title, body: a.body, severity: a.severity, link: a.link || "" }));
+  return jsonResponse({ success: true, alerts: mine });
 }
 function handlePutTargets(request, url, env) {
   const type = url.searchParams.get("type") || "";
@@ -278,18 +682,47 @@ async function handleSendInvites(request, env) {
   if (!list.length) return jsonResponse({ success: false, message: "No invites to send." }, 400);
   if (!link) return jsonResponse({ success: false, message: "No public dashboard link: add the Worker variable DASHBOARD_URL (https://...) or open the dashboard from its https address." }, 400);
   const results = [];
+  const portal = httpsOnly(env.PORTAL_URL).replace(/\/+$/, "");
   for (const it of list) {
     const email = String(it.email || "").trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { results.push({ email, ok: false, error: "Bad email" }); continue; }
-    const role = inviteEsc(String(it.role || "Viewer").slice(0, 60));
-    const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
+    const roleRaw = String(it.role || "Viewer").slice(0, 60), role = inviteEsc(roleRaw);
+    let html, subject = "You've been invited to the Taager Performance Dashboard";
+    if (roleRaw === "Merchant" && portal) {
+      // Merchants never use this dashboard: create their portal account and mail them the portal's set-password link.
+      let plink = portal + "/", note = "";
+      try {
+        const mid = String(it.merchantId || "").trim();
+        const pk = env.PORTAL_ADMIN_KEY || env.ADMIN_KEY;
+        if (mid && pk) {
+          const pr = await fetch(portal + "/api/admin/accounts", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Key": pk, "X-Portal": "1" },
+            body: JSON.stringify({ email, name: String(it.name || ""), merchantIds: [mid], email_link: false, sendLink: true }) });
+          const pj = await pr.json().catch(() => ({}));
+          if (pr.ok && pj.link && httpsOnly(pj.link)) plink = pj.link; else note = "portal " + pr.status + (pj && pj.error ? " " + pj.error : "");
+        } else note = !mid ? "no Merchant ID" : "PORTAL_ADMIN_KEY not set";
+      } catch (e) { note = "portal unreachable"; }
+      subject = "Your Taager merchant portal account";
+      html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
+        '<h2 style="margin:0 0 12px">Welcome to the Taager merchant portal</h2>' +
+        '<p style="line-height:1.6">Your account (' + inviteEsc(email) + ') is ready. Choose a password to see your orders, targets and performance.</p>' +
+        '<p style="margin:24px 0"><a href="' + inviteEsc(plink) + '" style="background:#0f9d7a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">' + (plink === portal + "/" ? "Open the merchant portal" : "Choose your password") + '</a></p>' +
+        '<p style="color:#667;font-size:12px">This is an automated message, please do not reply.</p></div>';
+      if (note) results.push({ email, ok: true, warn: note });
+      try {
+        const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject, html }) });
+        if (!note) results.push(r.ok ? { email, ok: true } : { email, ok: false, error: "Mail service " + r.status });
+        else if (!r.ok) results[results.length - 1] = { email, ok: false, error: "Mail service " + r.status };
+      } catch (e) { results.push({ email, ok: false, error: "Mail service unreachable" }); }
+      continue;
+    }
+    html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
       '<h2 style="margin:0 0 12px">You have been invited to the Taager Performance Dashboard</h2>' +
       '<p style="line-height:1.6">You now have access with the role <b>' + role + '</b>. Sign in with this email address (' + inviteEsc(email) + ') to get started.</p>' +
       '<p style="margin:24px 0"><a href="' + inviteEsc(link) + '" style="background:#0f9d7a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Open the dashboard</a></p>' +
       '<p style="color:#667;font-size:12px">This is an automated message, please do not reply.</p></div>';
     try {
       const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
-        body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: "You've been invited to the Taager Performance Dashboard", html }) });
+        body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject, html }) });
       if (r.ok) results.push({ email, ok: true }); else results.push({ email, ok: false, error: "Mail service " + r.status });
     } catch (e) { results.push({ email, ok: false, error: "Mail service unreachable" }); }
   }
@@ -435,6 +868,122 @@ async function staffAllowed(env, email) {
   const cfg = await accessCfg(env);
   return !cfg.requireApproval || email === MANAGER_EMAIL || !!(cfg.users && cfg.users[email]);
 }
+// ---------------------------------------------------------------------------
+// v1.17.0 — staff password reset: email link (1 hour, one use) → new password saved as a hash in the Users sheet (Apps Script).
+// The answer is always the same whether the email exists or not, so nobody can probe which emails have accounts.
+const RESET_HOURS = 1, RESET_MIN_PASSWORD = 8;
+const _pwChanged = new Map();
+async function pwChangedAt(env, email) {
+  const k = String(email || "").toLowerCase(), hit = _pwChanged.get(k);
+  if (hit && Date.now() - hit.at < 60000) return hit.v;
+  const v = +(await env.SYNC_CACHE.get("pwchanged:" + k)) || 0;
+  if (_pwChanged.size > 500) _pwChanged.clear();
+  _pwChanged.set(k, { at: Date.now(), v }); return v;
+}
+async function sha256Hex(t) { const b = await crypto.subtle.digest("SHA-256", _enc.encode(t)); return Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join(""); }
+function resetMailHtml(name, link) {
+  const e = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return '<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#111">' +
+    '<h2 style="margin:0 0 12px">Reset your Center Control password</h2>' +
+    '<p style="line-height:1.6">Hi ' + e(name || "") + ', someone (hopefully you) asked to reset the password of your Taager Center Control account.</p>' +
+    '<p style="margin:24px 0"><a href="' + e(link) + '" style="background:#0f9d7a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Choose a new password</a></p>' +
+    '<p style="line-height:1.6;color:#555;font-size:13px">The link works once and expires in ' + RESET_HOURS + ' hour. If you did not ask for this, ignore this email — your password stays the same.</p>' +
+    '<p style="line-height:1.6;color:#555;font-size:12px">If the button does not work, copy this link into your browser:<br><span style="word-break:break-all">' + e(link) + '</span></p>' +
+'</div>';
+}
+async function sendResetMail(env, to, name, link) {
+  const subject = "Reset your Center Control password", html = resetMailHtml(name, link);
+  if (env.RESEND_API_KEY && env.MAIL_FROM) {
+    const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject, html }) });
+    if (r.ok) return "resend";
+    try { await resetTrace(env, to, "resend-failed", "HTTP " + r.status + " " + (await r.text()).slice(0, 300)); } catch (e) {}
+  }
+  // fallback: Apps Script sends it from the account that owns the script
+  const res = await callAppsScriptPost(env, { action: "staff_send_reset_mail", serviceKey: env.SERVICE_KEY || "", email: to, subject, html });
+  if (res && res.success) return "apps-script";
+  throw new Error((res && (res.message || res.error)) || "no mail channel");
+}
+async function resetTrace(env, email, step, detail) {
+  try { await env.SYNC_CACHE.put("pwreset:last", JSON.stringify({ at: new Date().toISOString(), email, step, detail: String(detail || "").slice(0, 500) }), { expirationTtl: 7 * 86400 }); } catch (e) {}
+}
+// Every step answers with its real status, so the sign-in page can show exactly what happened:
+//   steps: [{ key: "account" | "email", label, status: "ok" | "fail" | "skip", detail }], code, triesLeft, retryAfterSec
+const RESET_MAX_PER_HOUR = 3;
+function forgotAnswer(code, message, steps, extra) {
+  return jsonResponse(Object.assign({ success: code === "sent", code, message, steps }, extra || {}), code === "rate_limited" ? 429 : 200);
+}
+function maskEmail(e) { const [u, d] = String(e).split("@"); return (u.length <= 2 ? u.charAt(0) + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, u.length - 2))) + "@" + d; }
+async function handleStaffForgot(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Bad request." }, 400); }
+  const email = String(b.email || "").trim().toLowerCase().slice(0, 160);
+  const ACC = "Account check", MAIL = "Reset email";
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return forgotAnswer("invalid_email", "Enter a valid work email.", []);
+  const ip = request.headers.get("CF-Connecting-IP") || "x", kIp = "rl:reset:ip:" + ip, kEm = "rl:reset:em:" + email;
+  const nIp = +(await env.SYNC_CACHE.get(kIp)) || 0;
+  if (nIp >= 10) return forgotAnswer("rate_limited", "Too many requests from this network. Try again in 15 minutes.", [], { retryAfterSec: 900, triesLeft: 0 });
+  await env.SYNC_CACHE.put(kIp, String(nIp + 1), { expirationTtl: 900 });
+  // per-address limit: only emails that really went out count (stored as { n, first })
+  let lim = { n: 0, first: Date.now() }; try { const t = await env.SYNC_CACHE.get(kEm); if (t) { const x = JSON.parse(t); lim = typeof x === "number" ? { n: x, first: Date.now() } : x; } } catch (e) {}
+  if (Date.now() - lim.first >= 3600e3) lim = { n: 0, first: Date.now() };
+  const retryAfterSec = Math.max(60, Math.ceil((lim.first + 3600e3 - Date.now()) / 1000));
+  if (lim.n >= RESET_MAX_PER_HOUR) {
+    await resetTrace(env, email, "rate-limited", RESET_MAX_PER_HOUR + " emails already sent this hour");
+    return forgotAnswer("rate_limited", "You already got " + RESET_MAX_PER_HOUR + " reset emails this hour. Try again in " + Math.ceil(retryAfterSec / 60) + " minutes — or use the last email you received.", [], { triesLeft: 0, retryAfterSec });
+  }
+  const left = RESET_MAX_PER_HOUR - lim.n;
+  try {
+    if (!(await staffEligible(env, email))) {
+      await resetTrace(env, email, "not-staff", "not @taager.com and not listed in Users & Roles (or inactive / Merchant)");
+      return forgotAnswer("not_staff", "This email cannot use Center Control. Merchants sign in at the merchant portal.", [{ key: "account", label: ACC, status: "fail", detail: "Not a Taager staff email" }, { key: "email", label: MAIL, status: "skip" }], { triesLeft: left });
+    }
+    const chk = await callAppsScriptPost(env, { action: "staff_user_check", serviceKey: env.SERVICE_KEY || "", email });
+    if (!chk || !chk.success) {
+      const why = (chk && (chk.message || chk.error)) || "no answer";
+      await resetTrace(env, email, "apps-script", why + (/unknown action/i.test(why) ? " → paste the new backend/Code.gs and Deploy a NEW version" : ""));
+      return forgotAnswer("service_error", "We could not check your account right now. Please tell the dashboard admin (account service: " + why + ").", [{ key: "account", label: ACC, status: "fail", detail: "Account service not reachable" }, { key: "email", label: MAIL, status: "skip" }], { triesLeft: left });
+    }
+    if (!chk.exists) {
+      await resetTrace(env, email, "no-account", "this email is not in the Users sheet (Apps Script)");
+      return forgotAnswer("no_account", "There is no Center Control account with this email. Check the spelling, or sign up first.", [{ key: "account", label: ACC, status: "fail", detail: "No account with this email" }, { key: "email", label: MAIL, status: "skip" }], { triesLeft: left });
+    }
+    const tok = Array.from(crypto.getRandomValues(new Uint8Array(32))).map((x) => x.toString(16).padStart(2, "0")).join("");
+    await env.SYNC_CACHE.put("pwreset:" + (await sha256Hex(tok)), JSON.stringify({ email, exp: Date.now() + RESET_HOURS * 3600e3 }), { expirationTtl: RESET_HOURS * 3600 });
+    const base = /^https:\/\/[^\s"<>]+$/.test(String(env.DASHBOARD_URL || "")) ? String(env.DASHBOARD_URL).replace(/#.*$/, "") : "https://center-control.taager.app/";
+    let via;
+    try { via = await sendResetMail(env, email, chk.name || "", base + "#reset=" + tok); }
+    catch (e) {
+      await resetTrace(env, email, "error", String(e && e.message || e));
+      await env.SYNC_CACHE.put("pwreset:lastError", JSON.stringify({ at: new Date().toISOString(), message: String(e && e.message || e) }));
+      return forgotAnswer("mail_error", "Your account was found, but the email could not be sent. Try again in a few minutes or tell the dashboard admin.", [{ key: "account", label: ACC, status: "ok", detail: chk.name ? "Hi " + chk.name : "" }, { key: "email", label: MAIL, status: "fail", detail: "Email service error" }], { triesLeft: left });
+    }
+    lim.n++; await env.SYNC_CACHE.put(kEm, JSON.stringify(lim), { expirationTtl: 3600 });
+    await resetTrace(env, email, "sent", "via " + via);
+    return forgotAnswer("sent", "Reset link sent to " + maskEmail(email) + ". It works once and expires in " + RESET_HOURS + " hour. Check your inbox (and spam).", [{ key: "account", label: ACC, status: "ok", detail: chk.name ? "Hi " + chk.name : "" }, { key: "email", label: MAIL, status: "ok", detail: "to " + maskEmail(email) }], { triesLeft: RESET_MAX_PER_HOUR - lim.n, retryAfterSec: Math.max(60, Math.ceil((lim.first + 3600e3 - Date.now()) / 1000)) });
+  } catch (e) {
+    await resetTrace(env, email, "error", String(e && e.message || e));
+    return forgotAnswer("service_error", "Something went wrong. Please try again in a minute.", [], { triesLeft: left });
+  }
+}
+async function handleStaffReset(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
+  let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Bad request." }, 400); }
+  const tok = String(b.token || ""), password = String(b.password || "");
+  if (!/^[0-9a-f]{64}$/.test(tok)) return jsonResponse({ success: false, message: "This reset link is not valid. Ask for a new one." }, 400);
+  if (password.length < RESET_MIN_PASSWORD || password.length > 200) return jsonResponse({ success: false, message: "The password needs at least " + RESET_MIN_PASSWORD + " characters." }, 400);
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return jsonResponse({ success: false, message: "Use letters and numbers in the password." }, 400);
+  const ip = request.headers.get("CF-Connecting-IP") || "x", kIp = "rl:resetset:ip:" + ip, n = +(await env.SYNC_CACHE.get(kIp)) || 0;
+  if (n >= 20) return jsonResponse({ success: false, message: "Too many attempts. Try again in 15 minutes." }, 429);
+  await env.SYNC_CACHE.put(kIp, String(n + 1), { expirationTtl: 900 });
+  const key = "pwreset:" + (await sha256Hex(tok)), rec = JSON.parse((await env.SYNC_CACHE.get(key)) || "null");
+  if (!rec || !(rec.exp > Date.now())) return jsonResponse({ success: false, message: "This reset link has expired or was already used. Ask for a new one." }, 400);
+  const res = await callAppsScriptPost(env, { action: "staff_set_password", serviceKey: env.SERVICE_KEY || "", email: rec.email, password });
+  if (!res || !res.success) return jsonResponse({ success: false, message: (res && (res.message || res.error)) || "Could not save the password. Try again." }, 502);
+  await Promise.all([env.SYNC_CACHE.delete(key), env.SYNC_CACHE.put("pwchanged:" + rec.email, String(Date.now())), env.SYNC_CACHE.delete("staffauth:" + rec.email)]);
+  _pwChanged.delete(rec.email);
+  return jsonResponse({ success: true, email: rec.email, message: "Password changed. Sign in with the new password." });
+}
+
 async function staffSession(request, url, env, action) {
   const tok = request.headers.get("X-Staff-Token") || url.searchParams.get("st") || "";
   const [payload, sig] = String(tok).split(".");
@@ -442,6 +991,9 @@ async function staffSession(request, url, env, action) {
   if (!sameStr(sig, await hmacB64(env.STAFF_SESSION_SECRET, payload))) return null;
   let s; try { s = JSON.parse(unb64url(payload)); } catch (e) { return null; }
   if (!s || !s.e || !(s.exp > Date.now())) return null;
+  // v1.17.0: a password reset signs out every session issued before it
+  const pc = await pwChangedAt(env, s.e);
+  if (pc && s.exp - STAFF_SESSION_DAYS * 86400000 < pc) return null;
   if (!(await staffEligible(env, s.e))) return null;
   // someone still waiting for approval may only ask for access and see whether they were approved
   if (action === "requestAccess" || action === "getAccess") return s;
@@ -451,7 +1003,53 @@ async function serviceOk(request, env) {
   const k = request.headers.get("X-Service-Key") || "";
   return !!k && ((env.SERVICE_KEY && String(env.SERVICE_KEY).length >= 16 && sameStr(k, env.SERVICE_KEY)) || (env.ADMIN_KEY && sameStr(k, env.ADMIN_KEY)));
 }
-async function handleStaffLogin(request, env) {
+// Same as backend/Code.gs pwDigest_: h = HMAC-SHA256(key=password, saltHex), then (iterations−1) × h = HMAC-SHA256(key=password, h)
+async function pwDigestHex(password, saltHex, iterations) {
+  const key = await crypto.subtle.importKey("raw", _enc.encode(password), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  let h = new Uint8Array(await crypto.subtle.sign("HMAC", key, _enc.encode(saltHex)));
+  for (let i = 1; i < iterations; i++) h = new Uint8Array(await crypto.subtle.sign("HMAC", key, h));
+  return Array.from(h, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+// v1.17.0 — sign-in without waiting for the Apps Script: the user's row (name, role, password hash) is kept in KV
+// ("staffauth:<email>") and the password is checked here. The row is refreshed from the Apps Script in the background
+// after a sign-in (every 10 min at most); a row older than 24 h, a password that does not match the cached hash, or a
+// password reset always goes back to the Apps Script first. Nobody is ever locked out by the cache.
+const AUTH_FRESH_MS = 10 * 60 * 1000, AUTH_MAX_AGE_MS = 24 * 3600 * 1000;
+async function fetchAuthRecord(env, email) {
+  if (!env.SERVICE_KEY || !env.APPS_SCRIPT_URL) return null;
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), 25000);
+  let rec;
+  try {
+    const r = await fetch(env.APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "staff_auth_record", serviceKey: env.SERVICE_KEY, email }), redirect: "follow", signal: ac.signal });
+    rec = JSON.parse(await r.text());
+  } finally { clearTimeout(t); }
+  if (!rec || !rec.success || typeof rec.exists !== "boolean") return null; // old Apps Script / key problem
+  if (!rec.exists) { await env.SYNC_CACHE.delete("staffauth:" + email); return { exists: false }; }
+  const out = { exists: true, name: String(rec.name || ""), email: String(rec.email || email), role: String(rec.role || ""), hash: String(rec.hash || ""), at: Date.now() };
+  if (/^h1\$/.test(out.hash)) await env.SYNC_CACHE.put("staffauth:" + email, JSON.stringify(out), { expirationTtl: 30 * 86400 });
+  return out;
+}
+async function hashMatches(hash, password) {
+  const p = String(hash || "").split("$");
+  if (p.length !== 4 || p[0] !== "h1") return null;             // legacy plain text → old path (it also upgrades the row to a hash)
+  const n = Number(p[1]); if (!(n > 0 && n <= 20000)) return null;
+  const calc = await pwDigestHex(password, p[2], n);
+  let diff = calc.length ^ p[3].length; for (let i = 0; i < Math.min(calc.length, p[3].length); i++) diff |= calc.charCodeAt(i) ^ p[3].charCodeAt(i);
+  return diff === 0;
+}
+async function fastStaffLogin(env, email, password, ctx) {
+  let cached = null; try { cached = JSON.parse((await env.SYNC_CACHE.get("staffauth:" + email)) || "null"); } catch (e) {}
+  if (cached && Date.now() - cached.at < AUTH_MAX_AGE_MS && (await hashMatches(cached.hash, password)) === true) {
+    if (Date.now() - cached.at > AUTH_FRESH_MS) { const job = fetchAuthRecord(env, email).catch(() => null); if (ctx && ctx.waitUntil) ctx.waitUntil(job); }
+    return { success: true, name: cached.name, email: cached.email, role: cached.role, fast: "cache" };
+  }
+  const rec = await fetchAuthRecord(env, email);                 // not cached / stale / password changed → fresh row
+  if (!rec) return null;
+  if (!rec.exists) return { success: false, message: "No account found with this email." };
+  if ((await hashMatches(rec.hash, password)) !== true) return null; // no match here → let the Apps Script decide (never locks anyone out)
+  return { success: true, name: rec.name, email: rec.email, role: rec.role, fast: "apps-script row" };
+}
+async function handleStaffLogin(request, env, ctx) {
   if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
   let b; try { b = JSON.parse(await request.text()); } catch (e) { return jsonResponse({ success: false, message: "Bad request." }, 400); }
   const email = String(b.email || "").trim().toLowerCase().slice(0, 160), password = String(b.password || "").slice(0, 200);
@@ -459,7 +1057,11 @@ async function handleStaffLogin(request, env) {
   const ip = request.headers.get("CF-Connecting-IP") || "x", kIp = "rl:staff:ip:" + ip, kEm = "rl:staff:em:" + email;
   const [nIp, nEm] = await Promise.all([env.SYNC_CACHE.get(kIp), env.SYNC_CACHE.get(kEm)]);
   if ((+nIp || 0) >= 40 || (+nEm || 0) >= 10) return jsonResponse({ success: false, message: "Too many attempts. Try again in 15 minutes." }, 429);
-  const res = await callAppsScriptPost(env, { action: "login", email, password });
+  // v1.17.0 — fast path: the Apps Script only hands over the stored row (service key) and the password is checked here.
+  // Anything unexpected (old Apps Script, legacy plain-text password, a hash that does not match) → the old Apps Script login.
+  let res = null;
+  try { res = await fastStaffLogin(env, email, password, ctx); } catch (e) { res = null; }
+  if (!res) res = await callAppsScriptPost(env, { action: "login", email, password });
   if (!res || !res.success) {
     await Promise.all([env.SYNC_CACHE.put(kIp, String((+nIp || 0) + 1), { expirationTtl: 900 }), env.SYNC_CACHE.put(kEm, String((+nEm || 0) + 1), { expirationTtl: 900 })]);
     return jsonResponse({ success: false, message: (res && res.message) || "Invalid email or password." });
@@ -467,10 +1069,187 @@ async function handleStaffLogin(request, env) {
   if (!(await staffEligible(env, email))) return jsonResponse({ success: false, message: "This dashboard is for Taager staff. Merchants use the Taager merchant portal." }, 403);
   let token = "";
   if (staffGateOn(env)) {
-    const payload = b64url(_enc.encode(JSON.stringify({ e: email, exp: Date.now() + STAFF_SESSION_DAYS * 86400000 })));
+    const payload = b64url(_enc.encode(JSON.stringify({ e: email, r: String(res.role || "").slice(0, 40), exp: Date.now() + STAFF_SESSION_DAYS * 86400000 })));
     token = payload + "." + (await hmacB64(env.STAFF_SESSION_SECRET, payload));
   }
   return jsonResponse({ success: true, name: res.name, email: res.email || email, role: res.role, token });
+}
+
+// ============================================================================
+//  v1.17.0 — SHARED SNAPSHOT (R2)
+//  Cold start: before this, anyone opening the dashboard on a browser that had
+//  never loaded it saw zeros until the whole sheet load finished. Whoever
+//  loads fresh data now pushes the gzipped snapshot here, and anyone with an
+//  empty local cache pulls it in one request and paints straight away, then
+//  syncs in the background exactly as before.
+//  Staff-gated like every other action — the snapshot carries CM3/PPM, so it
+//  must never be reachable with the link alone.
+// ============================================================================
+const SNAP_KEY = "snapshot/latest.json.gz";
+const SNAP_MAX_BYTES = 60 * 1024 * 1024;   // sanity ceiling; the real file is ~8MB gzipped
+
+function snapBucket(env) { return env.SNAPSHOTS || null; }
+
+async function snapHeadMeta(env) {
+  const b = snapBucket(env); if (!b) return null;
+  const h = await b.head(SNAP_KEY).catch(() => null);
+  if (!h) return null;
+  const m = h.customMetadata || {};
+  return { savedAt: +m.savedAt || 0, fp: m.fp || "", by: m.by || "", bytes: h.size || +m.bytes || 0, at: m.at || "" };
+}
+
+// The dashboard posts the gzipped snapshot as the raw request body.
+async function handleSnapshotPut(request, url, env) {
+  const b = snapBucket(env);
+  if (!b) return jsonResponse({ success: false, code: "no_bucket", message: "Shared snapshot is off — no R2 bucket bound (SNAPSHOTS)." }, 503);
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST only." }, 405);
+  const savedAt = +url.searchParams.get("savedAt") || Date.now();
+  const fp = String(url.searchParams.get("fp") || "").slice(0, 200);
+  const by = String(url.searchParams.get("email") || "").slice(0, 120);
+  const cur = await snapHeadMeta(env);
+  // Nothing to gain from rewriting the same numbers, or from replacing a newer push with an older one.
+  if (cur && fp && cur.fp === fp) return jsonResponse({ success: true, skipped: "same", savedAt: cur.savedAt });
+  if (cur && cur.savedAt > savedAt) return jsonResponse({ success: true, skipped: "older", savedAt: cur.savedAt });
+  const body = await request.arrayBuffer();
+  if (!body || body.byteLength < 100) return jsonResponse({ success: false, message: "Empty snapshot." }, 400);
+  if (body.byteLength > SNAP_MAX_BYTES) return jsonResponse({ success: false, message: "Snapshot too large (" + body.byteLength + " bytes)." }, 413);
+  await b.put(SNAP_KEY, body, {
+    httpMetadata: { contentType: "application/json", contentEncoding: "gzip" },
+    customMetadata: { savedAt: String(savedAt), fp: fp, by: by, bytes: String(body.byteLength), at: new Date().toISOString() },
+  });
+  return jsonResponse({ success: true, savedAt: savedAt, bytes: body.byteLength });
+}
+
+// Served still gzipped. Browsers that get Content-Encoding: gzip inflate it themselves;
+// the dashboard also sniffs the gzip magic bytes, so it works either way.
+async function handleSnapshotGet(env) {
+  const b = snapBucket(env);
+  if (!b) return jsonResponse({ success: false, code: "no_bucket", message: "Shared snapshot is off." }, 503);
+  const obj = await b.get(SNAP_KEY);
+  if (!obj) return jsonResponse({ success: false, code: "no_snapshot", message: "No shared snapshot yet — the first person to load the dashboard creates it." }, 404);
+  const m = obj.customMetadata || {};
+  const h = corsHeaders();
+  h["Content-Type"] = "application/json";
+  h["Content-Encoding"] = "gzip";
+  h["Access-Control-Expose-Headers"] = h["Access-Control-Expose-Headers"] + ", X-Snapshot-Saved-At, X-Snapshot-Fp";
+  h["X-Snapshot-Saved-At"] = String(m.savedAt || "");
+  h["X-Snapshot-Fp"] = String(m.fp || "");
+  return new Response(obj.body, { headers: h });
+}
+
+async function handleSnapshotMeta(env) {
+  if (!snapBucket(env)) return jsonResponse({ success: true, on: false, last: null });
+  return jsonResponse({ success: true, on: true, last: await snapHeadMeta(env) });
+}
+
+// ---------------------------------------------------------------------------
+//  v1.17.0 — PLANNER DOH relay
+//  The dashboard computes the table and sends it here; the Worker writes it to the sheet through
+//  Apps Script and keeps a copy, so the 11:00 Cairo run can rewrite it on a day nobody opened the
+//  dashboard. The copy lives here rather than in Script Properties, whose 9KB-per-value limit a few
+//  thousand SKUs blow straight through. Going through the Worker also means the browser gets a real
+//  answer back (Apps Script is no-cors from the page), so the button can report what actually
+//  happened instead of only that the request left.
+// ---------------------------------------------------------------------------
+const PDOH_PAYLOAD_KEY = "export:plannerdoh:payload";
+
+async function pdohStore(env, payload) {
+  const body = JSON.stringify(payload);
+  if (env.SNAPSHOTS) { await env.SNAPSHOTS.put(PDOH_PAYLOAD_KEY, body, { httpMetadata: { contentType: "application/json" } }); return "r2"; }
+  await env.SYNC_CACHE.put(PDOH_PAYLOAD_KEY, body, { expirationTtl: 7 * 86400 });   // KV fallback: 25MB per value
+  return "kv";
+}
+async function pdohLoad(env) {
+  try {
+    if (env.SNAPSHOTS) { const o = await env.SNAPSHOTS.get(PDOH_PAYLOAD_KEY); return o ? JSON.parse(await o.text()) : null; }
+    const t = await env.SYNC_CACHE.get(PDOH_PAYLOAD_KEY);
+    return t ? JSON.parse(t) : null;
+  } catch (e) { return null; }
+}
+
+// Hands a stored payload to Apps Script, which only writes it.
+async function pdohWrite(env, payload) {
+  const r = await callAppsScriptPost(env, Object.assign({ action: "planner_doh_rows", serviceKey: env.SERVICE_KEY || "" }, payload));
+  if (!r || r.success !== true) throw new Error((r && (r.message || r.error)) || "Apps Script did not write the sheet");
+  return r;
+}
+
+// The dashboard posts the table here.
+// v1.17.0 — Inventory & DOH per category -> its own tab, every day at 11:45 Cairo, just after the
+// Supply conversion run so the two never hit the same Apps Script deployment at once.
+const PIC_AT_MIN = 11 * 60 + 45, PIC_LAST_MIN = 13 * 60 + 59;
+async function runInvCategoryExport(env, opts) {
+  opts = opts || {};
+  const now = cairoNowParts(opts.now), mins = cairoMinutes(opts.now);
+  const key = "export:invcat:" + (opts.force ? "manual:" : "") + now.date;
+  let st = null; try { st = JSON.parse((await env.SYNC_CACHE.get(key)) || "null"); } catch (e) {}
+  if (!opts.force) {
+    if (String(env.INV_CATEGORY_EXPORT || "on").toLowerCase() === "off") return { skipped: "off" };
+    if (mins < PIC_AT_MIN || mins > PIC_LAST_MIN) return { skipped: "time" };
+    if (st && st.state === "done") return { skipped: "done" };
+    if (st && st.state === "running" && Date.now() - Date.parse(st.at) < 20 * 60 * 1000) return { skipped: "running" };
+    if (st && st.state === "failed" && ((st.tries || 0) >= 3 || Date.now() - Date.parse(st.at) < 15 * 60 * 1000)) return { skipped: "wait" };
+  }
+  const tries = ((st && st.tries) || 0) + 1;
+  const put = (o) => { const v = JSON.stringify(Object.assign({ date: now.date, tries, by: opts.by || "schedule" }, o)); return env.SYNC_CACHE.put(key, v, { expirationTtl: 4 * 86400 }).then(() => env.SYNC_CACHE.put("export:invcat:last", v, { expirationTtl: 30 * 86400 })); };
+  await put({ state: "running", at: new Date().toISOString() });
+  try {
+    const r = await callAppsScriptPost(env, { action: "inv_category_export", serviceKey: env.SERVICE_KEY || "" });
+    if (!r || r.success !== true) throw new Error((r && (r.message || r.error)) || "Apps Script did not write the sheet");
+    const done = { state: "done", at: new Date().toISOString(), rows: r.rows, sentAt: r.sentAt || "" };
+    await put(done); return done;
+  } catch (e) {
+    const fail = { state: "failed", at: new Date().toISOString(), message: String((e && e.message) || e).slice(0, 400) };
+    await put(fail); return fail;
+  }
+}
+// The dashboard posts the per-category table here rather than straight to Apps Script: going
+// through the Worker means it gets a real answer back (Apps Script is no-cors from the page, so a
+// refusal there — an action the deployment does not know yet, for one — looked like success).
+async function handleInvCategoryRows(request, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST only." }, 405);
+  let payload = null;
+  try { payload = await request.json(); } catch (e) { return jsonResponse({ success: false, message: "Could not read the table." }, 400); }
+  if (!payload || !payload.rows || !payload.rows.length) return jsonResponse({ success: false, message: "No rows." }, 400);
+  try {
+    const r = await callAppsScriptPost(env, Object.assign({ action: "inv_category_rows", serviceKey: env.SERVICE_KEY || "" }, payload));
+    if (!r || r.success !== true) throw new Error((r && (r.message || r.error)) || "Apps Script did not write the sheet");
+    await env.SYNC_CACHE.put("export:invcat:last", JSON.stringify({ date: cairoNowParts().date, by: "dashboard", state: "done",
+      at: new Date().toISOString(), rows: r.rows, sentAt: new Date().toISOString() }), { expirationTtl: 30 * 86400 });
+    return jsonResponse({ success: true, rows: r.rows });
+  } catch (e) {
+    return jsonResponse({ success: false, message: String((e && e.message) || e).slice(0, 400) }, 502);
+  }
+}
+
+async function handleInvCategoryExport(request, url, env) {
+  let email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+  if (staffGateOn(env)) { const ss = await staffSession(request, url, env, "invCategoryExport"); email = ss && ss.e ? String(ss.e).toLowerCase() : ""; }
+  if (url.searchParams.get("run") !== "1") {
+    let last = null; try { last = JSON.parse((await env.SYNC_CACHE.get("export:invcat:last")) || "null"); } catch (e) {}
+    return jsonResponse({ success: true, at: "11:45 Cairo", on: String(env.INV_CATEGORY_EXPORT || "on").toLowerCase() !== "off", last });
+  }
+  if (!isOwnerEmail(email)) return jsonResponse({ success: false, message: "Not authorized." }, 403);
+  const out = await runInvCategoryExport(env, { force: true, by: email });
+  return jsonResponse(Object.assign({ success: out.state === "done" }, out));
+}
+
+async function handlePlannerDohRows(request, url, env) {
+  if (request.method !== "POST") return jsonResponse({ success: false, message: "POST only." }, 405);
+  let payload = null;
+  try { payload = await request.json(); } catch (e) { return jsonResponse({ success: false, message: "Could not read the table." }, 400); }
+  if (!payload || !payload.rows || !payload.rows.length) return jsonResponse({ success: false, message: "No rows." }, 400);
+  payload.sentAt = new Date().toISOString();
+  try {
+    const stored = await pdohStore(env, payload);
+    const r = await pdohWrite(env, payload);
+    await env.SYNC_CACHE.put("export:plannerdoh:last", JSON.stringify({ date: cairoNowParts().date, by: "dashboard", state: "done",
+      at: new Date().toISOString(), rows: r.rows, yday: r.yday, sentAt: payload.sentAt }), { expirationTtl: 30 * 86400 });
+    return jsonResponse({ success: true, rows: r.rows, yday: r.yday, stored });
+  } catch (e) {
+    // The copy is already stored, so the 11:00 run can still write it even if this attempt failed.
+    return jsonResponse({ success: false, message: String((e && e.message) || e).slice(0, 400) }, 502);
+  }
 }
 
 function corsHeaders() {
@@ -478,7 +1257,7 @@ function corsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret, X-Admin-Key, X-Staff-Token, X-Service-Key",
-    "Access-Control-Expose-Headers": "Content-Disposition",
+    "Access-Control-Expose-Headers": "Content-Disposition, X-Data-Source, X-Cached-At, X-Cache-Reason",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
   };
@@ -1032,13 +1811,30 @@ async function unzipEntries(u8) {
   }
   return out;
 }
+// v1.18.0 — GitHub sometimes answers a write with 500 / 502 / 503 (or 403 secondary rate limit) when many blobs are
+// created in a row: retry those up to 3 times with a short back-off before giving up.
 async function ghApi(env, method, path, body) {
-  const r = await fetch("https://api.github.com/repos/" + env.GITHUB_REPO + path, {
-    method, headers: ghHeaders(env, { Accept: "application/vnd.github+json", "Content-Type": "application/json" }),
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!r.ok) throw new Error("GitHub " + method + " " + path.split("?")[0] + " → " + r.status + ": " + (await r.text()).slice(0, 200));
-  return r.json();
+  let last = "";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await new Promise((res) => setTimeout(res, 800 * attempt));
+    const r = await fetch("https://api.github.com/repos/" + env.GITHUB_REPO + path, {
+      method, headers: ghHeaders(env, { Accept: "application/vnd.github+json", "Content-Type": "application/json" }),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (r.ok) return r.json();
+    const txt = (await r.text()).slice(0, 200);
+    last = "GitHub " + method + " " + path.split("?")[0] + " → " + r.status + ": " + txt;
+    const retry = r.status >= 500 || r.status === 429 || (r.status === 403 && /secondary rate|abuse/i.test(txt));
+    if (!retry) break;
+  }
+  throw new Error(last);
+}
+// git blob id of a file = sha1("blob <size>\0" + bytes) — lets the publish skip every file that did not change
+async function gitBlobSha(bytes) {
+  const head = new TextEncoder().encode("blob " + bytes.length + "\0");
+  const all = new Uint8Array(head.length + bytes.length); all.set(head, 0); all.set(bytes, head.length);
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-1", all));
+  return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 async function publishSiteFromZip(env, zipBytes, version) {
   let files = await unzipEntries(zipBytes);
@@ -1054,17 +1850,28 @@ async function publishSiteFromZip(env, zipBytes, version) {
   const ref = await ghApi(env, "GET", "/git/ref/heads/" + encodeURIComponent(branch));
   const parent = ref.object.sha;
   const parentCommit = await ghApi(env, "GET", "/git/commits/" + parent);
+  // only the files that changed are sent (same bytes = same git blob id as in the branch) — a normal release is a few
+  // files instead of ~120 blob calls, which is what made GitHub answer 500 half-way through
+  const have = new Map();
+  try {
+    const cur = await ghApi(env, "GET", "/git/trees/" + parentCommit.tree.sha + "?recursive=1");
+    (cur.tree || []).forEach((e) => { if (e.type === "blob") have.set(e.path, e.sha); });
+  } catch (e) { /* no listing → send everything */ }
   const tree = [];
+  let changed = 0;
   for (const f of files) {
+    const sha = await gitBlobSha(f.data);
+    if (have.get(f.name) === sha) continue;
     const blob = await ghApi(env, "POST", "/git/blobs", { content: bytesToB64(f.data), encoding: "base64" });
-    tree.push({ path: f.name, mode: "100644", type: "blob", sha: blob.sha });
+    tree.push({ path: f.name, mode: "100644", type: "blob", sha: blob.sha }); changed++;
   }
-  const ig = await ghApi(env, "POST", "/git/blobs", { content: "releases/\nbackend/\ncloudflare-worker/\n*.zip\n", encoding: "utf-8" });
-  tree.push({ path: ".vercelignore", mode: "100644", type: "blob", sha: ig.sha });
+  const igText = "releases/\nbackend/\ncloudflare-worker/\n*.zip\n", igSha = await gitBlobSha(new TextEncoder().encode(igText));
+  if (have.get(".vercelignore") !== igSha) { const ig = await ghApi(env, "POST", "/git/blobs", { content: igText, encoding: "utf-8" }); tree.push({ path: ".vercelignore", mode: "100644", type: "blob", sha: ig.sha }); }
+  if (!tree.length) return { files: files.length, changed: 0, commit: parent.slice(0, 7), unchanged: true };
   const newTree = await ghApi(env, "POST", "/git/trees", { base_tree: parentCommit.tree.sha, tree });
   const commit = await ghApi(env, "POST", "/git/commits", { message: "Deploy dashboard v" + version + " (via Worker Sync Status upload)", tree: newTree.sha, parents: [parent] });
   await ghApi(env, "PATCH", "/git/refs/heads/" + encodeURIComponent(branch), { sha: commit.sha });
-  return { files: files.length, commit: commit.sha.slice(0, 7) };
+  return { files: files.length, changed, commit: commit.sha.slice(0, 7) };
 }
 
 async function handleReleaseUpload(request, env) {
@@ -1076,8 +1883,8 @@ async function handleReleaseUpload(request, env) {
   if ((request.headers.get("X-Release-Secret") || "") !== env.RELEASE_SECRET) return jsonResponse({ success: false, message: "Wrong upload password." }, 403);
   const rawName = String(url.searchParams.get("filename") || "").trim();
   if (!/\.zip$/i.test(rawName)) return jsonResponse({ success: false, message: "Only .zip files are accepted." }, 400);
-  const vm = rawName.match(/v?(\d+\.\d+\.\d+)/i);
-  const version = vm ? vm[1] : "unknown";
+  const vm = rawName.match(/v?(\d+)[._](\d+)[._](\d+)/i);   // v1.18.0 or v1_18_0 (Performance_dashboard_v1_18_0_glass.zip)
+  const version = vm ? vm[1] + "." + vm[2] + "." + vm[3] : "unknown";
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (!bytes.length || bytes.length > 25 * 1024 * 1024) return jsonResponse({ success: false, message: "Empty or too large (max 25MB)." }, 400);
   if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) return jsonResponse({ success: false, message: "Not a valid zip file." }, 400);
@@ -1205,7 +2012,10 @@ const FB_TRANSIENT = /lock|busy|try again|timed? ?out|too many|temporar|exceeded
 async function callAppsScriptPost(env, payload) {
   const r = await fetch(env.APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow" });
   const txt = await r.text();
-  try { return JSON.parse(txt); } catch (e) { return { success: false, error: "Server returned an invalid response", transient: true }; }
+  try { return JSON.parse(txt); } catch (e) {
+    const snip = txt.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+    return { success: false, error: "Server returned an invalid response (HTTP " + r.status + (snip ? ": " + snip : "") + ")", transient: true };
+  }
 }
 async function handleFeedback(request, env, ctx) {
   if (request.method !== "POST") return jsonResponse({ success: false, message: "POST required." }, 405);
@@ -1296,6 +2106,19 @@ async function handleFeedbackStatus(env) {
   return jsonResponse({ success: true, pending: pend.keys.length, failedCount: fail.keys.length, failed });
 }
 
+// v1.17.0 — Command Loop wiring (the module never touches anything else in this Worker)
+const LOOP = createLoop({
+  jsonResponse, staffSession, staffGateOn, serviceOk, accessCfg, metabaseLink, metabaseResponse, gzipText,
+  loadAlerts: towerLoadAlerts,
+  saveAlerts: (env, all) => env.SYNC_CACHE.put(TOWER_ALERTS_KEY, JSON.stringify(all.slice(0, TOWER_ALERTS_MAX))),
+  ownerEmails: OWNER_EMAILS, isOwner: isOwnerEmail
+});
+
+// v1.17.8 — Usage Log (tracking + Control > Usage Log). Uses the Command Loop D1 database (LOOP_DB); tables are created on first use.
+const USAGE = createUsage({ jsonResponse, staffSession, towerAdminOk });
+// v1.19.0 — ML Forecast (the Python job on GitHub Actions reads sources / writes results through here)
+const ML = createMl({ jsonResponse, serviceOk, metabaseProxy: handleMetabaseProxy });
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -1307,17 +2130,35 @@ export default {
 
     // v1.16.0 — staff gate: every data/query action needs a Taager staff session issued by this Worker
     // (staffLogin). Active once the STAFF_SESSION_SECRET secret is set. Merchants never get one.
-    if (action === "staffLogin") return handleStaffLogin(request, env);
+    if (action === "staffLogin") return handleStaffLogin(request, env, ctx);
+    // v1.17.0 — "Forgot your password?" on the dashboard sign-in page (no session needed)
+    if (action === "staffForgot") return handleStaffForgot(request, env);
+    if (action === "staffReset") return handleStaffReset(request, env);
     if (staffGateOn(env) && !STAFF_OPEN.has(action)) {
-      const okService = action === "getAccess" && (await serviceOk(request, env));
+      const okService = (action === "getAccess" || action === "getPortalTargets" || action === "getPortalAlerts" || action === "loopPortalSignals" || action === "loopMerchantRequest" || action === "loopPortalCatalog" || action === "loopCpaSync" || action === "mlSource" || action === "mlPut" || action === "mlGet") && (await serviceOk(request, env));
       const ss = okService ? null : await staffSession(request, url, env, action);
       if (!okService && !ss) return jsonResponse({ success: false, code: "staff_auth", message: "Please sign in again." }, 401);
       if (ss && ss.pending) return jsonResponse({ success: false, code: "staff_pending", message: "Waiting for admin approval." }, 403);
     }
 
+    // v1.17.0 — Command Loop (scores, tasks, merchant notifications) — see loop.js / loop-api.js
+    if (USAGE.isUsageAction(action)) return USAGE.handle(action, request, url, env);
+    if (ML.isMlAction(action)) return ML.handle(action, request, url, env);
+    if (LOOP.isLoopAction(action)) return LOOP.handle(action, request, url, env, ctx);
     if (action === "metabase") return handleMetabaseProxy(url, env);
+    if (action === "metabaseStatus") return handleMetabaseStatus(env);
+    if (action === "actualReturns") return handleActualReturns(url, env);
+    if (action === "metabaseAccept") return handleMetabaseAccept(url, env);
+    if (action === "declineDigestStatus") return handleDeclineDigestStatus(env);
+    if (action === "declineDigestSend") return handleDeclineDigestSend(request, url, env);
+    if (action === "plannerDohExport") return handlePlannerDohExport(request, url, env);
+    if (action === "supplyConversionExport") return handleSupplyConversionExport(request, url, env);
+    if (action === "invCategoryExport") return handleInvCategoryExport(request, url, env);
+    if (action === "invCategoryRows") return handleInvCategoryRows(request, env);
     if (action === "getAccess") return handleGetAccess(env);
     if (action === "putAccess") return handlePutAccess(request, env);
+    if (action === "getPortalTargets") return handleGetPortalTargets(request, url, env);
+    if (action === "getPortalAlerts") return handleGetPortalAlerts(request, url, env);
     if (action === "getTargets") return handleGetTargets(url, env);
     if (action === "putTargets") return handlePutTargets(request, url, env);
     if (action === "getAlerts") return handleGetAlerts(request, url, env);
@@ -1345,6 +2186,10 @@ export default {
     if (action === "publishComputed") return handlePublishComputed(request, env);
     if (action === "getComputed") return handleGetComputed(url, env);
     if (action === "listComputed") return handleListComputed(url, env);
+    if (action === "plannerDohRows") return handlePlannerDohRows(request, url, env);
+    if (action === "snapshotPut") return handleSnapshotPut(request, url, env);
+    if (action === "snapshotGet") return handleSnapshotGet(env);
+    if (action === "snapshotMeta") return handleSnapshotMeta(env);
     if (action === "getLastSync") return handleGetLastSync(url, env, ctx);
     if (action === "getLastSyncMeta") return handleGetLastSyncMeta(env);
     if (action === "fb") return handleFeedback(request, env, ctx);
@@ -1369,7 +2214,13 @@ export default {
     ctx.waitUntil(
       Promise.all([
         refreshLastSyncCache(env).catch((err) => console.error("[scheduled refreshLastSyncCache] failed (retry next tick):", err && err.message)),
+        LOOP.scheduled(env).catch((err) => console.error("[scheduled loop] failed:", err && err.message)),
         flushFeedbackQueue(env).catch((err) => console.error("[scheduled flushFeedbackQueue] failed:", err && err.message)),
+        sendDeclineDigest(env).catch((err) => console.error("[scheduled declineDigest] failed:", err && err.message)),
+        runPlannerDohExport(env).catch((err) => console.error("[scheduled plannerDoh] failed:", err && err.message)),
+        runSupplyConversionExport(env)
+          .then(() => runInvCategoryExport(env))
+          .catch((err) => console.error("[scheduled supplyConversion / invCategory] failed:", err && err.message)),
         // v1.3.48: Confirmed by Day اتنقل لـ Metabase — مفيش refresh من Google Sheets.
         refreshIncentiveMerchantsCache(env).then(
           () => env.SYNC_CACHE.delete(CACHE_KEY_INCENTIVE_MERCHANTS_ERROR).catch(() => {}),

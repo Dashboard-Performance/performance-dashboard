@@ -2,5 +2,7 @@
   "name": "taager-dashboard-worker",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node test/staff-gate.mjs" }
+  "scripts": {
+    "test": "node test/staff-gate.mjs && node test/reset.mjs && node --no-warnings test/loop.mjs && node --no-warnings test/metabase-guard.mjs && node --no-warnings test/fast-login.mjs && node --no-warnings test/usage.mjs && node --no-warnings test/ml.mjs"
+  }
 }
