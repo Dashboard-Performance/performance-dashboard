@@ -7,8 +7,9 @@
                      (× quantity per bundle) like Allocation Locking. CR% = confirmed ÷ placed, DR% = delivered ÷ confirmed (plain, no cut-off,
                      like the sheet).
      • Lock fields = the locking tab Allocation Locking reads (state.availabilityLockingRows), matched on SKU ID + Merchant ID:
-                     Locked = an active lock with an ALLOCATED_QUANTITY · Unlocked = the row is there but the quantity is blank or the lock
-                     is no longer active (expired / cancelled) · Not in lock list = no row for that merchant on that SKU.
+                     Locked = an active lock row (same rule as Availability Locking → Active Locks). ALLOCATED_QUANTITY 0 / blank means the
+                     SKU is locked to the merchant with NO quantity cap (it can raise whatever it needs) · Unlocked = the row is there but the
+                     lock expired / was cancelled · Not in lock list = no row for that merchant on that SKU (not locked to it at all).
      • Merchant status = the Matches / Single rule, taken at the start of the range: Active = the merchant had any activity on this single in
                      the month before the range starts (Main, else that month from the history tab), else New. "—" while that month is not loaded.
    Merchant Lock Review = the sheet's "Merchant Breakdown": merchants ranked by placed pieces (ties: confirmed); locked merchants with no
@@ -109,7 +110,8 @@
       if (!l.singleId || !l.tagerId || !bySku.has(l.singleId)) return;
       var k = l.tagerId + "||" + l.singleId, x = locks.get(k);
       if (!x) { x = { locked: false, any: true, alloc: 0, used: 0, rem: 0, name: l.merchantName || "" }; locks.set(k, x); }
-      if (!l.allocatedBlank && (!isActive || isActive(l, todayMs))) { x.locked = true; x.alloc += l.allocatedQty || 0; x.used += l.usedQty || 0; x.rem += l.remainingPieces || 0; }
+      // owner's rule: any active lock row = Locked; a blank / 0 ALLOCATED_QUANTITY = locked with no quantity cap
+      if (!isActive || isActive(l, todayMs)) { x.locked = true; x.alloc += l.allocatedBlank ? 0 : (l.allocatedQty || 0); x.used += l.usedQty || 0; x.rem += l.remainingPieces || 0; }
       if (!x.name && l.merchantName) x.name = l.merchantName;
     });
 
@@ -191,6 +193,64 @@
   function r3(v) { return v == null || !isFinite(v) ? "" : Math.round(v * 1000) / 1000; }
 
   // ------------------------------------------------------------------ SKU Lock Review (= SKU Summary)
+  // what each column means (shown when you hover the column title)
+  var TIP = {
+    // SKU Lock Review
+    "SKU ID": "The single SKU. Only SKUs that received inbound in the selected range are listed (same rows as Inventory & Inbound for that range).",
+    "SKU Name": "Product name of the SKU.",
+    "Category": "Category of the SKU (from the Inventory data).",
+    "Current Stock": "Pieces on hand now (good stock), same as Inventory & Inbound.",
+    "DOH": "Days on hand: current stock ÷ the SKU's average confirmed pieces per day (last 3 days), same as Inventory & Inbound.",
+    "Is Locked?": "Yes = at least one merchant has an active lock on this SKU in the locking tab.",
+    "Merchants with Demand": "How many merchants placed at least one piece of this SKU in the range (bundles split into their singles).",
+    "Total Placed": "Placed pieces of this SKU by all merchants in the range (bundles split into singles × quantity per bundle).",
+    "Total Confirmed": "Confirmed pieces of this SKU by the merchants with demand in the range.",
+    "Top Merchant": "The merchant with the most placed pieces of this SKU in the range (ties: more confirmed).",
+    "Top Merchant Placed": "Placed pieces of the top merchant in the range.",
+    "Top Merchant Share": "Top merchant's placed pieces ÷ Total Placed — how much of the SKU's demand one merchant holds.",
+    "Top Merchant Lock Status": "Lock status of the top merchant on this SKU: Locked (incl. allocated 0 = no quantity cap), Unlocked (lock expired / cancelled) or Not in lock list.",
+    "Locked Merchants": "Merchants with an active lock on this SKU (with or without demand in the range).",
+    "Unlocked Merchants": "Merchants with demand whose lock row on this SKU is no longer active (the lock expired / was cancelled).",
+    "Demand – Not in Lock List": "Merchants that placed demand on this SKU but have no lock row for it.",
+    "Locked – No Demand": "Merchants locked on this SKU that placed nothing in the range — stock held for nobody selling it.",
+    "Total Allocated": "Sum of ALLOCATED_QUANTITY of the active locks on this SKU.",
+    "Total Used": "Sum of QUANTITY_USED of the active locks on this SKU.",
+    "Total Remaining": "Sum of REMAINING_PIECES of the active locks on this SKU — pieces still held in locks.",
+    "Review Flag": "In this order: Top merchant not locked → SKU locked but no locked merchant → N demand merchant(s) not in lock list → OK. No demand in period = nobody placed it in the range.",
+    // Merchant Lock Review
+    "Rank": "Position of the merchant on this SKU by placed pieces (1 = biggest buyer). Empty = locked merchant with no demand in the range.",
+    "Merchant ID": "TAGER ID of the merchant.",
+    "Merchant": "Merchant name.",
+    "ACM": "Account manager of the merchant (from Matches).",
+    "Merchant Status": "Matches / Single rule at the start of the range: Active = the merchant sold this SKU in the month before the range, New = it did not. — = that month is not loaded yet.",
+    "Placed Pcs": "Placed pieces of this SKU by this merchant in the range (bundles split into singles × quantity).",
+    "Share of SKU Placed": "This merchant's placed pieces ÷ all placed pieces of the SKU in the range.",
+    "Cumulative Share": "Running total of the share from rank 1 down to this merchant — e.g. 80% = this merchant and the ones above it hold 80% of the demand.",
+    "Confirmed Pcs": "Confirmed pieces of this SKU by this merchant in the range.",
+    "Delivered Pcs": "Delivered pieces of this SKU by this merchant in the range.",
+    "CR%": "Confirmation rate = Confirmed Pcs ÷ Placed Pcs (whole range, no cut-off days).",
+    "DR%": "Delivery rate = Delivered Pcs ÷ Confirmed Pcs (whole range, no cut-off days).",
+    "Lock Status": "Locked = active lock row (same as Active Locks); allocated 0 = locked with no quantity cap, the merchant can raise what it needs · Unlocked = the lock row expired / was cancelled · Not in lock list = no lock row, the SKU is not locked to this merchant.",
+    "Allocated Qty": "ALLOCATED_QUANTITY of the merchant's active lock. 0 = locked with no quantity cap. Empty = not locked.",
+    "Used Qty": "QUANTITY_USED of the merchant's active lock — pieces already taken from it.",
+    "Remaining Pieces": "REMAINING_PIECES of the merchant's active lock — pieces still held for this merchant.",
+    "Check": "Locked & remaining > 0 → OK · Locked & allocated > 0 & remaining ≤ 0 → allocation fully used · Locked & allocated = 0 → 0 allocated qty (locked with no quantity cap) · Locked & no demand → no demand in period · Unlocked with demand → lock removed · no lock row → NOT in lock list.",
+    "Availability": "Availability of the SKU (same as Inventory & Inbound).",
+    "Placed Yesterday": "Placed pieces of this SKU yesterday by all merchants (bundles split into singles).",
+    "Cogs": "Cost of one piece.",
+    "Beginning Inventory": "Stock of the SKU on the first day of the range (Inventory & Inbound).",
+    "Inbound Qty": "Pieces received (inbound) in the range.",
+    "Inbound Date": "The days the inbound arrived in the range.",
+    "Confirmed Qty": "Confirmed pieces of the SKU in the range, all merchants (Inventory & Inbound).",
+    "Beginning Sales": "Pieces sold from the beginning stock = lower of Confirmed Qty and Beginning Inventory.",
+    "Remaining from Beginning": "Confirmed Qty − Beginning Sales — what was sold after the beginning stock ran out.",
+    "Confirmed From Purchase": "Pieces sold from the new purchase = lower of Remaining from Beginning and Inbound Qty.",
+    "Over Confirmed": "Confirmed beyond the beginning stock + the purchase = Remaining from Beginning − Inbound Qty (when above 0).",
+    "Inbound vs Sold": "Confirmed From Purchase ÷ Inbound Qty — how much of the purchase is sold (100% = all of it).",
+    "Overachieve": "Over Confirmed ÷ Inbound Qty — how far sales went past the purchase.",
+    "Purchases Sold Out On": "Sold out = the whole purchase is sold · otherwise the pieces of the purchase still not sold."
+  };
+  function tipAttr(name) { var t = TIP[name]; return t ? ' title="' + esc(t) + '"' : ""; }
   var FLAGS = [["all", "All review flags"], ["top", "Top merchant not locked"], ["notin", "Demand merchants not in lock list"], ["ok", "OK"], ["nodemand", "No demand in period"]];
   function skuRows(d) {
     var F = LR.sku, q = F.q.trim().toLowerCase();
@@ -208,7 +268,7 @@
     var cnt = function (k) { return d.skus.filter(function (r) { return r.flagKey === k; }).length; };
     var tiles = [["SKUs reviewed", int(d.skus.length), "received inbound in " + rangeText(d)], ["Top merchant not locked", int(cnt("top")), "the biggest buyer of the SKU has no active lock"],
       ["Demand merchants not in lock list", int(cnt("notin")), "SKUs where merchants placed demand with no lock row"], ["OK", int(cnt("ok")), "top merchant locked, every demand merchant in the lock list"], ["No demand", int(cnt("nodemand")), "no merchant placed demand in the range"]];
-    var th = function (c) { return '<th class="' + (c[2] ? "num " : "") + '" style="cursor:pointer;white-space:nowrap" data-lrs="' + c[0] + '">' + c[1] + (F.sort === c[0] ? (F.dir < 0 ? " ↓" : " ↑") : "") + '</th>'; };
+    var th = function (c) { return '<th class="' + (c[2] ? "num " : "") + '" style="cursor:pointer;white-space:nowrap" data-lrs="' + c[0] + '"' + tipAttr(c[1]) + '>' + c[1] + (F.sort === c[0] ? (F.dir < 0 ? " ↓" : " ↑") : "") + '</th>'; };
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>SKU Lock Review</h2>' +
       '<p>One row per SKU that received inbound in the range: its stock, who placed demand on it, and whether those merchants are locked. Click a SKU to open its merchants in Merchant Lock Review.</p></div>' +
       '<div class="table-controls">' + rangeBar("lrs") + '</div></div>' +
@@ -270,14 +330,14 @@
     var F = LR.mer, rows = merRows(d), pages = Math.max(1, Math.ceil(rows.length / PAGE)); if (F.page > pages - 1) F.page = pages - 1;
     var all = []; d.skus.forEach(function (S) { S.merchants.forEach(function (m) { all.push(m); }); });
     var cc = function (c) { return all.filter(function (m) { return m.check === c; }).length; };
-    var tiles = [["Merchant rows", int(all.length), "merchants with demand + locked merchants with none"], ["Not in lock list", int(cc(CHECK.notIn)), "placed demand, no lock row for that SKU"], ["Lock removed", int(cc(CHECK.removed)), "placed demand, lock row is Unlocked"],
-      ["Locked – 0 allocated", int(cc(CHECK.zero)), "locked, nothing allocated / left"], ["Locked – no demand", int(cc(CHECK.noDemand)), "locked but placed nothing in the range"], ["OK", int(cc(CHECK.ok)), "locked with remaining qty"]];
+    var tiles = [["Merchant rows", int(all.length), "merchants with demand + locked merchants with none"], ["Not in lock list", int(cc(CHECK.notIn)), "placed demand, no lock row for that SKU"], ["Lock removed", int(cc(CHECK.removed)), "placed demand, its lock expired / was cancelled"],
+      ["Locked – 0 allocated", int(cc(CHECK.zero)), "locked with no quantity cap / nothing left"], ["Locked – no demand", int(cc(CHECK.noDemand)), "locked but placed nothing in the range"], ["OK", int(cc(CHECK.ok)), "locked with remaining qty"]];
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Merchant Lock Review</h2>' +
       '<p>Every merchant who placed demand on each reviewed SKU, ranked by placed pieces (ties: confirmed), with its lock. Locked merchants with no demand in the range are listed after them with no rank.</p></div>' +
       '<div class="table-controls">' + rangeBar("lrm") + '</div></div>' +
       '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
       '<div class="sc-note" style="margin:0 18px 14px">Check: Locked &amp; remaining &gt; 0 → OK · Locked &amp; allocated &gt; 0 &amp; remaining ≤ 0 → allocation fully used · Locked &amp; allocated = 0 → 0 allocated qty · Unlocked with demand → lock removed · no lock row → NOT in lock list. ' +
-      'Lock fields come from the locking tab (Single rows), matched on SKU ID + Merchant ID. The stock &amp; inbound columns are the SKU\'s Inventory &amp; Inbound numbers for the range (the same on every merchant of that SKU).</div></div>';
+      'Locked = an active lock row, same as Active Locks — allocated 0 means the SKU is locked to the merchant with no quantity cap. Unlocked = the lock expired / was cancelled. Lock fields come from the locking tab (Single rows), matched on SKU ID + Merchant ID. The stock &amp; inbound columns are the SKU\'s Inventory &amp; Inbound numbers for the range (the same on every merchant of that SKU).</div></div>';
     var checks = Object.keys(CHECK).map(function (k) { return CHECK[k]; });
     html += '<div class="panel table-panel hover-glow"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Merchants' + (F.sku ? ' · ' + esc(F.sku) : '') + '</h2><p>' + esc(rangeText(d)) + (F.sku ? ' · <a href="#" id="lrmAll" style="color:var(--accent)">show all SKUs</a>' : '') + '</p></div><div class="table-controls" style="gap:8px;flex-wrap:wrap">' +
       '<input id="lrmQ" type="search" class="date-filter-input" style="min-width:200px" placeholder="Search SKU, merchant name or ID" value="' + esc(F.q) + '">' +
@@ -287,7 +347,7 @@
       '<select id="lrmCheck" class="date-filter-input">' + opts(checks, F.check, "All checks") + '</select>' +
       '<button class="btn btn-outline small" id="lrmStock">' + (F.stockCols ? "Hide" : "Show") + ' stock &amp; inbound columns</button>' +
       '<button class="btn btn-outline small tw-exp" data-csv="own" id="lrmCsv">Export CSV</button></div></div>' +
-      '<div class="table-responsive"><table class="data-table" id="lrmTable"><thead><tr>' + MER_COLS.concat(F.stockCols ? STOCK_COLS : []).map(function (c) { return '<th class="' + (NUM_HEAD.indexOf(c) >= 0 ? "num" : "") + '" style="white-space:nowrap">' + c + '</th>'; }).join("") + '</tr></thead><tbody>' +
+      '<div class="table-responsive"><table class="data-table" id="lrmTable"><thead><tr>' + MER_COLS.concat(F.stockCols ? STOCK_COLS : []).map(function (c) { return '<th class="' + (NUM_HEAD.indexOf(c) >= 0 ? "num" : "") + '" style="white-space:nowrap;cursor:help"' + tipAttr(c) + '>' + c + '</th>'; }).join("") + '</tr></thead><tbody>' +
       (rows.slice(F.page * PAGE, F.page * PAGE + PAGE).map(function (x) {
         var S = x.S, m = x.m;
         var h = '<tr><td class="font-mono">' + esc(S.sku) + '</td><td>' + esc(S.name) + '</td><td>' + esc(S.category) + '</td><td class="num">' + (m.rank == null ? "" : m.rank) + '</td><td class="font-mono">' + esc(m.mid) + '</td><td>' + esc(m.merchant) + '</td><td>' + esc(m.acm) + '</td>' +

@@ -424,6 +424,9 @@ function metabaseCsvToGviz(text, gid) {
   return { table: { cols: metabaseHeaderCols(labels), rows } };
 }
 
+// v1.18.0 — the Worker keeps every Metabase source prewarmed (cron every 10 min) and serves that copy instantly; the Refresh
+// button sets this so its sync asks Metabase live instead.
+let metabaseForceLive = false;
 async function metabaseFetchText(url, gid) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), METABASE_TIMEOUT_MS);
@@ -451,7 +454,7 @@ async function loadMetabaseSheetOnce(gid) {
   // dashboard origin -> every Metabase read goes through the Worker proxy (allow-listed on the worker side).
   if (!SYNC_CDN_URL) throw new Error("Worker URL (SYNC_CDN_URL) is not configured — cannot reach Metabase.");
   const text = await metabaseFetchText(
-    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid), gid); // v1.16.0: the link itself lives on the Worker
+    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + (metabaseForceLive ? "&live=1" : ""), gid); // v1.16.0: the link itself lives on the Worker
   if (src.format === "csv") return metabaseCsvToGviz(text, gid);
   let parsed;
   try { parsed = JSON.parse(text); }
@@ -1694,12 +1697,12 @@ function openCacheDB() {
   });
 }
 
-async function saveDataToCache(snapshot) {
+async function saveDataToCache(snapshot, savedAt) {
   try {
     const db = await openCacheDB();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).put({ savedAt: Date.now(), data: snapshot, fingerprint: computeSnapshotFingerprint(snapshot) }, IDB_KEY);
+      tx.objectStore(IDB_STORE).put({ savedAt: savedAt || Date.now(), data: snapshot, fingerprint: computeSnapshotFingerprint(snapshot) }, IDB_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -1789,6 +1792,17 @@ async function inflateSnapshotBody(buf) {
   if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot read the shared snapshot (no DecompressionStream).");
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
   return JSON.parse(await new Response(stream).text());
+}
+
+// v1.18.0 — when was the shared snapshot saved (tiny request, no body). 0 = none / unknown.
+async function sharedSnapshotSavedAt() {
+  if (!SYNC_CDN_URL) return 0;
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(`${SYNC_CDN_URL}?action=snapshotMeta`, { cache: "no-store", signal: ctrl.signal });
+    const j = res.ok ? await res.json() : null;
+    return (j && j.last && +j.last.savedAt) || 0;
+  } catch (e) { return 0; } finally { clearTimeout(timer); }
 }
 
 async function fetchSharedSnapshot() {
@@ -17804,6 +17818,18 @@ async function loadData(isManualRefresh = false) {
   const onScreen = !!(state.allParsedRows && state.allParsedRows.length) && state._shownFingerprint !== undefined;
   let cache = onScreen ? null : await loadDataFromCache();
   let paintedFromCache = onScreen;
+  metabaseForceLive = !!isManualRefresh;
+
+  // v1.18.0 — this browser's copy can be days old (last time it was opened). If somebody loaded newer numbers since then, the
+  // shared snapshot is newer: paint that one instead of the old local copy (one tiny request to compare first).
+  if (cache && !onScreen && !isManualRefresh) {
+    const sharedAt = await sharedSnapshotSavedAt();
+    if (sharedAt && sharedAt > (cache.savedAt || 0) + 60000) {
+      setSyncStatus("Loading the latest numbers…");
+      const shared = await fetchSharedSnapshot();
+      if (shared && shared.savedAt > (cache.savedAt || 0)) { cache = shared; whenIdle().then(() => saveDataToCache(shared.data, shared.savedAt)); }
+    }
+  }
 
   // v1.17.0 — cold start. Nothing cached in this browser (first visit, cleared
   // data, a different machine) used to mean zeros on screen for the whole sheet
@@ -17815,7 +17841,7 @@ async function loadData(isManualRefresh = false) {
     const shared = await fetchSharedSnapshot();
     if (shared) {
       cache = shared;
-      saveDataToCache(shared.data);   // so the next open on this browser is instant too
+      saveDataToCache(shared.data, shared.savedAt);   // so the next open on this browser is instant too (kept with ITS time, not now)
     }
   }
 

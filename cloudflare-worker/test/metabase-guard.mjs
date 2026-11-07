@@ -11,7 +11,7 @@ globalThis.fetch = async (u) => { const x = typeof next === "function" ? next(u)
 const csv = (months) => "CREATION_DATE,TAGER_ID,X\n" + Object.keys(months).map((k) => Array.from({ length: months[k] }, (_, i) => k + "-0" + (1 + (i % 9)) + "," + i + ",1").join("\n")).join("\n") + "\n";
 const MAIN = "2099497960", PRODUCTS = "1779314157";
 async function get(gid) {
-  const r = await worker.fetch(new Request("https://w/?action=metabase&gid=" + gid), env, { waitUntil() {} });
+  const r = await worker.fetch(new Request("https://w/?action=metabase&live=1&gid=" + gid), env, { waitUntil() {} });
   let body = r.headers.get("Content-Encoding") === "gzip" ? await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).text() : await r.text();
   return { s: r.status, src: r.headers.get("X-Data-Source"), at: r.headers.get("X-Cached-At"), why: r.headers.get("X-Cache-Reason"), body, expose: r.headers.get("Access-Control-Expose-Headers") || "" };
 }

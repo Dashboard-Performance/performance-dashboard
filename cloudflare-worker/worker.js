@@ -159,6 +159,12 @@ const MB_MONTH_DROP = 0.10;        // Main: a month (seen in the last good copy)
 const MB_ACCEPT_SMALLER_HOURS = 12;
 const MB_SAVE_EVERY_MS = 10 * 60 * 1000;
 const MB_FETCH_TIMEOUT_MS = 170000;
+// v1.18.0 — PREWARM: the cron fetches every Metabase source every MB_PREWARM_EVERY_MIN minutes and keeps the copy in KV, and the
+// dashboard is served that copy straight away while it is younger than MB_FRESH_MS — so opening the dashboard no longer waits on
+// Metabase running every query live (that took minutes). The Refresh button asks for live (&live=1).
+const MB_PREWARM_EVERY_MIN = 10;
+const MB_FRESH_MS = 15 * 60 * 1000;
+const MB_PREWARM_PARALLEL = 4;
 const MB_MONTHS_GIDS = { "2099497960": true, "7100000001": true, "7100000002": true }; // CSV sources with a date in the first column (per-month check)
 const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 function mbMonthOf(txt) {
@@ -241,7 +247,8 @@ function mbShrunk(shape, good, gid) {
 async function mbGunzip(buf) { return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer(); }
 async function mbGzipBytes(bytes) { return new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer(); }
 // → { gz?:ArrayBuffer (cached copy, gzip), bytes?:Uint8Array (live), contentType, source:"live"|"cache", cachedAt, reason, status }
-async function metabaseGuarded(env, gid) {
+async function metabaseGuarded(env, gid, opts) {
+  opts = opts || {};
   const target = metabaseLink(env, gid); if (!target) return { status: 404 };
   const csv = /\/csv(\?|$)|\.csv(\?|$)/i.test(target), metaKey = "mb:meta:" + gid, bodyKey = "mb:good:" + gid, susKey = "mb:sus:" + gid;
   const kv = env.SYNC_CACHE;
@@ -274,7 +281,7 @@ async function metabaseGuarded(env, gid) {
   if (!why && bytes) {
     // healthy → keep it as the last good copy (at most every 10 minutes, or right away when it changed)
     const changed = !good || good.rows !== shape.rows || good.size !== bytes.length;
-    if (changed || !good.at || Date.now() - Date.parse(good.at) > MB_SAVE_EVERY_MS) {
+    if (opts.forceSave || changed || !good.at || Date.now() - Date.parse(good.at) > MB_SAVE_EVERY_MS) {
       try {
         const gz = await mbGzipBytes(bytes);
         if (gz.byteLength < 24 * 1024 * 1024) {
@@ -296,14 +303,49 @@ async function metabaseGuarded(env, gid) {
   if (bytes) return { bytes, contentType: ct, source: "live", status: 200, reason: why };
   return { status: 502, reason: why };
 }
+// The copy the prewarm cron (or the last live call) saved, if it is younger than MB_FRESH_MS. null = go live.
+async function metabaseFresh(env, gid) {
+  let good = null; try { good = JSON.parse((await env.SYNC_CACHE.get("mb:meta:" + gid)) || "null"); } catch (e) {}
+  if (!good || !good.at || Date.now() - Date.parse(good.at) > MB_FRESH_MS) return null;
+  if (await env.SYNC_CACHE.get("mb:sus:" + gid)) return null;                 // something looked wrong last time → let the guard decide live
+  const gz = await env.SYNC_CACHE.get("mb:good:" + gid, { type: "arrayBuffer" });
+  if (!gz) return null;
+  return { gz, contentType: good.ct || "application/octet-stream", source: "prewarmed", fetchedAt: good.at, status: 200, rows: good.rows };
+}
+// Cron: refresh every source's saved copy. A KV lock keeps two runs from overlapping when Metabase is slow.
+async function prewarmMetabase(env, force) {
+  const minute = new Date().getUTCMinutes();
+  if (!force && minute % MB_PREWARM_EVERY_MIN !== 0) return { skipped: "not this minute" };
+  if (!env.SYNC_CACHE) return { skipped: "no KV" };
+  if (await env.SYNC_CACHE.get("mb:prewarm:lock")) return { skipped: "already running" };
+  await env.SYNC_CACHE.put("mb:prewarm:lock", new Date().toISOString(), { expirationTtl: 14 * 60 });
+  const gids = Object.keys(METABASE_SOURCES), out = {};
+  try {
+    let i = 0;
+    const worker = async () => {
+      while (i < gids.length) {
+        const gid = gids[i++], t0 = Date.now();
+        try { const g = await metabaseGuarded(env, gid, { forceSave: true }); out[gid] = { source: g.source || "none", rows: g.rows || 0, ms: Date.now() - t0, reason: g.reason || "" }; }
+        catch (e) { out[gid] = { error: (e && e.message) || String(e), ms: Date.now() - t0 }; }
+      }
+    };
+    await Promise.all(Array.from({ length: MB_PREWARM_PARALLEL }, worker));
+    await env.SYNC_CACHE.put("mb:prewarm:last", JSON.stringify({ at: new Date().toISOString(), sources: out }));
+    return { ok: true, sources: out };
+  } finally {
+    await env.SYNC_CACHE.delete("mb:prewarm:lock").catch(() => {});
+  }
+}
 async function handleMetabaseProxy(url, env) {
   const gid = String(url.searchParams.get("gid") || "");
   if (!metabaseLink(env, gid)) return jsonResponse({ success: false, message: "unknown source" }, 404);
-  const g = await metabaseGuarded(env, gid);
+  const live = url.searchParams.get("live") === "1";
+  const g = (!live && await metabaseFresh(env, gid)) || await metabaseGuarded(env, gid);
   const h = corsHeaders();
   h["Cache-Control"] = "no-store, no-transform";
   h["X-Data-Source"] = g.source || "none";
   if (g.cachedAt) h["X-Cached-At"] = g.cachedAt;
+  if (g.fetchedAt) h["X-Fetched-At"] = g.fetchedAt;
   if (g.reason) h["X-Cache-Reason"] = String(g.reason).replace(/[^\x20-\x7E]/g, " ").slice(0, 200);
   if (g.status !== 200) return new Response(JSON.stringify({ success: false, message: g.reason || "Metabase failed" }), { status: g.status || 502, headers: h });
   h["Content-Type"] = g.contentType;
@@ -529,7 +571,8 @@ async function handleMetabaseStatus(env) {
     const meta = m ? JSON.parse(m) : null;
     out[gid] = { label: METABASE_SOURCES[gid].label, lastGood: meta ? { at: meta.at, rows: meta.rows } : null, lastProblem: p ? JSON.parse(p) : null };
   }
-  return jsonResponse({ success: true, sources: out });
+  let prewarm = null; try { prewarm = JSON.parse((await env.SYNC_CACHE.get("mb:prewarm:last")) || "null"); } catch (e) {}
+  return jsonResponse({ success: true, sources: out, prewarm: prewarm ? { at: prewarm.at, everyMin: MB_PREWARM_EVERY_MIN, freshMin: MB_FRESH_MS / 60000 } : null });
 }
 
 // ---------------------------------------------------------------------------
@@ -1257,7 +1300,7 @@ function corsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Release-Secret, X-Admin-Key, X-Staff-Token, X-Service-Key",
-    "Access-Control-Expose-Headers": "Content-Disposition, X-Data-Source, X-Cached-At, X-Cache-Reason",
+    "Access-Control-Expose-Headers": "Content-Disposition, X-Data-Source, X-Cached-At, X-Cache-Reason, X-Fetched-At",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
   };
@@ -2214,6 +2257,7 @@ export default {
     ctx.waitUntil(
       Promise.all([
         refreshLastSyncCache(env).catch((err) => console.error("[scheduled refreshLastSyncCache] failed (retry next tick):", err && err.message)),
+        prewarmMetabase(env).catch((err) => console.error("[scheduled prewarmMetabase] failed:", err && err.message)),
         LOOP.scheduled(env).catch((err) => console.error("[scheduled loop] failed:", err && err.message)),
         flushFeedbackQueue(env).catch((err) => console.error("[scheduled flushFeedbackQueue] failed:", err && err.message)),
         sendDeclineDigest(env).catch((err) => console.error("[scheduled declineDigest] failed:", err && err.message)),

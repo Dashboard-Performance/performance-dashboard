@@ -134,3 +134,8 @@
 - Merchant Status = قاعدة Matches / Single على بداية الفترة: Active لو التاجر اشتغل على الـ SKU ده الشهر اللي قبل بداية الفترة، وإلا New ("—" لحد ما الشهر ده يتحمل).
 - اتجرب على داتا الشيت نفسه: الـ 73 SKU اللي الشيت مالي ملخصهم والـ 869 صف تاجر طلعوا نفس الأرقام بالظبط (العدد، أكبر تاجر، الإجماليات، Review Flag، الـ Rank، Lock Status، CHECK).
 - الأدوار غير الـ Admin / Country Manager: لازم تدّي الـ View للتابين من Users & Roles (navSkuLockReview / navMerchantLockReview).
+
+## الداش بورد يفتح على آخر داتا على طول + شرح الأعمدة + Lock Status زي Active Locks
+- **Worker (محتاج `npx wrangler deploy`):** كل 10 دقايق الـ Cron بيجيب كل كويريز Metabase (13) ويحفظ نسخة في KV (أربعة مع بعض، وقفل يمنع تشغيلتين فوق بعض). لما الداش بورد يطلب كويري والنسخة أحدث من 15 دقيقة، بتتبعتله على طول (`X-Data-Source: prewarmed`) بدل ما يستنى Metabase يشغل الكويري (كان بياخد دقايق). زرار Refresh بيطلب Live (`&live=1`). لو النسخة أقدم من 15 دقيقة أو كان فيه مشكلة آخر مرة → Live زي الأول بنفس الحماية (last good copy). `metabaseStatus` بيوري آخر تشغيلة.
+- **الداش بورد (`js/app.js`):** وأنت بتفتح، لو النسخة المشتركة (اللي آخر حد فتح الداش بورد رفعها) أحدث من النسخة المحفوظة عندك، بتتعرض هي على طول بدل نسختك القديمة. والنسخة المحفوظة بتتخزن بوقتها الحقيقي (مش وقت الحفظ).
+- **SKU Lock Review / Merchant Lock Review:** شرح لكل عمود لما تقف على اسمه. وLock Status بقى زي Active Locks: أي صف قفل شغال = Locked، وALLOCATED_QUANTITY = 0 أو فاضي معناه مقفول عليه من غير حد للكمية (Check = Locked – 0 allocated qty)، Unlocked = القفل خلص/اتلغى، Not in lock list = مفيش صف خالص.
