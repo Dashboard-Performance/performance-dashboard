@@ -12,6 +12,8 @@
 
 ## اللي جديد
 
+- **Availability** (Inventory & Products Performance وباقي الجداول): كويري Metabase "Products" (Data Extract) بترجّع WEBSITE_STATUS = null لـ 11,365 SKU (أغلبهم Locked)، فكان بيترسم pill فاضي. دلوقتي الفاضي بيظهر "—"، و NOT_AVAILABLE بقى أحمر زي Out of Stock.
+
 - **Incentive Merchants**: رجع يقرا الأداء الفعلي (Confirmed Orders) من كويري **Merchant Segmentation** (gid 620123165) بس، وبيفتح على الشهر الحالي. تاب أكتوبر (2125522926) اتلغى (`MERCHANT_SEG_ARCHIVE_GIDS = []`، `INCENTIVE_DEFAULT_MONTH = ""`)، وأي صفوف أكتوبر محفوظة في الكاش بتتجاهل. الشهور اللي الكويري مش شايلاها بتظهر برسالة "missing month".
 **الشكل (17_7)**
 - Glass و Liquid Glass بقوا شكل واحد اسمه **Glass**، والزرار فوق فيه اختيارين: Glass / Classic.

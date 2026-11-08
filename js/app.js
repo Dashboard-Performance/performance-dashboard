@@ -5329,7 +5329,7 @@ function renderPaginatedInventoryTable() {
       <td class="num"><span class="badge-outline ${m.stock > 10 ? 'green' : 'red'}">${fmtIntCell(Math.round(m.stock))}</span></td>
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="text-dim">${m.category}</td>
-      <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
+      <td>${availabilityBadge(m.availability)}</td>
       <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.price)}</td>
       <td class="num font-bold text-green">${fmtMoneyCompactCell(m.profit)}</td>
       <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.asp)}</td>
@@ -5650,6 +5650,13 @@ function wireTgtViews() {
 // -------------------------------------------------------------------------
 // The Merchant Segmentation query returns the CURRENT month only. Closed months come from their tabs (MERCHANT_SEG_ARCHIVE_GIDS, state.merchantSegHistoryRows);
 // for the same (merchant + month) the closed-month tab wins (it is the final number). Every page that reads merchant / ACM actuals from Segmentation uses this.
+// Availability badge — WEBSITE_STATUS from the Metabase "Products" query (Data Extract). Metabase returns null for many SKUs
+// (mostly locked ones), which used to draw an empty pill; a blank now shows a plain dash instead.
+function availabilityBadge(v) {
+  const t = String(v == null ? "" : v).trim();
+  if (!t || t === "-" || t === "Unknown") return '<span class="text-dim" title="No WEBSITE_STATUS in the Metabase Products query">—</span>';
+  return '<span class="badge-outline ' + (t === 'Out of Stock' || t === 'NOT_AVAILABLE' ? 'red' : 'blue') + '">' + escapeHtml(t) + '</span>';
+}
 function merchantSegRowsAll() {
   const base = state.merchantSegSourceRows || [], hist = MERCHANT_SEG_ARCHIVE_GIDS.length ? (state.merchantSegHistoryRows || []) : [];
   if (!hist.length) return base;
@@ -13738,7 +13745,7 @@ function wiRenderBundleExpandRowHtml(sku) {
       <tr>
         <td class="font-mono text-dim">${escapeHtml(b.productId)}</td>
         <td class="text-light truncate-cell" style="max-width:180px;" title="${escapeHtml(b.productName)}">${escapeHtml(b.productName)}</td>
-        <td><span class="badge-outline ${b.availability === 'Out of Stock' ? 'red' : 'blue'}">${escapeHtml(b.availability)}</span></td>
+        <td>${availabilityBadge(b.availability)}</td>
         <td class="num text-dim">${fmtIntCell(b.placed)}</td>
         <td class="num text-green font-bold">${fmtIntCell(b.confirmed)}</td>
         <td class="num text-blue">${fmtIntCell(b.delivered)}</td>
@@ -13887,7 +13894,7 @@ function renderWeeklyInventoryTable() {
       <td class="font-mono text-dim" style="cursor:pointer;user-select:none;" title="Click to show/hide the bundles that contain this Single SKU." onclick="wiToggleSkuExpand('${escapeHtml(r.sku).replace(/'/g, "\\'")}')">${wrapRawCell(0, `${isExpanded ? "▾" : "▸"} ${escapeHtml(r.sku)}`, r.sku)}</td>
       <td class="font-bold text-light truncate-cell" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
       <td class="text-dim truncate-cell" style="max-width:110px;" title="${escapeHtml(r.category)}">${escapeHtml(r.category)}</td>
-      <td><span class="badge-outline ${r.availability === 'Out of Stock' ? 'red' : 'blue'}">${escapeHtml(r.availability)}</span></td>
+      <td>${availabilityBadge(r.availability)}</td>
       <td class="num text-dim font-bold">${fmtIntCell(r.stock)}</td>
       <td class="num text-dim font-bold">${fmtIntCell(r.doh)}</td>
       <td class="num text-dim">${fmtMoneyCompactCell(r.cogs)}</td>
@@ -16649,7 +16656,7 @@ function renderPaginatedHealthyUnlockingTable() {
       <td class="font-mono text-dim">${m.skuId}</td>
       <td class="font-bold truncate-cell" title="${m.skuName}">${m.skuName}</td>
       <td class="text-dim truncate-cell" title="${m.category}">${m.category}</td>
-      <td><span class="badge-outline ${m.availability === 'Out of Stock' ? 'red' : 'blue'}">${m.availability}</span></td>
+      <td>${availabilityBadge(m.availability)}</td>
       <td class="text-dim">${m.lastInboundText}</td>
       <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
       <td class="font-mono text-dim">${m.tagerId}</td>
