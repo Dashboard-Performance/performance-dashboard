@@ -1601,7 +1601,9 @@
                       <th>Merchant Name</th>
                       <th>Category</th>
                       <th>ACM (Owner)</th>
-                      <th class="num" onclick="spfSort('oldDailyTarget')" style="cursor:pointer" title="Current daily Placed target of this match (before the new target). Click to sort.">Daily Target</th>
+                      <th class="num" onclick="spfSort('stock')" style="cursor:pointer" title="Current stock of the product (same as the other tables: bundles show their own row stock). Click to sort.">Stock</th>
+                      <th class="num" onclick="spfSort('doh')" style="cursor:pointer" title="Days on hand: stock ÷ average confirmed pieces per day (last 3 days); a bundle shows its weakest single. Click to sort.">DOH</th>
+                      <th class="num" onclick="spfSort('oldDailyTarget')" style="cursor:pointer" title="Daily Placed target this match is held to now. 'Adjusted' = changed by a Sales Plan - Feedback (hover it to see the main target and when it changed). Click to sort.">Daily Target</th>
                       <th class="num" onclick="spfSort('mtdTarget')" style="cursor:pointer" title="Placed pieces: Daily Target x days until yesterday. Click to sort.">Placed - MTD Target</th>
                       <th class="num" onclick="spfSort('mtdActual')" style="cursor:pointer" title="Placed pieces actual until yesterday. Click to sort.">Placed - Actual</th>
                       <th class="num" onclick="spfSort('runRate')" style="cursor:pointer" title="Projected month-end Placed. Click to sort.">Placed - Run Rate</th>

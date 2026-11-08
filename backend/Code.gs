@@ -593,7 +593,7 @@ var LAST_SYNC_GIDS = [
   "2042936628",  // TARGETS_ACM_GID
   "1780730573",  // INVENTORY_GID
   "1656655269",  // CAT_TARGETS_GID
-  "892918900",   // ACM_SALES_PLAN_GID
+  // "892918900" (ACM_SALES_PLAN_GID) — v1.18.0: no longer read; Sales Plan-ACM uses the month's uploaded targets
   "565878313",   // INBOUND_GID
   // v1.1.58 — Sellthrough Rate Panel EGY/IRQ toggle (Products Info فوق بيتشارك
   // مع IRQ، نفس الشيت بيتفلتر بعمود COUNTRY في app.js).
@@ -835,7 +835,6 @@ var LAST_SYNC_GID_LABELS_ = { "1620722565": "SKU Targets (Bundle & Single)",
   "757777690": "Repack (Supply Conversion)",
   "115442405": "Targets",
   "2042936628": "Targets ACM", "1780730573": "Inventory", "1656655269": "Category Targets",
-  "892918900": "ACM Sales Plan",
   "565878313": "Inbound",
   "997714491": "IRQ Sell-through Needed", "879952880": "IRQ Inbound",
   "827189174": "IRQ Beginning Inventory", "775718300": "IRQ COGS",
@@ -1355,101 +1354,9 @@ function getSalesPlanFeedbackSheet_() {
   return sh;
 }
 
-// ---------------------------------------------------------------------------
-//  Plan sheet sync: tab "Sales_Plan-ACM" (gid 892918900) — the sheet the dashboard's
-//  Sales Plan-ACM page reads. Columns A:F (Product ID, Name, CAT, Merchant ID, Name,
-//  Target Placed Daily) are NEVER modified. We only:
-//   - add column G "New Target Daily" + column H "Match Flag" (headers if empty),
-//   - fill H = "Existing match" for the rows that were already there,
-//   - existing match  -> G = Adjusted Target (existing merchant),
-//   - new merchants   -> appended BELOW the existing data (A:E filled, F left empty,
-//                        G = its target, H = "New match"); a match that already exists
-//                        in the sheet is never duplicated (its G is just updated).
-//  Saving the same match again the same day re-syncs: new-match rows that this
-//  feedback added before and that are no longer in the list are removed.
-// ---------------------------------------------------------------------------
-var SP_PLAN_GID = 892918900;
-var SP_PLAN_NEW_TARGET_HEADER = "New Target Daily";
-var SP_PLAN_FLAG_HEADER = "Match Flag";
-var SP_FLAG_EXISTING = "Existing match";
-var SP_FLAG_NEW = "New match";
-var SP_PLAN_UPDATED_HEADER = "Last Target Update"; // column I: date+time of the last time G was set/changed for that row
-
-function spPlanSheet_() {
-  var sheets = SpreadsheetApp.openById(WEBSITE_EGY_SHEET_ID).getSheets();
-  for (var i = 0; i < sheets.length; i++) if (sheets[i].getSheetId() === SP_PLAN_GID) return sheets[i];
-  return null;
-}
-
-// opts: { productId, productName, category, merchantId, adjustedTarget, newMerchants:[{id,name,target}], prevNewIds:[...] }
-function spSyncPlanSheet_(opts) {
-  var sh = spPlanSheet_();
-  if (!sh) return { ok: false, error: "Plan sheet (gid " + SP_PLAN_GID + ") not found." };
-  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
-  var hdr = sh.getRange(1, 7, 1, 3).getValues()[0];
-  var g1 = String(hdr[0] || "").trim(), h1 = String(hdr[1] || "").trim(), i1 = String(hdr[2] || "").trim();
-  if ((g1 && g1 !== SP_PLAN_NEW_TARGET_HEADER) || (h1 && h1 !== SP_PLAN_FLAG_HEADER) || (i1 && i1 !== SP_PLAN_UPDATED_HEADER)) {
-    return { ok: false, error: "Columns G/H/I of the plan sheet are already used by something else; not touched." };
-  }
-  if (sh.getMaxColumns() < 9) sh.insertColumnsAfter(sh.getMaxColumns(), 9 - sh.getMaxColumns());
-  if (!g1 || !h1 || !i1) sh.getRange(1, 7, 1, 3).setValues([[SP_PLAN_NEW_TARGET_HEADER, SP_PLAN_FLAG_HEADER, SP_PLAN_UPDATED_HEADER]]).setFontWeight("bold");
-  var stamp = Utilities.formatDate(new Date(), DD_TIMEZONE, "yyyy-MM-dd HH:mm");
-
-  var last = sh.getLastRow();
-  var data = last >= 2 ? sh.getRange(2, 1, last - 1, 9).getValues() : [];
-  var str = function (v) { return String(v === null || v === undefined ? "" : v).trim(); };
-
-  // H for rows that were there before this feature = "Existing match" (only blanks; never overwrite a flag)
-  var flagCol = [], needFlagWrite = false;
-  for (var i = 0; i < data.length; i++) {
-    var f = str(data[i][7]);
-    if (!f && (str(data[i][0]) || str(data[i][3]))) { f = SP_FLAG_EXISTING; needFlagWrite = true; data[i][7] = f; }
-    flagCol.push([data[i][7] === "" ? "" : data[i][7]]);
-  }
-  if (needFlagWrite && data.length) sh.getRange(2, 8, data.length, 1).setValues(flagCol);
-
-  var find = function (pid, mid) {
-    for (var r = 0; r < data.length; r++) if (str(data[r][0]) === pid && str(data[r][3]) === mid) return r;
-    return -1;
-  };
-  var res = { ok: true, updated: 0, added: 0, removed: 0 };
-
-  // 1) the existing (feedback) match -> adjusted target in G
-  var ex = find(opts.productId, opts.merchantId);
-  var setTarget = function (idx, val) { // writes G (+ I timestamp) only when the target really changes
-    var oldV = data[idx][6];
-    if (String(oldV === null || oldV === undefined ? "" : oldV).trim() !== "" && Number(oldV) === Number(val)) return false;
-    sh.getRange(idx + 2, 7).setValue(val); sh.getRange(idx + 2, 9).setValue(stamp); data[idx][6] = val; data[idx][8] = stamp;
-    return true;
-  };
-  if (ex !== -1 && setTarget(ex, opts.adjustedTarget)) res.updated++;
-
-  // 2) new merchants: update when already in the sheet, else append below the data
-  var keep = {};
-  var appendRows = [];
-  for (var n = 0; n < opts.newMerchants.length; n++) {
-    var m = opts.newMerchants[n]; keep[m.id] = true;
-    var at = find(opts.productId, m.id);
-    if (at !== -1) { if (setTarget(at, m.target)) res.updated++; }
-    else appendRows.push([opts.productId, opts.productName, opts.category, String(m.id), m.name || "", "", m.target, SP_FLAG_NEW, stamp]);
-  }
-  if (appendRows.length) {
-    var start = sh.getLastRow() + 1;
-    if (start + appendRows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), appendRows.length + 50);
-    sh.getRange(start, 1, appendRows.length, 9).setValues(appendRows);
-    res.added = appendRows.length;
-  }
-
-  // 3) new-match rows added by an earlier save of this same feedback and no longer listed -> remove
-  var stale = [];
-  (opts.prevNewIds || []).forEach(function (id) {
-    if (!id || keep[id]) return;
-    var r = find(opts.productId, id);
-    if (r !== -1 && str(data[r][7]) === SP_FLAG_NEW) stale.push(r + 2);
-  });
-  stale.sort(function (a, b) { return b - a; }).forEach(function (rowNo) { sh.deleteRow(rowNo); res.removed++; });
-  return res;
-}
+// v1.18.0 — owner's decision: nothing is written to (or read from) the "Sales_Plan-ACM" tab any more.
+// Sales Plan-ACM reads the month's uploaded targets (Control → Targets Upload) and applies the feedback saved here
+// (Adjusted Target / new merchants, from the feedback date on) in the dashboard itself.
 
 function handleSaveSalesPlanFeedback(payload) {
   var feedback = String(payload.feedback || "").trim();
@@ -1519,13 +1426,7 @@ function handleSaveSalesPlanFeedback(payload) {
     sh.getRange(target, 18).setNumberFormat("@");
     for (var c = 0; c < SP_MAX_NEW_MERCHANTS; c++) sh.getRange(target, 25 + c * 2).setNumberFormat("@"); // merchant IDs stay text; targets stay numbers
     sh.getRange(target, 1, 1, vals.length).setValues([vals]);
-    var planSync;
-    if (spNoChange_(feedback) && !(prevNewIds && prevNewIds.length)) {
-      planSync = { ok: true, skipped: true };
-    } else try {
-      planSync = spSyncPlanSheet_({ productId: productId, productName: String(row.productName || ""), category: String(row.category || ""), merchantId: merchantId,
-        adjustedTarget: num(adj), newMerchants: merchants, prevNewIds: prevNewIds });
-    } catch (syncErr) { planSync = { ok: false, error: String(syncErr && syncErr.message || syncErr) }; }
+    var planSync = { ok: true, skipped: true, reason: "dashboard applies the feedback to the month's uploaded plan" };
     return jsonResponse({ success: true, at: now, date: today, updated: target <= last, planSync: planSync });
   } finally {
     lock.releaseLock();
@@ -1543,15 +1444,19 @@ function handleGetSalesPlanFeedback(payload) {
       var d = ddNormDay_(r[0]);
       if (month && d.substring(0, 7) !== month) return;
       var k = String(r[3]).trim() + "||" + String(r[1]).trim();
-      if (items[k] && items[k].date > d) return;
       var ms = [];
       for (var j = 0; j < SP_MAX_NEW_MERCHANTS; j++) {
         var id = String(r[24 + j * 2] === undefined ? "" : r[24 + j * 2]).trim();
         if (id) ms.push({ id: id, target: Number(r[25 + j * 2]) || 0 });
       }
-      items[k] = { date: d, feedback: String(r[16] || ""), adjTarget: r[21] === "" || r[21] === undefined ? null : Number(r[21]), merchants: ms,
+      var it = { date: d, feedback: String(r[16] || ""), adjTarget: r[21] === "" || r[21] === undefined ? null : Number(r[21]), merchants: ms,
         comment: String(r[23] || ""), newTarget: Number(r[15]) || 0, by: String(r[18] || ""), at: String(r[20] || "") };
+      // v1.18.0 — every feedback of the month for the match (oldest first) so the dashboard applies each target change from its own day
+      var hist = (items[k] && items[k].history) || [];
+      hist.push({ date: it.date, feedback: it.feedback, adjTarget: it.adjTarget, merchants: it.merchants, by: it.by, at: it.at });
+      if (!items[k] || items[k].date <= d) { it.history = hist; items[k] = it; } else items[k].history = hist;
     });
+    Object.keys(items).forEach(function (k) { items[k].history.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.at < b.at ? -1 : 1); }); });
   }
   return jsonResponse({ success: true, items: items });
 }
@@ -1788,8 +1693,9 @@ function installDailyDeclineTrigger() {
 //      SKU | Name | Category | Stock | Placed Yesterday | Avg 3D Confirmed | CR% | DR% | NDR%
 //      | CR% Used | Placed x CR | Diff | DOH (Placed x CR) | DOH (Avg 3D)      — columns A..N only
 // ============================================================================
-var PDOH_TARGET_SHEET_ID = "1LSvaSIvl4Gapb28FICNGMKyMOlrsyTr9pEbeFpW-c1w";
-var PDOH_TARGET_GID = 693802633;
+// v1.18.0 — moved to "Supply Chain ROP" → tab "PLANNER DOH" (was 1LSvaSIvl4Gapb28FICNGMKyMOlrsyTr9pEbeFpW-c1w / gid 693802633)
+var PDOH_TARGET_SHEET_ID = "1EAq7r0MrtyCX41LJdXzIEMuPsSWzjBULb8klKDzzw1g";
+var PDOH_TARGET_GID = 347559848;
 var PDOH_PROP = "PLANNER_DOH_LAST";   // the last table the dashboard sent
 
 // The dashboard posts the table it already has on screen.
@@ -2319,6 +2225,11 @@ function resetLastSyncFiles() {
 //  The file is found by its name for the month (no URL to update every month).
 //  Override for a month: Script property RETURNS_ARCHIVE_<YYYY-MM> = the file URL or ID.
 // ============================================================================
+// v1.18.0 — the exact file per month (used before the search by name). Add the new month's file here, or leave it out and the
+// file named Return_Archive_YYYY-MM is found by its name as before.
+var RETURNS_ARCHIVE_IDS = {
+  "2026-11": "1oifWHi0O5TtBVL_az_k1IEBJ3I8HU9pUleuPSduPda8"
+};
 function handleActualReturns_(payload) {
   if (!workerKeyOk_(payload)) return jsonResponse({ success: false, message: "Not allowed (WORKER_SERVICE_KEY)." });
   return jsonResponse(computeActualReturns_(payload.month));
@@ -2330,7 +2241,7 @@ function computeActualReturns_(monthIn) {
   if (!/^\d{4}-\d{2}$/.test(month)) month = Utilities.formatDate(new Date(), "Africa/Cairo", "yyyy-MM");
   var name = "Return_Archive_" + month, file = null;
   try {
-    var ov = PropertiesService.getScriptProperties().getProperty("RETURNS_ARCHIVE_" + month);
+    var ov = PropertiesService.getScriptProperties().getProperty("RETURNS_ARCHIVE_" + month) || RETURNS_ARCHIVE_IDS[month] || "";
     if (ov) { var id = (/\/d\/([a-zA-Z0-9_-]+)/.exec(ov) || [null, ov])[1]; file = DriveApp.getFileById(id); }
     else {
       var it = DriveApp.getFilesByName(name), best = null;

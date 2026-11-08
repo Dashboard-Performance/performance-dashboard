@@ -35,7 +35,7 @@ var VIEW_NAV = {
     { type: "merchants", gid: "115442405", title: "Merchant Targets", desc: "TAGER_ID · Tager_name · Target GMV (Actual) · Target Placed (Actual) — each merchant's ACM is picked up automatically and its target is added to that ACM" },
     { type: "acm", gid: " _Targets_ACM_ ", title: "KPI's Account Manager", desc: "KPI targets & weights used for the ACM Final Weight % (edit below)", editor: true },
     { type: "category", gid: "1656655269", title: "Category Targets (Commercial)", desc: "Category · SKUs with Plan · Daily Target (Pcs/day) · Total Placed · Contribution % · Total Confirmed · CR% · Total Delivered · DR% · ASP · NDR% · Delivered GMV · CM3 · CM3/Pc · CM3% · PPM · PPM/Pc · PPM% · Adjusted SKUs" },
-    { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target · New Target · Flag" },
+    { type: "salesplan", gid: "892918900", title: "Sales Plan-ACM (daily)", desc: "SKU ID · Name · Category · Merchant ID · Merchant · Target — the main target of the month; Sales Plan - Feedback changes apply on top from their day", noSheet: true }, // v1.18.0 — the Sales_Plan-ACM tab is never read
     { type: "singlesku", gid: "1620722565", title: "SKU Targets (Bundle & Single)", desc: "Overall SKU tracker — bundle and single SKUs: PRODUCT_ID · Name · Category · Placed · Confirmed · Delivered · GMV" }
   ];
 
@@ -430,7 +430,7 @@ var VIEW_NAV = {
   function payloadOf(t) {
     var get = function (type) { return wfetch("getTargets", { timeout: 15000 }, "&type=" + type).then(function (p) { return p && p.table ? p : null; }).catch(function () { return null; }); };
     return get(t.type + "." + tgMonth).then(function (p) { return p || get(t.type); })
-      .then(function (p) { if (p) return p; return (typeof loadSheetWithRetry === "function") ? loadSheetWithRetry(t.gid) : null; });
+      .then(function (p) { if (p || t.noSheet) return p; return (typeof loadSheetWithRetry === "function") ? loadSheetWithRetry(t.gid) : null; });
   }
 
   // ---------------------------------------------------------------- UI shell: nav + views + banner
@@ -791,7 +791,7 @@ var VIEW_NAV = {
         '<input type="file" accept=".xlsx,.xls,.csv" hidden data-file="' + t.type + '"></label>' +
         '<div class="tw-msg" data-msg="' + t.type + '"></div><div data-prev="' + t.type + '"></div>' +
         '<div class="tg-acts"><button class="btn small" data-tpl="' + t.type + '">Download current / template</button>' +
-        '<button class="btn small" data-seed="' + t.type + '">Import Google Sheet</button>' +
+        (t.noSheet ? "" : '<button class="btn small" data-seed="' + t.type + '">Import Google Sheet</button>') +
         (!m && g ? '<button class="btn small" data-copyold="' + t.type + '">Copy older upload to this month</button>' : "") + '</div></div>';
     }).join("");
 
@@ -815,7 +815,7 @@ var VIEW_NAV = {
 
     $("twMonth").onchange = function () { if (/^\d{4}-\d{2}$/.test(this.value)) { tgMonth = this.value; tgState = {}; tgPlans = {}; tgDraft = {}; renderTargets(); } };
     $("twKey2Save").onclick = function () { ls(KEY_LS, $("twKey2").value.trim()); gmsg("Key saved.", "ok"); };
-    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.filter(function (x) { return !x.editor; }).length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.filter(function (x) { return !x.editor; })); };
+    $("twSeedAll").onclick = function () { if (!confirm("Copy the current Google Sheet data of all " + TARGET_TYPES.filter(function (x) { return !x.editor; }).length + " targets into " + monthTitle(tgMonth) + "?")) return; seed(TARGET_TYPES.filter(function (x) { return !x.editor && !x.noSheet; })); };
     kpiWire(host); planWire(host);
     host.querySelectorAll("[data-file]").forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) pick(inp.dataset.file, inp.files[0]); inp.value = ""; }; });
     host.querySelectorAll("[data-drop]").forEach(function (d) {

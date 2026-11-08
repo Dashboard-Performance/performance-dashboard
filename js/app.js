@@ -7083,15 +7083,107 @@ function getMpSalesPlanFinalStatus(pct) {
 // مش بس MTD)، و Run Rate % = نسبة الإسقاط ده من التارجت الشهري الكامل
 // (Daily Target × عدد أيام الشهر) — ده اللي بيجاوب سؤال "هيتحقق ولا لأ لو
 // الوضع فضل زي ما هو".
-function mpSpBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays, currentMonthDays, mtdTargetOverride) {
+function mpSpBuildMetric(dailyTarget, mtdActual, daysUntilYesterday, elapsedDays, currentMonthDays, mtdTargetOverride, monthlyTargetOverride) {
     const mtdTarget = (mtdTargetOverride !== undefined && mtdTargetOverride !== null) ? mtdTargetOverride : dailyTarget * daysUntilYesterday;
-    const monthlyTarget = dailyTarget * currentMonthDays;
+    const monthlyTarget = (monthlyTargetOverride !== undefined && monthlyTargetOverride !== null) ? monthlyTargetOverride : dailyTarget * currentMonthDays;
     const gap = mtdTarget - mtdActual;
     const runRate = (mtdActual / elapsedDays) * currentMonthDays;
     const achievedPct = mtdTarget > 0 ? (mtdActual / mtdTarget) * 100 : (mtdActual > 0 ? 100 : 0);
     const runRatePct = monthlyTarget > 0 ? (runRate / monthlyTarget) * 100 : (runRate > 0 ? 100 : 0);
     const status = getMpSalesPlanFinalStatus(achievedPct);
     return { dailyTarget, mtdTarget, monthlyTarget, mtdActual, gap, runRate, runRatePct, achievedPct, status };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v1.18.0 — Sales Plan - Feedback applied to the month's uploaded plan (owner's rule, option 2): the uploaded target is
+// the MAIN target; a feedback's Adjusted Target counts from the feedback day on (days before keep the main target);
+// its new merchants are new matches from that day on. Several feedbacks in the month apply in date order. "Stock issue"
+// and "No Feedback" change nothing. The Sales_Plan-ACM tab is neither read nor written.
+const SPFB = { byMonth: {}, loading: {}, cache: null };
+const SPFB_NO_CHANGE = ["Stock issue", "No Feedback"];
+function spfbLoad(monthKey) {
+  if (!monthKey || SPFB.byMonth[monthKey] || SPFB.loading[monthKey] || typeof FEEDBACK_API_URL === "undefined") return;
+  if (SPFB.failAt && Date.now() - SPFB.failAt < 60000) return;
+  SPFB.loading[monthKey] = true;
+  fbFetch(FEEDBACK_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "get_sales_plan_feedback", month: monthKey }) })
+    .then(r => r.json()).then(d => {
+      SPFB.byMonth[monthKey] = (d && d.success && d.items) ? d.items : {};
+      SPFB.cache = null;
+      spfbRefreshViews();
+    }).catch(() => { SPFB.failAt = Date.now(); })
+    .finally(() => { SPFB.loading[monthKey] = false; });
+}
+function spfbRefreshViews() {
+  try {
+    const on = (id) => { const el = $(id); return el && !el.classList.contains("hidden"); };
+    if (on("viewMpSalesPlan") && typeof prepareMpSalesPlanData === "function") prepareMpSalesPlanData();
+    if (on("viewSpFeedback") && typeof prepareSpFeedbackData === "function") prepareSpFeedbackData();
+  } catch (e) { console.warn("[Sales Plan] feedback refresh:", e); }
+}
+// a feedback just saved here: add it to the month's history so the plan changes at once (no reload)
+function spfbAddLocal(monthKey, mid, pid, entry) {
+  const items = SPFB.byMonth[monthKey] = Object.assign({}, SPFB.byMonth[monthKey] || {});
+  const k = mid + "||" + pid, cur = items[k] || {};
+  const hist = spfbHistory(cur).filter(h => h.date !== entry.date).concat([entry]).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  items[k] = Object.assign({}, cur, entry, { history: hist });
+  SPFB.cache = null;
+}
+// all feedbacks of the month for one match, oldest first (the sheet sends "history"; an older backend only the latest)
+function spfbHistory(item) { return (item && Array.isArray(item.history) && item.history.length) ? item.history : (item && item.date ? [item] : []); }
+function spfbPlanFor(base, monthKey) {
+  const items = SPFB.byMonth[monthKey];
+  const plain = () => base.map(p => Object.assign({}, p, { mainDailyTarget: p.dailyPlacedTarget, newTargetDaily: null, lastTargetUpdate: null, matchFlag: "", targetSteps: null, adjusted: false }));
+  if (SPFB.cache && SPFB.cache.base === base && SPFB.cache.items === items && SPFB.cache.key === monthKey) return SPFB.cache.out;
+  // the uploaded plan is the main target exactly as uploaded — no step dates are taken from the file
+  const out = plain();
+  if (items) {
+    const dayOf = (d) => +String(d || "").slice(8, 10) || 1;
+    const inMonth = (d) => String(d || "").slice(0, 7) === monthKey;
+    const byKey = new Map(out.map(p => [p.tagerId + "||" + p.productId, p]));
+    const info = state.merchantInfoMap || new Map();
+    Object.keys(items).forEach(k => {
+      const sep = k.indexOf("||"), mid = k.slice(0, sep), pid = k.slice(sep + 2);
+      const hist = spfbHistory(items[k]).filter(h => inMonth(h.date) && SPFB_NO_CHANGE.indexOf(String(h.feedback || "")) < 0);
+      if (!hist.length) return;
+      const step = (h, target) => ({ day: dayOf(h.date), target: target, date: h.date, by: h.by || "", feedback: h.feedback || "" });
+      const existing = byKey.get(k);
+      if (existing) {
+        const st = hist.filter(h => h.adjTarget !== null && h.adjTarget !== undefined && h.adjTarget !== "" && isFinite(+h.adjTarget)).map(h => step(h, +h.adjTarget));
+        if (st.length) { const last = st[st.length - 1]; existing.targetSteps = st; existing.adjusted = true; existing.dailyPlacedTarget = last.target; existing.newTargetDaily = last.target; existing.adjustNote = last; }
+      }
+      // new merchants: each feedback lists the full set from its day; one dropped by a later feedback goes to 0 from that day
+      const tpl = existing || base.find(p => p.productId === pid) || {};
+      const mine = new Map();
+      hist.forEach(h => {
+        const ids = new Set();
+        (h.merchants || []).forEach(m => {
+          const id = String(m.id || "").trim(); if (!id || id === mid) return;
+          const nk = id + "||" + pid; let row = byKey.get(nk);
+          if (row && !mine.has(nk) && !row.newMatch) return; // already in the uploaded plan → not created twice
+          ids.add(id);
+          if (!row) {
+            row = { productId: pid, productName: tpl.productName || pid, category: tpl.category || "Uncategorized", tagerId: id, tagerName: (info.get(id) || {}).merchantName || "",
+              dailyPlacedTarget: 0, originalDailyTarget: 0, mainDailyTarget: 0, newTargetDaily: null, matchFlag: "New match", lastTargetUpdate: null, targetSteps: [], adjusted: true, newMatch: true, addedFor: mid };
+            out.push(row); byKey.set(nk, row);
+          }
+          mine.set(nk, row); row.targetSteps.push(step(h, +m.target || 0));
+        });
+        mine.forEach((row, nk) => { if (!ids.has(nk.slice(0, nk.indexOf("||")))) row.targetSteps.push(step(h, 0)); });
+      });
+      mine.forEach(row => { const last = row.targetSteps[row.targetSteps.length - 1]; row.dailyPlacedTarget = last ? last.target : 0; row.newTargetDaily = row.dailyPlacedTarget; row.adjustNote = last; });
+    });
+  }
+  SPFB.cache = { base, items, key: monthKey, out };
+  return out;
+}
+// target of day d (1-based): the main target before the first step, then each step's target from its own day
+function spfbTargetOn(plan, d) { let t = plan.mainDailyTarget || 0; (plan.targetSteps || []).forEach(s => { if (s.day <= d) t = s.target; }); return t; }
+function spfbSumDays(plan, fromDay, toDay) { let sum = 0; for (let d = fromDay; d <= toDay; d++) sum += spfbTargetOn(plan, d); return sum; }
+function spfbNote(r) {
+  const n = r && r.adjustNote; if (!n) return "";
+  const f = (v) => (Math.abs(v - Math.round(v)) < 0.05 ? Math.round(v) : (+v).toFixed(1));
+  return r.newMatch ? `New match added by Sales Plan - Feedback on ${n.date}${n.by ? " by " + n.by : ""} (for merchant ${r.addedFor}) — daily target ${f(n.target)} from that day.`
+    : `Main target ${f(r.mainDailyTarget || 0)} → Adjusted ${f(n.target)} on ${n.date}${n.by ? " by " + n.by : ""} (${n.feedback}). Days before keep the main target.`;
 }
 
 function prepareMpSalesPlanData() {
@@ -7138,7 +7230,9 @@ function prepareMpSalesPlanData() {
     // المفروض يدخل حسبة الـ Critical/Good/Excellent/Upside ولا totals الملخص
     // فوق (كان بيتحسب "Critical" بس لأن مقسوم على صفر/تارجته صفر، مش لأداء
     // ضعيف فعلاً).
-    let planRows = (state.acmSalesPlanData || []).filter(p => p.dailyPlacedTarget > 0 || p.newTargetDaily === 0);
+    const spMonthKey = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0");
+    spfbLoad(spMonthKey);
+    let planRows = spfbPlanFor(state.acmSalesPlanData || [], spMonthKey).filter(p => p.dailyPlacedTarget > 0 || p.newTargetDaily === 0 || (p.targetSteps && p.targetSteps.length));
     if (selectedAcm !== "All") {
         planRows = planRows.filter(p => {
             const acm = ((state.merchantInfoMap || new Map()).get(p.tagerId) || {}).acmName || "Unassigned";
@@ -7203,6 +7297,7 @@ function prepareMpSalesPlanData() {
         //  - لو Last Target Update فاضي أو قبل الشهر: من أول الشهر بالتارجت الفعّال، زي الأول.
         const upd = plan.lastTargetUpdate;
         const targetDaysFor = (nDays) => {
+            if (plan.targetSteps && plan.targetSteps.length) return spfbSumDays(plan, 1, nDays); // v1.18.0 — feedback steps (main before, adjusted after)
             if (!(upd && upd.getFullYear() === today.getFullYear() && upd.getMonth() === today.getMonth())) return null;
             const updDay = upd.getDate();
             const daysBefore = Math.max(0, Math.min(nDays, updDay - 1));
@@ -7220,12 +7315,15 @@ function prepareMpSalesPlanData() {
 
         const ov = (m) => placedMtdOverride === null ? null : placedMtdOverride * m;
         const crF = matchStats.cr / 100, drF = matchStats.dr / 100;
-        const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(1));
-        const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF));
-        const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF));
+        // v1.18.0 — with feedback steps the month's target is the sum of each day's target (main before the change, adjusted after)
+        const monthBase = (plan.targetSteps && plan.targetSteps.length) ? spfbSumDays(plan, 1, currentMonthDays) : null;
+        const mo = (m) => monthBase === null ? null : monthBase * m;
+        const placedM = mpSpBuildMetric(plan.dailyPlacedTarget, raw.placed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(1), mo(1));
+        const confirmedM = mpSpBuildMetric(confirmedDailyTarget, raw.confirmed, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF), mo(crF));
+        const deliveredM = mpSpBuildMetric(deliveredDailyTarget, raw.delivered, daysUntilYesterday, elapsedDays, currentMonthDays, ov(crF * drF), mo(crF * drF));
         // Delivered GMV: MTD Target على الأيام الناضجة (elapsedDays - 5) والـ Run Rate على gmvRunRateDays — زي Commercial Plan.
         const gmvM = mpSpBuildMetric(gmvDailyTarget, raw.deliveredGmv, gmvMatureDays, gmvRunRateDays, currentMonthDays,
-            gmvMtdOverrideBase === null ? null : gmvMtdOverrideBase * crF * drF * matchStats.asp);
+            gmvMtdOverrideBase === null ? null : gmvMtdOverrideBase * crF * drF * matchStats.asp, mo(crF * drF * matchStats.asp));
 
         // Confirmed Pieces هو المقياس الأساسي اللي بيحدد "الحالة العامة" للصف
         // وكروت الملخص فوق (زي ما كان قبل كده، ده أساس عمود "Rounded Daily Confirmed").
@@ -7385,7 +7483,7 @@ function renderPaginatedMpSalesPlanTable() {
             <td class="truncate-cell" title="${m.merchantName}">${m.merchantName}</td>
             <td class="text-dim">${m.category}</td>
             <td class="font-bold text-purple">${m.acm}</td>
-            <td class="num text-dim" title="Daily placed target (Sales Plan-ACM sheet)">${m.placedDailyTarget ? (Math.abs(m.placedDailyTarget - Math.round(m.placedDailyTarget)) < 0.05 ? fmtIntCell(Math.round(m.placedDailyTarget)) : (+m.placedDailyTarget).toFixed(1)) : '<span class="text-dim">-</span>'}</td>
+            <td class="num text-dim" title="${m.adjusted ? escapeHtml(spfbNote(m)) : 'Daily placed target (the month\'s uploaded Sales Plan-ACM target)'}">${m.placedDailyTarget ? (Math.abs(m.placedDailyTarget - Math.round(m.placedDailyTarget)) < 0.05 ? fmtIntCell(Math.round(m.placedDailyTarget)) : (+m.placedDailyTarget).toFixed(1)) : '<span class="text-dim">-</span>'}${m.adjusted ? (m.newMatch ? ' <span class="badge-outline blue" style="font-size:10px">New match</span>' : ' <span class="badge-outline orange" style="font-size:10px">Adjusted</span>') : ''}</td>
             ${mpSpMetricCellsHtml(m.metrics.placed, false)}
             ${mpSpMetricCellsHtml(m.metrics.confirmed, false)}
             ${mpSpMetricCellsHtml(m.metrics.delivered, false)}
@@ -14706,6 +14804,8 @@ function prepareSpFeedbackData() {
   const t = state.mpSpTiming || { elapsedDays: 1, daysUntilYesterday: 1, currentMonthDays: 30 };
   const remaining = Math.max(0, t.currentMonthDays - t.daysUntilYesterday); // النهارده لحد آخر الشهر
   const rows = [];
+  // v1.18.0 — Stock & DOH per product, same index as the other tables
+  let sdIdx = null; try { sdIdx = buildDebundledStockDohIndex(state.allParsedRows || []); } catch (e) { sdIdx = null; }
   (state.mpSalesPlanDataPrepared || []).forEach(r => {
     const m = r.metrics.placed;
     if (!(m.mtdTarget > 0)) return;
@@ -14719,7 +14819,9 @@ function prepareSpFeedbackData() {
       productId: r.productId, productName: r.productName, tagerId: r.tagerId, merchantName: r.merchantName,
       category: r.category, acm: r.acm,
       mtdTarget: m.mtdTarget, mtdActual: m.mtdActual, runRate: m.runRate, achPct: m.achievedPct,
-      avgDaily, gap, oldDailyTarget: m.dailyTarget, newDailyTarget, remainingDays: remaining
+      avgDaily, gap, oldDailyTarget: m.dailyTarget, newDailyTarget, remainingDays: remaining,
+      stock: sdIdx ? (+sdIdx.getStockDoh(r.productId).stock || 0) : null, doh: sdIdx ? sdIdx.getStockDoh(r.productId).doh : null,
+      adjusted: !!r.adjusted, newMatch: !!r.newMatch, adjustNote: r.adjustNote || null, mainDailyTarget: r.mainDailyTarget, addedFor: r.addedFor || ""
     });
   });
   spfState.rows = rows;
@@ -14810,7 +14912,9 @@ function spfRowHtml(r) {
     <td class="truncate-cell" style="max-width:170px" title="${escapeHtml(r.merchantName)}">${escapeHtml(r.merchantName)}</td>
     <td class="text-dim">${escapeHtml(r.category)}</td>
     <td>${escapeHtml(r.acm)}</td>
-    <td class="num font-bold">${r.oldDailyTarget % 1 ? r.oldDailyTarget.toFixed(1) : fmtIntCell(r.oldDailyTarget)}</td>
+    <td class="num">${r.stock == null ? '<span class="text-dim">—</span>' : fmtIntCell(Math.round(r.stock))}</td>
+    <td class="num ${r.doh != null && r.doh < 5 ? "text-red font-bold" : ""}">${r.doh == null || !isFinite(r.doh) ? '<span class="text-dim">—</span>' : (+r.doh).toFixed(1)}</td>
+    <td class="num font-bold"${r.adjusted ? ` title="${escapeHtml(spfbNote(r))}"` : ""}>${r.oldDailyTarget % 1 ? r.oldDailyTarget.toFixed(1) : fmtIntCell(r.oldDailyTarget)}${r.adjusted ? (r.newMatch ? ' <span class="badge-outline blue" style="font-size:10px">New match</span>' : ' <span class="badge-outline orange" style="font-size:10px">Adjusted</span>') : ""}</td>
     <td class="num text-dim">${fmtIntCell(Math.round(r.mtdTarget))}</td>
     <td class="num font-bold">${fmtIntCell(Math.round(r.mtdActual))}</td>
     <td class="num">${fmtIntCell(Math.round(r.runRate))}</td>
@@ -14835,7 +14939,7 @@ function spfRender() {
   if (spfState.page > totalPages - 1) spfState.page = totalPages - 1;
   const start = spfState.page * SPF_PAGE_SIZE;
   const page = data.slice(start, start + SPF_PAGE_SIZE);
-  body.innerHTML = page.length ? page.map(spfRowHtml).join("") : '<tr><td colspan="20" class="text-dim" style="text-align:center;padding:18px">No matches under 70% Placed Ach%.</td></tr>';
+  body.innerHTML = page.length ? page.map(spfRowHtml).join("") : '<tr><td colspan="22" class="text-dim" style="text-align:center;padding:18px">No matches under 70% Placed Ach%.</td></tr>';
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("spfRowCount", `${data.length} Matches`);
   set("spfPageInd", `Page ${spfState.page + 1} of ${totalPages}`);
@@ -14856,7 +14960,10 @@ async function spfLoadFeedback() {
     if (data && data.success && data.items) {
       const sc = window.TowerCore && window.TowerCore.merchantScope ? window.TowerCore.merchantScope() : null;
       if (sc) { const mine = {}; Object.keys(data.items).forEach(k => { if (sc.id && k.split("||")[0] === sc.id) mine[k] = data.items[k]; }); data.items = mine; }
-      spfState.fb = data.items; spfRender();
+      let firstTime = false;
+      if (!sc) { firstTime = !SPFB.byMonth[month]; SPFB.byMonth[month] = data.items; SPFB.cache = null; } // same month's feedback feeds Sales Plan-ACM (v1.18.0)
+      spfState.fb = data.items;
+      if (firstTime) spfbRefreshViews(); else spfRender();
     }
   } catch (e) { console.warn("spfLoadFeedback", e); }
 }
@@ -14916,13 +15023,20 @@ async function spfSave(tr) {
       newTarget: r.newDailyTarget || 0, by: user.name || "", at: data.at || ""
     };
     delete spfState.drafts[key];
+    // v1.18.0 — the plan changes right away (Sales Plan-ACM applies the feedback from today on), no sheet involved
+    try {
+      spfbAddLocal(spfMonthKey(), String(r.tagerId).trim(), String(r.productId).trim(), { date: spfState.fb[key].date, feedback: v.feedback, adjTarget: spfState.fb[key].adjTarget,
+        merchants: spfState.fb[key].merchants, by: user.name || "", at: data.at || "" });
+      prepareMpSalesPlanData();
+    } catch (e) { console.warn("[Sales Plan] apply saved feedback:", e); }
     spfRender();
     // الـ Plan sheet (Sales_Plan-ACM) اتعدّل؟ لو فشل بنقول بوضوح (الـ Feedback نفسه اتحفظ).
     const ps = data.planSync, tr2 = document.querySelector(`#spfTableBody tr[data-spk="${CSS.escape(key)}"]`);
     const st2 = tr2 && tr2.querySelector(".spf-fb-status");
-    if (st2 && !ps && data.queued) { st2.textContent = "Saved ✓ — syncing to the sheet in the background…"; st2.style.color = "#067647"; }
+    if (st2 && !ps && data.queued) { st2.textContent = spfNoChange(v.feedback) ? "Saved ✓ · no target change" : "Saved ✓ · applied to Sales Plan-ACM from today"; st2.style.color = "#067647"; }
     else if (st2 && ps) {
-      if (ps.ok) { st2.textContent = `Saved ✓ · plan sheet: ${ps.updated || 0} updated, ${ps.added || 0} added${ps.removed ? ", " + ps.removed + " removed" : ""}`; st2.style.color = "#067647"; }
+      if (ps.ok && ps.skipped) { st2.textContent = spfNoChange(v.feedback) ? "Saved ✓ · no target change" : "Saved ✓ · applied to Sales Plan-ACM from today"; st2.style.color = "#067647"; }
+      else if (ps.ok) { st2.textContent = `Saved ✓ · plan sheet: ${ps.updated || 0} updated, ${ps.added || 0} added${ps.removed ? ", " + ps.removed + " removed" : ""}`; st2.style.color = "#067647"; }
       else { st2.textContent = "Saved, but the plan sheet was NOT updated: " + (ps.error || "unknown"); st2.style.color = "#B42318"; }
     }
   } catch (err) {
@@ -17399,7 +17513,7 @@ async function fetchAllSheetsSnapshot() {
       INVENTORY_GID ? loadSheetWithRetry(INVENTORY_GID).catch(track(INVENTORY_GID)) : Promise.resolve(null),
       PRODUCTS_GID ? loadSheetWithRetry(PRODUCTS_GID).catch(track(PRODUCTS_GID)) : Promise.resolve(null),
       CAT_TARGETS_GID ? loadSheetWithRetry(CAT_TARGETS_GID).catch(track(CAT_TARGETS_GID)) : Promise.resolve(null),
-      ACM_SALES_PLAN_GID ? loadSheetWithRetry(ACM_SALES_PLAN_GID).catch(track(ACM_SALES_PLAN_GID)) : Promise.resolve(null),
+      Promise.resolve(null), // v1.18.0 — the Sales_Plan-ACM tab is not read any more: Sales Plan-ACM = the month's uploaded targets (Targets Upload) + Sales Plan - Feedback
       NEW_SEGMENTATION_GID ? loadSheetWithRetry(NEW_SEGMENTATION_GID).catch((err) => { newSegLoadError = err.message || String(err); staleGids.push(NEW_SEGMENTATION_GID); return null; }) : Promise.resolve(null),
       INBOUND_GID ? loadSheetWithRetry(INBOUND_GID).catch(track(INBOUND_GID)) : Promise.resolve(null),
       loadSheetWithRetry(PRODUCTS_INFO_GID).catch(track(PRODUCTS_INFO_GID)),

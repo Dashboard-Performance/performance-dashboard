@@ -2137,7 +2137,13 @@ async function handleFeedbackGet(payload, env, ctx) {
       const d = String(q.at).substring(0, 10);
       if (payload.month && d.substring(0, 7) !== String(payload.month)) return;
       const r = p.row || {}, k = String(r.merchantId).trim() + "||" + String(r.productId).trim();
-      items[k] = { date: d, feedback: String(p.feedback || ""), adjTarget: Number(p.adjustedTarget), merchants: (p.newMerchants || []).map(m => ({ id: m.id, target: Number(m.target) })), comment: String(p.comment || ""), newTarget: Number(r.newDailyTarget) || 0, by: p.userName || "", at };
+      const it = { date: d, feedback: String(p.feedback || ""), adjTarget: Number(p.adjustedTarget), merchants: (p.newMerchants || []).map(m => ({ id: m.id, target: Number(m.target) })), comment: String(p.comment || ""), newTarget: Number(r.newDailyTarget) || 0, by: p.userName || "", at };
+      // v1.18.0 — keep the month's history (the dashboard applies every change from its own day); a save still in the queue
+      // replaces the same day's entry (same rule as the sheet: one row per day per match)
+      const hist = ((items[k] && items[k].history) || []).filter(h => h.date !== d);
+      hist.push({ date: d, feedback: it.feedback, adjTarget: it.adjTarget, merchants: it.merchants, by: it.by, at });
+      it.history = hist;
+      items[k] = it;
     }
   });
   return jsonResponse({ success: true, items, pending: pend.length });
