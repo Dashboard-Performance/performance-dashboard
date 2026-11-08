@@ -175,21 +175,19 @@
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
         if (isExcluded(id)) { SC.exclN++; return; } // packaging, not product
         var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
-        var P = mtdC[id] || 0, V = begC[id] || 0, Z = inMC[id] || 0, I = impMC[id] || 0, R = rto[id] || 0, B = rep[id] || 0;
-        // MTD confirmed is consumed in order: Beg Inv -> Purchases -> Importation -> Returns -> Repack.
+        // v1.18.0 — owner's request: Importation and Repack are out of the Supply conversion. Importation receipts count with
+        // Purchases for now (CONV_IMPORT_IN_PURCHASES); Repack is not counted at all.
+        var P = mtdC[id] || 0, V = begC[id] || 0, Z = (inMC[id] || 0) + (CONV_IMPORT_IN_PURCHASES ? (impMC[id] || 0) : 0), R = rto[id] || 0;
+        // MTD confirmed is consumed in order: Beg Inv -> Purchases -> Returns.
         var X = P === 0 ? 0 : Math.min(V, P),
             AB = Math.min(P - X, Z),
-            IM = Math.min(P - X - AB, I),
-            AF = Math.min(P - X - AB - IM, R),
-            BR = Math.max(0, Math.min(P - X - AB - IM - R, B));
+            AF = Math.max(0, Math.min(P - X - AB, R));
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
         [["all"], [cat]].forEach(function (kk) {
           var a = conv[kk[0]] = conv[kk[0]] || mkAgg();
           a.beg[0] += V * w; a.beg[1] += X * w;
           a.pur[0] += Z * w; a.pur[1] += AB * w;
-          a.imp[0] += I * w; a.imp[1] += IM * w;
           a.ret[0] += R * w; a.ret[1] += AF * w;
-          a.rep[0] += B * w; a.rep[1] += BR * w;
         });
       });
       SC.conv = conv; SC.convMonth = cref.toLocaleDateString("en-GB", { month: "short", year: "numeric" }); SC.convElapsed = celapsed; SC.convMdays = cmdays; SC.convLatest = convSame;
@@ -220,8 +218,9 @@
   //   Converted           = the COGS that has actually converted out of it so far (EGP)
   //   Conversion %        = Converted / Planned     — against the plan
   //   Converted vs Actual = Converted / Actual      — against what actually turned up
-  var CONV_ROWS = [["beg", "Beg Inv.", "tbeg"], ["pur", "Purchases", "tpur"], ["imp", "Importation", "timp"],
-                   ["ret", "Returns", "tret"], ["rep", "Repack", "trep"]];
+  // v1.18.0 — Importation and Repack taken out (owner's request); Importation receipts are inside Purchases for now.
+  var CONV_IMPORT_IN_PURCHASES = true;
+  var CONV_ROWS = [["beg", "Beg Inv.", "tbeg"], ["pur", "Purchases", "tpur"], ["ret", "Returns", "tret"]];
   function convCalc() {
     var d = SC.conv && SC.conv[SC.cat === "all" ? "all" : SC.cat]; if (!d) return null;
     var pl = planGet();
@@ -300,7 +299,7 @@
       '<th class="num" title="The share this source is expected to convert. Shown as the line to read the two percentages against \u2014 nothing is multiplied by it.">Target%</th>' +
       '<th class="num" title="The COGS that has actually converted out of this source so far this month.">Converted</th>' +
       '<th class="num" title="Converted \u00f7 Planned \u2014 how the conversion reads against the plan. Green once it passes Target%.">Conversion %</th>' +
-      '<th class="num" title="Converted \u00f7 Actual \u2014 how it reads against what actually turned up, which can differ a lot from the plan.">Converted vs Actual</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity \u00d7 WAC), single SKUs only. Converted = the MTD confirmed COGS consumed from each source, in order: Beg Inv \u2192 Purchases \u2192 Importation \u2192 Returns \u2192 Repack. <b>Target%</b> is a reference only \u2014 read <b>Conversion %</b> (against the plan) and <b>Converted vs Actual</b> (against what really arrived) against it; neither is multiplied by it, and no figure above changes when it is edited. <b>Importation</b> = the pieces received this month under an Importation PO; the Purchases row is everything received under any other PO, so the two never count the same piece twice.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control \u2192 Targets \u2192 Supply conversion plan).</div></div>';
+      '<th class="num" title="Converted \u00f7 Actual \u2014 how it reads against what actually turned up, which can differ a lot from the plan.">Converted vs Actual</th></tr></thead><tbody>' + body + '</tbody></table></div><div class="sc-note" style="margin:12px 16px">Values are COGS (quantity \u00d7 WAC), single SKUs only. Converted = the MTD confirmed COGS consumed from each source, in order: Beg Inv \u2192 Purchases \u2192 Returns. <b>Target%</b> is a reference only \u2014 read <b>Conversion %</b> (against the plan) and <b>Converted vs Actual</b> (against what really arrived) against it; neither is multiplied by it, and no figure above changes when it is edited. <b>Importation</b> and <b>Repack</b> are not part of this table: pieces received under an Importation PO are counted in <b>Purchases</b> for now, and repacked pieces are not counted.</div>' + impNote() + exclNote() + retNote() + '<div class="sc-note" style="margin:0 16px 12px">Planned: ' + esc(window.TaagerPlans ? window.TaagerPlans.sourceText(PLAN) : "") + ' (Control \u2192 Targets \u2192 Supply conversion plan).</div></div>';
   }
   function exclNote() {
     var e = SC.exclEnds || []; if (!e.length) return "";
@@ -309,7 +308,7 @@
   function impNote() {
     var n = (SC.impPo || []).length;
     if (!n) return '<div class="sc-note" style="margin:0 16px 12px">Importation: no PO numbers set yet — add them in Control → Targets → Supply conversion plan.</div>';
-    return '<div class="sc-note" style="margin:0 16px 12px">Importation POs (' + n + '): ' + esc((SC.impPo || []).join(", ")) + ' → ' + int(SC.impLines || 0) + ' inbound line' + ((SC.impLines || 0) === 1 ? "" : "s") + ' on ' + int(SC.impSkuN || 0) + ' SKU' + ((SC.impSkuN || 0) === 1 ? "" : "s") + '. Only what was received <b>this month</b> under these POs counts in the Importation row.</div>';
+    return '<div class="sc-note" style="margin:0 16px 12px">Importation POs (' + n + '): ' + esc((SC.impPo || []).join(", ")) + ' → ' + int(SC.impLines || 0) + ' inbound line' + ((SC.impLines || 0) === 1 ? "" : "s") + ' on ' + int(SC.impSkuN || 0) + ' SKU' + ((SC.impSkuN || 0) === 1 ? "" : "s") + '. What was received <b>this month</b> under these POs is counted inside the Purchases row for now.</div>';
   }
   function retNote() {
     var I = SC.retInfo, t;
