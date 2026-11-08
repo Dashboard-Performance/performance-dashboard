@@ -86,11 +86,11 @@ const PRODUCT_ONLY_GID = "7100000002";
 // المستخدم لسه يقدر يغيّر لأي شهر من فلتر التاريخ فوق الجدول عادي. خليها "" لو
 // يومًا عايزها ترجع تفتح على الشهر الحالي تلقائيًا زي الأول. الصيغة لازم تطابق
 // شكل الشهر المعروض بالظبط: "Month YYYY" (زي "September 2026").
-const INCENTIVE_DEFAULT_MONTH = "October 2026"; // "" = الشهر الحالي تلقائيًا (من كويري Merchant Segmentation) — دلوقتي أكتوبر 2026 (أرقامه النهائية من تاب 2125522926)
+const INCENTIVE_DEFAULT_MONTH = ""; // "" = الشهر الحالي تلقائيًا (من كويري Merchant Segmentation، gid 620123165)
 // Incentive Merchants — أرقام الشهور المقفولة: تابات في نفس الـ Google Sheet بنفس أعمدة كويري Merchant Segmentation (MONTH, COUNTRY, TAGER_ID, …, CONFIRMED, …).
 // الكويري بترجّع الشهر الحالي بس، فالشهر اللي فات بيتقرا من هنا. لو نفس (تاجر + شهر) موجود في الاتنين، تاب الشهر المقفول هو اللي بيتاخد.
 // 2125522926 = أكتوبر 2026 (النهائي). لما يتقفل شهر جديد ضيف تابه هنا.
-const MERCHANT_SEG_ARCHIVE_GIDS = ["2125522926"];
+const MERCHANT_SEG_ARCHIVE_GIDS = []; // بطلب صريح: تاب أكتوبر (2125522926) اتلغى — Incentive Merchants بيقرا من كويري Merchant Segmentation بس
 
 // شيت "WareHouse" (Purchase Plan، تحت Commercial Plan): بيبين حالة كل SKU
 // في المخزن (Condition) — الأعمدة: LOCATION, SKU_ID, PRODUCT_NAME, WAREHOUSE,
@@ -5651,7 +5651,7 @@ function wireTgtViews() {
 // The Merchant Segmentation query returns the CURRENT month only. Closed months come from their tabs (MERCHANT_SEG_ARCHIVE_GIDS, state.merchantSegHistoryRows);
 // for the same (merchant + month) the closed-month tab wins (it is the final number). Every page that reads merchant / ACM actuals from Segmentation uses this.
 function merchantSegRowsAll() {
-  const base = state.merchantSegSourceRows || [], hist = state.merchantSegHistoryRows || [];
+  const base = state.merchantSegSourceRows || [], hist = MERCHANT_SEG_ARCHIVE_GIDS.length ? (state.merchantSegHistoryRows || []) : [];
   if (!hist.length) return base;
   const keys = new Set(hist.map(r => r.merchantId + "|" + r.monthYear));
   return base.filter(r => !keys.has(r.merchantId + "|" + r.monthYear)).concat(hist);
@@ -17630,6 +17630,7 @@ async function fetchAllSheetsSnapshot() {
   const merchantSkuDailyRowsNow = merchantSkuDailyPayload ? parseMerchantSkuDailySheet(merchantSkuDailyPayload) : state.merchantSkuDailyRows;
   // Closed months for Incentive Merchants and the merchant / ACM pages (MERCHANT_SEG_ARCHIVE_GIDS). If a tab did not load this time, keep what was loaded before.
   const merchantSegHistoryNow = (() => {
+    if (!MERCHANT_SEG_ARCHIVE_GIDS.length) return [];   // no archive tabs → drop any rows kept from the old October tab
     const got = MERCHANT_SEG_ARCHIVE_GIDS.filter(g => sheets[g]);
     if (!got.length) return state.merchantSegHistoryRows || [];
     const out = []; got.forEach(g => { try { parseMerchantSegmentationSheet(sheets[g]).forEach(r => out.push(r)); } catch (e) { console.warn("[Merchant Segmentation archive] parse", g, e); } });
