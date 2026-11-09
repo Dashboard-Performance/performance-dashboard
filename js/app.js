@@ -1785,13 +1785,20 @@ const SHARED_SNAPSHOT_TIMEOUT_MS = 45000;
 
 // Inflates whatever came back: the browser may already have decoded it from
 // Content-Encoding, or we may be holding the raw gzip bytes.
+function snapshotReviver(k, v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    if (Array.isArray(v.__map) && Object.keys(v).length === 1) return new Map(v.__map);
+    if (Array.isArray(v.__set) && Object.keys(v).length === 1) return new Set(v.__set);
+  }
+  return v;
+}
 async function inflateSnapshotBody(buf) {
   const bytes = new Uint8Array(buf);
   const gzipped = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
-  if (!gzipped) return JSON.parse(new TextDecoder().decode(bytes));
+  if (!gzipped) return JSON.parse(new TextDecoder().decode(bytes), snapshotReviver);
   if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot read the shared snapshot (no DecompressionStream).");
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return JSON.parse(await new Response(stream).text());
+  return JSON.parse(await new Response(stream).text(), snapshotReviver);
 }
 
 // v1.18.0 — when was the shared snapshot saved (tiny request, no body). 0 = none / unknown.
@@ -1932,7 +1939,8 @@ function getBackupWorker() {
             self.postMessage({ id, error: "NO_COMPRESSION_STREAM" });
             return;
           }
-          const json = JSON.stringify({ savedAt: savedAt, data: data });
+          // Maps / Sets would turn into {} in JSON (cogsMap etc.) — keep them as tagged entries; inflateSnapshotBody revives them.
+          const json = JSON.stringify({ savedAt: savedAt, data: data }, function (k, v) { return v instanceof Map ? { __map: Array.from(v.entries()) } : v instanceof Set ? { __set: Array.from(v) } : v; });
           const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
           const buf = await new Response(stream).arrayBuffer();
           // raw: the shared snapshot goes to R2 as bytes — no base64, so nothing
@@ -17833,7 +17841,20 @@ function keepIfCollapsed(prev, next, label) {
   if (prev.length >= 100 && next.length < prev.length * 0.05) { console.warn("[data] " + label + " returned only " + next.length + " rows (had " + prev.length + ") — keeping the previous data"); return prev; }
   return next;
 }
+// Data sets the code reads with .get / .forEach(v, key). An older shared snapshot carried them as {} (JSON drops Maps), which broke
+// every page with "cogsMap.get is not a function". Anything that is not a Map is turned back into one (empty if nothing survived);
+// the background sync right after fills them again from the sheets.
+const SNAPSHOT_MAP_KEYS = ["cogsMap", "cogsMapIrq", "repackMap", "irqInventoryMap"];
+function normalizeSnapshotMaps(snapshot) {
+  SNAPSHOT_MAP_KEYS.forEach(k => {
+    const v = snapshot[k];
+    if (v == null || v instanceof Map) return;
+    snapshot[k] = (v && typeof v === "object") ? new Map(Array.isArray(v) ? v : (Array.isArray(v.__map) ? v.__map : Object.entries(v))) : new Map();
+  });
+  return snapshot;
+}
 function applySnapshotToState(snapshot) {
+  normalizeSnapshotMaps(snapshot);
   restoreFullDatasets();
   state.allParsedRowsFull = snapshot.allParsedRows;
   state.allParsedRows = userScopedRows(snapshot.allParsedRows);
