@@ -1460,9 +1460,9 @@ if ($("adminPasswordInput")) $("adminPasswordInput").addEventListener("keydown",
 // -------------------------------------------------------------------------
 // SEGMENTATION PANEL — render (الجدول + كروت الـ KPI بتاعة يوليو)
 // -------------------------------------------------------------------------
-function fmtSegValue(unit, value) {
+function fmtSegValue(unit, value, card) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
-  if (unit === "money") return fmtMoneyCompactCell(value);
+  if (unit === "money") return card ? wrapRawCell(value, fmtMoneyCompact(value)) : fmtMoneyCompactCell(value);   // KPI card = short form, table = real number
   if (unit === "percent") return fmtPctCell(value * 100);
   return fmtIntCell(Math.round(value));
 }
@@ -1508,9 +1508,9 @@ function renderSegmentationPanel() {
       return `
         <div class="metric-card hover-glow seg-kpi">
           <div class="metric-title">${r.label} <span class="text-dim" style="font-weight:400;font-size:11px;">${segMonthLabel}</span></div>
-          <div class="metric-value">${fmtSegValue(r.unit, r.actual)}</div>
+          <div class="metric-value">${fmtSegValue(r.unit, r.actual, true)}</div>
           ${segBar(r.ach)}
-          <div class="metric-sub text-dim seg-kpi-sub"><span>Target ${fmtSegValue(r.unit, r.target)}</span>${segAchPill(r.ach)}</div>
+          <div class="metric-sub text-dim seg-kpi-sub"><span>Target ${fmtSegValue(r.unit, r.target, true)}</span>${segAchPill(r.ach)}</div>
         </div>`;
     }).join("");
   }
@@ -4992,6 +4992,10 @@ function getSegmentLogic(orders) {
 
 const fmtInt = new Intl.NumberFormat("en-US");
 const fmtPct = (n) => `${n.toFixed(1)}%`;
+// v1.18.0 — owner's rule: KPI cards / tiles keep the short form (fmtMoneyCompact: EGP 6.86M, EGP 2K); TABLE cells show the real
+// number (fmtMoneyCompactCell → fmtMoneyExact: "EGP 1,500", "EGP 6,860,412", "EGP 412.37" — up to 2 decimals).
+const fmtMoneyExactNf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const fmtMoneyExact = (n) => { n = Number(n) || 0; return (n < 0 ? "-" : "") + "EGP " + fmtMoneyExactNf.format(Math.abs(n)); };
 const fmtMoneyCompact = (n) => {
   if (n === 0) return `EGP 0`;
   const sign = n < 0 ? "-" : ""; const abs = Math.abs(n);
@@ -5016,7 +5020,8 @@ function wrapRawCell(raw, text, exportOverride) {
 }
 const fmtIntCell = (n) => wrapRawCell(n, fmtInt.format(n));
 const fmtPctCell = (n) => wrapRawCell(n, fmtPct(n), fmtPct(n)); // الداونلود بينزل "49.0%" زي ما هي، مش رقم خام من غير علامة %
-const fmtMoneyCompactCell = (n) => wrapRawCell(n, fmtMoneyCompact(n));
+const fmtMoneyCompactCell = (n) => wrapRawCell(n, fmtMoneyExact(n));   // table cells: the real number, no K / M
+const fmtMoneyExactCell = (n) => wrapRawCell(n, fmtMoneyExact(n));
 
 function setupTicker() {
   const text = TICKER_MESSAGES.join("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
@@ -5338,13 +5343,13 @@ function renderPaginatedInventoryTable() {
       <td class="num font-bold text-dim">${fmtIntCell(Math.round(m.doh))}</td>
       <td class="text-dim">${m.category}</td>
       <td>${availabilityBadge(m.availability)}</td>
-      <td class="num font-bold text-blue">${fmtMoneyCompactCell(m.price)}</td>
-      <td class="num font-bold text-green">${fmtMoneyCompactCell(m.profit)}</td>
-      <td class="num text-purple font-bold">${fmtMoneyCompactCell(m.asp)}</td>
+      <td class="num font-bold text-blue">${fmtMoneyExactCell(m.price)}</td>
+      <td class="num font-bold text-green">${fmtMoneyExactCell(m.profit)}</td>
+      <td class="num text-purple font-bold">${fmtMoneyExactCell(m.asp)}</td>
       <td class="num"><span class="badge-outline ${getCrBadgeColor(m.cr)}">${fmtPctCell(m.cr)}</span></td>
       <td class="num text-dim">${fmtPctCell(m.dr)}</td>
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>
-      <td class="num text-light font-bold">${fmtMoneyCompactCell(m.cm3)}</td>
+      <td class="num text-light font-bold">${fmtMoneyExactCell(m.cm3)}</td>
       <td class="num text-dim">${m.avgPlacedDaily.toFixed(1)}</td>
       <td class="num text-dim">${fmtIntCell(m.placedYday)}</td>
       <td class="num text-blue font-bold">${fmtIntCell(m.confYday)}</td>
@@ -6233,13 +6238,13 @@ function renderOvCategoryContr(rows) {
 const cm3State = { scope: "overall", period: "weekly", wired: false };
 let cm3PosNegChartInst = null; let cm3ContrChartInst = null;
 
-function fmtCm3Money(n) {
+function fmtCm3Money(n) {   // cards + chart axis: short form
   const sign = n < 0 ? "-" : ""; const abs = Math.abs(n);
   if (abs >= 1000000) return `${sign}EGP ${(abs / 1000000).toFixed(2)}M`;
   if (abs >= 1000) return `${sign}EGP ${Math.round(abs / 1000)}K`;
   return `${sign}EGP ${Math.round(abs)}`;
 }
-const fmtCm3MoneyCell = (n) => wrapRawCell(n, fmtCm3Money(n));
+const fmtCm3MoneyCell = (n) => wrapRawCell(n, fmtMoneyExact(n));   // table cells: the real number
 
 function cm3PeriodLabel(dateObj, mode) {
   const y = dateObj.getFullYear(); const mo = dateObj.getMonth() + 1; const day = dateObj.getDate();
@@ -8900,7 +8905,7 @@ function renderCm3apInsights(products, meta) {
   // الأرقام المعروضة هنا (prevCm3Pct -> latestWeekCm3Pct) هي بالظبط نفس
   // الرقمين اللي اتطرحوا من بعض عشان يطلعوا الـ Delta — فمينفعش تتلخبط
   // اتجاهاتها أبداً (Gainer يبان صاعد فعلاً، Decliner يبان نازل فعلاً).
-  const movementValue = (p) => `${cm3apDeltaBadge(p.deltaCm3Pct)} <span class="text-dim">(${fmtPctCell(p.prevCm3Pct ?? 0)} &rarr; ${fmtPctCell(p.latestWeekCm3Pct ?? 0)}, ${fmtMoneyCompactCell(p.deliveredGmv)} GMV)</span>`;
+  const movementValue = (p) => `${cm3apDeltaBadge(p.deltaCm3Pct)} <span class="text-dim">(${fmtPctCell(p.prevCm3Pct ?? 0)} &rarr; ${fmtPctCell(p.latestWeekCm3Pct ?? 0)}, ${fmtMoneyCompact(p.deliveredGmv)} GMV)</span>`;
 
   let html = `<div class="cm3ap-insights-grid">`;
   html += `<div class="cm3ap-insight-card"><h4 class="text-green">Top CM3% Gainers</h4><ul>${

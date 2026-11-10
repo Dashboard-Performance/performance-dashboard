@@ -12,6 +12,8 @@
 
 ## اللي جديد
 
+- **الجداول بالرقم الحقيقي، الكروت زي ما هي**: كل خانات الفلوس في الجداول (fmtMoneyCompactCell / fmtCm3MoneyCell، وجداول Control و Loop) بتظهر الرقم كامل بالفواصل (EGP 1,500 بدل EGP 2K، والكسور لحد رقمين عشريين). كروت الـ KPI (Over View، Segmentation، CM3، Supply، Commercial، Loop…) ومحاور الرسوم البيانية فضلت بالشكل المختصر (EGP 6.86M / 5k).
+
 - **إصلاح "Sync Error: cogsMap.get is not a function"**: الـ Shared snapshot (R2) كان بيتحفظ JSON فالـ Maps (cogsMap, cogsMapIrq, repackMap, irqInventoryMap) بتوصل {}. ومن v1.18.0 المتصفح بياخد الـ shared لو أحدث من نسخته، فالمشكلة بقت تظهر كتير. دلوقتي الـ Maps بتتحفظ وبترجع صح، وأي نسخة قديمة فيها {} بتتحول Map تلقائي قبل ما تترسم.
 
 - **Availability** (Inventory & Products Performance وباقي الجداول): كويري Metabase "Products" (Data Extract) بترجّع WEBSITE_STATUS = null لـ 11,365 SKU (أغلبهم Locked)، فكان بيترسم pill فاضي. دلوقتي الفاضي بيظهر "—"، و NOT_AVAILABLE بقى أحمر زي Out of Stock.

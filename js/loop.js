@@ -9,7 +9,8 @@
   function $(id) { return document.getElementById(id); }
   function esc(s) { return C.esc(s); }
   function fmtN(n) { return Math.round(n || 0).toLocaleString("en-US"); }
-  function fmtEgp(n) { n = n || 0; var a = Math.abs(n); return "EGP " + (a >= 1e6 ? (n / 1e6).toFixed(2) + "M" : a >= 1e3 ? (n / 1e3).toFixed(1) + "K" : Math.round(n)); }
+  function fmtEgp(n) { n = n || 0; var a = Math.abs(n); return "EGP " + (a >= 1e6 ? (n / 1e6).toFixed(2) + "M" : a >= 1e3 ? (n / 1e3).toFixed(1) + "K" : Math.round(n)); }   // cards
+  function fmtEgpT(n) { n = Number(n) || 0; return (n < 0 ? "-" : "") + "EGP " + new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(Math.abs(n)); }   // table cells: the real number
   function ago(iso) { if (!iso) return ""; var m = Math.round((Date.now() - Date.parse(iso)) / 60000); if (m < 1) return "just now"; if (m < 60) return m + "m ago"; var h = Math.round(m / 60); if (h < 48) return h + "h ago"; return Math.round(h / 24) + "d ago"; }
   function day(iso) { return iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : ""; }
   function api(action, body, params, timeout) {
@@ -248,7 +249,7 @@
   function ctlOverview(box) {
     return Promise.all([api("loopStats"), api("loopRunInfo"), api("loopConfig")]).then(function (r) {
       var s = r[0].stats, run = r[1]; CFG = r[2].config; DEF = r[2].defaults; REASONS = r[2].reasons; TEAMS = r[2].teams || []; SECTEAM = r[2].sectionTeam || {};
-      var secRows = Object.keys(s.bySection).sort(function (a, b) { return s.bySection[b].open - s.bySection[a].open; }).map(function (k) { var x = s.bySection[k]; return '<tr><td>' + esc(navLabel(k)) + '</td><td class="r">' + x.open + '</td><td class="r ' + (x.late ? "lp-late" : "") + '">' + x.late + '</td><td class="r">' + x.resolved + '</td><td class="r">' + fmtEgp(x.impact) + '</td></tr>'; }).join("");
+      var secRows = Object.keys(s.bySection).sort(function (a, b) { return s.bySection[b].open - s.bySection[a].open; }).map(function (k) { var x = s.bySection[k]; return '<tr><td>' + esc(navLabel(k)) + '</td><td class="r">' + x.open + '</td><td class="r ' + (x.late ? "lp-late" : "") + '">' + x.late + '</td><td class="r">' + x.resolved + '</td><td class="r">' + fmtEgpT(x.impact) + '</td></tr>'; }).join("");
       var ownRows = Object.keys(s.byOwner).sort(function (a, b) { return s.byOwner[b].late - s.byOwner[a].late || s.byOwner[b].open - s.byOwner[a].open; }).map(function (k) { var x = s.byOwner[k]; return '<tr><td>' + esc(k) + '</td><td class="r">' + x.open + '</td><td class="r ' + (x.late ? "lp-late" : "") + '">' + x.late + '</td></tr>'; }).join("");
       var RL = r[0].reasons || {}; var rsRows = Object.keys(s.byReason).map(function (k) { var x = s.byReason[k]; return '<tr><td>' + esc((RL[k] || {}).label || k) + '</td><td class="r">' + x.open + '</td><td class="r">' + x.resolved + '</td><td class="r">' + x.recovered + ' / ' + (x.recovered + x.notRecovered) + '</td></tr>'; }).join("");
       var pb = (s.playbook || []).slice(0, 15).map(function (p) { return '<tr><td>' + esc(p.key) + '</td><td class="r">' + p.n + '</td><td class="r"><b>' + p.rate + '%</b></td></tr>'; }).join("");

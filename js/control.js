@@ -6,7 +6,8 @@
   function esc(s) { return C.esc(s); }
   function ago(iso) { var m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); if (m < 1) return "just now"; if (m < 60) return m + "m ago"; var h = Math.round(m / 60); if (h < 24) return h + "h ago"; return Math.round(h / 24) + "d ago"; }
   function fmtNum(n) { return Math.round(n || 0).toLocaleString("en-US"); }
-  function fmtMoney(n) { n = n || 0; var a = Math.abs(n); return "EGP " + (a >= 1e6 ? (n / 1e6).toFixed(2) + "M" : a >= 1e3 ? (n / 1e3).toFixed(1) + "K" : Math.round(n)); }
+  function fmtMoney(n) { n = n || 0; var a = Math.abs(n); return "EGP " + (a >= 1e6 ? (n / 1e6).toFixed(2) + "M" : a >= 1e3 ? (n / 1e3).toFixed(1) + "K" : Math.round(n)); }   // cards
+  function fmtMoneyT(n) { n = Number(n) || 0; return (n < 0 ? "-" : "") + "EGP " + new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(Math.abs(n)); }   // table cells: the real number
   function initials(n) { var p = String(n || "?").split(/\s+/).filter(Boolean); return ((p[0] || "?")[0] + ((p[1] || "")[0] || "")).toUpperCase(); }
 
   // ---------------------------------------------------------------- shared metrics honoring Settings → Metric cutoffs
@@ -65,7 +66,7 @@
         tgt("GMV", a.deliveredGmv, a.targetGmv, fmtMoney) + tgt("Run rate (EOM)", a.runRate, a.targetGmv, fmtMoney) + tgt("Placed orders", a.placed, a.targetPlaced, fmtNum) + tgt("NDR", m.ndr, state.acmKpis.ndr.target, pct1) + tgt("CM3", a.cm3Pct, state.acmKpis.cm3.target, pct1) + tgt("Retention", a.actualRetentionPct, state.acmKpis.retention.target, pct1) +
         '<div class="tw-score"><span class="tw-muted">Final score</span><b>' + a.finalScorePct.toFixed(1) + '%</b></div></div>' +
       '<div class="tw-card"><h3>Daily orders</h3>' + areaChart(daily) + '</div>' +
-      '<div class="tw-card"><h3>Top merchants</h3>' + (mers.length ? '<table class="tw-table"><thead><tr><th>Merchant</th><th class="r">Orders</th><th class="r">NDR</th><th class="r">GMV</th></tr></thead><tbody>' + mers.map(function (x) { return '<tr><td><b>' + esc(x.name) + '</b></td><td class="r">' + fmtNum(x.placed) + '</td><td class="r">' + pct1(x.ndr) + '</td><td class="r">' + fmtMoney(x.deliveredGmv) + '</td></tr>'; }).join("") + '</tbody></table>' : '<div class="tw-muted">No merchants found for this ACM in the loaded data.</div>') + '</div>' +
+      '<div class="tw-card"><h3>Top merchants</h3>' + (mers.length ? '<table class="tw-table"><thead><tr><th>Merchant</th><th class="r">Orders</th><th class="r">NDR</th><th class="r">GMV</th></tr></thead><tbody>' + mers.map(function (x) { return '<tr><td><b>' + esc(x.name) + '</b></td><td class="r">' + fmtNum(x.placed) + '</td><td class="r">' + pct1(x.ndr) + '</td><td class="r">' + fmtMoneyT(x.deliveredGmv) + '</td></tr>'; }).join("") + '</tbody></table>' : '<div class="tw-muted">No merchants found for this ACM in the loaded data.</div>') + '</div>' +
       '<div class="tw-row"><button class="btn btn-primary" id="twDAlert">Send alert to ' + esc(name.split(" ")[0]) + '</button><button class="btn" id="twDMerch">Open Merchants</button></div></div></aside>';
     closeDrawer();
     var d = document.createElement("div"); d.id = "twDrawer"; d.className = "tw-drawer"; d.innerHTML = html; document.body.appendChild(d);
@@ -90,7 +91,7 @@
       '<div class="tw-card tw-kv"><div><span>ACM</span><b>' + esc(m.acm || "—") + '</b></div><div><span>Delivered GMV</span><b>' + fmtMoney(m.deliveredGmv) + '</b></div><div><span>Current segment</span><b>' + esc(m.currentSegment || "—") + '</b></div><div><span>Projected segment</span><b>' + esc(m.projectedSegment || "—") + '</b></div><div><span>Active SKUs</span><b>' + fmtNum(m.skuCount) + '</b></div><div><span>CM3</span><b>' + pct1(m.cm3Pct) + '</b></div></div>' +
       '<div class="tw-card"><h3>Targets</h3><div class="tw-muted" style="margin-bottom:10px">Delivered vs month target</div>' + tgt("GMV", m.deliveredGmv, m.targetGmv, fmtMoney) + tgt("Run rate (EOM)", m.runRate, m.targetGmv, fmtMoney) + tgt("Placed orders", m.placed, m.targetPlaced, fmtNum) + '</div>' +
       '<div class="tw-card"><h3>Daily orders</h3>' + areaChart(daily) + '</div>' +
-      '<div class="tw-card"><h3>Top SKUs</h3>' + (skus.length ? '<table class="tw-table"><thead><tr><th>SKU</th><th>Category</th><th class="r">Orders</th><th class="r">GMV</th></tr></thead><tbody>' + skus.map(function (x) { return '<tr><td><b>' + esc(x.sku) + '</b></td><td>' + esc(x.cat) + '</td><td class="r">' + fmtNum(x.placed) + '</td><td class="r">' + fmtMoney(x.gmv) + '</td></tr>'; }).join("") + '</tbody></table>' : '<div class="tw-muted">No daily rows for this merchant in the current filter.</div>') + '</div>' +
+      '<div class="tw-card"><h3>Top SKUs</h3>' + (skus.length ? '<table class="tw-table"><thead><tr><th>SKU</th><th>Category</th><th class="r">Orders</th><th class="r">GMV</th></tr></thead><tbody>' + skus.map(function (x) { return '<tr><td><b>' + esc(x.sku) + '</b></td><td>' + esc(x.cat) + '</td><td class="r">' + fmtNum(x.placed) + '</td><td class="r">' + fmtMoneyT(x.gmv) + '</td></tr>'; }).join("") + '</tbody></table>' : '<div class="tw-muted">No daily rows for this merchant in the current filter.</div>') + '</div>' +
       '<div class="tw-row"><button class="btn btn-primary" id="twDAlert">Alert ' + esc(acmFirst) + '</button></div></div></aside>';
     closeDrawer();
     var d = document.createElement("div"); d.id = "twDrawer"; d.className = "tw-drawer"; d.innerHTML = html; document.body.appendChild(d);
