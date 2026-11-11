@@ -51,7 +51,7 @@
     var rows = [];
     try {
       var main = (typeof productLevelRows === "function" ? productLevelRows() : (state.allParsedRows || [])), invMap = state.inventoryMap || {};
-      if (!main.length || !Object.keys(invMap).length || typeof buildDebundledStockDohIndex !== "function") { SC.rows = []; SC.empty = true; return; }
+      if (!main.length || !Object.keys(invMap).length || typeof buildDebundledStockDohIndex !== "function") { SC.rows = []; SC.convRows = []; SC.empty = true; return; }
       var idx = buildDebundledStockDohIndex(main), dbm = buildDebundleProductMap(state.debundleMap, state.cogsMap), pm = dbm.productMap, singles = dbm.singlesList;
       var mapsFor = function (sku) { var m = pm.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
       var t0 = new Date(); t0.setHours(0, 0, 0, 0); var today = t0.getTime();
@@ -170,11 +170,11 @@
       if (RET.data && RET.data.month === retMonth) { var rs = RET.data.skus || {}; Object.keys(rs).forEach(function (k) { var id = String(k).trim(); rto[id] = (rto[id] || 0) + (+rs[k] || 0); }); }
       SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
       var cids = {}; [begC, inMC, impMC, rto, rep, mtdC].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
-      var conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
+      var convRows = [], conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
         if (isExcluded(id)) { SC.exclN++; return; } // packaging, not product
-        var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0; if (!w) return;
+        var w = (state.cogsMap && state.cogsMap.get) ? (+state.cogsMap.get(id) || 0) : 0;
         // v1.18.0 — owner's request: Importation and Repack are out of the Supply conversion. Importation receipts count with
         // Purchases for now (CONV_IMPORT_IN_PURCHASES); Repack is not counted at all.
         var P = mtdC[id] || 0, V = begC[id] || 0, Z = (inMC[id] || 0) + (CONV_IMPORT_IN_PURCHASES ? (impMC[id] || 0) : 0), R = rto[id] || 0;
@@ -183,6 +183,11 @@
             AB = Math.min(P - X, Z),
             AF = Math.max(0, Math.min(P - X - AB, R));
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
+        // Supply Conversion tab: the same per-SKU waterfall, kept row by row (pieces). SKUs with no WAC are listed too but never reach the EGP totals below.
+        var lastTs = last[id] || 0, stockNow = idx.stockByProductId.has(id) ? (+idx.stockByProductId.get(id) || 0) : (+iv.stock || 0);
+        convRows.push({ id: id, name: iv.skuName || pr.name || id, cat: cat, conf: P, beg: V, fromBeg: X, pur: Z, fromPur: AB, ret: R, fromRet: AF, rest: Math.max(0, P - X - AB - AF), conv: X + AB + AF,
+          wac: w, convEgp: w ? (X + AB + AF) * w : null, last: lastTs, lastDays: lastTs ? Math.max(0, Math.round((today - lastTs) / DAY)) : null, stock: stockNow });
+        if (!w) return; // packaging / no WAC: not in the EGP table
         [["all"], [cat]].forEach(function (kk) {
           var a = conv[kk[0]] = conv[kk[0]] || mkAgg();
           a.beg[0] += V * w; a.beg[1] += X * w;
@@ -190,7 +195,7 @@
           a.ret[0] += R * w; a.ret[1] += AF * w;
         });
       });
-      SC.conv = conv; SC.convMonth = cref.toLocaleDateString("en-GB", { month: "short", year: "numeric" }); SC.convElapsed = celapsed; SC.convMdays = cmdays; SC.convLatest = convSame;
+      SC.convRows = convRows; SC.conv = conv; SC.convMonth = cref.toLocaleDateString("en-GB", { month: "short", year: "numeric" }); SC.convElapsed = celapsed; SC.convMdays = cmdays; SC.convLatest = convSame;
       var tot = 0, cum = 0, sorted = rows.slice().sort(function (x, y) { return y.inv - x.inv; });
       rows.forEach(function (r) { tot += r.inv; });
       sorted.forEach(function (r) { cum += r.inv; r.abc = r.stock <= 0 ? "-" : cum / (tot || 1) <= 0.8 ? "A" : cum / (tot || 1) <= 0.95 ? "B" : "C"; var L = ACT_LOOKUP[r.abc + "_" + r.fms + "_" + r.quarter]; if (L) { r.action = L[0]; r.channel = L[1]; } });
@@ -522,10 +527,84 @@
     host.innerHTML = items.map(function (t) { return '<div class="ov-stk' + (t[3] ? " ov-stk-" + t[3] : "") + '"><div><span>' + t[0] + '</span><small>' + t[2] + '</small></div><b>' + t[1] + '</b></div>'; }).join("");
   };
 
+
+  /* ---------------------------------------------------------------- Supply Conversion tab (v1.18.0): conversion per SKU
+     Same waterfall as the Supply conversion table of Inventory Aging (single SKUs, packaging left out, month = the month picked at the top):
+     the month's Confirmed pieces are taken from Beg Inv first, then Purchases, then Returns.  Pieces here; Converted EGP = pieces × WAC.
+     Last Inbound = the newest receipt of the SKU in the Inbound data (any month). */
+  var CV = { q: "", cat: "", key: "conf", dir: "desc", page: 0 }, CV_PAGE = 50;
+  var CV_COLS = [
+    ["id", "SKU ID", 0, "Single SKU."], ["name", "SKU Name", 0], ["cat", "Category", 0],
+    ["conf", "Confirmed (Month)", 1, "Confirmed pieces of the month picked at the top (bundles split into their singles)."],
+    ["beg", "Beg Inv", 1, "Beginning inventory of the month (Beginning Inventory query)."], ["fromBeg", "Sent from Beg Inv", 1, "Confirmed pieces served by Beg Inv = the smaller of Confirmed and Beg Inv."], ["begPct", "Beg Conv %", 1, "Sent from Beg Inv ÷ Beg Inv."],
+    ["pur", "Purchases", 1, "Pieces received in the month (Inbound data; Importation POs are counted inside Purchases for now)."], ["fromPur", "Sent from Purchases", 1, "Confirmed pieces left after Beg Inv, served by Purchases = the smaller of that and Purchases."], ["purPct", "Purchases Conv %", 1, "Sent from Purchases ÷ Purchases."],
+    ["ret", "Returns", 1, "Actual returns scanned in the warehouse this month with condition \"Product is good\"."], ["fromRet", "Sent from Returns", 1, "Confirmed pieces left after Beg Inv and Purchases, served by Returns = the smaller of that and Returns."], ["retPct", "Returns Conv %", 1, "Sent from Returns ÷ Returns."],
+    ["conv", "Total Converted", 1, "Sent from Beg Inv + Purchases + Returns."], ["rest", "Not Covered", 1, "Confirmed − Total Converted: confirmed pieces none of the three sources covers."], ["convEgp", "Converted (EGP)", 1, "Total Converted × WAC. Blank when the SKU has no WAC."],
+    ["last", "Last Inbound", 0, "Date of the newest receipt of this SKU in the Inbound data (any month)."], ["lastDays", "Days Since Inbound", 1, "Days from the last inbound to today."], ["stock", "Stock Now", 1, "Current stock (company stock)."], ["wac", "WAC", 1, "Weighted average cost per piece."]
+  ];
+  function cvRows() {
+    var q = CV.q.trim().toLowerCase();
+    var rows = (SC.convRows || []).filter(function (r) {
+      if (CV.cat && r.cat !== CV.cat) return false;
+      return !q || r.id.toLowerCase().indexOf(q) >= 0 || String(r.name || "").toLowerCase().indexOf(q) >= 0;
+    }).map(function (r) {
+      var o = Object.assign({}, r); o.begPct = r.beg ? r.fromBeg / r.beg * 100 : null; o.purPct = r.pur ? r.fromPur / r.pur * 100 : null; o.retPct = r.ret ? r.fromRet / r.ret * 100 : null; return o;
+    });
+    var k = CV.key, d = CV.dir === "asc" ? 1 : -1;
+    return rows.sort(function (a, b) { var x = a[k], y = b[k]; if (typeof x === "string" || typeof y === "string") return d * String(x || "").localeCompare(String(y || "")); return d * ((x == null ? -Infinity : x) - (y == null ? -Infinity : y)); });
+  }
+  function cvCell(r, k) {
+    var v = r[k];
+    if (k === "last") return v ? dfmt(v) : "—";
+    if (k === "begPct" || k === "purPct" || k === "retPct") return v == null ? "—" : v.toFixed(1) + "%";
+    if (k === "convEgp" || k === "wac") return v == null || !v ? (k === "wac" ? '<span class="text-dim" title="No WAC for this SKU">No WAC</span>' : "—") : moneyC(v);
+    if (k === "lastDays") return v == null ? "—" : int(v);
+    if (typeof v === "number") return int(v);
+    return esc(v == null || v === "" ? "—" : (k === "cat" ? (CATL[v] || v) : v));
+  }
+  function renderConversion(host) {
+    var all = SC.convRows || [], rows = cvRows(), pages = Math.max(1, Math.ceil(rows.length / CV_PAGE)); if (CV.page > pages - 1) CV.page = pages - 1;
+    var T = { conf: 0, fromBeg: 0, fromPur: 0, fromRet: 0, rest: 0, beg: 0, pur: 0, ret: 0, conv: 0, convEgp: 0 };
+    rows.forEach(function (r) { Object.keys(T).forEach(function (k) { T[k] += +r[k] || 0; }); });
+    var cats = Array.from(new Set(all.map(function (r) { return r.cat; }))).sort();
+    var tiles = [["SKUs", int(rows.length), "single SKUs with Beg Inv, receipts, returns or sales this month"], ["Confirmed (Month)", int(T.conf), "pieces"],
+      ["Sent from Beg Inv", int(T.fromBeg), (T.beg ? (T.fromBeg / T.beg * 100).toFixed(1) : "0.0") + "% of " + int(T.beg) + " Beg Inv pcs"], ["Sent from Purchases", int(T.fromPur), (T.pur ? (T.fromPur / T.pur * 100).toFixed(1) : "0.0") + "% of " + int(T.pur) + " received pcs"],
+      ["Sent from Returns", int(T.fromRet), (T.ret ? (T.fromRet / T.ret * 100).toFixed(1) : "0.0") + "% of " + int(T.ret) + " returned pcs"], ["Not Covered", int(T.rest), "confirmed pcs none of the 3 sources covers"], ["Converted (EGP)", money(T.convEgp), "qty × WAC"]];
+    var th = function (c) { return '<th class="' + (c[2] ? "num" : "") + '" style="cursor:pointer;white-space:nowrap" data-cvs="' + c[0] + '" title="' + esc(c[3] || c[1]) + '">' + c[1] + (CV.key === c[0] ? (CV.dir === "desc" ? " ↓" : " ↑") : "") + '</th>'; };
+    var tot = { id: "Total", name: int(rows.length) + " SKUs", cat: "", conf: T.conf, beg: T.beg, fromBeg: T.fromBeg, begPct: T.beg ? T.fromBeg / T.beg * 100 : null, pur: T.pur, fromPur: T.fromPur, purPct: T.pur ? T.fromPur / T.pur * 100 : null,
+      ret: T.ret, fromRet: T.fromRet, retPct: T.ret ? T.fromRet / T.ret * 100 : null, conv: T.conv, rest: T.rest, convEgp: T.convEgp, last: 0, lastDays: null, stock: null, wac: null };
+    var body = rows.slice(CV.page * CV_PAGE, CV.page * CV_PAGE + CV_PAGE).map(function (r) {
+      return '<tr>' + CV_COLS.map(function (c) { var k = c[0]; return '<td class="' + (c[2] ? "num" : "") + (k === "id" ? " font-mono" : "") + '"' + (k === "name" ? ' style="min-width:260px;max-width:420px;white-space:normal;word-break:break-word;line-height:1.35"' : "") + '>' + cvCell(r, k) + '</td>'; }).join("") + '</tr>';
+    }).join("") || '<tr><td colspan="' + CV_COLS.length + '" class="text-dim" style="text-align:center;padding:18px">No SKUs for this selection.</td></tr>';
+    var foot = '<tr style="font-weight:700;background:rgba(148,163,184,.08)">' + CV_COLS.map(function (c) { var k = c[0], v = tot[k]; return '<td class="' + (c[2] ? "num" : "") + '">' + (v == null || (k === "last") || (k === "stock") || (k === "wac") || (k === "lastDays") ? "" : cvCell(tot, k)) + '</td>'; }).join("") + '</tr>';
+    host.innerHTML = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Supply Conversion — ' + esc(SC.convMonth || "") + '</h2>' +
+      '<p>How much of each SKU\'s confirmed pieces was served from Beg Inv, Purchases and Returns · follows the month picked at the top · single SKUs</p></div>' +
+      '<div class="table-controls" style="gap:8px;flex-wrap:wrap"><input id="cvQ" type="search" class="date-filter-input" style="min-width:220px" placeholder="Search SKU ID or name" value="' + esc(CV.q) + '">' +
+      '<select id="cvCat" class="date-filter-input"><option value="">All categories</option>' + cats.map(function (c) { return '<option value="' + esc(c) + '"' + (CV.cat === c ? " selected" : "") + '>' + esc(CATL[c] || c) + '</option>'; }).join("") + '</select>' +
+      '<button class="btn btn-outline small tw-exp" data-csv="own" id="cvCsv">Export CSV</button></div></div>' +
+      '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + esc(t[2]) + '</small></div>'; }).join("") + '</div></div>' +
+      '<div class="panel table-panel hover-glow"><div class="table-responsive"><table class="data-table" id="cvTable"><thead><tr>' + CV_COLS.map(th).join("") + '</tr></thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
+      '<div class="pagination-controls" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:12px 18px"><button class="btn btn-outline small" id="cvPrev"' + (CV.page ? "" : " disabled") + '>Prev</button><span class="text-dim">Page ' + (CV.page + 1) + ' of ' + pages + '</span><button class="btn btn-outline small" id="cvNext"' + (CV.page < pages - 1 ? "" : " disabled") + '>Next</button></div>' +
+      '<div class="sc-note" style="margin:0 16px 12px">The month\'s Confirmed pieces are taken in order: <b>Beg Inv → Purchases → Returns</b> — the same waterfall as the Supply conversion table in Inventory Aging, so the totals of the EGP column match that table when every SKU is shown. SKUs with no WAC are listed (pieces) but have no EGP value. Percentages = Sent ÷ what that source made available.</div>' +
+      exclNote() + impNote() + retNote() + '</div>';
+    var on = function (id, ev, fn) { var el = host.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
+    on("cvQ", "input", function (e) { CV.q = e.target.value; CV.page = 0; renderConversion(host); var el = host.querySelector("#cvQ"); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+    on("cvCat", "change", function (e) { CV.cat = e.target.value; CV.page = 0; renderConversion(host); });
+    on("cvPrev", "click", function () { if (CV.page > 0) { CV.page--; renderConversion(host); } });
+    on("cvNext", "click", function () { CV.page++; renderConversion(host); });
+    host.querySelectorAll("[data-cvs]").forEach(function (h) { h.addEventListener("click", function (ev) { ev.stopPropagation(); var k = h.dataset.cvs; if (CV.key === k) CV.dir = CV.dir === "desc" ? "asc" : "desc"; else { CV.key = k; CV.dir = (k === "id" || k === "name" || k === "cat") ? "asc" : "desc"; } renderConversion(host); }); });
+    on("cvCsv", "click", function (ev) {
+      ev.stopPropagation();
+      var r2 = function (v) { return v == null || !isFinite(v) ? "" : Math.round(v * 100) / 100; }, lines = [CV_COLS.map(function (c) { return c[1]; })].concat(rows.map(function (r) { return CV_COLS.map(function (c) { var v = r[c[0]]; return c[0] === "last" ? (v ? new Date(v).toISOString().slice(0, 10) : "") : (typeof v === "number" ? r2(v) : (v == null ? "" : v)); }); }));
+      var csv = "﻿" + lines.map(function (l) { return l.map(function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(","); }).join("\n");
+      var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = "supply-conversion-" + String(SC.convKey || "month") + ".csv"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    });
+  }
+
   /* ---------------------------------------------------------------- wiring */
   C.supplyConversionExport = convExport;
   C.invCategoryExport = catExport;
-  var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions] };
+  var VIEWS = { scAging: ["viewScAging", renderAging], scSkus: ["viewScSkus", renderSkus], scActions: ["viewScActions", renderActions], scConversion: ["viewScConversion", renderConversion] };
   var current = null;
   function rerender() { build(); if (current && VIEWS[current]) { var h = $(VIEWS[current][0]); if (h && !h.classList.contains("hidden")) VIEWS[current][1](h); } }
   // وقت الداونلود (زرار Download CSV): نعرض كل الصفوف بدل الصفحة الحالية، وبعدها نرجع زي ما كان.
@@ -555,7 +634,7 @@
   function setup() {
     Object.keys(VIEWS).forEach(function (name) {
       mkSection(VIEWS[name][0]);
-      C.registerView(name, { sectionId: VIEWS[name][0], navId: ({ scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions" })[name], label: "", open: true, sub: "Inventory aging, stock health & actions", render: function (host) { current = name; build(); if (SC.empty) { host.innerHTML = '<div class="sc-note">Waiting for dashboard data (inventory, COGS, inbound and sales). It appears here as soon as the main data finishes loading.</div>'; return; } VIEWS[name][1](host); } });
+      C.registerView(name, { sectionId: VIEWS[name][0], navId: ({ scAging: "navScAging", scSkus: "navScSkus", scActions: "navScActions", scConversion: "navScConversion" })[name], label: "", open: true, sub: (name === "scConversion" ? "Supply conversion per SKU — Beg Inv, Purchases, Returns" : "Inventory aging, stock health & actions"), render: function (host) { current = name; build(); if (SC.empty) { host.innerHTML = '<div class="sc-note">Waiting for dashboard data (inventory, COGS, inbound and sales). It appears here as soon as the main data finishes loading.</div>'; return; } VIEWS[name][1](host); } });
       var h = $(VIEWS[name][0]); if (h) { h.addEventListener("click", onClick); h.addEventListener("input", onInput); h.addEventListener("change", onInput); }
     });
     boot();

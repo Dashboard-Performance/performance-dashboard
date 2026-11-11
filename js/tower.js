@@ -28,7 +28,7 @@ var VIEW_NAV = {
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
     weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner",
-    telesales: "navTelesalesPerf", telesalesAgents: "navTelesalesAgents"
+    telesales: "navTelesalesPerf", telesalesAgents: "navTelesalesAgents", scConversion: "navScConversion"
   };
   var ADMIN_PW_VIEWS = ["forecastModel", "forecastModelMerchant"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
@@ -1055,7 +1055,8 @@ var VIEW_NAV = {
       { nav: "navScSkus", view: "scSkus", label: "SKU Analysis" },
       { nav: "navScActions", view: "scActions", label: "Action Plan" },
       { nav: "navPurchasePlan", view: "purchasePlan", label: "Purchase Plan" },
-      { nav: "navDohPlanner", view: "dohPlanner", label: "Planner DOH" }
+      { nav: "navDohPlanner", view: "dohPlanner", label: "Planner DOH" },
+      { nav: "navScConversion", view: "scConversion", label: "Supply Conversion" }
     ] },
     { toggle: "navMarketplaceToggle", title: "Marketplace", groups: [
       { label: "Inventory", tabs: [
@@ -1246,7 +1247,7 @@ var VIEW_NAV = {
     mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
     incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
     weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh",
-    telesales: "telesales", telesalesAgents: "telesales-agents"
+    telesales: "telesales", telesalesAgents: "telesales-agents", scConversion: "supply-conversion"
   };
   function twFileOf(view) { return view === "overview" ? "index.html" : (VIEW_SLUG[view] || view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()) + ".html"; }
   // Old file names (camelCase view name) keep working so saved links don't break; they open the same tab and the address bar switches to the new name.
