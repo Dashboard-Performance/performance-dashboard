@@ -1,7 +1,9 @@
 /* Telesales → Agents Performance (v1.18.0)
    Agent and Team-Leader (TL) performance of the Telesales team. Read straight from the Telesales_Data Google Sheet — it does not use Main:
      • "Agent's_Performance" (GID 0): one row per agent per day.   • "Team" (GID 570707782): TL, Agent Name, Taager ID (joined to TELESALES_AGENT_ID).
-   Every number is the sheet's own column, summed over the picked dates. Ratios are re-computed from the sums with the same formula the sheet uses
+   CM3 and CM3/Pc are the exception: the sheet has no CM3 and Main has no agent id, so they are the Telesales merchant's (1160154) own totals from Main (CM3 cut-off), shown as cards only.
+   CM3% = CM3 ÷ Delivered GMV of the same cut-off days. PPM% = PPM ÷ Conf GMV (the sheet's PPM is on confirmed pieces), per agent / TL / total.
+   Every other number is the sheet's own column, summed over the picked dates. Ratios are re-computed from the sums with the same formula the sheet uses
    (checked against every row of the sheet), so a rate is never an average of daily rates:
      • AOV = Conf GMV ÷ Confirmed Orders. ABS = Pieces incl. warranty ÷ Confirmed Orders. Basket Size = Pieces ÷ Confirmed Orders (excl. / incl. warranty).
      • Delivery Rate (Pcs) = Delivered Pcs ÷ Confirmed Pcs. Delivery Rate (Orders) = Delivered Orders ÷ Confirmed Orders.
@@ -79,7 +81,7 @@
   function addTo(b, r) { for (var k in b) if (SUMS[k] && typeof r[k] === "number") b[k] += r[k]; }
   function finish(b) {
     b.ordersDay = div(b.co, b.days); b.gmvDay = div(b.gmv, b.days); b.aov = div(b.gmv, b.co); b.abs = div(b.pIn, b.co); b.basketEx = div(b.pEx, b.co); b.basketIn = div(b.pIn, b.co);
-    b.asp = div(b.aspTot, b.pIn); b.ppmPcEx = div(b.ppmEx, b.pEx); b.ppmPcIn = div(b.ppmIn, b.pIn);
+    b.ppmPct = b.gmv ? 100 * b.ppmIn / b.gmv : null; b.asp = div(b.aspTot, b.pIn); b.ppmPcEx = div(b.ppmEx, b.pEx); b.ppmPcIn = div(b.ppmIn, b.pIn);
     b.drPcs = b.cp ? 100 * b.dp / b.cp : null; b.drOrd = b.co ? 100 * b.dord / b.co : null;
     b.fakeOrdPct = b.co ? 100 * b.fo / b.co : null; b.fakePcsPct = b.cp ? 100 * b.fp / b.cp : null; b.asRate = b.co ? 100 * b.ao / b.co : null;
     return b;
@@ -109,6 +111,27 @@
   }
 
   // [key, title, isNumber, tooltip]
+  // CM3 is not in the Telesales_Data sheet and Main has no agent id, so CM3 and CM3/Pc here are the Telesales merchant's (1160154) own numbers from Main —
+  // one figure for the whole team in the picked dates, not split per agent / TL. Same maths as the Telesales Performance page:
+  // CM3 only on days up to the CM3 cut-off (latest data day of all merchants − CM3_LAG_DAYS); CM3/Pc = CM3 ÷ Delivered pcs of those same days.
+  var MID = "1160154";
+  function dayStart(k) { var p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]).getTime(); }
+  function mainCm3() {
+    var all = []; try { all = state.allParsedRows || []; } catch (e) { all = []; }
+    if (!all.length) return { loaded: false };
+    var cut = getCm3LagCutoffTimestamp(all), cm3Gmv = 0, from = AG.from ? dayStart(AG.from) : 0, to = AG.to ? dayStart(AG.to) : Infinity, cm3 = 0, dlv = 0, rows = 0;
+    all.forEach(function (r) {
+      if (String(r.merchantId || "").trim() !== MID || !r.timestamp) return;
+      var d = new Date(r.timestamp); d.setHours(0, 0, 0, 0); var t = d.getTime();
+      if (t < from || t > to) return;
+      rows++;
+      if (isRowEligibleForLag(r, cut, "telesales")) dlv += r.deliveredPieces || 0;
+      if (isCm3RowEligible(r, cut, "telesales")) { cm3 += r.cm3 || 0; cm3Gmv += r.deliveredGmv || 0; }
+    });
+    return { loaded: true, cut: cut, cm3: cm3, perPc: dlv ? cm3 / dlv : null, pct: cm3Gmv ? 100 * cm3 / cm3Gmv : null, rows: rows };
+  }
+  function mainSig() { var a = []; try { a = state.allParsedRows || []; } catch (e) {} return a.length + ":" + (a[0] && a[0].timestamp) + ":" + (a[a.length - 1] && a[a.length - 1].timestamp); }
+
   var COLS = [
     ["name", "Agent", 0], ["tl", "TL", 0], ["id", "Agent ID", 0],
     ["days", "Days Worked", 1, "Sum of DAYS in the sheet (1 = worked that day)."],
@@ -117,13 +140,13 @@
     ["expGmv", "Expected Monthly GMV", 1, "GMV/Day × 22 — the same formula as the sheet. A TL or the total is the sum of its agents."],
     ["aov", "AOV", 1, "Conf GMV ÷ Confirmed Orders."], ["abs", "ABS", 1, "Pieces incl. warranty ÷ Confirmed Orders."],
     ["basketEx", "Basket Size (excl. warranty)", 1, "Pieces excl. warranty ÷ Confirmed Orders."], ["basketIn", "Basket Size (incl. warranty)", 1, "Pieces incl. warranty ÷ Confirmed Orders."],
-    ["asp", "ASP", 1, "The sheet's ASP, weighted by Pieces incl. warranty."], ["ppmPcEx", "PPM/Pc (excl. warranty)", 1, "The sheet's PPM per piece, weighted by Pieces excl. warranty."], ["ppmPcIn", "PPM/Pc (incl. warranty)", 1, "The sheet's PPM per piece, weighted by Pieces incl. warranty."],
+    ["asp", "ASP", 1, "The sheet's ASP, weighted by Pieces incl. warranty."], ["ppmPcEx", "PPM/Pc (excl. warranty)", 1, "The sheet's PPM per piece, weighted by Pieces excl. warranty."], ["ppmPcIn", "PPM/Pc (incl. warranty)", 1, "The sheet's PPM per piece, weighted by Pieces incl. warranty."], ["ppmPct", "PPM%", 1, "PPM (the sheet's PPM/Pc incl. warranty × Pieces incl. warranty) ÷ Conf GMV. Both are on confirmed pieces."],
     ["dord", "Delivered Orders", 1], ["dp", "Delivered Pcs", 1], ["dgmv", "Delivered GMV", 1], ["expDgmv", "Expected Monthly Delivered GMV", 1, "Delivered GMV ÷ Days Worked × 22 — the same formula as the sheet."],
     ["drOrd", "Delivery Rate (Orders)", 1, "Delivered Orders ÷ Confirmed Orders."], ["drPcs", "Delivery Rate (Pcs)", 1, "Delivered Pcs ÷ Confirmed Pcs."],
     ["fo", "Fake Orders", 1], ["fp", "Fake Pcs", 1], ["fg", "Fake GMV", 1], ["fakeOrdPct", "Fake Rate (Orders)", 1, "Fake Orders ÷ Confirmed Orders."], ["fakePcsPct", "Fake Rate (Pcs)", 1, "Fake Pcs ÷ Confirmed Pcs."],
     ["ao", "Aftersales Orders", 1], ["ap", "Aftersales Pcs", 1], ["asRate", "Aftersales Rate", 1, "Aftersales Orders ÷ Confirmed Orders."]
   ];
-  var MONEY = { gmv: 1, gmvDay: 1, expGmv: 1, aov: 1, asp: 1, ppmPcEx: 1, ppmPcIn: 1, dgmv: 1, expDgmv: 1, fg: 1 }, PCT = { drOrd: 1, drPcs: 1, fakeOrdPct: 1, fakePcsPct: 1, asRate: 1 }, D1 = { ordersDay: 1, abs: 1, basketEx: 1, basketIn: 1 };
+  var MONEY = { gmv: 1, gmvDay: 1, expGmv: 1, aov: 1, asp: 1, ppmPcEx: 1, ppmPcIn: 1, dgmv: 1, expDgmv: 1, fg: 1 }, PCT = { ppmPct: 1, drOrd: 1, drPcs: 1, fakeOrdPct: 1, fakePcsPct: 1, asRate: 1 }, D1 = { ordersDay: 1, abs: 1, basketEx: 1, basketIn: 1 };
   function cell(r, k) {
     var v = r[k];
     if (MONEY[k]) return money(v); if (PCT[k]) return pct(v); if (D1[k]) return dec(v, 2);
@@ -155,10 +178,12 @@
     var agents = sortRows(d.agents.slice()), per = (AG.from || d.min) && (AG.to || d.max) ? dayText(AG.from || d.min) + " – " + dayText(AG.to || d.max) : "all days";
     var tiles = [["Agents", int(T.agents), "with rows in the selection"], ["Days Worked", int(T.days), "sum of agent-days"], ["Confirmed Orders", int(T.co), int(T.cp) + " pcs"], ["Conf GMV", moneyC(T.gmv), "AOV " + moneyC(T.aov)],
       ["Expected Monthly GMV", moneyC(T.expGmv), "per-day × 22"], ["Delivered GMV", moneyC(T.dgmv), int(T.dp) + " pcs"], ["Delivery Rate (Pcs)", pct(T.drPcs), "Delivered ÷ Confirmed pcs"], ["Fake Rate (Orders)", pct(T.fakeOrdPct), int(T.fo) + " fake orders"],
-      ["Aftersales Rate", pct(T.asRate), int(T.ao) + " orders"], ["ASP", moneyC(T.asp), "weighted by pieces"], ["PPM/Pc (incl. warranty)", moneyC(T.ppmPcIn), "excl.: " + moneyC(T.ppmPcEx)]];
+      ["Aftersales Rate", pct(T.asRate), int(T.ao) + " orders"], ["ASP", moneyC(T.asp), "weighted by pieces"], ["PPM/Pc (incl. warranty)", moneyC(T.ppmPcIn), "excl.: " + moneyC(T.ppmPcEx)], ["PPM%", pct(T.ppmPct), "PPM ÷ Conf GMV"]];
+    var M = mainCm3(), mNote = !M.loaded ? "Main is still loading" : (AG.tl ? "whole team — not split by TL" : "merchant " + MID + " (Main) · up to " + new Date(M.cut).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }));
+    tiles.push(["CM3", M.loaded ? moneyC(M.cm3) : "—", mNote], ["CM3/Pc", M.loaded ? moneyC(M.perPc) : "—", "CM3 ÷ Delivered pcs, same days"], ["CM3%", M.loaded ? pct(M.pct) : "—", "CM3 ÷ Delivered GMV, same days"]);
     var tlOpts = '<option value="">All TLs</option>' + d.tlNames.map(function (n) { return '<option value="' + esc(n) + '"' + (AG.tl === n ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("");
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Agents Performance</h2>' +
-      '<p>Telesales agents and TLs · ' + esc(per) + ' · from the Telesales_Data sheet (Agent\'s_Performance + Team). Delivered numbers of the latest days are still maturing.</p></div>' +
+      '<p>Telesales agents and TLs · ' + esc(per) + ' · from the Telesales_Data sheet (Agent\'s_Performance + Team), CM3 from Main. Delivered numbers of the latest days are still maturing.</p></div>' +
       '<div class="table-controls" style="gap:8px;flex-wrap:wrap"><label class="text-dim" style="font-size:12px">From <input id="tagFrom" type="date" class="date-filter-input" min="' + d.min + '" max="' + d.max + '" value="' + AG.from + '"></label>' +
       '<label class="text-dim" style="font-size:12px">To <input id="tagTo" type="date" class="date-filter-input" min="' + d.min + '" max="' + d.max + '" value="' + AG.to + '"></label>' +
       '<select id="tagTl" class="date-filter-input">' + tlOpts + '</select><button class="btn btn-outline small" id="tagRefresh">Refresh</button></div></div>' +
@@ -169,7 +194,7 @@
     html += '<div class="panel table-panel hover-glow"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Agents</h2><p>' + int(agents.length) + ' agents · click a column title to sort</p></div>' +
       '<div class="table-controls" style="gap:8px;flex-wrap:wrap"><input id="tagQ" type="search" class="date-filter-input" style="min-width:220px" placeholder="Search agent, ID or TL" value="' + esc(AG.q) + '"><button class="btn btn-outline small tw-exp" data-csv="own" id="tagCsv">Export CSV</button></div></div>' +
       table("", "", agents, COLS, "tagTable") + '</div>';
-    host.innerHTML = html; draw(d);
+    host.innerHTML = html; draw(d); watch(host);
     var on = function (id, ev, fn) { var el = host.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
     on("tagFrom", "change", function (e) { AG.from = e.target.value; render(host); }); on("tagTo", "change", function (e) { AG.to = e.target.value; render(host); });
     on("tagTl", "change", function (e) { AG.tl = e.target.value; render(host); }); on("tagRefresh", "click", function () { AG.raw = null; load(host, true); });
@@ -191,6 +216,14 @@
       options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#94a3b8" } } },
         scales: { x: { ticks: { color: "#94a3b8" }, grid: { color: "#1e293b" } }, y: { beginAtZero: true, ticks: { color: "#94a3b8" }, grid: { color: "#1e293b" } } } }
     });
+  }
+  var watchT = 0, lastSig = "";
+  function watch(host) {
+    clearInterval(watchT); lastSig = mainSig();
+    watchT = setInterval(function () {
+      var sec = $("viewTelesalesAgents"); if (!sec || sec.classList.contains("hidden")) { clearInterval(watchT); return; }
+      if (mainSig() !== lastSig && AG.raw) render(host);
+    }, 1500);
   }
   window.TaagerTelesalesAgents = { parse: parse, state: AG, compute: function () { return compute(); }, load: function (h) { AG.raw = null; load(h || document.body, true); } };
 
