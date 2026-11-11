@@ -11,6 +11,7 @@
      • ASP = Delivered GMV ÷ Delivered pieces. Avg Placed/Day = Placed pieces ÷ days that have rows.
      • Stock & DOH: the dashboard's stock index (bundles broken into their singles), company stock of the SKU.
    The cut-off day comes from all merchants' rows in the period (the dashboard's latest data day), not from this merchant alone.
+   SKU Name / Category come from the dashboard's Inventory tab (then the Products tab) — Main itself has no SKU name.
    1160154 still counts in every other page of the dashboard. */
 (function () {
   "use strict";
@@ -47,7 +48,8 @@
       if (!r.sku) return;
       var b = bySku.get(r.sku); if (!b) { b = tcEmptyBucket(); bySku.set(r.sku, b); }
       add(b, r); add(tot, r);
-      if (!info.has(r.sku)) info.set(r.sku, { name: r.productName || "", category: r.category || "" });
+      if (!info.has(r.sku)) { var inv = (S.inventoryMap || {})[r.sku] || {}, prod = (S.productsMap || {})[r.sku] || {};   // Main has no SKU name — same source as the other pages: Inventory tab, then Products tab
+        info.set(r.sku, { name: inv.skuName || prod.name || r.productName || "", category: (inv.category && inv.category !== "Uncategorized" ? inv.category : "") || prod.category || r.category || "" }); }
       var d = daily.get(r.date) || { ts: r.timestamp, placed: 0, confirmed: 0, delivered: 0 };
       d.placed += r.placedPieces || 0; d.confirmed += r.confirmedPieces || 0; d.delivered += r.deliveredPieces || 0; daily.set(r.date, d);
     });
