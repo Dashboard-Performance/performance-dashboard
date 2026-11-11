@@ -181,6 +181,11 @@
       })();
       SC.retInfo = RET.data && RET.data.month === retMonth ? RET.data : null; SC.retErr = RET.err; SC.retLoading = RET.loading;
       var cids = {}; [begC, inMC, impMC, rto, rep, mtdC].forEach(function (o) { Object.keys(o).forEach(function (k) { cids[k] = 1; }); });
+      // Last Inbound for the picked month = the newest receipt on or before the END of that month (a receipt from a later month is not "last" for October);
+      // Days Since Inbound is counted to the end of that month (today for the latest month).
+      var cvEnd = new Date(ccy, ccmo + 1, 1).getTime(), cvRefDay = convSame ? today : new Date(ccy, ccmo + 1, 0).getTime(), lastC = {};
+      var dayMs = function (t) { var d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+      (state.inboundRows || []).forEach(function (r) { if (r.sku && r.rcvTs && r.rcvTs < cvEnd && (!lastC[r.sku] || r.rcvTs > lastC[r.sku])) lastC[r.sku] = r.rcvTs; });
       var convRows = [], conv = { all: null }, mkAgg = function () { return { beg: [0, 0], pur: [0, 0], ret: [0, 0], rep: [0, 0], imp: [0, 0] }; }; // [actual, converted]
       Object.keys(cids).forEach(function (id) {
         var m = pm.get(id); if ((m && m.length > 1) || idx.isBundleByProductId.get(id) || (singles && singles.size && !singles.has(id))) return;
@@ -195,9 +200,9 @@
             AF = Math.max(0, Math.min(P - X - AB, R));
         var iv = invMap[id] || {}, pr = (state.productsMap || {})[id] || {}, cat = String(iv.category || pr.category || "").toLowerCase() || "general";
         // Supply Conversion tab: the same per-SKU waterfall, kept row by row (pieces). SKUs with no WAC are listed too but never reach the EGP totals below.
-        var lastTs = last[id] || 0, stockNow = idx.stockByProductId.has(id) ? (+idx.stockByProductId.get(id) || 0) : (+iv.stock || 0);
+        var lastTs = lastC[id] || 0, stockNow = idx.stockByProductId.has(id) ? (+idx.stockByProductId.get(id) || 0) : (+iv.stock || 0);
         convRows.push({ id: id, name: iv.skuName || pr.name || id, cat: cat, conf: P, beg: V, fromBeg: X, pur: Z, fromPur: AB, ret: R, fromRet: AF, rest: Math.max(0, P - X - AB - AF), conv: X + AB + AF,
-          wac: w, convEgp: w ? (X + AB + AF) * w : null, last: lastTs, lastDays: lastTs ? Math.max(0, Math.round((today - lastTs) / DAY)) : null, stock: stockNow });
+          wac: w, convEgp: w ? (X + AB + AF) * w : null, last: lastTs, lastDays: lastTs ? Math.max(0, Math.round((cvRefDay - dayMs(lastTs)) / DAY)) : null, stock: stockNow });
         if (!w) return; // packaging / no WAC: not in the EGP table
         [["all"], [cat]].forEach(function (kk) {
           var a = conv[kk[0]] = conv[kk[0]] || mkAgg();
@@ -552,7 +557,7 @@
     ["pur", "Purchases", 1, "Pieces received in the month (Inbound data; Importation POs are counted inside Purchases for now)."], ["fromPur", "Converted from Purchases", 1, "Confirmed pieces left after Beg Inv, served by Purchases = the smaller of that and Purchases."], ["purPct", "Purchases Conv %", 1, "Converted from Purchases ÷ Purchases."],
     ["ret", "Returns", 1, "Actual returns scanned in the warehouse this month with condition \"Product is good\"."], ["fromRet", "Converted from Returns", 1, "Confirmed pieces left after Beg Inv and Purchases, served by Returns = the smaller of that and Returns."], ["retPct", "Returns Conv %", 1, "Converted from Returns ÷ Returns."],
     ["conv", "Total Converted", 1, "Converted from Beg Inv + Purchases + Returns."], ["rest", "Not Covered", 1, "Confirmed − Total Converted: confirmed pieces none of the three sources covers."], ["convEgp", "Converted (EGP)", 1, "Total Converted × WAC. Blank when the SKU has no WAC."],
-    ["last", "Last Inbound", 0, "Date of the newest receipt of this SKU in the Inbound data (any month)."], ["lastDays", "Days Since Inbound", 1, "Days from the last inbound to today."], ["stock", "Stock Now", 1, "Current stock (company stock)."], ["wac", "WAC", 1, "Weighted average cost per piece."]
+    ["last", "Last Inbound", 0, "Date of the newest receipt of this SKU on or before the end of the picked month."], ["lastDays", "Days Since Inbound", 1, "Days from that last inbound to the end of the picked month (to today for the latest month)."], ["stock", "Stock Now", 1, "Stock today (company stock) \u2014 not the stock at the end of the picked month."], ["wac", "WAC", 1, "Weighted average cost per piece."]
   ];
   function cvRows() {
     var q = CV.q.trim().toLowerCase();
