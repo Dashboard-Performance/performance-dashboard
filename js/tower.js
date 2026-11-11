@@ -28,7 +28,7 @@ var VIEW_NAV = {
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
     weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner",
-    telesales: "navTelesalesPerf"
+    telesales: "navTelesalesPerf", telesalesAgents: "navTelesalesAgents"
   };
   var ADMIN_PW_VIEWS = ["forecastModel", "forecastModelMerchant"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
@@ -1097,7 +1097,8 @@ var VIEW_NAV = {
       { nav: "navMlForecast", view: "mlForecast", label: "ML Forecast" }
     ] },
     { toggle: "navTelesalesToggle", title: "Telesales", tabs: [
-      { nav: "navTelesalesPerf", view: "telesales", label: "Telesales Performance" }
+      { nav: "navTelesalesPerf", view: "telesales", label: "Telesales Performance" },
+      { nav: "navTelesalesAgents", view: "telesalesAgents", label: "Agents Performance" }
     ] },
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
       { nav: "navIncMerchants", view: "incentiveMerchants", label: "Incentive Merchants" }
@@ -1245,7 +1246,7 @@ var VIEW_NAV = {
     mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
     incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
     weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh",
-    telesales: "telesales"
+    telesales: "telesales", telesalesAgents: "telesales-agents"
   };
   function twFileOf(view) { return view === "overview" ? "index.html" : (VIEW_SLUG[view] || view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()) + ".html"; }
   // Old file names (camelCase view name) keep working so saved links don't break; they open the same tab and the address bar switches to the new name.

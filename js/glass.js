@@ -44,7 +44,7 @@
     navForecastModel: "forecastModel", navForecastModelMerchant: "forecastModelMerchant", navMlForecast: "mlForecast", navDohPlanner: "dohPlanner",
     navTowerRoles: "towerRoles", navTowerTargets: "towerTargets", navLoopTasks: "loopTasks", navTowerAlerts: "towerAlerts",
     navLoopControl: "loopControl", navLoopTeams: "loopTeams", navTowerSettings: "towerSettings", navTowerActivity: "towerActivity", navTowerUsage: "towerUsage", navTowerInvite: "towerInvite",
-    navTelesalesPerf: "telesales"
+    navTelesalesPerf: "telesales", navTelesalesAgents: "telesalesAgents"
   };
   // Forecast Model لسه ورا باسورد الـ Admin Panel — فهنا بنسيب العنصر الأصلي يتداس (الباقي بقى من غير باسورد)
   var VIA_CLICK = { navForecastModel: 1, navForecastModelMerchant: 1 };
