@@ -12,6 +12,8 @@
 
 ## اللي جديد
 
+- **جروب جديد: Telesales** (في الـ sidebar بعد Marketplace): نفس صفحات الداش بورد بنفس الحسبة بالظبط، بس لميرشنت **1160154** لوحده ومن كويري الـ Main (مستوى الـ Match). الصفحات: Over View · Inventory · CM3 Analyst · CM3 Analyst / Products · Analyst / Products · Analyst / Single · Matches / Single · Performance-Matches · New Matches · Poor Matches · Merchant Performance. أول ما تفتح صفحة من Telesales الداتا بتتفلتر على 1160154 (نفس الـ Merchant scope)، وأول ما تفتح أي صفحة برا الجروب بترجع كاملة. 1160154 لسه محسوب في باقي الداش بورد زي ما هو. الصلاحية: Admin / Country Manager + الـ Role الافتراضي "Marketplace" (لو الـ Roles متسيفة قبل كده، ضيف صفحات Telesales من Users & Roles). ومفيش أي publish (Computed API / Planner DOH) بيطلع وإنت على صفحة Telesales. صفحات جديدة: telesales.html, telesales-*.html (اتبنوا بـ tools/build-pages.mjs).
+
 - **الجداول بالرقم الحقيقي، الكروت زي ما هي**: كل خانات الفلوس في الجداول (fmtMoneyCompactCell / fmtCm3MoneyCell، وجداول Control و Loop) بتظهر الرقم كامل بالفواصل (EGP 1,500 بدل EGP 2K، والكسور لحد رقمين عشريين). كروت الـ KPI (Over View، Segmentation، CM3، Supply، Commercial، Loop…) ومحاور الرسوم البيانية فضلت بالشكل المختصر (EGP 6.86M / 5k).
 
 - **إصلاح "Sync Error: cogsMap.get is not a function"**: الـ Shared snapshot (R2) كان بيتحفظ JSON فالـ Maps (cogsMap, cogsMapIrq, repackMap, irqInventoryMap) بتوصل {}. ومن v1.18.0 المتصفح بياخد الـ shared لو أحدث من نسخته، فالمشكلة بقت تظهر كتير. دلوقتي الـ Maps بتتحفظ وبترجع صح، وأي نسخة قديمة فيها {} بتتحول Map تلقائي قبل ما تترسم.

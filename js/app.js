@@ -2141,6 +2141,8 @@ async function publishComputedSnapshots() {
   // v1.16.0: النشر بقى محتاج الـ admin key — بيحصل بس من متصفح أدمن (ومش بيتقل على باقي الناس)
   let publishKey = ""; try { publishKey = localStorage.getItem("towerAdminKey") || ""; } catch (e) {}
   if (!publishKey) return;
+  // v1.18.0 — never publish numbers that are cut down to one merchant (Telesales pages / Merchant scope)
+  try { if (window.TowerCore && window.TowerCore.merchantScope && window.TowerCore.merchantScope()) return; } catch (e) {}
   if (!state.allParsedRows || state.allParsedRows.length === 0) return; // لسه مفيش داتا خام اتحملت
 
   // بطلب صريح: الشاشة كانت بتجمد (Freeze) وقت تحميل الداتا الجديدة، بسبب إن
@@ -19052,7 +19054,8 @@ function dohRecalculate() {
     // Keep the planning sheet current without anyone pressing anything — same admin-key gate as the
     // other publishes, so it only ever goes out from an admin's browser and costs other users nothing.
     let pubKey = ""; try { pubKey = localStorage.getItem("towerAdminKey") || ""; } catch (e) {}
-    if (pubKey && rows.length) publishPlannerDoh().catch(() => {});
+    let scopedNow = false; try { scopedNow = !!(window.TowerCore && window.TowerCore.merchantScope && window.TowerCore.merchantScope()); } catch (e) {}
+    if (pubKey && rows.length && !scopedNow) publishPlannerDoh().catch(() => {});
   } catch (e) {
     console.error("DOH Planner error:", e);
     if (status) status.textContent = "Couldn't build the Planner DOH: " + (e && e.message ? e.message : e);

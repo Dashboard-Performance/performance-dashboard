@@ -43,7 +43,8 @@
     navSegmentationPanel: "segmentation", navSellthroughPanel: "sellthrough", navWeeklyInventory: "weeklyInventory",
     navForecastModel: "forecastModel", navForecastModelMerchant: "forecastModelMerchant", navMlForecast: "mlForecast", navDohPlanner: "dohPlanner",
     navTowerRoles: "towerRoles", navTowerTargets: "towerTargets", navLoopTasks: "loopTasks", navTowerAlerts: "towerAlerts",
-    navLoopControl: "loopControl", navLoopTeams: "loopTeams", navTowerSettings: "towerSettings", navTowerActivity: "towerActivity", navTowerUsage: "towerUsage", navTowerInvite: "towerInvite"
+    navLoopControl: "loopControl", navLoopTeams: "loopTeams", navTowerSettings: "towerSettings", navTowerActivity: "towerActivity", navTowerUsage: "towerUsage", navTowerInvite: "towerInvite",
+    navTsOverview: "tsOverview", navTsInventory: "tsInventory", navTsCm3Analyst: "tsCm3Analyst", navTsCm3AnalystProducts: "tsCm3AnalystProducts", navTsPpmAnalystProducts: "tsPpmAnalystProducts", navTsPpmAnalystSingle: "tsPpmAnalystSingle", navTsProductsMatchesAnalyst: "tsProductsMatchesAnalyst", navTsMpMatches: "tsMpMatches", navTsMpNewMatches: "tsMpNewMatches", navTsPoorMatches: "tsPoorMatches", navTsMerchantPerformance: "tsMerchantPerformance"
   };
   // Forecast Model لسه ورا باسورد الـ Admin Panel — فهنا بنسيب العنصر الأصلي يتداس (الباقي بقى من غير باسورد)
   var VIA_CLICK = { navForecastModel: 1, navForecastModelMerchant: 1 };

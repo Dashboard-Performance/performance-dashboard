@@ -27,8 +27,15 @@ var VIEW_NAV = {
     allocationLocking: "navAllocationLocking", healthyUnlocking: "navHealthyUnlocking", skuLockReview: "navSkuLockReview", merchantLockReview: "navMerchantLockReview",
     mpMatches: "navMpMatches", mpNewMatches: "navMpNewMatches", mpDeclineWatch: "navMpDeclineWatch",
     incentiveMerchants: "navIncMerchants", segmentation: "navSegmentationPanel", sellthrough: "navSellthroughPanel",
-    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner"
+    weeklyInventory: "navWeeklyInventory", forecastModel: "navForecastModel", forecastModelMerchant: "navForecastModelMerchant", mlForecast: "navMlForecast", dohPlanner: "navDohPlanner",
+    tsOverview: "navTsOverview", tsInventory: "navTsInventory", tsCm3Analyst: "navTsCm3Analyst", tsCm3AnalystProducts: "navTsCm3AnalystProducts", tsPpmAnalystProducts: "navTsPpmAnalystProducts", tsPpmAnalystSingle: "navTsPpmAnalystSingle", tsProductsMatchesAnalyst: "navTsProductsMatchesAnalyst", tsMpMatches: "navTsMpMatches", tsMpNewMatches: "navTsMpNewMatches", tsPoorMatches: "navTsPoorMatches", tsMerchantPerformance: "navTsMerchantPerformance"
   };
+  // v1.18.0 — Telesales: a separate group with the same pages as the rest of the dashboard, showing ONLY merchant 1160154 (the Telesales
+  // merchant), from the match-level query (Main). Opening one of its pages turns the merchant scope on (the same scope a Merchant account
+  // gets, so every number is calculated exactly like the normal page); opening any other page turns it off. 1160154 stays in every other page.
+  var TS_MID = "1160154";
+  var TS_VIEWS = { tsOverview: "overview", tsInventory: "inventory", tsCm3Analyst: "cm3Analyst", tsCm3AnalystProducts: "cm3AnalystProducts", tsPpmAnalystProducts: "ppmAnalystProducts", tsPpmAnalystSingle: "ppmAnalystSingle", tsProductsMatchesAnalyst: "productsMatchesAnalyst", tsMpMatches: "mpMatches", tsMpNewMatches: "mpNewMatches", tsPoorMatches: "poorMatches", tsMerchantPerformance: "merchantPerformance" };
+  var tsOn = false;
   var ADMIN_PW_VIEWS = ["forecastModel", "forecastModelMerchant"]; // the only page still behind the Admin Panel password (Segmentation / Sellthrough / Inventory & Inbound moved to Merchants / Supply Chain, no password)
   var ADMIN_GROUP_IDS = ["navAdminToggle"]; // wrapper whose children are the Admin Panel tools
   var TARGET_TYPES = [
@@ -74,7 +81,7 @@ var VIEW_NAV = {
         "Country Manager": { views: "*", admin: true },
         "Account Manager": { views: base.concat(g("navAcmToggle"), g("navMerchantsToggle"), g("navIncentivesToggle")) },
         "Commercial": { views: base.concat(g("navCommercialToggle")) },
-        "Marketplace": { views: base.concat(g("navMarketplaceToggle")) },
+        "Marketplace": { views: base.concat(g("navMarketplaceToggle"), g("navTelesalesToggle")) },   // Telesales: Marketplace for now (owner adjusts in Users & Roles)
         "Supply Chain": { views: base.concat(g("navSupplyChainToggle")) },
         "Merchant": { views: base }
       },
@@ -147,7 +154,7 @@ var VIEW_NAV = {
   // Merchant scope: a Merchant only sees the numbers of the Merchant ID linked to their email (set in Users & Roles).
   // null = not a Merchant (no restriction). A Merchant without an ID sees nothing until an admin links one.
   function merchantScope() {
-    if (effRoleName() !== "Merchant") return null;
+    if (effRoleName() !== "Merchant") return tsOn ? { id: TS_MID, telesales: true } : null;
     var s = session(), id = "", previewing = false;
     try { previewing = !!sessionStorage.getItem(PREVIEW_SS) && isRealAdmin(); } catch (e) {}
     if (previewing) { try { id = sessionStorage.getItem(PREVIEW_MID) || ""; } catch (e) {} }
@@ -162,7 +169,7 @@ var VIEW_NAV = {
     if (sc && ov) {
       if (!note) { note = document.createElement("div"); note.id = "twScopeNote"; note.className = "tw-scopenote"; ov.insertBefore(note, ov.firstChild); }
       note.classList.toggle("warn", !sc.id);
-      note.textContent = sc.id ? "Showing the numbers of Merchant ID " + sc.id + " only." : "Your account is not linked to a Merchant ID yet. Ask an admin to add it, then your numbers will appear here.";
+      note.textContent = sc.telesales ? "Telesales — showing the numbers of Merchant ID " + sc.id + " only (from the match-level data)." : sc.id ? "Showing the numbers of Merchant ID " + sc.id + " only." : "Your account is not linked to a Merchant ID yet. Ask an admin to add it, then your numbers will appear here.";
     } else if (note) note.remove();
     if (sig !== lastScopeSig) { lastScopeSig = sig; if (typeof window.rescopeData === "function") window.rescopeData(); }
   }
@@ -479,6 +486,7 @@ var VIEW_NAV = {
     navSupplyChainToggle: '<path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
     navMarketplaceToggle: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
     navIncentivesToggle: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+    navTelesalesToggle: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
     navAdminToggle: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
     navTowerToggle: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
     navSyncStatus: '<path d="M3 12h4l2-6 4 12 2-6h6"/>'
@@ -1094,6 +1102,25 @@ var VIEW_NAV = {
       { nav: "navForecastModelMerchant", view: "forecastModelMerchant", label: "Forecast Model Merchant" },
       { nav: "navMlForecast", view: "mlForecast", label: "ML Forecast" }
     ] },
+    { toggle: "navTelesalesToggle", title: "Telesales", groups: [
+      { label: "Overview", tabs: [ { nav: "navTsOverview", view: "tsOverview", label: "Over View" } ] },
+      { label: "Inventory", tabs: [ { nav: "navTsInventory", view: "tsInventory", label: "Inventory" } ] },
+      { label: "CM3", tabs: [
+        { nav: "navTsCm3Analyst", view: "tsCm3Analyst", label: "CM3 Analyst" },
+        { nav: "navTsCm3AnalystProducts", view: "tsCm3AnalystProducts", label: "CM3 Analyst / Products" }
+      ] },
+      { label: "PPM", tabs: [
+        { nav: "navTsPpmAnalystProducts", view: "tsPpmAnalystProducts", label: "Analyst / Products" },
+        { nav: "navTsPpmAnalystSingle", view: "tsPpmAnalystSingle", label: "Analyst / Single" }
+      ] },
+      { label: "Matches", tabs: [
+        { nav: "navTsProductsMatchesAnalyst", view: "tsProductsMatchesAnalyst", label: "Matches / Single" },
+        { nav: "navTsMpMatches", view: "tsMpMatches", label: "Performance-Matches" },
+        { nav: "navTsMpNewMatches", view: "tsMpNewMatches", label: "New Matches" },
+        { nav: "navTsPoorMatches", view: "tsPoorMatches", label: "Poor Matches" }
+      ] },
+      { label: "Merchant", tabs: [ { nav: "navTsMerchantPerformance", view: "tsMerchantPerformance", label: "Merchant Performance" } ] }
+    ] },
     { toggle: "navIncentivesToggle", title: "Incentives Tracker", tabs: [
       { nav: "navIncMerchants", view: "incentiveMerchants", label: "Incentive Merchants" }
     ] },
@@ -1115,6 +1142,7 @@ var VIEW_NAV = {
   function hubOfView(v) { for (var i = 0; i < HUBS.length; i++) for (var j = 0; j < HUBS[i].tabs.length; j++) if (HUBS[i].tabs[j].view === v) return HUBS[i]; return null; }
   function hubTabs(h) { return h.tabs.filter(function (t) { return allowed(t.nav); }); }
   function setupHubs() {
+    Object.keys(TS_VIEWS).forEach(function (v) { var a = $(VIEW_NAV[v]); if (a && !a.dataset.ts) { a.dataset.ts = "1"; a.addEventListener("click", function () { window.switchView(v); }); } });
     HUBS.forEach(function (h) {
       var el = $(h.toggle); if (!el || el.dataset.twHub) return;
       el.dataset.twHub = "1"; el.classList.add("tw-hub");
@@ -1239,7 +1267,8 @@ var VIEW_NAV = {
     allocationLocking: "allocation-locking", healthyUnlocking: "unlocking-actions", skuLockReview: "sku-lock-review", merchantLockReview: "merchant-lock-review",
     mpMatches: "performance-matches", mpNewMatches: "new-matches", mpDeclineWatch: "decline-matches",
     incentiveMerchants: "incentive-merchants", segmentation: "segmentation-panel", sellthrough: "sellthrough-rate-panel",
-    weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh"
+    weeklyInventory: "inventory-inbound", forecastModel: "forecast-model", forecastModelMerchant: "forecast-model-merchant", dohPlanner: "planner-doh",
+    tsOverview: "telesales", tsInventory: "telesales-inventory", tsCm3Analyst: "telesales-cm3-analyst", tsCm3AnalystProducts: "telesales-cm3-analyst-products", tsPpmAnalystProducts: "telesales-analyst-products", tsPpmAnalystSingle: "telesales-analyst-single", tsProductsMatchesAnalyst: "telesales-matches-single", tsMpMatches: "telesales-performance-matches", tsMpNewMatches: "telesales-new-matches", tsPoorMatches: "telesales-poor-matches", tsMerchantPerformance: "telesales-merchant-performance"
   };
   function twFileOf(view) { return view === "overview" ? "index.html" : (VIEW_SLUG[view] || view.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()) + ".html"; }
   // Old file names (camelCase view name) keep working so saved links don't break; they open the same tab and the address bar switches to the new name.
@@ -1272,6 +1301,19 @@ var VIEW_NAV = {
     window.__twSwitch = function (name) {
       var res; renderTok++;
       if (name === "commercialDebundlized") name = "commercialPlan"; // old view name (saved links / state)
+      // Telesales pages: same page as the normal one, with merchant 1160154's numbers only
+      var tsBase = TS_VIEWS[name];
+      if (tsBase && VIEW_NAV[name] && !allowed(VIEW_NAV[name])) { name = "overview"; tsBase = null; }
+      if (tsBase) {
+        if (!tsOn) { tsOn = true; applyScope(); }
+        res = origSwitch(tsBase);
+        document.querySelectorAll(".sidebar-nav .nav-item.active, .sidebar-nav .nav-item-sub.active").forEach(function (el) { el.classList.remove("active"); });
+        var tsNav = $(VIEW_NAV[name]); if (tsNav) tsNav.classList.add("active");
+        updateHub(name);
+        var tsp = document.querySelector(".topbar-title p"); if (tsp) tsp.textContent = "Merchant ID " + TS_MID + " only · match-level data";
+        return res;
+      }
+      if (tsOn) { tsOn = false; applyScope(); }
       if (isOwnView(name)) { if (!(name === "towerInvite" ? canInvite() : (EXTRA_VIEWS[name] && EXTRA_VIEWS[name].open ? allowed(EXTRA_VIEWS[name].navId) : isEffAdmin()))) { res = origSwitch("overview"); updateHub("overview"); return res; } res = showOwnView(name); updateHub(name); return res; }
       var nid = VIEW_NAV[name];
       if (nid && !allowed(nid)) { name = "overview"; }
