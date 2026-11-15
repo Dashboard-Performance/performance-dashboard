@@ -164,3 +164,5 @@
 - **Apps Script:** `get_sales_plan_feedback` بيرجع كمان `history` (كل Feedbacks الشهر لكل ماتش، الأقدم الأول). الـ Worker بيضيف اللي لسه في الطابور على الـ history.
 - **Sales Plan - Feedback:** عمودين **Stock** و**DOH** بعد ACM (نفس Stock/DOH بتوع باقي الجداول)، وDaily Target عليه علامة Adjusted. بعد Save التارجت بيتغير في Sales Plan-ACM على طول.
 - محتاج: GitHub + `npx wrangler deploy` + **New version** للـ Apps Script.
+- **Inventory & Products Performance**: عمودين جداد — **Placed Today** قبل Placed YDay، و**Conf Today** قبل Conf YDay. Today = آخر يوم في داتا Main (نفس مرجع Yday: Yday هو اليوم اللي قبله)، ونفس أساس الحساب (Orders) بتاع Yday. (`js/app.js` + `index.html`، والصفحات اتعملت rebuild).
+- **Merchant Lock Review**: صفوف "Locked – no demand in period" كان عمود **ACM** فيها فاضي — بقى بيتجاب من بيانات التاجر (merchant info) زي باقي الصفوف، و"Unassigned" لو التاجر مالوش ACM (فلتر ACM بقى بيشوفها). (`js/lockreview.js`)

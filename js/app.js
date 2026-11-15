@@ -5278,7 +5278,7 @@ function prepareInventoryTableData(rows) {
     // شوية عن شيت الديبندلايز). عشان الـ DOH متطلعش أكبر من الـ Stock المعروض
     // فعليًا جمبه في نفس الصف، لما مفيش ديماند بنستخدم inv.stock نفسه كـ DOH.
     const invDoh = dohInfo.avg > 0 ? dohInfo.doh : Math.round(inv.stock || 0);
-    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: invDoh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
+    map.set(sku, { skuId: sku, skuName: inv.skuName, stock: inv.stock, doh: invDoh, category: inv.category, availability: inv.availability, isLocked: inv.isLocked, price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedToday: 0, confToday: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
   }
   rows.forEach(r => {
     const sku = r.sku; if (!sku) return;
@@ -5289,7 +5289,7 @@ function prepareInventoryTableData(rows) {
       // شيت الـ Inventory)، فلو مفيش ديماند الـ DOH لازم يبقى 0 برضه (مش
       // ستوك شيت الديبندلايز اللي ممكن يبقى رقم مختلف تمامًا).
       const rowDoh = dohInfo.avg > 0 ? dohInfo.doh : 0;
-      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: rowDoh, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
+      map.set(sku, { skuId: sku, skuName: "Unknown", stock: 0, doh: rowDoh, category: r.category, availability: "Unknown", isLocked: "No", price: prod.price, profit: prod.profit, placed: 0, confirmed: 0, delivered: 0, cm3: 0, deliveredGmv: 0, placedToday: 0, confToday: 0, placedYday: 0, confYday: 0, conf3d: 0, conf5d: 0, conf15d: 0, merchants5d: {}, totalActiveDays: new Set(), aspGmv: 0, aspPieces: 0 });
     }
     const entry = map.get(sku);
     entry.placed += r.placedOrders; entry.confirmed += r.confirmedOrders; entry.delivered += r.deliveredOrders;
@@ -5305,6 +5305,7 @@ function prepareInventoryTableData(rows) {
   recentWindowRows("", rows, d15Ms, todayMs + 86400000).forEach(r => {
     const entry = map.get(r.sku); if (!entry) return;
     const rDate = new Date(r.timestamp); rDate.setHours(0,0,0,0); const rTime = rDate.getTime();
+    if (rTime === todayMs) { entry.placedToday += r.placedOrders; entry.confToday += r.confirmedOrders; }
     if (rTime === ydayMs) { entry.placedYday += r.placedOrders; entry.confYday += r.confirmedOrders; }
     if (rTime >= d3Ms) entry.conf3d += r.confirmedOrders;
     if (rTime >= d15Ms) entry.conf15d += r.confirmedOrders;
@@ -5353,7 +5354,9 @@ function renderPaginatedInventoryTable() {
       <td class="num"><span class="badge-outline ${getNdrBadgeColor(m.ndr)}">${fmtPctCell(m.ndr)}</span></td>
       <td class="num text-light font-bold">${fmtMoneyExactCell(m.cm3)}</td>
       <td class="num text-dim">${m.avgPlacedDaily.toFixed(1)}</td>
+      <td class="num text-dim">${fmtIntCell(m.placedToday)}</td>
       <td class="num text-dim">${fmtIntCell(m.placedYday)}</td>
+      <td class="num text-blue font-bold">${fmtIntCell(m.confToday)}</td>
       <td class="num text-blue font-bold">${fmtIntCell(m.confYday)}</td>
       <td class="num text-orange font-bold">${m.avg3d.toFixed(1)}</td>
       <td class="num text-purple font-bold">${m.avg15d.toFixed(1)}</td>

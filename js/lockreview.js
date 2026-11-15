@@ -141,7 +141,7 @@
         var sep = k.indexOf("||"); if (k.slice(sep + 2) !== S.sku || !L.locked) return;
         var b = dem.get(k); if (b && b.placed > 0) return;
         var mid = k.slice(0, sep), mi = info.get(mid) || {};
-        S.merchants.push({ rank: null, mid: mid, merchant: L.name || mi.merchantName || mid, acm: "", status: "", placed: 0, share: 0, cum: null, confirmed: b ? b.confirmed : 0, delivered: b ? b.delivered : 0,
+        S.merchants.push({ rank: null, mid: mid, merchant: L.name || mi.merchantName || mid, acm: (b && b.acm) || mi.acmName || "Unassigned", status: "", placed: 0, share: 0, cum: null, confirmed: b ? b.confirmed : 0, delivered: b ? b.delivered : 0,
           cr: null, dr: null, lock: "Locked", alloc: L.alloc, used: L.used, rem: L.rem, check: CHECK.noDemand });
       });
       // summary (the sheet's SKU Summary)
