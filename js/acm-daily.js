@@ -26,24 +26,31 @@
     if ($("acmdStyle")) return;
     var s = document.createElement("style"); s.id = "acmdStyle";
     s.textContent =
-      ".acmd-wrap{overflow:auto;max-height:calc(100vh - 330px);min-height:240px;border-top:1px solid var(--line)}" +
-      ".acmd-table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}" +
-      ".acmd-table th,.acmd-table td{padding:9px 10px;font-size:12px;border-bottom:1px solid var(--line);border-right:1px solid rgba(127,127,127,.12);white-space:nowrap}" +
-      ".acmd-table thead th{position:sticky;top:0;z-index:3;background:var(--gl-card-strong,var(--panel));color:var(--text-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;user-select:none;text-align:right}" +
+      ".acmd-wrap{width:100%;border-top:1px solid var(--line)}" +
+      ".acmd-table{border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed}" +
+      ".acmd-table th,.acmd-table td{padding:8px 3px;font-size:12px;border-bottom:1px solid var(--line);border-right:1px solid rgba(127,127,127,.12);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+      ".acmd-table thead th{color:var(--text-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;user-select:none;text-align:right;background:rgba(127,127,127,.06)}" +
       ".acmd-table thead th:hover{color:var(--text)} .acmd-table thead th.sorted{color:var(--blue)}" +
-      ".acmd-table .l{text-align:left} .acmd-table .n{text-align:right;font-variant-numeric:tabular-nums}" +
-      ".acmd-table .s0,.acmd-table .s1,.acmd-table .s2,.acmd-table .s3,.acmd-table .s4{position:sticky;z-index:2;background:var(--gl-card-strong,var(--panel))}" +
-      ".acmd-table thead .s0,.acmd-table thead .s1,.acmd-table thead .s2,.acmd-table thead .s3,.acmd-table thead .s4{z-index:4}" +
-      ".acmd-table .s0{left:0;min-width:84px;max-width:84px}.acmd-table .s1{left:84px;min-width:170px;max-width:170px;overflow:hidden;text-overflow:ellipsis}" +
-      ".acmd-table .s2{left:254px;min-width:84px}.acmd-table .s3{left:338px;min-width:84px;border-right:2px solid var(--line-light)}" +
+      ".acmd-table .l{text-align:left;padding-left:10px} .acmd-table .n{text-align:right;font-variant-numeric:tabular-nums;padding-right:8px}" +
+      ".acmd-table .c-id{width:72px}.acmd-table .c-name{width:150px}.acmd-table .c-avg{width:74px}.acmd-table .c-goal{width:78px}.acmd-table .c-tot{width:84px}" +
+      ".acmd-table .sep{border-right:2px solid var(--line-light)}" +
       ".acmd-table .tot{font-weight:700;background:rgba(59,130,246,.10)}" +
-      ".acmd-table .d{min-width:62px;text-align:right;font-variant-numeric:tabular-nums;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35)}" +
+      ".acmd-table .d{text-align:right;padding-right:6px;font-variant-numeric:tabular-nums;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35)}" +
       ".acmd-table .d.e{background:rgba(0,0,0,.28);color:transparent;text-shadow:none}" +
       "html[data-theme=light] .acmd-table .d{color:#0b1220;text-shadow:none}" +
       ".acmd-table tbody tr:hover td:not(.d){background:rgba(59,130,246,.10)}" +
-      ".acmd-table tfoot td{position:sticky;bottom:0;z-index:2;background:var(--gl-card-strong,var(--panel));font-weight:800;border-top:2px solid var(--line-light)}" +
-      ".acmd-table tfoot td.s0,.acmd-table tfoot td.s1,.acmd-table tfoot td.s2,.acmd-table tfoot td.s3{z-index:5}" +
-      ".acmd-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim)} .acmd-legend i{display:inline-block;width:120px;height:8px;border-radius:99px;background:linear-gradient(90deg,rgba(239,68,68,.75),rgba(148,163,184,.55),rgba(16,185,129,.8))}";
+      ".acmd-table tfoot td{font-weight:800;border-top:2px solid var(--line-light);background:rgba(127,127,127,.06)}" +
+      /* the table is sized to fit the screen: fewer columns / smaller type / k-numbers as the width gets tighter */
+      ".acmd-tight .acmd-table th,.acmd-tight .acmd-table td{font-size:11px}.acmd-tight .acmd-table .d{padding-right:4px}" +
+      ".acmd-dense .acmd-table th,.acmd-dense .acmd-table td{font-size:10.5px}.acmd-dense .acmd-table .d{padding-right:3px}" +
+      ".acmd-dense .acmd-table .c-id,.acmd-dense .acmd-table .s0{display:none}.acmd-dense .acmd-table .c-name{width:118px}.acmd-dense .acmd-table .c-avg{width:66px}.acmd-dense .acmd-table .c-goal{width:48px}.acmd-dense .acmd-table .c-tot{width:66px}" +
+      ".acmd-micro .acmd-table th,.acmd-micro .acmd-table td{font-size:9.5px}.acmd-micro .acmd-table .d{padding:8px 2px}.acmd-micro .acmd-table .l{padding-left:6px}.acmd-micro .acmd-table .n{padding-right:4px}" +
+      ".acmd-micro .acmd-table .c-id,.acmd-micro .acmd-table .s0,.acmd-micro .acmd-table .c-goal,.acmd-micro .acmd-table .s3{display:none}.acmd-micro .acmd-table .c-name{width:96px}.acmd-micro .acmd-table .c-avg{width:58px}.acmd-micro .acmd-table .c-tot{width:58px}" +
+      ".acmd-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.acmd-scroll .acmd-table{table-layout:auto;width:max-content;min-width:100%}" +
+      ".acmd-scroll .acmd-table .c-id,.acmd-scroll .acmd-table .s0{display:none}.acmd-scroll .acmd-table th,.acmd-scroll .acmd-table td{font-size:10.5px}" +
+      ".acmd-scroll .acmd-table .d,.acmd-scroll .acmd-table .d-h{min-width:40px}.acmd-scroll .acmd-table .s1{position:sticky;left:0;z-index:2;min-width:118px;max-width:118px;background:var(--gl-card-strong,var(--panel))}" +
+      ".acmd-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim)} .acmd-legend i{display:inline-block;width:120px;height:8px;border-radius:99px;background:linear-gradient(90deg,rgba(239,68,68,.75),rgba(148,163,184,.55),rgba(16,185,129,.8))}" +
+      "@media (max-width:700px){.acmd-legend i{width:70px}}";
     document.head.appendChild(s);
   }
 
@@ -115,16 +122,19 @@
       ["Daily Goal", tot.goals ? int(tot.goal) : "—", tot.goals ? tot.goals + " merchants with a target" : "no targets loaded"]];
     var acmOpts = '<option value="">All ACMs</option>' + d.acms.map(function (n) { return '<option value="' + esc(n) + '"' + (AD.acm === n ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("");
     var arrow = function (k) { return AD.sort === k ? (AD.dir < 0 ? " ↓" : " ↑") : ""; };
-    var th = function (k, label, cls, title) { return '<th class="' + cls + (AD.sort === k ? " sorted" : "") + '" data-s="' + k + '"' + (title ? ' title="' + esc(title) + '"' : "") + '>' + label + arrow(k) + '</th>'; };
-    var head = '<tr>' + th("id", "Tager ID", "s0 l") + th("name", "Tager Name", "s1 l") + th("avg", "Avg Daily", "s2", "Row total ÷ the " + nd + " day columns.") +
-      th("goal", "Daily Goal", "s3", "Target Placed (Merchant Targets) ÷ " + d.dim + " days in the month. Blank = no target.") +
-      d.days.map(function (x, i) { return th("d:" + i, dlab(x.ts), "d-h", dfull(x.ts)); }).join("") + th("total", "Row Total", "") + '</tr>';
+    var th = function (k, label, cls, title, hd) { return '<th class="' + cls + (AD.sort === k ? " sorted" : "") + '" data-s="' + k + '"' + (title ? ' title="' + esc(title) + '"' : "") + '><span class="lb"' + (hd ? ' data-hf="' + esc(hd[0]) + '" data-hs="' + esc(hd[1]) + '" data-hd="' + esc(hd[2]) + '"' : "") + '>' + label + '</span>' + arrow(k) + '</th>'; };
+    var cols = '<colgroup><col class="c-id"><col class="c-name"><col class="c-avg"><col class="c-goal">' + d.days.map(function () { return "<col>"; }).join("") + '<col class="c-tot"></colgroup>';
+    var head = '<tr>' + th("id", "Tager ID", "s0 l") + th("name", "Tager Name", "s1 l") + th("avg", "Avg Daily", "s2", "Row total ÷ the " + nd + " day columns.", ["Avg Daily", "Avg Daily", "Avg"]) +
+      th("goal", "Daily Goal", "s3 sep", "Target Placed (Merchant Targets) ÷ " + d.dim + " days in the month. Blank = no target.", ["Daily Goal", "Daily Goal", "Goal"]) +
+      d.days.map(function (x, i) { var dt = new Date(x.ts), dd = String(dt.getDate()).padStart(2, "0"), first = i === 0 || dt.getDate() === 1; return th("d:" + i, dlab(x.ts), "d-h", dfull(x.ts), [dlab(x.ts), dt.getDate() + "/" + (dt.getMonth() + 1), first ? dt.getDate() + "/" + (dt.getMonth() + 1) : dd]); }).join("") + th("total", "Row Total", "", "Sum of the day columns.", ["Row Total", "Row Total", "Total"]) + '</tr>';
+    var kfmt = function (v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(Math.round(v)); };
+    var dcell = function (v, extra, style) { return '<td class="d' + (extra || "") + '"' + (style ? ' style="' + style + '"' : "") + ' data-f="' + int(v) + '" data-c="' + kfmt(v) + '" title="' + int(v) + '">' + int(v) + '</td>'; };
     var body = page.map(function (m) {
-      return '<tr><td class="s0 l font-mono text-dim">' + esc(m.id) + '</td><td class="s1 l font-bold" title="' + esc(m.name + " · " + m.acm) + '">' + esc(m.name) + '</td><td class="s2 n">' + dec(m.avg) + '</td><td class="s3 n">' + (m.goal != null ? int(m.goal) : "") + '</td>' +
-        m.cells.map(function (v) { return v == null ? '<td class="d e">·</td>' : '<td class="d" style="background:' + heat(v, lo, hi) + '">' + int(v) + '</td>'; }).join("") + '<td class="n tot">' + int(m.total) + '</td></tr>';
+      return '<tr><td class="s0 l font-mono text-dim">' + esc(m.id) + '</td><td class="s1 l font-bold" title="' + esc(m.name + " · " + m.acm + " · " + m.id) + '">' + esc(m.name) + '</td><td class="s2 n">' + dec(m.avg) + '</td><td class="s3 n sep">' + (m.goal != null ? int(m.goal) : "") + '</td>' +
+        m.cells.map(function (v) { return v == null ? '<td class="d e">·</td>' : dcell(v, "", "background:" + heat(v, lo, hi)); }).join("") + '<td class="n tot">' + int(m.total) + '</td></tr>';
     }).join("") || '<tr><td class="l text-dim" colspan="' + (nd + 5) + '" style="text-align:center;padding:22px">No merchants for this selection.</td></tr>';
-    var foot = '<tr><td class="s0 l" colspan="2">Grand totals' + (L.length > page.length ? ' <span class="text-dim" style="font-weight:500">(all ' + L.length.toLocaleString("en-US") + ')</span>' : "") + '</td><td class="s2 n">' + dec(nd ? tot.total / nd : null) + '</td><td class="s3 n">' + (tot.goals ? int(tot.goal) : "") + '</td>' +
-      tot.cells.map(function (v) { return '<td class="n">' + int(v) + '</td>'; }).join("") + '<td class="n tot">' + int(tot.total) + '</td></tr>';
+    var foot = '<tr><td class="s0"></td><td class="s1 l">Grand totals' + (L.length > page.length ? ' <span class="text-dim" style="font-weight:500">(' + L.length.toLocaleString("en-US") + ')</span>' : "") + '</td><td class="s2 n">' + dec(nd ? tot.total / nd : null) + '</td><td class="s3 n sep">' + (tot.goals ? int(tot.goal) : "") + '</td>' +
+      tot.cells.map(function (v) { return dcell(v, " n", "color:inherit;text-shadow:none"); }).join("") + '<td class="n tot">' + int(tot.total) + '</td></tr>';
     host.innerHTML = '<div class="panel table-panel hover-glow">' +
       '<div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Daily Orders — Merchants</h2><p>Placed Orders per merchant per day · ' + esc(dlab(d.days[0].ts)) + ' – ' + esc(dlab(d.days[nd - 1].ts)) + ' · Merchant Only query · the latest day can still be incomplete</p></div>' +
       '<div class="table-controls" style="gap:8px;flex-wrap:wrap"><label class="text-dim" style="font-size:12px">From <input id="acmdFrom" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.from) + '"></label>' +
@@ -134,7 +144,7 @@
       '<button class="btn btn-outline small" id="acmdCsv">Export CSV</button></div></div>' +
       '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
       '<div style="display:flex;justify-content:flex-end;padding:0 18px 8px"><div class="acmd-legend"><span>' + int(lo === Infinity ? 0 : lo) + '</span><i></i><span>' + int(hi === -Infinity ? 0 : hi) + '</span></div></div>' +
-      '<div class="acmd-wrap"><table class="acmd-table" id="acmdTable"><thead>' + head + '</thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
+      '<div class="acmd-wrap"><table class="acmd-table" id="acmdTable" data-nd="' + nd + '">' + cols + '<thead>' + head + '</thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
       '<div class="table-footer"><span>' + L.length.toLocaleString("en-US") + ' merchants</span><div class="pager"><button id="acmdPrev" class="btn btn-outline small"' + (AD.page === 0 ? " disabled" : "") + '>Prev</button><span>Page ' + (AD.page + 1) + ' of ' + pages + '</span><button id="acmdNext" class="btn btn-outline small"' + (AD.page >= pages - 1 ? " disabled" : "") + '>Next</button></div></div></div>';
     var on = function (id, ev, fn) { var el = host.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
     on("acmdFrom", "change", function (e) { AD.from = e.target.value; AD.page = 0; render(host); }); on("acmdTo", "change", function (e) { AD.to = e.target.value; AD.page = 0; render(host); });
@@ -150,8 +160,32 @@
       var csv = "﻿" + lines.map(function (l) { return l.map(function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(","); }).join("\n");
       var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = "daily-orders-merchants.csv"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     });
-    watch(host);
+    fit(host); observe(host); watch(host);
   }
+
+  // Fit the table to the screen: no inner scrolling. As the width gets tighter: full -> tight (smaller type, d/m headers, k-numbers) -> dense (no Tager ID) -> scroll (phones only).
+  function fit(host) {
+    var wrap = host.querySelector(".acmd-wrap"), t = host.querySelector("#acmdTable"); if (!wrap || !t) return;
+    var MODES = ["full", "tight", "dense", "micro", "scroll"], mode = "scroll", i;
+    var apply = function (m) {
+      wrap.className = "acmd-wrap acmd-" + m; t.dataset.mode = m;
+      t.querySelectorAll("td[data-f]").forEach(function (c) { c.textContent = (m === "full" || m === "scroll") ? c.dataset.f : c.dataset.c; });
+      t.querySelectorAll(".lb[data-hf]").forEach(function (l) { l.textContent = m === "full" || m === "scroll" ? l.dataset.hf : m === "tight" ? l.dataset.hs : l.dataset.hd; });
+    };
+    // the first mode where nothing is cut off wins (measured, not guessed); phones fall through to a horizontal scroll
+    var clipped = function () {
+      var bad = false; t.querySelectorAll("td.d:not(.e), thead th:not(.s1), tfoot td:not(.s1)").forEach(function (c) { if (c.scrollWidth > c.clientWidth + 1) bad = true; });
+      return bad || wrap.scrollWidth > wrap.clientWidth + 1;
+    };
+    for (i = 0; i < MODES.length - 1; i++) { apply(MODES[i]); if (!clipped()) { mode = MODES[i]; break; } }
+    apply(mode); lastW = wrap.clientWidth;
+  }
+  var lastW = 0, ro = null, hostRef = null;
+  function observe(host) {
+    hostRef = host; if (ro || typeof ResizeObserver === "undefined") return;
+    ro = new ResizeObserver(function () { var w = hostRef && hostRef.querySelector(".acmd-wrap"); if (w && Math.abs(w.clientWidth - lastW) > 1) fit(hostRef); }); ro.observe(host);
+  }
+  window.addEventListener("resize", function () { if (hostRef) fit(hostRef); });
 
   var watchT = 0, lastSig = "";
   function watch(host) {
