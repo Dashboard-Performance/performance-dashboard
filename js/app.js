@@ -75,8 +75,10 @@ const MERCHANT_SEGMENTATION_GID = "620123165";
 const MERCHANT_ONLY_GID = "7100000001";
 // ACM pages (ACM Performance / Target ACM) read their orders + Delivered GMV from Merchant Segmentation (decided by the owner:
 // Segmentation is the GMV definition to use). Set to true to read them from Merchant Only instead (daily, = Main's Delivered GMV).
-// While false, Merchant Only is not requested at all.
+// (Merchant Only is requested either way — see LOAD_MERCHANT_ONLY below.)
 const ACM_USES_MERCHANT_ONLY = false;
+// Merchant Only is always requested: Account Manager → Daily Orders reads it (daily x merchant x ACM). ACM_USES_MERCHANT_ONLY above only decides whether the ACM pages use it as their source.
+const LOAD_MERCHANT_ONLY = true;
 // v1.18.0 — Product Only (Metabase public question): one row per (DATE_GROUP x PRODUCT_ID x IS_PRIMARY), Egypt, no merchant dimension.
 const PRODUCT_ONLY_GID = "7100000002";
 
@@ -323,7 +325,7 @@ const METABASE_SOURCES = {
   [AVAILABILITY_LOCKING_GID]: { label: "Availability Locking",     format: "json" },
   [MERCHANT_SKU_DAILY_GID]:   { label: "Merchant SKU Daily",       format: "json" },
   [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json" },
-  ...(ACM_USES_MERCHANT_ONLY ? { [MERCHANT_ONLY_GID]: { label: "Merchant Only", format: "csv" } } : {}),
+  ...(LOAD_MERCHANT_ONLY ? { [MERCHANT_ONLY_GID]: { label: "Merchant Only", format: "csv" } } : {}),
   [PRODUCT_ONLY_GID]:         { label: "Product Only",             format: "csv" },
   [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json" }
 };
@@ -17663,7 +17665,7 @@ async function fetchAllSheetsSnapshot() {
   })();
   // v1.18.0 — Merchant Only (ACM pages). If it fails to load / parse, the previous rows stay and the ACM pages fall back to the old source.
   let merchantOnlyRowsNow = state.merchantOnlyRows || [];
-  if (ACM_USES_MERCHANT_ONLY) try { const moPayload = sheets[MERCHANT_ONLY_GID]; if (moPayload) merchantOnlyRowsNow = parseMerchantOnlySheet(moPayload); else if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
+  if (LOAD_MERCHANT_ONLY) try { const moPayload = sheets[MERCHANT_ONLY_GID]; if (moPayload) merchantOnlyRowsNow = parseMerchantOnlySheet(moPayload); else if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
   catch (e) { console.warn("[Merchant Only]", e && e.message || e); if (staleGids.indexOf(MERCHANT_ONLY_GID) < 0) staleGids.push(MERCHANT_ONLY_GID); }
   applyMerchantAcmToMainRows(allParsedRows, buildMerchantAcmMap(merchantSegRowsNow.concat(merchantSegHistoryNow), merchantSkuDailyRowsNow));   // the newest month wins per merchant; closed-month tabs add the merchants that have not sold yet this month
 
