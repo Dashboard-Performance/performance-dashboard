@@ -38,7 +38,7 @@
       ".acmd-table .d{text-align:right;padding-right:6px;font-variant-numeric:tabular-nums;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35)}" +
       ".acmd-table .d.e{background:rgba(0,0,0,.28);color:transparent;text-shadow:none}" +
       "html[data-theme=light] .acmd-table .d{color:#0b1220;text-shadow:none}" +
-      ".acmd-table tbody tr:hover td:not(.d){background:rgba(59,130,246,.10)}" +
+      ".acmd-table tbody tr:hover td:not(.d){background-image:linear-gradient(rgba(59,130,246,.12),rgba(59,130,246,.12))}" +
       ".acmd-table tfoot td{font-weight:800;border-top:2px solid var(--line-light);background:rgba(127,127,127,.06)}" +
       /* the table is sized to fit the screen: fewer columns / smaller type / k-numbers as the width gets tighter */
       ".acmd-tight .acmd-table th,.acmd-tight .acmd-table td{font-size:11px}.acmd-tight .acmd-table .d{padding-right:4px}" +
@@ -48,8 +48,12 @@
       ".acmd-micro .acmd-table .c-id,.acmd-micro .acmd-table .s0,.acmd-micro .acmd-table .c-goal,.acmd-micro .acmd-table .s3{display:none}.acmd-micro .acmd-table .c-name{width:96px}.acmd-micro .acmd-table .c-avg{width:58px}.acmd-micro .acmd-table .c-tot{width:58px}" +
       ".acmd-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.acmd-scroll .acmd-table{table-layout:auto;width:max-content;min-width:100%}" +
       ".acmd-scroll .acmd-table .c-id,.acmd-scroll .acmd-table .s0{display:none}.acmd-scroll .acmd-table th,.acmd-scroll .acmd-table td{font-size:10.5px}" +
-      ".acmd-scroll .acmd-table .d,.acmd-scroll .acmd-table .d-h{min-width:40px}.acmd-scroll .acmd-table .s1{position:sticky;left:0;z-index:2;min-width:118px;max-width:118px;background:var(--gl-card-strong,var(--panel))}" +
+      ".acmd-scroll .acmd-table .d,.acmd-scroll .acmd-table .d-h{min-width:40px}.acmd-scroll .acmd-table .s1{position:sticky;left:0;z-index:2;min-width:118px;max-width:118px;background-color:#101826;box-shadow:6px 0 8px -6px rgba(0,0,0,.55)}" +
+      "html[data-theme=light] .acmd-scroll .acmd-table .s1{background-color:#eef2f8;box-shadow:6px 0 8px -6px rgba(30,50,90,.35)}" +
+      ".acmd-scroll .acmd-table thead .s1{z-index:3}" +
       ".acmd-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim)} .acmd-legend i{display:inline-block;width:120px;height:8px;border-radius:99px;background:linear-gradient(90deg,rgba(239,68,68,.75),rgba(148,163,184,.55),rgba(16,185,129,.8))}" +
+      ".acmd-head{flex-wrap:wrap;gap:10px}.panel-head-modern .table-controls.acmd-ctl{flex-wrap:wrap !important;flex:0 1 auto;max-width:100%;row-gap:8px}" +
+      "@media (max-width:1200px){.acmd-head{flex-direction:column;align-items:stretch}.acmd-ctl{justify-content:flex-start}}" +
       "@media (max-width:700px){.acmd-legend i{width:70px}}";
     document.head.appendChild(s);
   }
@@ -136,8 +140,8 @@
     var foot = '<tr><td class="s0"></td><td class="s1 l">Grand totals' + (L.length > page.length ? ' <span class="text-dim" style="font-weight:500">(' + L.length.toLocaleString("en-US") + ')</span>' : "") + '</td><td class="s2 n">' + dec(nd ? tot.total / nd : null) + '</td><td class="s3 n sep">' + (tot.goals ? int(tot.goal) : "") + '</td>' +
       tot.cells.map(function (v) { return dcell(v, " n", "color:inherit;text-shadow:none"); }).join("") + '<td class="n tot">' + int(tot.total) + '</td></tr>';
     host.innerHTML = '<div class="panel table-panel hover-glow">' +
-      '<div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Daily Orders — Merchants</h2><p>Placed Orders per merchant per day · ' + esc(dlab(d.days[0].ts)) + ' – ' + esc(dlab(d.days[nd - 1].ts)) + ' · Merchant Only query · the latest day can still be incomplete</p></div>' +
-      '<div class="table-controls" style="gap:8px;flex-wrap:wrap"><label class="text-dim" style="font-size:12px">From <input id="acmdFrom" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.from) + '"></label>' +
+      '<div class="panel-head-modern acmd-head"><div class="panel-title-wrapper border-blue"><h2>Daily Orders — Merchants</h2><p>Placed Orders per merchant per day · ' + esc(dlab(d.days[0].ts)) + ' – ' + esc(dlab(d.days[nd - 1].ts)) + ' · Merchant Only query · the latest day can still be incomplete</p></div>' +
+      '<div class="table-controls acmd-ctl" style="gap:8px;flex-wrap:wrap"><label class="text-dim" style="font-size:12px">From <input id="acmdFrom" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.from) + '"></label>' +
       '<label class="text-dim" style="font-size:12px">To <input id="acmdTo" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.to) + '"></label>' +
       '<select id="acmdAcm" class="date-filter-input" title="Account Manager">' + acmOpts + '</select>' +
       '<input id="acmdQ" type="search" class="date-filter-input" style="min-width:190px" placeholder="Tager ID or name" value="' + esc(AD.q) + '" autocomplete="off">' +
