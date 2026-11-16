@@ -20,7 +20,15 @@
   function parseYmd(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
   function st() { try { return state; } catch (e) { return {}; } }
   function rowsNow() { return st().merchantOnlyRows || []; }
-  function sig() { var a = rowsNow(), t = st().merchantTargets || {}; return a.length + ":" + (a[0] && a[0].ts) + ":" + (a[a.length - 1] && a[a.length - 1].ts) + ":" + Object.keys(t).length; }
+  // v1.18.1 - the signature includes the Placed Orders total, so a new order redraws the page even when the number of rows did not change
+  function sig() { var a = rowsNow(), t = st().merchantTargets || {}, s = 0; for (var i = 0; i < a.length; i++) s += a[i].placedOrders || 0; return a.length + ":" + (a[0] && a[0].ts) + ":" + (a[a.length - 1] && a[a.length - 1].ts) + ":" + s + ":" + Object.keys(t).length; }
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function asOfText() {
+    var L = st().merchantOnlyLiveAt; if (!L) return "checking…";
+    var d = new Date(L.at), t = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+    if (L.source === "cache") return "⚠ Metabase did not answer — showing the last saved copy (checked " + t + ")";
+    return "Live · checked " + t + " · refreshes every minute";
+  }
 
   function css() {
     if ($("acmdStyle")) return;
@@ -140,7 +148,7 @@
     var foot = '<tr><td class="s0"></td><td class="s1 l">Grand totals' + (L.length > page.length ? ' <span class="text-dim" style="font-weight:500">(' + L.length.toLocaleString("en-US") + ')</span>' : "") + '</td><td class="s2 n">' + dec(nd ? tot.total / nd : null) + '</td><td class="s3 n sep">' + (tot.goals ? int(tot.goal) : "") + '</td>' +
       tot.cells.map(function (v) { return dcell(v, " n", "color:inherit;text-shadow:none"); }).join("") + '<td class="n tot">' + int(tot.total) + '</td></tr>';
     host.innerHTML = '<div class="panel table-panel hover-glow">' +
-      '<div class="panel-head-modern acmd-head"><div class="panel-title-wrapper border-blue"><h2>Daily Orders — Merchants</h2><p>Placed Orders per merchant per day · ' + esc(dlab(d.days[0].ts)) + ' – ' + esc(dlab(d.days[nd - 1].ts)) + ' · Merchant Only query · the latest day can still be incomplete</p></div>' +
+      '<div class="panel-head-modern acmd-head"><div class="panel-title-wrapper border-blue"><h2>Daily Orders — Merchants</h2><p>Placed Orders per merchant per day · ' + esc(dlab(d.days[0].ts)) + ' – ' + esc(dlab(d.days[nd - 1].ts)) + ' · Merchant Only query · the latest day can still be incomplete · <span id="acmdAsOf">' + esc(asOfText()) + '</span></p></div>' +
       '<div class="table-controls acmd-ctl" style="gap:8px;flex-wrap:wrap"><label class="text-dim" style="font-size:12px">From <input id="acmdFrom" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.from) + '"></label>' +
       '<label class="text-dim" style="font-size:12px">To <input id="acmdTo" type="date" class="date-filter-input" min="' + ymd(d.min) + '" max="' + ymd(d.max) + '" value="' + ymd(d.to) + '"></label>' +
       '<select id="acmdAcm" class="date-filter-input" title="Account Manager">' + acmOpts + '</select>' +
@@ -191,8 +199,21 @@
   }
   window.addEventListener("resize", function () { if (hostRef) fit(hostRef); });
 
+  // v1.18.1 - while this page is open it re-reads Merchant Only by itself every minute (Worker serves a copy at most 60 s old), independent of the dashboard's full sync
+  var liveT = 0;
+  function liveTick() {
+    var sec = $("viewAcmDailyOrders"); if (!sec || sec.classList.contains("hidden")) { clearInterval(liveT); liveT = 0; return; }
+    if (document.hidden || typeof window.refreshMerchantOnlyLive !== "function") return;
+    window.refreshMerchantOnlyLive().then(function () { var el = $("acmdAsOf"); if (el) el.textContent = asOfText(); }).catch(function (e) { var el = $("acmdAsOf"); if (el) el.textContent = "could not refresh (" + String((e && e.message) || "error").slice(0, 60) + ") - showing the last numbers"; });
+  }
+  function startLive() {
+    var L = st().merchantOnlyLiveAt;
+    if (!liveT) liveT = setInterval(liveTick, 60000);
+    if (!L || Date.now() - L.at > 30000) liveTick();
+  }
   var watchT = 0, lastSig = "";
   function watch(host) {
+    startLive();
     clearInterval(watchT); lastSig = sig();
     watchT = setInterval(function () {
       var sec = $("viewAcmDailyOrders"); if (!sec || sec.classList.contains("hidden")) { clearInterval(watchT); return; }

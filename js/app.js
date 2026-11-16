@@ -456,7 +456,7 @@ async function loadMetabaseSheetOnce(gid) {
   // dashboard origin -> every Metabase read goes through the Worker proxy (allow-listed on the worker side).
   if (!SYNC_CDN_URL) throw new Error("Worker URL (SYNC_CDN_URL) is not configured — cannot reach Metabase.");
   const text = await metabaseFetchText(
-    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + (metabaseForceLive ? "&live=1" : ""), gid); // v1.16.0: the link itself lives on the Worker
+    SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(gid) + (metabaseForceLive ? "&live=1" : (gid === MERCHANT_ONLY_GID ? "&maxage=60" : "")), gid); // v1.16.0: the link itself lives on the Worker; v1.18.1: Merchant Only is never older than ~1 min
   if (src.format === "csv") return metabaseCsvToGviz(text, gid);
   let parsed;
   try { parsed = JSON.parse(text); }
@@ -466,7 +466,8 @@ async function loadMetabaseSheetOnce(gid) {
 
 function loadMetabaseSheet(gid) {
   const cached = metabaseMemCache.get(gid);
-  if (cached && (Date.now() - cached.at) < METABASE_CACHE_TTL_MS) return Promise.resolve(cached.payload);
+  // v1.18.1 - the Refresh button (metabaseForceLive) never takes the 60-second in-browser copy: it asks the Worker live, every time.
+  if (!metabaseForceLive && cached && (Date.now() - cached.at) < METABASE_CACHE_TTL_MS) return Promise.resolve(cached.payload);
   if (metabaseInFlight.has(gid)) return metabaseInFlight.get(gid);
   const p = loadMetabaseSheetOnce(gid).then((payload) => {
     metabaseMemCache.set(gid, { at: Date.now(), payload });
@@ -475,6 +476,26 @@ function loadMetabaseSheet(gid) {
   metabaseInFlight.set(gid, p);
   return p;
 }
+
+// v1.18.1 - Daily Orders keeps itself live: it re-reads Merchant Only on its own (not the whole dashboard sync).
+// maxage=60 -> the Worker serves its saved copy only while it is younger than 60 s, otherwise it asks Metabase right then
+// (so any number of viewers = one Metabase run a minute). Returns { at, source, cachedAt } or null when nothing usable came back.
+let merchantOnlyLiveBusy = null;
+function refreshMerchantOnlyLive() {
+  if (merchantOnlyLiveBusy) return merchantOnlyLiveBusy;
+  merchantOnlyLiveBusy = (async () => {
+    if (!LOAD_MERCHANT_ONLY || !SYNC_CDN_URL) return null;
+    const text = await metabaseFetchText(SYNC_CDN_URL + "?action=metabase&gid=" + encodeURIComponent(MERCHANT_ONLY_GID) + "&maxage=60", MERCHANT_ONLY_GID);
+    const rows = parseMerchantOnlySheet(metabaseCsvToGviz(text, MERCHANT_ONLY_GID));
+    if (!rows.length) return null;
+    state.merchantOnlyRows = rows;
+    const served = metabaseServedFrom.get(MERCHANT_ONLY_GID) || {};
+    state.merchantOnlyLiveAt = { at: Date.now(), source: served.source || "", cachedAt: served.cachedAt || null };
+    return state.merchantOnlyLiveAt;
+  })().finally(() => { merchantOnlyLiveBusy = null; });
+  return merchantOnlyLiveBusy;
+}
+if (typeof window !== "undefined") window.refreshMerchantOnlyLive = refreshMerchantOnlyLive;
 
 // Loads every Metabase source into `sheets` (mutates it). Failures never throw here:
 // a failed source keeps whatever `sheets` already had (nothing, normally) and is
@@ -4389,6 +4410,9 @@ function merchantOnlySelectedRows() {
   const rows = m ? all.filter(r => r.monthYear === m) : all;
   return rows.length ? rows : null;
 }
+// v1.18.1 - does the Merchant Segmentation query hold this month? It only holds the CURRENT month, so the month before it (e.g. October while it is November) is not in it:
+// ACM / Merchant pages used to show 0 for every actual there. For such a month they now read the Main query (rows passed in) instead of Segmentation.
+function segHasMonth(m) { return !m || merchantSegRowsAll().some(r => r.monthYear === m); }
 // ACM -> { placed, confirmed, delivered, deliveredGmv } for the selected month. Blank / "Unassigned" ACM rows are left out,
 // the same way the ACM table has always ignored unassigned merchants.
 function merchantOnlyByAcm() {
@@ -5406,7 +5430,7 @@ function prepareAcmTableData(rows) {
   // v1.15.38: أرقام الأوردرات (Placed/Confirmed/Delivered/Delivered GMV) بتتقرا من كويري Merchant Segmentation
   // (Metabase) مجمّعة بالـ ACM — بدل الشيت الرئيسي (Main). CM3 و PPM لسه من Main (مش في الكويري).
   // لو الكويري فاضية بنفضل على Main.
-  if (!__histAcm && (moAcm || merchantSegRowsAll().length)) {
+  if (!__histAcm && (moAcm || merchantSegRowsAll().length) && (moAcm || segHasMonth(__selMonthAcm))) {   // v1.18.1: a month Segmentation does not hold keeps the Main numbers computed above
     const segByAcm = moAcm || new Map();
     if (!moAcm) (state.merchantTableData || []).forEach(mm => {
       const nm = mm.acm; if (!nm || nm === "Unassigned") return;
@@ -5745,7 +5769,21 @@ function prepareMerchantTableData(rows) {
   // قائمة التجار نفسها + Placed/Confirmed/Delivered (orders و pieces) +
   // Delivered GMV + Segmentation columns — كل ده من شيت الـ Segmentation
   // الجديد (MERCHANT_SEGMENTATION_GID، gid=620123165) دلوقتي.
-  const segAggMap = buildMerchantAggFromSegmentation(selectedMonthStr);
+  let segAggMap = buildMerchantAggFromSegmentation(selectedMonthStr);
+  // v1.18.1 - a month the Segmentation query does not hold (the month before the current one): merchants + their orders / Delivered GMV come from the Main rows of that month.
+  if (selectedMonthStr && !segHasMonth(selectedMonthStr)) {
+    segAggMap = new Map();
+    rows.forEach(r => {
+      if (!r.merchantId || r.merchantId === "Unassigned") return;
+      let e = segAggMap.get(r.merchantId);
+      if (!e) { e = { id: r.merchantId, name: r.merchantName, acm: r.acmName || "Unassigned", country: "", placed: 0, confirmed: 0, delivered: 0, placedPieces: 0, confirmedPieces: 0, deliveredPieces: 0, deliveredGmv: 0, _latestMonthTs: -Infinity,
+        segmentation: "", newSegmentation: "", nextMonthSegment: "", prevMonthSegment: "", firstTimeMvm: "", firstTimeHvm: "", firstMonth: "" }; segAggMap.set(r.merchantId, e); }
+      e.placed += r.placedOrders || 0; e.confirmed += r.confirmedOrders || 0; e.delivered += r.deliveredOrders || 0;
+      e.placedPieces += r.placedPieces || 0; e.confirmedPieces += r.confirmedPieces || 0; e.deliveredPieces += r.deliveredPieces || 0;
+      e.deliveredGmv += r.deliveredGmv || 0;
+      if (r.acmName && r.acmName !== "Unassigned") e.acm = r.acmName; if (r.merchantName) e.name = r.merchantName;
+    });
+  }
 
   // أي تاجر عنده Target متحدد (شيت Targets، TARGETS_GID) لازم يفضل ظاهر في
   // "Overall Merchant Performance" و"Overall Targets Attainment" حتى لو
