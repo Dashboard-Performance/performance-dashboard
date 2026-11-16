@@ -170,3 +170,9 @@
   - `js/app.js`: كويري Merchant Only بقت بتتطلب دايمًا (`LOAD_MERCHANT_ONLY = true`)؛ `ACM_USES_MERCHANT_ONLY` لسه false، يعني صفحات ACM لسه بتقرأ من Merchant Segmentation زي ما قررت.
   - الـ Worker فيه Merchant Only فعلاً (`7100000001`) — مفيش تعديل مطلوب لو الـ Worker المنشور آخر نسخة.
   - **Role access**: التاب ده مش بيتضاف أوتوماتيك لأي Role محفوظ — ادّيه من Users & Roles ("Daily Orders") للي عايزه يشوفه.
+- **Over View → Orders per Hour — Today vs Yesterday** (بانل جديد فوق Pipeline Velocity: `js/ov-hourly.js`): Placed Orders تراكمي بالساعة، النهارده (أخضر) قصاد امبارح (أزرق فاتح)، overall من غير أي فلتر (لا ACM ولا Telesales). كروت: Today so far · Yesterday same hour · Difference + % · Yesterday total.
+  - **الـ Worker لازم يتعمله `npx wrangler deploy`** (`cloudflare-worker/worker.js`): الـ cron بيشتغل كل دقيقة أصلاً، وفي أول 10 دقايق من كل ساعة بتوقيت القاهرة بياخد **نقطة واحدة** من قراءة **live** لـ Merchant Only (مش من النسخة المحفوظة) = Placed Orders لآخر يوم في الداتا لحد اللحظة دي (مصر فقط + التاجر `1160154`). لو Metabase ما ردّش في الدقايق دي بيحاول تاني لحد :09، ولو فشل الساعة تفضل فاضية (مفيش تقدير).
+  - الداتا بتتخزن في KV (`hourly:snap:<date>`) 40 يوم؛ الـ endpoint: `?action=hourlyOrders` (محمي بنفس staff-session بتاع باقي الأكشنز). تعطيل: environment variable `HOURLY_ORDERS=off`.
+  - **مفيش رجوع للماضي**: الكويري مفيهاش ساعات، فالنقاط بتبدأ من أول ساعة بعد الـ deploy، وخط امبارح بيظهر بعد ما يعدي يوم من النقاط. كارت Yesterday total بيقرا رقم Merchant Only لليوم ده فبيظهر من أول يوم.
+  - البانل مخفي عن Merchant role. تاب Over View بالفعل متاح بحسب الـ Roles، مفيش صلاحية جديدة.
+  - اختبار: `cloudflare-worker/test/hourly.mjs` (15) + Playwright على داتا تجريبية فقط.

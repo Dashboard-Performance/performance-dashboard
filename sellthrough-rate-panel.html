@@ -189,6 +189,8 @@
               <div class="ov-tile" style="--kpi:var(--green)"><span class="ov-lbl">Delivered GMV</span><b class="ov-val text-green" id="deliveredGmvVal">EGP 0</b><div class="ov-sub" id="deliveredGmvRunRate">Run Rate: —</div><div class="ov-spark" id="ovSparkGmv"></div></div>
             </div>
           </section>
+          <!-- v1.18.0 — Orders per Hour: today vs yesterday, built from hourly points of Merchant Only (js/ov-hourly.js) -->
+          <div class="panel chart-panel hover-glow" id="ovHourlyHost" style="margin-bottom:16px"></div>
           <div class="ov-row">
             <div class="panel chart-panel hover-glow">
               <div class="panel-head-modern">
@@ -3319,6 +3321,7 @@
   <script src="js/telesales.js"></script>
   <script src="js/telesales-agents.js"></script>
   <script src="js/acm-daily.js"></script>
+  <script src="js/ov-hourly.js"></script>
   <script src="js/glass.js"></script>
 </body>
 </html>
