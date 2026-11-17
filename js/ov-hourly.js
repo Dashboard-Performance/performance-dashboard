@@ -38,10 +38,13 @@
       if (s.dataDay && s.placed != null && isFinite(s.placed)) vals[s.dataDay] = +s.placed;
       var ds = Object.keys(vals).sort(), any = false;
       ds.forEach(function (d) {
-        var x = Math.round((utcDay(s.cairoDate) - utcDay(d)) / 3600000) + s.hour;
+        var x = Math.round((utcDay(s.cairoDate) - utcDay(d)) / 3600000) + s.hour + Math.round(+s.minute || 0) / 60;   // v1.18.3: the minute it was read
         if (!isFinite(x) || x < 0) return;
         if (prev[d] == null || vals[d] !== prev[d]) any = true;
-        (series[d] = series[d] || {})[x] = { x: x, y: vals[d], at: s.at };          // a newer reading for the same hour wins
+        // v1.18.3 - the same number as the reading before = Metabase served its cached result again (it does: 1,027 at 12, 13 and 14:00 on 17 Nov
+        // while the question already had 1,622). That is not a reading of that hour, so it is not drawn; after midnight it still counts (24:00 total).
+        if (x < 24 && prev[d] != null && vals[d] === prev[d]) { /* stale */ }
+        else (series[d] = series[d] || {})[Math.round(x * 60)] = { x: x, y: vals[d], at: s.at };
         // closing: only readings taken after the DAY ended (x >= 24), and only when the query is visibly refreshing
         var st = status[d] = status[d] || { quiet: 0, closed: false, lastChangeX: null };
         if (prev[d] != null && vals[d] !== prev[d]) { st.quiet = 0; st.closed = false; st.lastChangeX = x; }
@@ -50,7 +53,7 @@
           if (fresh && ++st.quiet >= SETTLE) st.closed = true;
         }
       });
-      if (any) moved = { date: s.cairoDate, hour: s.hour };
+      if (any) moved = { date: s.cairoDate, hour: s.hour, minute: +s.minute || 0 };
       ds.forEach(function (d) { prev[d] = vals[d]; });
     });
     var known = Object.keys(series).sort();
@@ -67,7 +70,10 @@
     var t = curve(today), y = curve(yday);
     var real = t.P.filter(function (p) { return !p.start; });
     var last = real.length ? real[real.length - 1] : null;
-    var sameHour = last ? y.P.filter(function (p) { return p.x === last.x && !p.start; })[0] || null : null;
+    // yesterday "at the same hour" = its newest reading up to that hour (a skipped stale hour had that same number anyway)
+    var sameHour = null;
+    if (last) y.P.forEach(function (p) { if (!p.start && !p.end && p.x <= last.x && (!sameHour || p.x > sameHour.x)) sameHour = p; });
+    if (sameHour && last.x - sameHour.x > 2) sameHour = null;
     var ys = status[yday] || null;
     var nowX = raw && isFinite(raw.hour) ? raw.hour + (isFinite(raw.minute) ? raw.minute : 0) / 60 : null;
     if (raw && raw.cairoDate && today !== raw.cairoDate) nowX = null;
@@ -80,8 +86,9 @@
   function hh(x, day) {
     if (x == null) return "";
     if (x === 24) return "24:00";
-    var t = String(x % 24).padStart(2, "0") + ":00";
-    if (x > 24) { var u = utcDay(day); t += isNaN(u) ? " (+1 day)" : " " + dayLabel(new Date(u + Math.floor(x / 24) * 86400000).toISOString().slice(0, 10)); }
+    var mm = Math.round((x - Math.floor(x)) * 60), hr = Math.floor(x) + (mm === 60 ? 1 : 0); mm = mm % 60;
+    var t = String(hr % 24).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+    if (x >= 24) { var u = utcDay(day); t += isNaN(u) ? " (+1 day)" : " " + dayLabel(new Date(u + Math.floor(x / 24) * 86400000).toISOString().slice(0, 10)); }
     return t;
   }
 
@@ -105,7 +112,7 @@
       var meta = ch.getDatasetMeta(di); if (meta.hidden || ds.$gap) return;
       ctx.save(); ctx.textAlign = "center"; ctx.fillStyle = di === 0 ? C_T : C_Y;
       meta.data.forEach(function (pt, i) {
-        var v = ds.data[i]; if (v == null || (ds.$kind[i] === "start")) return;
+        var v = ds.data[i] && ds.data[i].y; if (v == null || (ds.$kind[i] === "start")) return;
         var end = ds.$kind[i] === "end";
         if (!end && i % step && i !== ds.$lastIdx) return;
         ctx.font = (end ? "700 11.5px" : "600 10.5px") + " Inter, sans-serif";
@@ -163,11 +170,11 @@
         ? '<span class="ovh-chip ok">' + esc(dayLabel(d.yday)) + ' <b>closed</b> · last change ' + hh(d.yLastChange != null ? d.yLastChange : 24, d.yday) + '</span>'
         : '<span class="ovh-chip wait">' + esc(dayLabel(d.yday)) + ' <b>still updating</b>' + (d.yLastChange != null ? ' · last change ' + hh(d.yLastChange, d.yday) : '') + '</span>');
       if (d.waiting) chips.push('<span class="ovh-chip wait">' + esc(dayLabel(d.today)) + ' <b>not in the query yet</b></span>');
-      if (d.moved) chips.push('<span class="ovh-chip">query last moved at <b>' + String(d.moved.hour).padStart(2, "0") + ':00</b>' + (d.moved.date !== (H.raw && H.raw.cairoDate) ? " · " + esc(dayLabel(d.moved.date)) : "") + '</span>');
+      if (d.moved) chips.push('<span class="ovh-chip">Metabase last moved at <b>' + String(d.moved.hour).padStart(2, "0") + ':' + String(d.moved.minute || 0).padStart(2, "0") + '</b>' + (d.moved.date !== (H.raw && H.raw.cairoDate) ? " · " + esc(dayLabel(d.moved.date)) : "") + '</span>');
       body = '<div class="cx-hero2" style="padding:0 18px 12px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b' + (t[3] ? ' style="color:' + t[3] + '"' : '') + '>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
         (chips.length ? '<div class="ovh-chips">' + chips.join("") + '</div>' : "") + warn +
         '<div class="ovh-chart"><canvas id="ovhCanvas"></canvas></div>' +
-        '<div class="ovh-note">Placed Orders up to each hour (Cairo) · 24:00 = full day total.</div>';
+        '<div class="ovh-note">Each point = the moment Metabase showed a new number (Cairo time) · 24:00 = full day total.</div>';
     }
     host.innerHTML = head + body;
     if (d.T.length || d.Y.length) draw(d);
@@ -176,40 +183,30 @@
   function draw(d) {
     var cv = $("ovhCanvas"); if (!cv || typeof Chart === "undefined") return;
     if (H.chart) { try { H.chart.destroy(); } catch (e) {} H.chart = null; }
-    // the axis starts at the first hour that has a reading (today or yesterday), not at 00:00
-    var x0 = Math.min.apply(null, d.T.concat(d.Y).map(function (p) { return p.x; }).concat([d.maxX]));
-    x0 = Math.max(0, Math.min(x0, d.maxX - 1));
-    var xs = []; for (var i = x0; i <= d.maxX; i++) xs.push(i);
+    // the axis starts at the first hour that has a reading (today or yesterday), not at 00:00; points sit at the minute they were read
+    var x0 = Math.floor(Math.min.apply(null, d.T.concat(d.Y).map(function (p) { return p.x; }).concat([d.maxX - 1])));
+    x0 = Math.max(0, x0);
     function ds(P, color, label, fillA) {
-      var data = xs.map(function () { return null; }), kind = xs.map(function () { return ""; });
-      P.forEach(function (p) { if (p.x >= x0 && p.x <= d.maxX) { data[p.x - x0] = p.y; kind[p.x - x0] = p.start ? "start" : p.end ? "end" : "pt"; } });
-      var lastIdx = -1; data.forEach(function (v, k) { if (v != null && kind[k] !== "start") lastIdx = k; });
+      P = P.filter(function (p) { return p.x >= x0 && p.x <= d.maxX; });
+      var kind = P.map(function (p) { return p.end ? "end" : "pt"; });
       var ctx = cv.getContext("2d"), g = ctx.createLinearGradient(0, 0, 0, 320); g.addColorStop(0, fillA); g.addColorStop(1, "rgba(0,0,0,0)");
-      return { label: label, data: data, $kind: kind, $lastIdx: lastIdx, borderColor: color, backgroundColor: g, fill: "origin", borderWidth: 2.5, tension: .3, spanGaps: false,
-        pointRadius: kind.map(function (k) { return k === "start" ? 0 : k === "end" ? 5 : 3.5; }), pointHoverRadius: kind.map(function (k) { return k === "start" ? 0 : 6; }),
+      return { label: label, data: P.map(function (p) { return { x: p.x, y: p.y }; }), $kind: kind, $lastIdx: P.length - 1, borderColor: color, backgroundColor: g, fill: "origin",
+        borderWidth: 2.5, tension: .3, pointRadius: kind.map(function (k) { return k === "end" ? 5 : 3.5; }), pointHoverRadius: 6,
         pointBackgroundColor: kind.map(function (k) { return k === "end" ? color : "#0b1220"; }), pointBorderColor: color, pointBorderWidth: 2 };
-    }
-    // hours without a reading: a thin dashed bridge between the two readings around them (its own dataset: no fill, no labels, no tooltip)
-    function gaps(P, color) {
-      var out = [], Q = P.slice().sort(function (a, b) { return a.x - b.x; });
-      for (var k = 1; k < Q.length; k++) if (Q[k].x - Q[k - 1].x > 1) {
-        var data = xs.map(function () { return null; }); data[Q[k - 1].x] = Q[k - 1].y; data[Q[k].x] = Q[k].y;
-        out.push({ label: "", $gap: true, data: data, borderColor: color, borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false, spanGaps: true, tension: 0 });
-      }
-      return out;
     }
     var sets = [ds(d.T, C_T, "today", "rgba(52,211,153,.18)"), ds(d.Y, C_Y, "yesterday", "rgba(125,211,252,.10)")];
     H.chart = new Chart(cv.getContext("2d"), {
       type: "line", plugins: [labels],
-      data: { labels: xs.map(function (x) { return hh(x); }), datasets: sets },
-      options: { responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { top: 26, right: 26, left: 4 } }, interaction: { mode: "index", intersect: false },
+      data: { datasets: sets },
+      options: { responsive: true, maintainAspectRatio: false, animation: false, parsing: false, layout: { padding: { top: 26, right: 26, left: 4 } },
+        interaction: { mode: "nearest", axis: "x", intersect: false },
         plugins: { legend: { display: false },
-          tooltip: { filter: function (it) { return !it.dataset.$gap && it.raw != null && it.dataset.$kind[it.dataIndex] !== "start"; },
-            callbacks: { title: function (it) { return it.length && xs[it[0].dataIndex] === 24 ? "Full day (24:00)" : "Up to " + (it.length ? it[0].label : ""); },
+          tooltip: { callbacks: { title: function (it) { var x = it.length ? it[0].raw.x : null; return x === 24 ? "Full day (24:00)" : "At " + hh(x); },
               label: function (c) { var end = c.dataset.$kind[c.dataIndex] === "end";
                 return " " + c.dataset.label + ": " + int(c.parsed.y) + " orders" + (end ? (c.datasetIndex === 1 && !d.yClosed ? " (still updating)" : " (incl. late orders)") : ""); } } } },
-        scales: { x: { ticks: { color: C_DIM, maxRotation: 0, autoSkip: false, callback: function (v, k) { return xs[k] % 3 === 0 ? hh(xs[k]) : ""; } }, grid: { color: function (c) { return xs[c.index] % 3 === 0 ? "rgba(148,163,184,.14)" : "rgba(148,163,184,.04)"; } },
-            title: { display: true, text: "Hour (Cairo) — orders placed up to that hour", color: C_DIM } },
+        scales: { x: { type: "linear", min: x0, max: d.maxX, ticks: { color: C_DIM, maxRotation: 0, stepSize: 1, autoSkip: false, callback: function (v) { return v % 3 === 0 ? hh(v) : ""; } },
+            grid: { color: function (c) { return c.tick && c.tick.value % 3 === 0 ? "rgba(148,163,184,.14)" : "rgba(148,163,184,.04)"; } },
+            title: { display: true, text: "Time (Cairo) — orders placed up to that time", color: C_DIM } },
           y: { beginAtZero: true, grace: "8%", ticks: { color: C_DIM, callback: function (v) { return int(v); } }, grid: { color: "rgba(148,163,184,.12)" }, title: { display: true, text: "Placed orders (cumulative)", color: C_DIM } } } }
     });
     H.chart.$ovh = d; H.chart.update("none");
