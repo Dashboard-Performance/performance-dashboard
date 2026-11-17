@@ -61,7 +61,6 @@
       if (!all.length) return { P: [], latest: null };
       var latest = all[all.length - 1];
       var P = all.filter(function (p) { return p.x < 24; });
-      if (!P.length || P[0].x > 0) P.unshift({ x: 0, y: 0, start: true });              // nothing is placed before the DAY starts
       if (latest.x >= 24) P.push({ x: 24, y: Math.max(latest.y, P[P.length - 1].y), at: latest.at, end: true });
       return { P: P, latest: latest };
     }
@@ -147,7 +146,7 @@
     var sub = d.today ? esc(dayLabel(d.today)) + (d.Y.length ? " vs " + esc(dayLabel(d.yday)) : "") + " · Placed Orders, cumulative" : "Placed Orders, cumulative by hour · Merchant Only";
     var head = '<div class="panel-head-modern"><div class="panel-title-wrapper border-green"><h2>Orders per Hour — Today vs Yesterday</h2><p>' + sub + '</p></div>' +
       '<div class="ovh-legend"><span><i style="background:' + C_T + '"></i>today' + (d.today ? " · " + esc(dayLabel(d.today)) : "") + '</span>' +
-      '<span><i style="background:' + C_Y + '"></i>yesterday' + (d.yday ? " · " + esc(dayLabel(d.yday)) : "") + '</span><span><span class="ovh-dash"></span>no reading</span></div></div>';
+      '<span><i style="background:' + C_Y + '"></i>yesterday' + (d.yday ? " · " + esc(dayLabel(d.yday)) : "") + '</span></div></div>';
     var body;
     if (H.err && !H.raw) body = '<div class="ovh-empty">Could not read the hourly points (' + esc(H.err) + '). It retries by itself.</div>';
     else if (!H.raw) body = '<div class="ovh-empty">Reading the hourly points…</div>';
@@ -168,9 +167,7 @@
       body = '<div class="cx-hero2" style="padding:0 18px 12px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b' + (t[3] ? ' style="color:' + t[3] + '"' : '') + '>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
         (chips.length ? '<div class="ovh-chips">' + chips.join("") + '</div>' : "") + warn +
         '<div class="ovh-chart"><canvas id="ovhCanvas"></canvas></div>' +
-        '<div class="ovh-note">Each point = Placed Orders of that day (the date in Merchant Only) up to that hour, read on the hour (Cairo). ' +
-        'The query refreshes about once an hour, so a reading can trail the real number a little. 24:00 = the full day, late orders included. ' +
-        'A day is closed once the query is refreshing and that day stops moving. Dashed = hours without a reading.</div>';
+        '<div class="ovh-note">Placed Orders up to each hour (Cairo) · 24:00 = full day total.</div>';
     }
     host.innerHTML = head + body;
     if (d.T.length || d.Y.length) draw(d);
@@ -179,10 +176,13 @@
   function draw(d) {
     var cv = $("ovhCanvas"); if (!cv || typeof Chart === "undefined") return;
     if (H.chart) { try { H.chart.destroy(); } catch (e) {} H.chart = null; }
-    var xs = []; for (var i = 0; i <= d.maxX; i++) xs.push(i);
+    // the axis starts at the first hour that has a reading (today or yesterday), not at 00:00
+    var x0 = Math.min.apply(null, d.T.concat(d.Y).map(function (p) { return p.x; }).concat([d.maxX]));
+    x0 = Math.max(0, Math.min(x0, d.maxX - 1));
+    var xs = []; for (var i = x0; i <= d.maxX; i++) xs.push(i);
     function ds(P, color, label, fillA) {
       var data = xs.map(function () { return null; }), kind = xs.map(function () { return ""; });
-      P.forEach(function (p) { if (p.x >= 0 && p.x <= d.maxX) { data[p.x] = p.y; kind[p.x] = p.start ? "start" : p.end ? "end" : "pt"; } });
+      P.forEach(function (p) { if (p.x >= x0 && p.x <= d.maxX) { data[p.x - x0] = p.y; kind[p.x - x0] = p.start ? "start" : p.end ? "end" : "pt"; } });
       var lastIdx = -1; data.forEach(function (v, k) { if (v != null && kind[k] !== "start") lastIdx = k; });
       var ctx = cv.getContext("2d"), g = ctx.createLinearGradient(0, 0, 0, 320); g.addColorStop(0, fillA); g.addColorStop(1, "rgba(0,0,0,0)");
       return { label: label, data: data, $kind: kind, $lastIdx: lastIdx, borderColor: color, backgroundColor: g, fill: "origin", borderWidth: 2.5, tension: .3, spanGaps: false,
@@ -198,18 +198,17 @@
       }
       return out;
     }
-    var sets = [ds(d.T, C_T, "today", "rgba(52,211,153,.18)"), ds(d.Y, C_Y, "yesterday", "rgba(125,211,252,.10)")]
-      .concat(gaps(d.T, "rgba(52,211,153,.45)"), gaps(d.Y, "rgba(125,211,252,.45)"));
+    var sets = [ds(d.T, C_T, "today", "rgba(52,211,153,.18)"), ds(d.Y, C_Y, "yesterday", "rgba(125,211,252,.10)")];
     H.chart = new Chart(cv.getContext("2d"), {
-      type: "line", plugins: [bands, labels],
+      type: "line", plugins: [labels],
       data: { labels: xs.map(function (x) { return hh(x); }), datasets: sets },
       options: { responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { top: 26, right: 26, left: 4 } }, interaction: { mode: "index", intersect: false },
         plugins: { legend: { display: false },
           tooltip: { filter: function (it) { return !it.dataset.$gap && it.raw != null && it.dataset.$kind[it.dataIndex] !== "start"; },
-            callbacks: { title: function (it) { return it.length && it[0].dataIndex === 24 ? "Full day (24:00)" : "Up to " + (it.length ? it[0].label : ""); },
+            callbacks: { title: function (it) { return it.length && xs[it[0].dataIndex] === 24 ? "Full day (24:00)" : "Up to " + (it.length ? it[0].label : ""); },
               label: function (c) { var end = c.dataset.$kind[c.dataIndex] === "end";
                 return " " + c.dataset.label + ": " + int(c.parsed.y) + " orders" + (end ? (c.datasetIndex === 1 && !d.yClosed ? " (still updating)" : " (incl. late orders)") : ""); } } } },
-        scales: { x: { ticks: { color: C_DIM, maxRotation: 0, autoSkip: false, callback: function (v, k) { return k % 3 === 0 ? hh(k) : ""; } }, grid: { color: function (c) { return c.index % 3 === 0 ? "rgba(148,163,184,.14)" : "rgba(148,163,184,.04)"; } },
+        scales: { x: { ticks: { color: C_DIM, maxRotation: 0, autoSkip: false, callback: function (v, k) { return xs[k] % 3 === 0 ? hh(xs[k]) : ""; } }, grid: { color: function (c) { return xs[c.index] % 3 === 0 ? "rgba(148,163,184,.14)" : "rgba(148,163,184,.04)"; } },
             title: { display: true, text: "Hour (Cairo) — orders placed up to that hour", color: C_DIM } },
           y: { beginAtZero: true, grace: "8%", ticks: { color: C_DIM, callback: function (v) { return int(v); } }, grid: { color: "rgba(148,163,184,.12)" }, title: { display: true, text: "Placed orders (cumulative)", color: C_DIM } } } }
     });
