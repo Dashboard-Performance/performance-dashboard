@@ -30,14 +30,7 @@
   function cell(c) { return c ? (c.v != null ? c.v : c.f) : ""; }
 
   var PP = { skus: null, loading: false, err: "", sig: "", data: null, q: "", cat: "all", status: "all", sort: "conf", dir: -1, page: 0,
-    th: { low: 7, over: 90, trend: 30 }, groups: null, poll: null, watch: null, chart: null };
-  var GROUPS = [
-    ["product", "Product"], ["sales", "Sales"], ["funnel", "Funnel"], ["money", "Money"], ["merch", "Merchants"],
-    ["stock", "Stock & inbound"], ["bundle", "Bundles"], ["plan", "Sales plan"], ["status", "Status & action"]
-  ];
-  try { var sv = JSON.parse(localStorage.getItem("ppTracker") || "null"); if (sv) { if (sv.th) PP.th = Object.assign(PP.th, sv.th); if (sv.groups) PP.groups = sv.groups; } } catch (e) {}
-  if (!PP.groups) { PP.groups = {}; GROUPS.forEach(function (g) { PP.groups[g[0]] = true; }); }
-  function save() { try { localStorage.setItem("ppTracker", JSON.stringify({ th: PP.th, groups: PP.groups })); } catch (e) {} }
+    th: { low: 7, over: 90, trend: 30 }, poll: null, watch: null, chart: null };
 
   // ---------- the SKU list (Tracking-SKU's tab) ----------
   function parseList(p) {
@@ -237,63 +230,35 @@
   // columns: [key, label, group, cell fn, tooltip, numeric]
   function dayCell(ms, age) { return ms ? fmtDay(ms) + (age != null ? ' <small class="text-dim">(' + age + 'd)</small>' : "") : '<span class="text-dim">—</span>'; }
   var COLS = [
-    ["n", "#", null, function (r) { return r.n; }, "Order in the Tracking-SKU's tab", 1],
-    ["id", "SKU", null, function (r) { return '<b>' + esc(r.id) + '</b>'; }, "", 0],
-    ["name", "Name", null, function (r) { return '<span style="display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="' + esc(r.name) + '">' + esc(r.name) + '</span>'; }, "", 0],
-    ["cat", "Category", "product", function (r) { return esc(r.cat); }, "Inventory → Products", 0],
-    ["sub", "Sub-category", "product", function (r) { return esc(r.sub); }, "Products", 0],
-    ["sc", "Product type", "product", function (r) { return esc(r.sc); }, "Products → SC", 0],
-    ["web", "Website", "product", function (r) { return esc(r.web); }, "Products → website status", 0],
-    ["avail", "Availability", "product", function (r) { return esc(r.avail); }, "Inventory → availability", 0],
-    ["locked", "Locked", "product", function (r) { return esc(r.locked); }, "Products → IS_LOCKED", 0],
-    ["price", "Price", "product", function (r) { return int(r.price); }, "Products → selling price", 1],
-    ["profit", "Merchant profit", "product", function (r) { return int(r.profit); }, "Products → profit", 1],
-    ["cogs", "COGS", "product", function (r) { return int(r.cogs); }, "COGS tab", 1],
-    ["lppm", "List PPM", "product", function (r) { return int(r.lppm); }, "Price − merchant profit − COGS (today's pricing)", 1],
-    ["pM", "Placed pcs MTD", "sales", function (r) { return int(r.pM); }, "", 1],
-    ["conf", "Confirmed pcs MTD", "sales", function (r) { return '<b>' + int(r.conf) + '</b>'; }, "", 1],
-    ["dM", "Delivered pcs MTD", "sales", function (r) { return int(r.dM); }, "", 1],
-    ["cL", "Confirmed LM (same days)", "sales", function (r) { return int(r.cL); }, "Confirmed pieces on the same days of last month", 1],
-    ["dLM", "Δ vs LM", "sales", function (r) { return delta(r.dLM); }, "Confirmed MTD vs the same days of last month", 1],
-    ["c7", "Confirmed 7d", "sales", function (r) { return int(r.c7); }, "Last 7 data days", 1],
-    ["c7p", "Prev 7d", "sales", function (r) { return int(r.c7p); }, "The 7 days before", 1],
-    ["d7", "Δ 7d", "sales", function (r) { return delta(r.d7); }, "Last 7 days vs the 7 before", 1],
-    ["avgM", "Avg / day MTD", "sales", function (r) { return fin(r.avgM) ? r.avgM.toFixed(1) : "—"; }, "Confirmed MTD ÷ days so far", 1],
-    ["avg7", "Avg / day 7d", "sales", function (r) { return fin(r.avg7) ? r.avg7.toFixed(1) : "—"; }, "Confirmed last 7 days ÷ 7", 1],
-    ["lastSale", "Last sale", "sales", function (r) { return dayCell(r.lastSale, r.idle); }, "Last day with a confirmed piece (days before the data day)", 1],
-    ["cr", "CR %", "funnel", function (r) { return pct(r.cr); }, "Confirmed ÷ placed pieces, 30 days ending 2 days before the data day", 1],
-    ["dr", "DR %", "funnel", function (r) { return pct(r.dr); }, "Delivered ÷ confirmed pieces, 30 days ending 5 days before the data day", 1],
-    ["ndr", "NDR %", "funnel", function (r) { return pct(r.ndr); }, "CR × DR", 1],
-    ["gmv", "Delivered GMV MTD", "money", function (r) { return int(r.gmv); }, "", 1],
-    ["cm3", "CM3 MTD", "money", function (r) { return '<span class="' + (r.cm3 < 0 ? "text-red" : "") + '">' + int(r.cm3) + '</span>'; }, "", 1],
-    ["cm3p", "CM3 %", "money", function (r) { return pct(r.cm3p); }, "CM3 ÷ delivered GMV", 1],
-    ["ppm", "PPM MTD", "money", function (r) { return int(r.ppm); }, "Delivered PPM", 1],
-    ["ppmPc", "PPM / pc", "money", function (r) { return int(r.ppmPc); }, "Delivered PPM ÷ delivered pieces", 1],
-    ["asp", "ASP", "money", function (r) { return int(r.asp); }, "Delivered GMV ÷ delivered pieces", 1],
-    ["merch", "Merchants MTD", "merch", function (r) { return int(r.merch); }, "Merchants with a confirmed piece this month", 1],
-    ["merchNew", "New merchants", "merch", function (r) { return int(r.merchNew); }, "Selling it this month but not last month", 1],
-    ["top", "Top merchant", "merch", function (r) { return r.top ? '<span style="display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="' + esc(r.top) + '">' + esc(r.top) + '</span>' : '<span class="text-dim">—</span>'; }, "Most confirmed pieces this month", 0],
-    ["topShare", "Top share", "merch", function (r) { return pct(r.topShare, 0); }, "Top merchant's share of confirmed pieces — high = depends on one merchant", 1],
-    ["stock", "Stock", "stock", function (r) { return '<b>' + int(r.stock) + '</b>'; }, "Inventory", 1],
-    ["doh", "DOH", "stock", function (r) { return '<span class="' + (r.doh > 0 && r.doh < PP.th.low ? "text-orange" : r.doh > PP.th.over ? "text-purple" : "") + '">' + int(r.doh) + '</span>'; }, "Inventory → days on hand", 1],
-    ["lockQ", "Locked pcs", "stock", function (r) { return int(r.lockQ); }, "Availability Locking → remaining pieces of locks not expired", 1],
-    ["free", "Free stock", "stock", function (r) { return int(r.free); }, "Stock − locked pieces", 1],
-    ["cover", "Cover (days)", "stock", function (r) { return fin(r.cover) ? int(r.cover) : "—"; }, "Free stock ÷ confirmed avg / day of the last 7 days (actuals, not a forecast)", 1],
-    ["inLast", "Last inbound", "stock", function (r) { return dayCell(r.inLast, r.inAge); }, "Inbound → last receiving date", 1],
-    ["inLastQty", "Last inbound qty", "stock", function (r) { return int(r.inLastQty); }, "", 1],
-    ["inMtd", "Inbound MTD", "stock", function (r) { return int(r.inMtd); }, "Received this month", 1],
-    ["in90", "Inbound 90d", "stock", function (r) { return int(r.in90); }, "Received in the last 90 days", 1],
-    ["bundles", "In bundles", "bundle", function (r) { return int(r.bundles); }, "Bundles that contain this SKU (debundle map)", 1],
-    ["bLive", "Bundles selling", "bundle", function (r) { return int(r.bLive); }, "Of them, with a confirmed order this month", 1],
-    ["bOrd", "Bundle orders MTD", "bundle", function (r) { return int(r.bOrd); }, "Confirmed orders of bundles that contain it", 1],
-    ["dB", "Δ bundles vs LM", "bundle", function (r) { return delta(r.dB); }, "Bundle orders MTD vs the same days of last month", 1],
-    ["planM", "Plan merchants", "plan", function (r) { return int(r.planM); }, "Sales Plan (ACM) rows on this SKU", 1],
-    ["planT", "Plan / day", "plan", function (r) { return int(r.planT); }, "Sum of their daily placed targets", 1],
-    ["planA", "Plan achv %", "plan", function (r) { return r.planA == null ? "—" : '<span class="' + (r.planA >= 100 ? "text-green" : r.planA < 70 ? "text-orange" : "") + '">' + pct(r.planA, 0) + '</span>'; }, "Placed pieces MTD ÷ (plan / day × days so far)", 1],
-    ["st", "Status", "status", function (r) { var s = ST[r.st]; return '<span class="tw-pill ' + s[1] + '">' + s[0] + '</span>'; }, "", 0],
-    ["act", "Suggested action", "status", function (r) { return '<small>' + esc(ST[r.st][2]) + '</small>'; }, "", 0]
+    ["id", "SKU", function (r) { return '<b>' + esc(r.id) + '</b>'; }, "", 0],
+    ["name", "Name", function (r) { return '<span style="display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="' + esc(r.name) + '">' + esc(r.name) + '</span>'; }, "", 0],
+    ["cat", "Category", function (r) { return esc(r.cat); }, "Inventory → Products", 0],
+    ["avail", "Availability", function (r) { return esc(r.avail); }, "Inventory → availability", 0],
+    ["stock", "Stock", function (r) { return '<b>' + int(r.stock) + '</b>'; }, "Inventory", 1],
+    ["doh", "DOH", function (r) { return int(r.doh); }, "Inventory → days on hand", 1],
+    ["price", "Price", function (r) { return int(r.price); }, "Products → selling price", 1],
+    ["profit", "Merchant profit", function (r) { return int(r.profit); }, "Products → profit", 1],
+    ["cogs", "COGS", function (r) { return int(r.cogs); }, "COGS tab", 1],
+    ["lppm", "List PPM", function (r) { return int(r.lppm); }, "Price − merchant profit − COGS", 1],
+    ["pM", "Placed pcs MTD", function (r) { return int(r.pM); }, "", 1],
+    ["conf", "Confirmed pcs MTD", function (r) { return '<b>' + int(r.conf) + '</b>'; }, "", 1],
+    ["dM", "Delivered pcs MTD", function (r) { return int(r.dM); }, "", 1],
+    ["dLM", "Δ vs LM", function (r) { return delta(r.dLM); }, "Confirmed MTD vs the same days of last month", 1],
+    ["d7", "Δ 7d", function (r) { return delta(r.d7); }, "Confirmed last 7 days vs the 7 before", 1],
+    ["cr", "CR %", function (r) { return pct(r.cr); }, "Confirmed ÷ placed pieces, 30 days ending 2 days before the data day", 1],
+    ["dr", "DR %", function (r) { return pct(r.dr); }, "Delivered ÷ confirmed pieces, 30 days ending 5 days before the data day", 1],
+    ["ndr", "NDR %", function (r) { return pct(r.ndr); }, "CR × DR", 1],
+    ["gmv", "Delivered GMV MTD", function (r) { return int(r.gmv); }, "", 1],
+    ["cm3", "CM3", function (r) { return '<span class="' + (r.cm3 < 0 ? "text-red" : "") + '">' + int(r.cm3) + '</span>'; }, "CM3 MTD", 1],
+    ["cm3p", "CM3 %", function (r) { return pct(r.cm3p); }, "CM3 ÷ delivered GMV", 1],
+    ["ppm", "PPM MTD", function (r) { return int(r.ppm); }, "Delivered PPM", 1],
+    ["ppmPc", "PPM / pc", function (r) { return int(r.ppmPc); }, "Delivered PPM ÷ delivered pieces", 1],
+    ["asp", "ASP", function (r) { return int(r.asp); }, "Delivered GMV ÷ delivered pieces", 1],
+    ["merch", "Merchants MTD", function (r) { return int(r.merch); }, "Merchants with a confirmed piece this month", 1],
+    ["top", "Top merchant", function (r) { return r.top ? '<span style="display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="' + esc(r.top) + '">' + esc(r.top) + '</span>' : '<span class="text-dim">—</span>'; }, "Most confirmed pieces this month", 0],
+    ["topShare", "Top share", function (r) { return pct(r.topShare, 0); }, "Top merchant's share of confirmed pieces", 1]
   ];
-  function cols() { return COLS.filter(function (c) { return !c[2] || PP.groups[c[2]]; }); }
+  function cols() { return COLS; }
 
   function tile(label, value, sub, cls) { return '<div class="cx-tile"><span>' + label + '</span><b class="' + (cls || "") + '">' + value + '</b><small>' + sub + '</small></div>'; }
 
@@ -325,10 +290,6 @@
       tile("Low DOH / Overstock", int(sts.low || 0) + " / " + int(sts.over || 0), "DOH < " + PP.th.low + " · DOH > " + PP.th.over),
       tile("Inbound MTD", int(sum("inMtd")), int(cnt(function (r) { return r.inMtd > 0; })) + " SKUs received this month")
     ];
-    var chips = '<button type="button" class="tw-chip' + (PP.status === "all" ? " on" : "") + '" data-st="all">All · ' + int(R.length) + '</button>' +
-      Object.keys(ST).filter(function (k) { return sts[k]; }).map(function (k) { return '<button type="button" class="tw-chip' + (PP.status === k ? " on" : "") + '" data-st="' + k + '">' + ST[k][0] + ' · ' + int(sts[k]) + '</button>'; }).join("");
-    var catOpts = d.cats.map(function (c) { return '<option value="' + esc(c.cat) + '"' + (PP.cat === c.cat ? " selected" : "") + '>' + esc(c.cat) + '</option>'; }).join("");
-    var grpBoxes = GROUPS.map(function (g) { return '<label class="text-dim" style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap"><input type="checkbox" data-grp="' + g[0] + '"' + (PP.groups[g[0]] ? " checked" : "") + '> ' + g[1] + '</label>'; }).join("");
     var cs = cols();
 
     var html = '<div class="panel table-panel hover-glow" style="margin-bottom:14px"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>Provision Products</h2>' +
@@ -341,18 +302,9 @@
       d.cats.map(function (c) { return '<tr data-cat="' + esc(c.cat) + '" style="cursor:pointer' + (PP.cat === c.cat ? ';background:color-mix(in srgb,var(--accent) 12%,transparent)' : '') + '"><td>' + esc(c.cat) + '</td><td class="num">' + int(c.n) + '</td><td class="num">' + int(c.sell) + '</td><td class="num">' + int(c.conf) + '</td><td class="num">' + delta(chg(c.conf, c.cL)) + '</td><td class="num">' + int(c.cm3) + '</td><td class="num">' + int(c.stock) + '</td><td class="num' + (c.oos ? ' text-red' : '') + '">' + int(c.oos) + '</td></tr>'; }).join("") +
       '</tbody></table></div></div></div>';
 
-    html += '<div class="panel table-panel hover-glow"><div class="panel-head-modern"><div class="panel-title-wrapper border-blue"><h2>SKUs</h2><p>Click a column title to sort. Status = the first rule that matches (out of stock → all locked → not selling → low DOH → overstock → declining → growing → healthy).</p></div></div>' +
-      '<div class="tw-chips" style="padding:0 18px 10px">' + chips + '</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:0 18px 10px">' +
-      '<select id="ppCat" class="date-filter-input" style="flex:0 0 auto"><option value="all">All categories</option>' + catOpts + '</select>' +
-      '<input id="ppQ" type="search" class="date-filter-input" style="flex:0 1 260px;min-width:160px" placeholder="Search SKU, name or merchant" value="' + esc(PP.q) + '">' +
-      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Low DOH &lt; <input id="ppLow" type="number" min="1" value="' + PP.th.low + '" class="date-filter-input" style="width:64px;min-width:0;flex:0 0 64px"></label>' +
-      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Overstock DOH &gt; <input id="ppOver" type="number" min="1" value="' + PP.th.over + '" class="date-filter-input" style="width:64px;min-width:0;flex:0 0 64px"></label>' +
-      '<label class="text-dim" style="display:inline-flex;align-items:center;gap:6px">Trend ± <input id="ppTrend" type="number" min="1" value="' + PP.th.trend + '" class="date-filter-input" style="width:60px;min-width:0;flex:0 0 60px">%</label>' +
-      '<button type="button" class="tw-exp" id="ppCsv">Export CSV</button><button type="button" class="btn" id="ppReload" title="Read the Tracking-SKU\'s tab again">Reload SKU list</button></div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:0 18px 10px"><b class="text-dim">Columns</b>' + grpBoxes + '</div>' +
+    html += '<div class="panel table-panel hover-glow" style="padding-top:6px">' +
       '<div class="table-responsive"><table class="data-table" id="ppTable"><thead><tr>' +
-      cs.map(function (c) { return '<th data-k="' + c[0] + '"' + (c[5] ? ' class="num"' : '') + (c[4] ? ' title="' + esc(c[4]) + '"' : '') + '>' + c[1] + (PP.sort === c[0] ? (PP.dir < 0 ? " ▼" : " ▲") : "") + '</th>'; }).join("") +
+      cs.map(function (c) { return '<th data-k="' + c[0] + '"' + (c[4] ? ' class="num"' : '') + (c[3] ? ' title="' + esc(c[3]) + '"' : '') + '>' + c[1] + (PP.sort === c[0] ? (PP.dir < 0 ? " ▼" : " ▲") : "") + '</th>'; }).join("") +
       '</tr></thead><tbody id="ppBody"></tbody></table></div>' +
       '<div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 18px"><button type="button" class="btn" id="ppPrev">Prev</button><span class="text-dim" id="ppPageInfo"></span><button type="button" class="btn" id="ppNext">Next</button></div></div>';
     host.innerHTML = html;
@@ -367,7 +319,7 @@
     var body = host.querySelector("#ppBody"); if (!body) return;
     var slice = rows.slice(PP.page * PAGE, PP.page * PAGE + PAGE);
     body.innerHTML = slice.length ? slice.map(function (r) {
-      return '<tr>' + cs.map(function (c) { return '<td' + (c[5] ? ' class="num"' : '') + '>' + c[3](r) + '</td>'; }).join("") + '</tr>';
+      return '<tr>' + cs.map(function (c) { return '<td' + (c[4] ? ' class="num"' : '') + '>' + c[2](r) + '</td>'; }).join("") + '</tr>';
     }).join("") : '<tr><td colspan="' + cs.length + '" class="text-dim" style="text-align:center;padding:18px">No SKU matches these filters.</td></tr>';
     var pi = host.querySelector("#ppPageInfo"); if (pi) pi.textContent = "Page " + (PP.page + 1) + " of " + pages + " · " + int(rows.length) + " SKUs";
   }
@@ -391,37 +343,14 @@
     });
   }
 
-  function csv() {
-    var rows = view(PP.data), plain = function (h) { return String(h).replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'"); };
-    var raw = function (r, k) {
-      if (k === "st") return ST[r.st][0]; if (k === "act") return ST[r.st][2];
-      if (k === "lastSale" || k === "inLast") return r[k] ? new Date(r[k]).toISOString().slice(0, 10) : "";
-      var x = r[k]; return x == null || (typeof x === "number" && !isFinite(x)) ? "" : typeof x === "number" ? Math.round(x * 100) / 100 : x;
-    };
-    var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    var lines = [COLS.map(function (c) { return q(plain(c[1])); }).join(",")].concat(rows.map(function (r) { return COLS.map(function (c) { return q(raw(r, c[0])); }).join(","); }));
-    var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "provision-products-" + new Date(PP.data.anchor).toISOString().slice(0, 10) + ".csv"; document.body.appendChild(a); a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-  }
-
   function wire(host) {
     var re = function () { PP.page = 0; render(host); };
-    var rebuild = function () { PP.data = null; PP.sig = ""; re(); };
     var on = function (id, ev, fn) { var el = host.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
-    on("ppCat", "change", function (e) { PP.cat = e.target.value; re(); });
-    on("ppQ", "input", function (e) { PP.q = e.target.value; PP.page = 0; drawBody(host); });
-    var th = function (k, def) { return function (e) { var v = Math.round(+e.target.value); PP.th[k] = v > 0 ? v : def; save(); rebuild(); }; };
-    on("ppLow", "change", th("low", 7)); on("ppOver", "change", th("over", 90)); on("ppTrend", "change", th("trend", 30));
-    on("ppCsv", "click", csv);
-    on("ppReload", "click", function () { PP.skus = null; PP.data = null; PP.sig = ""; render(host); });
     on("ppPrev", "click", function () { if (PP.page > 0) { PP.page--; drawBody(host); } });
     on("ppNext", "click", function () { PP.page++; drawBody(host); });
-    host.querySelectorAll("[data-st]").forEach(function (b) { b.addEventListener("click", function () { PP.status = b.dataset.st; re(); }); });
     host.querySelectorAll("tr[data-cat]").forEach(function (tr) { tr.addEventListener("click", function () { PP.cat = PP.cat === tr.dataset.cat ? "all" : tr.dataset.cat; re(); }); });
-    host.querySelectorAll("input[data-grp]").forEach(function (b) { b.addEventListener("change", function () { PP.groups[b.dataset.grp] = b.checked; save(); render(host); }); });
     host.querySelectorAll("#ppTable th[data-k]").forEach(function (h) {
-      h.addEventListener("click", function () { var k = h.dataset.k; if (k === "act") return; if (PP.sort === k) PP.dir = -PP.dir; else { PP.sort = k; PP.dir = (k === "id" || k === "name" || k === "cat" || k === "n") ? 1 : -1; } PP.page = 0; render(host); });
+      h.addEventListener("click", function () { var k = h.dataset.k; if (PP.sort === k) PP.dir = -PP.dir; else { PP.sort = k; PP.dir = (k === "id" || k === "name" || k === "cat" || k === "avail" || k === "top") ? 1 : -1; } PP.page = 0; render(host); });
     });
   }
 
