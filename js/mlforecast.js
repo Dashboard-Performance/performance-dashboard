@@ -9,7 +9,7 @@
   var C = null, $ = function (id) { return document.getElementById(id); };
   var S = { data: null, err: "", empty: false, seg: "ALL", q: "", sort: "live", dir: -1, page: 0, host: null, bucket: "end", names: null, loading: false };
   var PAGE = 50;
-  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix", dash: "Forecast Model recipe", blend: "Ens. + recipe", blend_gbm: "GBM + recipe" };
+  var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix", dash: "Forecast Model recipe", blend: "Ens. + recipe", blend_gbm: "GBM + recipe", merge3: "Final (recipe + ML + NHITS)", nhits: "NHITS (deep)" };
   var BUCKET_LABEL = { "7": "Day 7", "14": "Day 14", "21": "Day 21", "end": "Month end (locked)" };
   var FEATURE_LABEL = { tsb_b30: "Intermittent-demand rate (TSB .2/.2)", tsb_c30: "Intermittent-demand rate (TSB .5/.1)", dash_ens: "Recent-rate rules average", dash_rate: "Forecast Model recipe (30 days)", m1: "Last month", m2: "2 months ago", m3: "3 months ago", m4: "4 months ago", mtd: "Month to date", mtd_rr: "Month-to-date pace", r3: "Pace 3d", r7: "Pace 7d", r14: "Pace 14d", r30: "Pace 30d", r60: "Pace 60d", r90: "Pace 90d",
     r7_r30: "7d vs 30d", r14_r60: "14d vs 60d", r30_r90: "30d vs 90d", slope30: "30-day trend", cv30: "30-day volatility", zero30: "Zero-sale days", maxshare30: "Spikiness", cr14: "Confirmation rate", dr_mature: "Delivery rate",
@@ -23,7 +23,7 @@
     under_demand: ["Under-forecast · stock was there", "Demand rose with stock on hand"], over_demand: ["Over-forecast · stock was there", "Demand fell with stock on hand"],
     empty_restocked: ["Empty at month start · restocked", "No stock on day 1, a buy arrived in the month"], empty_no_restock: ["Empty at month start · no restock", "No stock and nothing arrived"],
     stockout: ["Ran out in the month", "Out of stock ≥ 30% of the days, forecast above actual"], no_stock_data: ["Not in the Stock Archive", ""] };
-  var MODEL_COLS = ["naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal", "dash", "blend", "blend_gbm"];
+  var MODEL_COLS = ["merge3", "naive", "ma3", "pace14", "pace_mtd", "gbm_l1", "gbm_l1_cal", "gbm_tw", "gbm_log", "ens", "ens_cal", "dash", "blend", "blend_gbm"];   // v2.3: merge3 = what is published
 
   function esc(v) { return C && C.esc ? C.esc(v) : String(v == null ? "" : v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function n0(v) { return v == null || isNaN(v) ? "—" : Math.round(v).toLocaleString("en-US"); }
@@ -152,14 +152,14 @@
   function monthTable(D, bk) {
     var rows = (((D.accuracy || {}).byMonth || {})[bk]) || [];
     if (!rows.length) return '<div class="mlf-empty">No finished months to replay yet.</div>';
-    var cols = [["ens", "Ensemble"], ["gbm_l1", "GBM"], ["pace14", "Pace 14d"], ["naive", "Last month"]];
+    var cols = [["merge3", "Final"], ["nhits", "NHITS"], ["dash", "Recipe"], ["ens", "Ensemble"], ["gbm_l1", "GBM"], ["pace14", "Pace 14d"], ["naive", "Last month"]].filter(function (c) { return rows.some(function (r) { return r[c[0]] != null; }); });
     return '<div class="table-responsive"><table class="mlf-t"><thead><tr><th>Month</th><th class="num">Actual</th><th class="num">Ensemble forecast</th><th class="num">Bias</th>' + cols.map(function (c) { return '<th class="num">' + c[1] + ' acc.</th>'; }).join("") + '</tr></thead><tbody>' +
       rows.map(function (r) {
         var best = -1e9, bk2 = ""; cols.forEach(function (c) { if (r[c[0]] != null && r[c[0]] > best) { best = r[c[0]]; bk2 = c[0]; } });
         var bias = r.ensF != null && r.actual ? (r.ensF / r.actual - 1) * 100 : null;
         return '<tr><td>' + esc(monthName(r.month)) + '</td><td class="num">' + n0(r.actual) + '</td><td class="num">' + n0(r.ensF) + '</td><td class="num ' + (bias == null ? "" : bias >= 0 ? "mlf-up" : "mlf-down") + '">' + (bias == null ? "—" : (bias >= 0 ? "+" : "") + pct(bias)) + '</td>' +
           cols.map(function (c) { return '<td class="num' + (c[0] === bk2 ? " best" : "") + '">' + pct(r[c[0]]) + '</td>'; }).join("") + '</tr>';
-      }).join("") + '</tbody></table></div><p class="mlf-note">Each month is forecast only with what was known on that day of the month before it. Accuracy = 1 − total absolute error ÷ total actual pieces. Green = best of the four on that month.</p>';
+      }).join("") + '</tbody></table></div><p class="mlf-note">Each month is forecast only with what was known on that day of the month before it. Accuracy = 1 − total absolute error ÷ total actual pieces. Green = the best one on that month. Final = what the dashboard shows (Forecast Model recipe + ML + NHITS in equal parts).</p>';
   }
   function splitTable(es) {
     var keys = Object.keys(SPLIT_LABEL);
