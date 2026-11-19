@@ -4526,6 +4526,8 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
       if (hasCm) { o.pDlv = 0; o.pCnf = 0; PO_CM3_KEYS.forEach(k => { o["p_" + k] = 0; }); }
       byKey.set(key, o);
     }
+    // v1.18.3 (Provision Products): ACTIVE_MERCHANTS_MTD — distinct merchants so far this month; the largest of the product-day's lines
+    if (ix["ACTIVE_MERCHANTS_MTD"] !== undefined) { const am = cellNumber(at(c, "ACTIVE_MERCHANTS_MTD")); o.activeMerchantsMtd = Math.max(o.activeMerchantsMtd || 0, am); }
     Object.keys(PO_COLS).forEach(k => { o[k] += cellNumber(at(c, PO_COLS[k])); });
     if (hasCm && /^(true|yes|1)$/i.test(cellText(at(c, "IS_PRIMARY")).trim())) {
       o.pDlv += cellNumber(at(c, "DLV_PIECES_ACTUAL")); o.pCnf += cellNumber(at(c, "CNF_PIECES_ACTUAL"));
