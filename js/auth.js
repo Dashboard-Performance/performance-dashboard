@@ -121,9 +121,23 @@
   }
 
   // v1.16.0 — staff sign-in through the Worker + the token on every Worker call
+  // v1.18.3: a time limit (it could wait forever before) + one quiet retry when the Worker / Apps Script hiccups
+  const STAFF_LOGIN_TIMEOUT_MS = 30000;
+  function staffLoginOnce(email, password) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), STAFF_LOGIN_TIMEOUT_MS);
+    return fetch(CONFIG.WORKER_URL + "?action=staffLogin", { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ email: email, password: password }), signal: controller.signal })
+      .then((r) => r.json().then((j) => (j && typeof j === "object" ? j : { success: false, transient: true })).catch(() => ({ success: false, transient: true, message: "Server error " + r.status })),
+        (err) => ({ success: false, transient: true, message: err && err.name === "AbortError" ? "Server is busy right now — please try again in a moment." : "Could not reach the server. Please check your connection." }))
+      .finally(() => clearTimeout(timer));
+  }
   function staffLogin(email, password) {
-    return fetch(CONFIG.WORKER_URL + "?action=staffLogin", { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ email: email, password: password }) })
-      .then((r) => r.json().catch(() => ({ success: false, message: "Server error " + r.status })));
+    return staffLoginOnce(email, password).then((r) => {
+      if (r && r.success) return r;
+      // retry once only when the answer never came / was not JSON / was a 5xx — never on a wrong password
+      const busy = r && (r.transient || /^Server (error 5|is busy)/.test(r.message || ""));
+      return busy ? new Promise((ok) => setTimeout(ok, 1500)).then(() => staffLoginOnce(email, password)) : r;
+    });
   }
   (function wrapFetch() {
     const orig = window.fetch;
@@ -167,6 +181,8 @@
   const AUTH_API_TIMEOUT_MS = 25000;
   // Login attempt budget: shorter than the general timeout so a stalled call is retried instead of hanging.
   const LOGIN_ATTEMPT_MS = 12000;
+  // Sign-up: the server reads the Users sheet (~3 s) and hashes the password (a few s) — give it room before calling it busy.
+  const SIGNUP_TIMEOUT_MS = 45000;
 
   // v1.1.1: ⚠️ ردود أي Apps Script Web App (كبيرة أو صغيرة — حتى heartbeat
   // الصغيرة دي) بتتوصّل فعليًا عن طريق تحويل داخلي لمسار
@@ -666,19 +682,26 @@
       }
 
       const stop = startBusy(submitBtn, hintEl, "Creating account…");
+      // v1.18.3: when the answer is slow or lost, the account may still have been written. So after a timeout / "busy" /
+      // "already registered" we try to SIGN IN with the same email + password: if that works the user is in, with no second
+      // attempt and no confusing "already registered".
+      const signInAfter = (fallbackMsg) => staffLogin(email, password).then((r2) => {
+        if (r2 && r2.success) { finishAuth(r2, "signup"); return; }
+        errorEl.textContent = fallbackMsg || (r2 && r2.message) || "Account created — please sign in.";
+      });
       // The server decides who may sign up (taager.com or an admin-invited email).
-      callApi({ action: "signup", name: name, email: email, password: password, role: role })
+      callApi({ action: "signup", name: name, email: email, password: password, role: role }, 1, SIGNUP_TIMEOUT_MS)
         .then((res) => {
           if (!res || !res.success) {
-            errorEl.textContent = (res && res.message) || "Could not create the account.";
+            const msg = (res && res.message) || "Could not create the account.";
+            if (res && (res.busy || /already registered/i.test(msg))) return signInAfter(msg);
+            errorEl.textContent = msg;
             return;
           }
           // the account exists now — sign in through the Worker to get the staff token
-          return staffLogin(email, password).then((r2) => {
-            if (!r2 || !r2.success) { errorEl.textContent = (r2 && r2.message) || "Account created — please sign in."; return; }
-            finishAuth(r2, "signup");
-          });
+          return signInAfter(null);
         })
+        .catch((err) => signInAfter(err.message || "Something went wrong. Please try again."))
         .catch((err) => {
           errorEl.textContent = err.message || "Something went wrong. Please try again.";
         })
