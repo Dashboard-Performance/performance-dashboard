@@ -7,7 +7,7 @@
 (function () {
   "use strict";
   var C = null, $ = function (id) { return document.getElementById(id); };
-  var S = { data: null, err: "", empty: false, seg: "ALL", q: "", sort: "live", dir: -1, page: 0, host: null, bucket: "end", names: null, loading: false };
+  var S = { data: null, err: "", empty: false, seg: "ALL", q: "", sort: "live", dir: -1, page: 0, host: null, bucket: "end", names: null, loading: false, beh: "" };
   var PAGE = 50;
   var MODEL_LABEL = { naive: "Last month", ma3: "3-mo avg", pace14: "Pace 14d", pace30: "Pace 30d", pace_mtd: "Pace MTD", gbm_l1: "GBM", gbm_tw: "GBM Tw", gbm_log: "GBM log", ens: "Ensemble", gbm_l1_cal: "GBM+fix", ens_cal: "Ens.+fix", dash: "Forecast Model recipe", blend: "Ens. + recipe", blend_gbm: "GBM + recipe", merge3: "Final (recipe + ML + NHITS)", nhits: "NHITS (deep)" };
   var BUCKET_LABEL = { "7": "Day 7", "14": "Day 14", "21": "Day 21", "end": "Month end (locked)" };
@@ -41,7 +41,7 @@
       ".mlf-t th.s{cursor:pointer}.mlf-t th.s:hover{color:var(--text)}.mlf-t td{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent)}.mlf-t .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}" +
       ".mlf-t td.best{font-weight:800;color:var(--green)}.mlf-t td.champ{box-shadow:inset 0 -2px 0 var(--accent)}.mlf-sku b{display:block;font-weight:650}.mlf-sku span{color:var(--text-dim);font-size:11px}" +
       ".mlf-pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--text2)}.mlf-pill.A{background:color-mix(in srgb,var(--green) 18%,transparent);color:var(--green)}.mlf-pill.B{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}" +
-      ".mlf-up{color:var(--green)}.mlf-down{color:var(--red,#e5484d)}.mlf-dim{color:var(--text-dim)}.mlf-note{color:var(--text-dim);font-size:12.5px;line-height:1.55;margin:8px 2px}" +
+      ".mlf-beh{white-space:nowrap;font-size:12.5px}#mlfBeh{min-height:32px;padding:0 8px;border-radius:8px;border:1px solid var(--line2);background:var(--panel);color:var(--text);margin-right:6px}.mlf-up{color:var(--green)}.mlf-down{color:var(--red,#e5484d)}.mlf-dim{color:var(--text-dim)}.mlf-note{color:var(--text-dim);font-size:12.5px;line-height:1.55;margin:8px 2px}" +
       ".mlf-two{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:14px;margin:14px 0}@media(max-width:1250px){.mlf-two{grid-template-columns:1fr}}" +
       ".mlf-empty{padding:28px 18px;color:var(--text-dim);font-size:14px;line-height:1.7}.mlf-empty code{background:color-mix(in srgb,var(--text) 8%,transparent);padding:1px 6px;border-radius:6px}" +
       ".mlf-imp div{display:grid;grid-template-columns:200px 1fr 54px;gap:10px;align-items:center;padding:5px 0;font-size:13px}.mlf-imp i{display:block;height:8px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,transparent),var(--accent))}.mlf-imp b{text-align:right;font-variant-numeric:tabular-nums}.mlf-pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding-top:10px;font-size:13px;color:var(--text-dim)}";
@@ -60,13 +60,37 @@
       .then(function () { S.loading = false; draw(); });
   }
 
+  // ---- Behavior per SKU (v1.18.3) — the same tag the Forecast Model gives: its own functions (fcBuildSeries → fcFeatures → fcCategorize)
+  // on the last 30 FULL days of confirmed pieces, bundles split into their singles (Main), so a SKU reads the same here and there.
+  // A SKU with no confirmed piece in those 30 days = "No sales" (the Forecast Model has nothing to read from it either).
+  var BEH_ORDER = ["Shifting Up", "Shifting Down", "Steady", "Non-Linear / Volatile", "Spiky", "No sales"];
+  var BEH_CLS = { "Shifting Up": "mlf-up", "Shifting Down": "mlf-down" };
+  var BEH = { key: "", map: null, from: null, to: null };
+  function behaviorMap() {
+    try {
+      if (typeof fcBuildSeries !== "function" || typeof fcCategorize !== "function" || typeof fcFeatures !== "function" || typeof buildDebundleProductMap !== "function") return {};
+      var rows = state.allParsedRows || [], deb = state.debundleMap || [];
+      var key = rows.length + "|" + deb.length + "|" + (rows.length ? rows[rows.length - 1].timestamp : 0) + "|" + new Date().toDateString();
+      if (BEH.map && BEH.key === key) return BEH.map;
+      var pm = buildDebundleProductMap(deb, state.cogsMap || new Map()).productMap;
+      var mappingsFor = function (sku) { var m = pm.get(sku); return (m && m.length) ? m : [{ singleId: sku, quantity: 1 }]; };
+      var sd = fcBuildSeries([], rows, mappingsFor, new Date()), out = {}, W = typeof FC_WINDOW_DAYS === "number" ? FC_WINDOW_DAYS : 30;
+      if (sd.lastFullIdx >= W - 1) {
+        sd.series.forEach(function (arr, sku) { var f = fcFeatures(arr, sd.lastFullIdx); out[sku] = f.total > 0 ? fcCategorize(f) : "No sales"; });
+        BEH.from = sd.days[sd.lastFullIdx - W + 1]; BEH.to = sd.days[sd.lastFullIdx];
+      }
+      BEH.key = key; BEH.map = out;
+      return out;
+    } catch (e) { console.warn("[ML Forecast] behavior", e); return {}; }
+  }
+
   // ---- numbers derived from what the model published
   function rowsOf(D) {
-    var live = (D.live && D.live.rows) || {}, lock = (D.locked && D.locked.rows) || {}, now = (D.nowcast && D.nowcast.rows) || {}, names = nameMap(), out = [], seen = {};
+    var live = (D.live && D.live.rows) || {}, lock = (D.locked && D.locked.rows) || {}, now = (D.nowcast && D.nowcast.rows) || {}, names = nameMap(), beh = behaviorMap(), out = [], seen = {};
     function add(sku) {
       if (seen[sku]) return; seen[sku] = 1;
       var l = live[sku], k = lock[sku], c = now[sku];
-      out.push({ sku: sku, name: names[sku] || "", seg: (l && l[3]) || (k && k[3]) || "C",
+      out.push({ sku: sku, name: names[sku] || "", seg: (l && l[3]) || (k && k[3]) || "C", beh: beh[sku] || "No sales",
         live: l ? l[0] : 0, liveLo: l ? l[1] : 0, liveHi: l ? l[2] : 0,
         locked: k ? k[0] : null, lockLo: k ? k[1] : null, lockHi: k ? k[2] : null,
         mtd: c ? c[0] : null, eom: c ? c[1] : null,
@@ -117,20 +141,23 @@
         D.importance.map(function (r) { return '<div><span title="' + esc(r[0]) + '">' + esc(FEATURE_LABEL[r[0]] || r[0]) + '</span><i style="width:' + Math.max(2, r[1] / mx * 100).toFixed(0) + '%"></i><b>' + r[1].toFixed(1) + '%</b></div>'; }).join("") + '</div></div>';
     }
     // per SKU table
-    var q = S.q.trim().toLowerCase(), list = seg.filter(function (r) { return !q || r.sku.toLowerCase().indexOf(q) >= 0 || r.name.toLowerCase().indexOf(q) >= 0; });
+    var q = S.q.trim().toLowerCase(), list = seg.filter(function (r) { return (!S.beh || r.beh === S.beh) && (!q || r.sku.toLowerCase().indexOf(q) >= 0 || r.name.toLowerCase().indexOf(q) >= 0); });
+    var behCount = {}; seg.forEach(function (r) { behCount[r.beh] = (behCount[r.beh] || 0) + 1; });
+    var behWin = BEH.from && BEH.to ? BEH.from.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " – " + BEH.to.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "the last 30 full days";
     list.sort(function (a, b) { var x = a[S.sort], y = b[S.sort]; if (typeof x === "string" || typeof y === "string") return S.dir * String(x || "").localeCompare(String(y || "")); return S.dir * ((x == null ? -Infinity : x) - (y == null ? -Infinity : y)); });
     var pages = Math.max(1, Math.ceil(list.length / PAGE)); if (S.page >= pages) S.page = pages - 1;
     var th = function (k, l, num) { return '<th class="s' + (num ? " num" : "") + '" data-sort="' + k + '">' + l + (S.sort === k ? (S.dir < 0 ? " ↓" : " ↑") : "") + '</th>'; };
-    h += '<div class="tw-card"><div class="mlf-bar" style="margin-top:0"><b>Per SKU</b><span><input id="mlfQ" placeholder="Search SKU or name…" value="' + esc(S.q) + '"> <button class="btn btn-outline small" id="mlfExp">Export CSV</button></span></div>' +
-      '<div class="table-responsive"><table class="mlf-t"><thead><tr>' + th("sku", "SKU") + th("seg", "Seg") + th("locked", "Locked · " + monthName(D.currentMonth).split(" ")[0], 1) + th("mtd", "MTD", 1) + th("eom", "Pace → end", 1) + th("pace", "vs locked", 1) +
+    h += '<div class="tw-card"><div class="mlf-bar" style="margin-top:0"><b>Per SKU</b><span><select id="mlfBeh" title="Demand behavior over ' + esc(behWin) + ' — the same tag as the Forecast Model"><option value="">All Behaviors</option>' + BEH_ORDER.filter(function (b) { return behCount[b]; }).map(function (b) { return '<option value="' + esc(b) + '"' + (S.beh === b ? " selected" : "") + '>' + esc(b) + " (" + n0(behCount[b]) + ")</option>"; }).join("") + '</select> <input id="mlfQ" placeholder="Search SKU or name…" value="' + esc(S.q) + '"> <button class="btn btn-outline small" id="mlfExp">Export CSV</button></span></div>' +
+      '<div class="table-responsive"><table class="mlf-t"><thead><tr>' + th("sku", "SKU") + th("seg", "Seg") + th("beh", "Behavior") + th("locked", "Locked · " + monthName(D.currentMonth).split(" ")[0], 1) + th("mtd", "MTD", 1) + th("eom", "Pace → end", 1) + th("pace", "vs locked", 1) +
       th("live", "Live · " + monthName(D.targetMonth).split(" ")[0], 1) + '<th class="num">P10 – P90</th></tr></thead><tbody>' +
       list.slice(S.page * PAGE, S.page * PAGE + PAGE).map(function (r) {
-        return '<tr><td class="mlf-sku"><b>' + esc(r.name || r.sku) + '</b><span>' + (r.name ? esc(r.sku) : "") + '</span></td><td><span class="mlf-pill ' + r.seg + '">' + r.seg + '</span></td>' +
+        return '<tr><td class="mlf-sku"><b>' + esc(r.name || r.sku) + '</b><span>' + (r.name ? esc(r.sku) : "") + '</span></td><td><span class="mlf-pill ' + r.seg + '">' + r.seg + '</span></td><td class="mlf-beh ' + (BEH_CLS[r.beh] || (r.beh === "No sales" ? "mlf-dim" : "")) + '" title="Demand behavior over ' + esc(behWin) + '">' + esc(r.beh) + '</td>' +
           '<td class="num">' + n0(r.locked) + '</td><td class="num">' + n0(r.mtd) + '</td><td class="num">' + n0(r.eom) + '</td>' +
           '<td class="num ' + (r.pace == null ? "" : r.pace >= 0 ? "mlf-up" : "mlf-down") + '">' + (r.pace == null ? "—" : (r.pace >= 0 ? "+" : "") + pct(r.pace, 0)) + '</td>' +
           '<td class="num"><b>' + n0(r.live) + '</b></td><td class="num mlf-dim">' + n0(r.liveLo) + ' – ' + n0(r.liveHi) + '</td></tr>';
-      }).join("") + (list.length ? "" : '<tr><td colspan="8" class="mlf-empty">Nothing matches.</td></tr>') + '</tbody></table></div>' +
+      }).join("") + (list.length ? "" : '<tr><td colspan="9" class="mlf-empty">Nothing matches.</td></tr>') + '</tbody></table></div>' +
       '<div class="mlf-pager"><span>' + n0(list.length) + ' SKUs</span><button class="btn btn-outline small" id="mlfPrev"' + (S.page ? "" : " disabled") + '>Prev</button><span>Page ' + (S.page + 1) + ' of ' + pages + '</span><button class="btn btn-outline small" id="mlfNext"' + (S.page < pages - 1 ? "" : " disabled") + '>Next</button></div></div>';
+    h += '<p class="mlf-note">Behavior = the Forecast Model\'s demand pattern over ' + esc(behWin) + ' (confirmed pieces, bundles split into their singles): Shifting Up, Shifting Down, Steady, Non-Linear / Volatile or Spiky; No sales = nothing confirmed in those days.</p>';
     h += '<p class="mlf-note">Data used: ' + esc(dataLine(D)) + '. Model: ' + esc(Object.keys(ch).map(function (s) { return "segment " + s + " → " + (MODEL_LABEL[ch[s]] || ch[s]); }).join(" · ")) + ' (the candidate with the best accuracy over the last finished months). Trained on ' + ((D.live && D.live.train && D.live.train.months) || "?") + ' finished months.</p></div>';
     var keepFocus = document.activeElement && document.activeElement.id === "mlfQ", caret = keepFocus ? document.activeElement.selectionStart : 0;
     host.innerHTML = h; wire(D, list);
@@ -184,13 +211,14 @@
     var host = S.host;
     host.querySelectorAll("[data-seg]").forEach(function (b) { b.onclick = function () { S.seg = b.dataset.seg; S.page = 0; draw(); }; });
     host.querySelectorAll("[data-bk]").forEach(function (b) { b.onclick = function () { S.bucket = b.dataset.bk; draw(); }; });
-    host.querySelectorAll("[data-sort]").forEach(function (t) { t.onclick = function () { var k = t.dataset.sort; if (S.sort === k) S.dir = -S.dir; else { S.sort = k; S.dir = k === "sku" || k === "seg" ? 1 : -1; } S.page = 0; draw(); }; });
+    host.querySelectorAll("[data-sort]").forEach(function (t) { t.onclick = function () { var k = t.dataset.sort; if (S.sort === k) S.dir = -S.dir; else { S.sort = k; S.dir = k === "sku" || k === "seg" || k === "beh" ? 1 : -1; } S.page = 0; draw(); }; });
     var q = $("mlfQ"); if (q) q.oninput = function (e) { S.q = e.target.value; S.page = 0; draw(); };
+    var bs = $("mlfBeh"); if (bs) bs.onchange = function (e) { S.beh = e.target.value; S.page = 0; draw(); };
     var p = $("mlfPrev"), n = $("mlfNext"); if (p) p.onclick = function () { S.page = Math.max(0, S.page - 1); draw(); }; if (n) n.onclick = function () { S.page++; draw(); };
     var ex = $("mlfExp"); if (ex) ex.onclick = function () {
       var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
-      var lines = ["SKU,Name,Segment,Locked " + D.currentMonth + ",MTD,Pace to month end,Pace vs locked %,Live " + D.targetMonth + ",P10,P90"];
-      list.forEach(function (r) { lines.push([r.sku, r.name, r.seg, r.locked, r.mtd, r.eom, r.pace == null ? "" : r.pace.toFixed(1), r.live, r.liveLo, r.liveHi].map(cell).join(",")); });
+      var lines = ["SKU,Name,Segment,Behavior,Locked " + D.currentMonth + ",MTD,Pace to month end,Pace vs locked %,Live " + D.targetMonth + ",P10,P90"];
+      list.forEach(function (r) { lines.push([r.sku, r.name, r.seg, r.beh, r.locked, r.mtd, r.eom, r.pace == null ? "" : r.pace.toFixed(1), r.live, r.liveLo, r.liveHi].map(cell).join(",")); });
       var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv" })); a.download = "ml-forecast-" + D.asOf + ".csv"; document.body.appendChild(a); a.click(); a.remove();
     };
   }
@@ -202,6 +230,6 @@
     C.registerView("mlForecast", { sectionId: "viewMlForecast", navId: "navMlForecast", label: "ML Forecast", sub: "A model that learns every day · next month locks on the 1st", open: true, render: render });
     var nav = $("navMlForecast"); if (nav && !nav.__mlf) { nav.__mlf = 1; nav.addEventListener("click", function () { window.switchView("mlForecast"); }); }
   }
-  window.MlForecast = { rowsOf: rowsOf, state: S };
+  window.MlForecast = { rowsOf: rowsOf, state: S, render: render, behaviorMap: behaviorMap };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 180); }); else setTimeout(boot, 180);
 })();
