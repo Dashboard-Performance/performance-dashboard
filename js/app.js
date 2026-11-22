@@ -81,6 +81,10 @@ const ACM_USES_MERCHANT_ONLY = false;
 const LOAD_MERCHANT_ONLY = true;
 // v1.18.0 — Product Only (Metabase public question): one row per (DATE_GROUP x PRODUCT_ID x IS_PRIMARY), Egypt, no merchant dimension.
 const PRODUCT_ONLY_GID = "7100000002";
+// v1.18.3 — Product API (Metabase "Product - API"): one row per (day x product x IS_PRIMARY), the previous month + this month up to
+// YESTERDAY. Bundles stay bundles and singles are what sold alone (the same products as Main), with the full CM3 walk. Commercial Plan and
+// Analyst / Products read it; Main stays their fallback (not loaded, Settings forces Main, a Merchant account, or an ACM filter on Commercial Plan).
+const PRODUCT_API_GID = "7100000003";
 
 
 // الشهر اللي لوحة Incentive Merchants بتفتح عليه افتراضيًا (من غير ما المستخدم
@@ -177,7 +181,9 @@ const SINGLE_SKU_TARGETS_GID = "1620722565";
 // مستخدم بس في Commercial Plan عشان نحسب نصيب كل Single من قيمة
 // البندل (GMV/CM3/PPM) بالنسبة لتكلفته (COGS) داخل نفس البندل — بالظبط زي
 // عمود "%" في شيت الـ BUNDLE TABLE المرجعي (Single Cogs ÷ Bundle Cogs).
-const COGS_GID = "1724469150";
+// v1.18.3 — COGS comes from Metabase "COGS - API" (one row per SKU x country: WAVG = weighted average purchase price, LAST_PURCHASE_PRICE),
+// filtered to EGY in parseCogsApi. Bundles are in it too (sum of their singles x quantity). The old COGS tab (gid 1724469150) is no longer read.
+const COGS_GID = "7100000004";
 // شيت Availability Locking (تحت Poor Matches): بيبين إيه الـ Single SKUs اللي
 // جزء (أو كل) الاستوك بتاعها متقفل (Locked) لصالح تاجر معين (Solo) أو أكتر
 // من تاجر، وبيمنع باقي التجار إنهم يعرضوا/يبيعوا نفس الـ SKU ده لحد ما القفل
@@ -327,6 +333,8 @@ const METABASE_SOURCES = {
   [MERCHANT_SEGMENTATION_GID]:{ label: "Merchant Segmentation",    format: "json" },
   ...(LOAD_MERCHANT_ONLY ? { [MERCHANT_ONLY_GID]: { label: "Merchant Only", format: "csv" } } : {}),
   [PRODUCT_ONLY_GID]:         { label: "Product Only",             format: "csv" },
+  [PRODUCT_API_GID]:          { label: "Product API",              format: "csv" },
+  [COGS_GID]:                 { label: "COGS",                     format: "json" },
   [CONFIRMED_BY_DAY_GID]:     { label: "Confirmed by Day",         format: "json" }
 };
 const METABASE_TIMEOUT_MS = 180000;
@@ -619,6 +627,7 @@ const state = {
   merchantSegSourceRows: [], // شيت Merchant Segmentation الجديد (MERCHANT_SEGMENTATION_GID) — مصدر Confirmed Orders لجدول Merchant Segmentation & Projections بس
   merchantSegHistoryRows: [], // أرشيف شهور سابقة (MERCHANT_SEG_HISTORY_GIDS) — مصدر Incentive Merchants للشهور الفاتت فقط
   merchantOnlyRows: [], // v1.18.0 — Merchant Only (Egypt): per day x merchant x ACC_MANAGER — source of the ACM pages
+  productApiRows: [], // v1.18.3 — Product API: per day x product (bundles + singles, like Main), up to yesterday — Commercial Plan + Analyst / Products
   productOnlyRows: [], // v1.18.0 — Product Only (Egypt): per day x product, in the same shape as Main rows — source of the product + category pages
   supplyRepackRows: [], // شيت SUPPLY_REPACK_GID — [{ts, sku, qty, status}]
   repackMap: new Map(), // شيت WareHouse (WAREHOUSE_REPACK_GID) — عمود Repack في Purchase Plan (تحت Commercial Plan)
@@ -1759,6 +1768,7 @@ function computeSnapshotFingerprint(snapshot) {
   (snapshot.merchantSegSourceRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
   (snapshot.merchantSegHistoryRows || []).forEach(r => { segConfirmed += r.confirmedOrders || 0; segRowsCount++; });
   const poRows = snapshot.productOnlyRows || []; let poPieces = 0; poRows.forEach(r => { poPieces += r.placedPieces || 0; });
+  const paRows = snapshot.productApiRows || []; let paPieces = 0, paCm3 = 0; paRows.forEach(r => { paPieces += r.placedPieces || 0; paCm3 += r.cm3 || 0; });
   let moPlaced = 0, moGmv = 0; const moRows = snapshot.merchantOnlyRows || [];
   moRows.forEach(r => { moPlaced += r.placedOrders || 0; moGmv += r.deliveredGmv || 0; });
   const parts = [
@@ -1768,7 +1778,7 @@ function computeSnapshotFingerprint(snapshot) {
     (snapshot.debundleMap || []).length, Object.keys(snapshot.singleSkuTargets || {}).length,
     (snapshot.inboundRows || []).length, (snapshot.newSegRows || []).length,
     (snapshot.availabilityLockingRows || []).length,
-    segRowsCount, Math.round(segConfirmed), moRows.length, Math.round(moPlaced), Math.round(moGmv), poRows.length, Math.round(poPieces)
+    segRowsCount, Math.round(segConfirmed), moRows.length, Math.round(moPlaced), Math.round(moGmv), poRows.length, Math.round(poPieces), paRows.length, Math.round(paPieces), Math.round(paCm3)
   ];
   return parts.join("|");
 }
@@ -2901,6 +2911,24 @@ function parseAcmSalesPlanSheet(payload) {
 // (Product/Single ID), Cost, LAST_PP, Country. بيرجع Map(productId -> cost).
 // مستخدم بس في Commercial Plan لحساب وزن كل Single داخل البندل.
 // -------------------------------------------------------------------------
+// v1.18.3 — COGS from Metabase "COGS - API" (COGS_GID): columns found by name. Keeps the rows of one country (EGY) when the query has a
+// COUNTRY column; cost = WAVG (the weighted average purchase price, what the old tab's "Cost" column held), LAST_PURCHASE_PRICE when WAVG is empty.
+function parseCogsApi(payload, country) {
+  const cols = (payload && payload.table && payload.table.cols) || [];
+  const ix = {}; cols.forEach((c, i) => { ix[String(c.label || "").trim().toUpperCase()] = i; });
+  const skuI = ix["SKU"] !== undefined ? ix["SKU"] : ix["PRODUCT_ID"], costI = ix["WAVG"] !== undefined ? ix["WAVG"] : ix["COST"], lastI = ix["LAST_PURCHASE_PRICE"], ctyI = ix["COUNTRY"];
+  if (skuI === undefined || (costI === undefined && lastI === undefined)) throw new Error("COGS query is missing columns (needs SKU and WAVG or LAST_PURCHASE_PRICE)");
+  const want = String(country || "EGY").toUpperCase(), map = new Map();
+  for (const r of ((payload.table && payload.table.rows) || [])) {
+    const c = r.c || [];
+    const sku = cellText(c[skuI]).trim(); if (!sku) continue;
+    if (ctyI !== undefined && cellText(c[ctyI]).trim().toUpperCase() !== want) continue;
+    let cost = costI !== undefined ? cellNumber(c[costI]) : 0;
+    if (!(cost > 0) && lastI !== undefined) cost = cellNumber(c[lastI]);
+    if (cost > 0 && !map.has(sku)) map.set(sku, cost);
+  }
+  return map;
+}
 function parseCogsSheet(payload) {
   const rawRows = payload?.table?.rows ?? [];
   const map = new Map();
@@ -3202,7 +3230,8 @@ function escapeHtml(str) {
 const ppmAnalystState = { data: [], filtered: [], sortKey: "deliveredGmv", sortDir: "desc", page: 0 };
 
 function preparePpmAnalystProductsData() {
-  const mainRowsAll = allSkuRows();   // bundles + singles -> Main (Matches)
+  const mainRowsAll = planProductRows();   // bundles + singles -> Product API (v1.18.3), Main when it is not loaded
+  const dShift = planDayShift(mainRowsAll);
 
   // "الشهر ده" = الشهر الحقيقي الحالي (تاريخ الجهاز)، بنفس فورمات monthYear
   // المستخدم أصلاً في parseMainSheet، عشان نلاقي بالظبط صفوف نفس الشهر ده.
@@ -3217,7 +3246,8 @@ function preparePpmAnalystProductsData() {
   // CM3/TOTAL CM3/CM3% — بطلب صريح، نفس منطق PPM Analyst/Single بالظبط:
   // كات أوف الـ CM3 (CM3_LAG_DAYS يوم) بس على العمود ده، باقي الأعمدة (زي
   // فوق) من غير أي كات أوف.
-  const cm3CutoffTs = getCm3LagCutoffTimestamp(monthRows);
+  const cm3Raw = getCm3LagCutoffTimestamp(monthRows);
+  const cm3CutoffTs = cm3Raw ? dayShift(cm3Raw, dShift) : 0;   // Product API ends yesterday → the 5 days count from today, like Main
 
   // DOH بيتحسب من كل تاريخ MAIN_GID (آخر 3 أيام فعليين)، مش بس صفوف الشهر
   // الحالي — بنفس منطق Recommended Tracker بالظبط.
@@ -3330,7 +3360,8 @@ function preparePpmAnalystProductsData() {
     // Priceing_PPM = Selling Price − Profit − Cogs، وLAST ASP PLACED = نفس حسبة
     // عمود ASP في Inventory بالظبط (مجموع GMV ÷ مجموع Pieces)، بس على الـ
     // Placed مش الـ Delivered — وPPM% = Priceing_PPM ÷ LAST ASP PLACED.
-    const cogs = (state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0;
+    // v1.18.3: the COGS tab first; when it has none (it can break), the latest purchase price per piece in Product API (bundles too)
+    const cogs = ((state.cogsMap && state.cogsMap.get) ? (state.cogsMap.get(sku) || 0) : 0) || productApiCogs(sku);
     const ppmSku = sellingPrice - profit - cogs;
     // LAST ASP PLACED = Placed GMV ÷ Placed Pieces بتوع آخر يوم بس فيه
     // Placed فعلاً (أحدث تاريخ في placedByDate) — مش مجموع/متوسط الشهر كله.
@@ -4499,16 +4530,20 @@ function buildNameBySku(mainRows, productsInfoRows) {
   (productsInfoRows || []).forEach(r => { if (r.PRODUCT_ID && r.PRODUCT_NAME && !m.has(r.PRODUCT_ID)) m.set(r.PRODUCT_ID, String(r.PRODUCT_NAME).trim()); });
   return m;
 }
-function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
+function parseProductOnlySheet(payload, categoryBySku, nameBySku, opts) {
+  opts = opts || {};
+  const COLS = opts.cols || PO_COLS, optional = opts.optional || [], label = opts.label || "Product Only";
   const cols = (payload && payload.table && payload.table.cols) || [];
   const ix = {};
   cols.forEach((c, i) => { ix[String(c.label || "").trim().toUpperCase()] = i; });
-  const missing = ["DATE_GROUP", "PRODUCT_ID"].concat(Object.keys(PO_COLS).map(k => PO_COLS[k])).filter(k => ix[k] === undefined);
-  if (missing.length) throw new Error("Product Only is missing columns: " + missing.join(", "));
+  const missing = ["DATE_GROUP", "PRODUCT_ID"].concat(Object.keys(COLS).filter(k => optional.indexOf(k) < 0).map(k => COLS[k])).filter(k => ix[k] === undefined);
+  if (missing.length) throw new Error(label + " is missing columns: " + missing.join(", "));
   const at = (c, k) => c[ix[k]];
+  const num = (c, k) => (ix[k] === undefined ? 0 : cellNumber(at(c, k)));   // an optional column the query does not have = 0
   const cmNeed = ["IS_PRIMARY", "CNF_PIECES_ACTUAL", "GROSS_DELIVERED_REVENUE", "TOTAL_CM3_DELIVERED", "OPS_AND_SHIPPING_REVENUE_DELIVERED", "SHIPPING_COST_DELIVERED", "VAT_COST_DELIVERED", "PACKAGING_COST_DELIVERED", "RETURN_COST_DELIVERED", "TOTAL_CS_COST_DELIVERED"];
-  const hasCm = cmNeed.every(k => ix[k] !== undefined);
-  try { state.productOnlyCmInfo = { hasCm, missing: cmNeed.filter(k => ix[k] === undefined) }; } catch (e) {}
+  const hasCm = !opts.noCm && cmNeed.every(k => ix[k] !== undefined);
+  if (!opts.noCm) { try { state.productOnlyCmInfo = { hasCm, missing: cmNeed.filter(k => ix[k] === undefined) }; } catch (e) {} }
+  const hasCogs = !!opts.cogs && ix["AVG_COGS_PLACED"] !== undefined;
   const cmSum = (c, list) => list.reduce((a, k) => a + (ix[k] === undefined ? 0 : cellNumber(at(c, k))), 0);
   const byKey = new Map();
   for (const r of ((payload.table && payload.table.rows) || [])) {
@@ -4521,14 +4556,16 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
       const d = new Date(dateStr);   // same parsing as parseMainSheet, so every date cut-off behaves the same
       o = { date: dateStr, monthYear: isNaN(d.getTime()) ? "Unknown Month" : d.toLocaleString("en-US", { month: "long", year: "numeric" }), timestamp: isNaN(d.getTime()) ? 0 : d.getTime(),
         merchantId: "", merchantName: "All merchants", sku, productName: (ix["PRODUCT_NAME"] === undefined ? "" : cellText(at(c, "PRODUCT_NAME")).trim()) || (nameBySku && nameBySku.get(sku)) || "",
-        category: (categoryBySku && categoryBySku.get(sku)) || "Uncategorized", acmName: "Unassigned", source: "productOnly" };
-      Object.keys(PO_COLS).forEach(k => { o[k] = 0; });
+        category: (categoryBySku && categoryBySku.get(sku)) || "Uncategorized", acmName: "Unassigned", source: opts.source || "productOnly" };
+      Object.keys(COLS).forEach(k => { o[k] = 0; });
+      if (hasCogs) o.cogsPerPiece = 0;
       if (hasCm) { o.pDlv = 0; o.pCnf = 0; PO_CM3_KEYS.forEach(k => { o["p_" + k] = 0; }); }
       byKey.set(key, o);
     }
     // v1.18.3 (Provision Products): ACTIVE_MERCHANTS_MTD — distinct merchants so far this month; the largest of the product-day's lines
     if (ix["ACTIVE_MERCHANTS_MTD"] !== undefined) { const am = cellNumber(at(c, "ACTIVE_MERCHANTS_MTD")); o.activeMerchantsMtd = Math.max(o.activeMerchantsMtd || 0, am); }
-    Object.keys(PO_COLS).forEach(k => { o[k] += cellNumber(at(c, PO_COLS[k])); });
+    Object.keys(COLS).forEach(k => { o[k] += num(c, COLS[k]); });
+    if (hasCogs) { const cg = Math.abs(cellNumber(at(c, "AVG_COGS_PLACED"))); if (cg > o.cogsPerPiece) o.cogsPerPiece = cg; }   // purchase price per piece that day (the query shows it negative)
     if (hasCm && /^(true|yes|1)$/i.test(cellText(at(c, "IS_PRIMARY")).trim())) {
       o.pDlv += cellNumber(at(c, "DLV_PIECES_ACTUAL")); o.pCnf += cellNumber(at(c, "CNF_PIECES_ACTUAL"));
       PO_CM3_KEYS.forEach(k => { o["p_" + k] += cmSum(c, PO_CM3_PARTS[k]); });
@@ -4542,6 +4579,31 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku) {
   });
   return rows;
 }
+// v1.18.3 — Product API: the same columns as Product Only minus the order counts. GMV = the selling price WITHOUT the shipping fee
+// (GROSS_*_REVENUE), which is exactly what Main calls PLACED_GMV / DELIVERED_GMV (Oct 2026: 42,650,587 vs Main 42,655,347), so the
+// numbers and the Commercial Plan GMV targets stay comparable. Orders are not in the query (0) — neither page uses them.
+const PA_COLS = Object.assign({}, PO_COLS, { placedGmv: "GROSS_PLACED_REVENUE", confirmedGmv: "GROSS_CONFIRMED_REVENUE", deliveredGmv: "GROSS_DELIVERED_REVENUE" });
+function parseProductApiSheet(payload, categoryBySku, nameBySku) {
+  return parseProductOnlySheet(payload, categoryBySku, nameBySku, { cols: PA_COLS, optional: ["placedOrders", "confirmedOrders", "deliveredOrders"], label: "Product API", source: "productApi", noCm: true, cogs: true });
+}
+// Rows for Commercial Plan + Analyst / Products: Product API when it is loaded, else Main. Main also when Settings forces it
+// (localStorage paMode = "main"), for a Merchant account (Product API is company-wide) and when an ACM is picked (Product API has no merchants).
+function planProductRows(opts) {
+  let forced = ""; try { forced = localStorage.getItem("paMode") || ""; } catch (e) {}
+  let scoped = false; try { scoped = !!(window.TowerCore && window.TowerCore.merchantScope && window.TowerCore.merchantScope()); } catch (e) {}
+  const acm = (opts && opts.acm) || "All";
+  const has = !!(state.productApiRows && state.productApiRows.length);
+  return (!has || forced === "main" || scoped || acm !== "All") ? allSkuRows() : state.productApiRows;
+}
+// Product API stops at yesterday, Main runs until now: with Product API "today" (and the CR / CM3 cutoffs counted from it) is the day after its newest day.
+function planDayShift(rowsAll) { return rowsAll && rowsAll === state.productApiRows ? 1 : 0; }
+// latest purchase price per piece of a SKU in Product API (bundles included) — the fallback when the COGS tab has none
+let __paCogsCache = { rows: null, map: null };
+function productApiCogs(sku) {
+  const rows = state.productApiRows || [];
+  if (__paCogsCache.rows !== rows) { const m = new Map(); rows.forEach(r => { if (!(r.cogsPerPiece > 0)) return; const e = m.get(r.sku); if (!e || r.timestamp > e.ts) m.set(r.sku, { ts: r.timestamp, cogs: r.cogsPerPiece }); }); __paCogsCache = { rows, map: m }; }
+  const e = __paCogsCache.map.get(sku); return e ? e.cogs : 0;
+}
 // "main" | "po": which rows the product-level + category pages read. Product Only is used whenever it is loaded; the Settings switch can force Main.
 // A Merchant-role user always reads Main (their own merchant's rows) — Product Only is company-wide.
 function productMode() {
@@ -4551,7 +4613,8 @@ function productMode() {
 }
 // Product Only = SINGLE SKUs only (bundles are already split into their singles). So:
 //  - productLevelRows(): pages that work on single SKUs only (Analyst / Single, CM3 Analyst / Products, Planner DOH, Supply Chain) -> Product Only when loaded, else Main.
-//  - allSkuRows(): pages / cards that include bundles AND singles (Over View, Inventory & Products Performance, Commercial Plan, PPM Analyst / Products, category actuals) -> always Main (Matches).
+//  - planProductRows() (v1.18.3): Commercial Plan + Analyst / Products -> Product API (bundles + singles, up to yesterday), Main as the fallback.
+//  - allSkuRows(): pages / cards that include bundles AND singles (Over View, Inventory & Products Performance, PPM Analyst / Products, category actuals) -> always Main (Matches).
 function productLevelRows() { return productMode() === "po" ? state.productOnlyRows : (state.allParsedRows || []); }
 function allSkuRows() { return state.allParsedRows || []; }
 // Main vs Product Only totals per month (for the reconciliation table in Control > Settings)
@@ -5282,10 +5345,10 @@ function getSegBadgeClass(segment) {
 // (the 1st / 2nd), the filtered rows hold only the first day or two of the new month, so those days belong to the previous month and are filtered out:
 // every "yesterday" figure came out 0. These windows therefore read the days from the full data (same ACM filter), ending at the latest day of the
 // selection. An older month is unchanged (its whole window lies inside it). A custom date range of the section stays exactly that range.
-function recentWindowRows(sectionKey, selectionRows, fromMs, toMs) {
+function recentWindowRows(sectionKey, selectionRows, fromMs, toMs, baseRows) {
   if (sectionKey && getActiveDateRangeFilter(sectionKey)) return selectionRows;
   const acm = $("acmSelect") ? $("acmSelect").value : "All";
-  return (state.allParsedRows || selectionRows).filter(r => r.timestamp >= fromMs && r.timestamp < toMs && (acm === "All" || r.acmName === acm));
+  return (baseRows || state.allParsedRows || selectionRows).filter(r => r.timestamp >= fromMs && r.timestamp < toMs && (acm === "All" || r.acmName === acm));
 }
 
 function prepareInventoryTableData(rows) {
@@ -7662,16 +7725,21 @@ function computeCommercialPlan(opts) {
     }
   });
 
-  const mainRowsAll = allSkuRows();   // Commercial Plan: bundles + singles -> Main (Matches)
   const selectedMonth = $("monthSelect") ? $("monthSelect").value : "";
   const selectedAcm = $("acmSelect") ? $("acmSelect").value : "All";
+  // v1.18.3: the Commercial Plan page reads Product API (bundles + singles, the full CM3 walk); Main when Product API is missing or an ACM is picked.
+  // Purchase Plan calls this without opts and keeps Main.
+  const mainRowsAll = inPlanOnly ? planProductRows({ acm: selectedAcm }) : allSkuRows();
+  const dShift = planDayShift(mainRowsAll);
   const rows = mainRowsAll.filter(r => (rowMatchesPeriod(r, selectedMonth, "commercialPlan")) && (selectedAcm === "All" || r.acmName === selectedAcm));
 
-  const cm3CutoffTs = getCm3LagCutoffTimestamp(rows); // نفس الـ 4 أيام بتاعة الـ DR والـ CM3
-  const crCutoffTs = getLagCutoffTimestamp(rows, CR_LAG_DAYS); // نفس اليومين بتاعة الـ CR
+  const cm3Raw = getCm3LagCutoffTimestamp(rows), crRaw = getLagCutoffTimestamp(rows, CR_LAG_DAYS);
+  const cm3CutoffTs = cm3Raw ? dayShift(cm3Raw, dShift) : 0; // نفس الـ 4 أيام بتاعة الـ DR والـ CM3 (Product API: counted from the day after its newest day)
+  const crCutoffTs = crRaw ? dayShift(crRaw, dShift) : 0; // نفس اليومين بتاعة الـ CR
 
   let latestTs = 0; rows.forEach(r => { if (r.timestamp > latestTs) latestTs = r.timestamp; });
   const today = new Date(latestTs); today.setHours(0, 0, 0, 0);
+  if (dShift) today.setDate(today.getDate() + dShift);   // Product API ends yesterday: its newest day is a full day, "today" is the next one
   const todayMs = today.getTime();
   const d3Ms = dayShift(todayMs, -3); // Avg Last 3 Days Confirmed
   const elapsedDays = today.getDate() || 1;
@@ -7752,7 +7820,7 @@ function computeCommercialPlan(opts) {
     }
   });
   // Avg Last 3 Days Confirmed — from the days before the latest day, even when they are in the previous month (see recentWindowRows)
-  recentWindowRows("commercialPlan", rows, d3Ms, todayMs + 86400000).forEach(r => {
+  recentWindowRows("commercialPlan", rows, d3Ms, todayMs + 86400000, dShift ? mainRowsAll : null).forEach(r => {
     if (!r.sku || !skuList.has(r.sku)) return;
     const rDate = new Date(r.timestamp); rDate.setHours(0, 0, 0, 0);
     if (rDate.getTime() >= d3Ms) getBucket(r.sku).conf3d += r.confirmedPieces;
@@ -17496,11 +17564,12 @@ const GID_LABELS = {
   [INBOUND_GID]: "Inbound", [PRODUCTS_INFO_GID]: "Products Info",
   [BEGIN_INV_GID]: "Beginning Inventory", [SELLTHROUGH_NEEDED_GID]: "Sell-through Needed",
   [PRODUCTS_DEBUNDLE_MAP_GID]: "Products Debundle Map", [SINGLE_SKU_TARGETS_GID]: "SKU Targets (Bundle & Single)",
-  [COGS_GID]: "COGS", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
+  [COGS_GID]: "COGS (Metabase COGS - API, EGY)", [AVAILABILITY_LOCKING_GID]: "Availability Locking",
   [PRODUCTS_MATCHES_GID]: "Products & Matches (Recommended Tracker)",
   [MERCHANT_SEGMENTATION_GID]: "Merchant Segmentation",
   [MERCHANT_ONLY_GID]: "Merchant Only (ACM Performance / Target ACM)",
   [PRODUCT_ONLY_GID]: "Product Only (product + category pages)",
+  [PRODUCT_API_GID]: "Product API (Commercial Plan + Analyst / Products)",
   [WEEKLY_INVENTORY_GID]: "Daily SKU Inventory (Weekly Inventory & Inbound)",
   [WAREHOUSE_REPACK_GID]: "WareHouse (Purchase Plan Repack)",
   [SUPPLY_REPACK_GID]: "Repack (Supply Conversion)",
@@ -17717,6 +17786,14 @@ async function fetchAllSheetsSnapshot() {
     else if (staleGids.indexOf(PRODUCT_ONLY_GID) < 0) staleGids.push(PRODUCT_ONLY_GID);
   } catch (e) { console.warn("[Product Only]", e && e.message || e); if (staleGids.indexOf(PRODUCT_ONLY_GID) < 0) staleGids.push(PRODUCT_ONLY_GID); }
 
+  // v1.18.3 — Product API (Commercial Plan + Analyst / Products). If it fails to load / parse, the previous rows stay and the pages read Main.
+  let productApiRowsNow = state.productApiRows || [];
+  try {
+    const paPayload = sheets[PRODUCT_API_GID];
+    if (paPayload) { const pi = prodInfoPayload ? parseProductsInfoSheet(prodInfoPayload) : state.metabaseProductsInfo; productApiRowsNow = parseProductApiSheet(paPayload, buildCategoryBySku(allParsedRows, pi), buildNameBySku(allParsedRows, pi)); }
+    else if (staleGids.indexOf(PRODUCT_API_GID) < 0) staleGids.push(PRODUCT_API_GID);
+  } catch (e) { console.warn("[Product API]", e && e.message || e); if (staleGids.indexOf(PRODUCT_API_GID) < 0) staleGids.push(PRODUCT_API_GID); }
+
   // شيت CAT_TARGETS_GID بيتقرا مرة واحدة بس (parseCommercialTargetsSheet)،
   // و categoryTargets (المستخدم في CM3 Analyst) بقى مشتق من نفس النتيجة.
   const commercialTargetsResult = catTargetsPayload ? parseCommercialTargetsSheet(catTargetsPayload) : state.commercialTargets;
@@ -17746,13 +17823,17 @@ async function fetchAllSheetsSnapshot() {
     irqInventoryMap: irqInventoryPayload ? parseIrqInventorySheet(irqInventoryPayload) : state.irqInventoryMap,
     debundleMap: debundleMapPayload ? applyGoodStockToDebundle(parseDebundleMapSheet(debundleMapPayload), warehouseRepackPayload) : state.debundleMap, // <-- Commercial Plan
     singleSkuTargets: singleSkuTargetsPayload ? parseSingleSkuTargetsSheet(singleSkuTargetsPayload) : state.singleSkuTargets,
-    cogsMap: cogsPayload ? parseCogsSheet(cogsPayload) : state.cogsMap, // <-- Commercial Plan (وزن الـ Single داخل البندل)
+    cogsMap: (function () {   // v1.18.3: Metabase "COGS - API", EGY rows. If it fails to load / parse, the previous map stays.
+      if (!cogsPayload) return state.cogsMap;
+      try { const m = parseCogsApi(cogsPayload, "EGY"); return m.size ? m : state.cogsMap; } catch (e) { console.warn("[COGS]", e && e.message || e); if (staleGids.indexOf(COGS_GID) < 0) staleGids.push(COGS_GID); return state.cogsMap; }
+    })(), // <-- Commercial Plan (وزن الـ Single داخل البندل), Analyst / Products, Bundle Recommendations
     availabilityLockingRows: availabilityLockingPayload ? parseAvailabilityLockingSheet(availabilityLockingPayload) : state.availabilityLockingRows, // <-- Availability Locking
     productsMatchesRows: productsMatchesPayload ? parseProductsMatchesSheet(productsMatchesPayload) : state.productsMatchesRows, // <-- Recommended Tracker
     merchantSkuDailyRows: merchantSkuDailyRowsNow, // <-- Recommended Tracker (Day0..Day5)
     merchantSegSourceRows: merchantSegRowsNow, // <-- Merchant Segmentation & Projections (Confirmed Orders source)
     merchantSegHistoryRows: merchantSegHistoryNow, // closed months (Incentive Merchants + the merchant / ACM pages for those months)
     merchantOnlyRows: merchantOnlyRowsNow, // v1.18.0 — Merchant Only (ACM Performance / Target ACM)
+    productApiRows: productApiRowsNow, // v1.18.3 — Product API (Commercial Plan + Analyst / Products)
     productOnlyRows: productOnlyRowsNow, // v1.18.0 — Product Only (product + category pages)
     weeklyInventory: weeklyInventoryPayload ? parseWeeklyInventorySheet(weeklyInventoryPayload) : { rows: state.weeklyInventoryRows, dateCols: state.weeklyInventoryDateCols }, // <-- Weekly Inventory & Inbound (Admin Panel)
     supplyRepackRows: supplyRepackPayload ? parseSupplyRepackSheet(supplyRepackPayload) : state.supplyRepackRows,
@@ -17834,7 +17915,7 @@ function userScopedRows(rows) {
 }
 // Merchant scope for every other data set: a Merchant only keeps the rows of their own Merchant ID / its SKUs.
 // The full data is kept in state._scopeFull so switching role (View as) or logging out restores it.
-const SCOPE_ARR_SKU = { productOnlyRows: "sku", inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "sku" };
+const SCOPE_ARR_SKU = { productApiRows: "sku", productOnlyRows: "sku", inboundRows: "sku", metabaseProductsInfo: "PRODUCT_ID", metabaseBeginningInventory: "PRODUCT_ID", metabaseSellthroughNeeded: "PRODUCT_ID", merchantSkuDailyRows: "skuId", supplyRepackRows: "sku", confirmedByDayRows: "productId", weeklyInventoryRows: "sku" };
 const SCOPE_ARR_MID = { acmSalesPlanData: "tagerId", availabilityLockingRows: "tagerId", productsMatchesRows: "merchantId", merchantSegSourceRows: "merchantId", merchantSegHistoryRows: "merchantId", merchantOnlyRows: "merchantId", incentiveMerchantsRows: "merchantId" };
 const SCOPE_OBJ_SKU = ["inventoryMap", "productsMap", "singleSkuTargets"];
 const SCOPE_OBJ_MID = ["merchantTargets", "merchantSegmentsMap"];
@@ -17942,6 +18023,7 @@ function applySnapshotToState(snapshot) {
   state.merchantSegHistoryRows = snapshot.merchantSegHistoryRows || state.merchantSegHistoryRows || [];
   state.merchantOnlyRows = snapshot.merchantOnlyRows || state.merchantOnlyRows || [];
   state.productOnlyRows = snapshot.productOnlyRows || state.productOnlyRows || [];
+  state.productApiRows = snapshot.productApiRows || state.productApiRows || [];
   state.supplyRepackRows = snapshot.supplyRepackRows || state.supplyRepackRows || [];
   state.repackMap = snapshot.repackMap || state.repackMap || new Map(); // <-- Purchase Plan (Repack column)
   state.confirmedByDayRows = snapshot.confirmedByDayRows || state.confirmedByDayRows || []; // <-- Weekly Inventory & Inbound (Confirmed Qty، آخر 30 يوم)
