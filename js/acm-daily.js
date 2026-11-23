@@ -6,7 +6,8 @@
      • AVG_DAILY = Row total ÷ number of day columns (a merchant that sold on 8 of 15 days is divided by 15, like the Metabase view).
      • DAILY_GOAL = the merchant's Target Placed (Merchant Targets, monthly) ÷ days in the month of To — the same target ÷ days-in-month
        convention the dashboard uses for its MTD targets. A merchant without a target shows a blank.
-     • Merchant's ACM = the ACC_MANAGER on its latest day in the selection. Colour = red (lowest cell) → green (highest cell) over all merchants in the selection.
+     • Merchant's ACM = the ACC_MANAGER on its latest day in the selection. Colour (v1.18.3) = the day vs that merchant's own Daily Goal: ≥ 100% green, 80–99% amber, < 80% red;
+       no target → vs its own Avg Daily; today's (incomplete) column is not coloured.
      • Grand totals = sum over every merchant that passes the filters (not only the page shown); its AVG_DAILY = grand total ÷ day columns. */
 (function () {
   "use strict";
@@ -62,18 +63,24 @@
       ".acmd-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim)} .acmd-legend i{display:inline-block;width:120px;height:8px;border-radius:99px;background:linear-gradient(90deg,rgba(239,68,68,.75),rgba(148,163,184,.55),rgba(16,185,129,.8))}" +
       ".acmd-head{flex-wrap:wrap;gap:10px}.panel-head-modern .table-controls.acmd-ctl{flex-wrap:wrap !important;flex:0 1 auto;max-width:100%;row-gap:8px}" +
       "@media (max-width:1200px){.acmd-head{flex-direction:column;align-items:stretch}.acmd-ctl{justify-content:flex-start}}" +
-      "@media (max-width:700px){.acmd-legend i{width:70px}}";
+      "@media (max-width:700px){.acmd-legend i{width:70px}}" +
+      ".acmd-legend .lg{display:inline-block;width:14px;height:10px;border-radius:3px;margin-left:6px}.acmd-legend .lg.r{background:rgba(220,50,55,.8)}.acmd-legend .lg.a{background:rgba(225,150,8,.7)}.acmd-legend .lg.g{background:rgba(10,165,115,.8)}" +
+      ".acmd-legend .lg.t,.acmd-table .d.today{background:rgba(127,127,127,.10);box-shadow:inset 0 0 0 1px rgba(148,163,184,.45)}html .acmd-table .d.today{color:var(--text);text-shadow:none}";
     document.head.appendChild(s);
   }
 
-  // red (low) -> slate (middle) -> green (high)
-  function heat(v, lo, hi) {
-    var t = hi > lo ? (v - lo) / (hi - lo) : 0.5, a, b, k;
-    var R = [239, 68, 68, 0.78], M = [148, 163, 184, 0.5], G = [16, 185, 129, 0.82];
-    if (t < 0.5) { a = R; b = M; k = t / 0.5; } else { a = M; b = G; k = (t - 0.5) / 0.5; }
-    var c = a.map(function (x, i) { return x + (b[i] - x) * k; });
-    return "rgba(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + "," + c[3].toFixed(2) + ")";
+  // v1.18.3 - the colour is the day vs THAT merchant's own Daily Goal (not vs the other merchants):
+  //   ≥ 100% of goal = green (deeper up to 150%) · 80–99% = amber · < 80% = red (deeper as it falls to 0).
+  //   No target → its own Avg Daily is the benchmark. Today's column (still incomplete) is not coloured.
+  var GOOD = 1, WARN = 0.8;
+  function mix(a, b, k) { k = Math.max(0, Math.min(1, k)); var c = a.map(function (x, i) { return x + (b[i] - x) * k; }); return "rgba(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + "," + c[3].toFixed(2) + ")"; }
+  function heat(p) {
+    var R0 = [190, 30, 45, 0.9], R1 = [239, 68, 68, 0.6], A0 = [217, 119, 6, 0.62], A1 = [234, 179, 8, 0.62], G0 = [16, 185, 129, 0.55], G1 = [5, 150, 105, 0.95];
+    if (p >= GOOD) return mix(G0, G1, (p - GOOD) / 0.5);
+    if (p >= WARN) return mix(A0, A1, (p - WARN) / (GOOD - WARN));
+    return mix(R0, R1, p / WARN);
   }
+  function bench(m) { return m.goal != null && m.goal > 0 ? m.goal : (m.avg > 0 ? m.avg : null); }
 
   function bounds() {
     var rows = rowsNow(), mn = Infinity, mx = -Infinity;
@@ -140,10 +147,18 @@
       th("goal", "Daily Goal", "s3 sep", "Target Placed (Merchant Targets) ÷ " + d.dim + " days in the month. Blank = no target.", ["Daily Goal", "Daily Goal", "Goal"]) +
       d.days.map(function (x, i) { var dt = new Date(x.ts), dd = String(dt.getDate()).padStart(2, "0"), first = i === 0 || dt.getDate() === 1; return th("d:" + i, dlab(x.ts), "d-h", dfull(x.ts), [dlab(x.ts), dt.getDate() + "/" + (dt.getMonth() + 1), first ? dt.getDate() + "/" + (dt.getMonth() + 1) : dd]); }).join("") + th("total", "Row Total", "", "Sum of the day columns.", ["Row Total", "Row Total", "Total"]) + '</tr>';
     var kfmt = function (v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(Math.round(v)); };
-    var dcell = function (v, extra, style) { return '<td class="d' + (extra || "") + '"' + (style ? ' style="' + style + '"' : "") + ' data-f="' + int(v) + '" data-c="' + kfmt(v) + '" title="' + int(v) + '">' + int(v) + '</td>'; };
+    var dcell = function (v, extra, style, tip) { return '<td class="d' + (extra || "") + '"' + (style ? ' style="' + style + '"' : "") + ' data-f="' + int(v) + '" data-c="' + kfmt(v) + '" title="' + esc(tip || int(v)) + '">' + int(v) + '</td>'; };
+    var t0 = new Date(); t0.setHours(0, 0, 0, 0); var todayI = -1; d.days.forEach(function (x, i) { if (x.ts === t0.getTime()) todayI = i; });
     var body = page.map(function (m) {
       return '<tr><td class="s0 l font-mono text-dim">' + esc(m.id) + '</td><td class="s1 l font-bold" title="' + esc(m.name + " · " + m.acm + " · " + m.id) + '">' + esc(m.name) + '</td><td class="s2 n">' + dec(m.avg) + '</td><td class="s3 n sep">' + (m.goal != null ? int(m.goal) : "") + '</td>' +
-        m.cells.map(function (v) { return v == null ? '<td class="d e">·</td>' : dcell(v, "", "background:" + heat(v, lo, hi)); }).join("") + '<td class="n tot">' + int(m.total) + '</td></tr>';
+        m.cells.map(function (v, i) {
+          if (v == null) return '<td class="d e">·</td>';
+          var b = bench(m), base = m.goal != null && m.goal > 0 ? "goal " : "own avg ";
+          if (i === todayI) return dcell(v, " today", "", int(v) + " · today, still incomplete — not coloured");
+          if (b == null) return dcell(v, "", "background:rgba(148,163,184,.35)", int(v) + " · no goal and no average");
+          var p = v / b;
+          return dcell(v, "", "background:" + heat(p), int(v) + " · " + Math.round(p * 100) + "% of " + base + "(" + int(b) + ")");
+        }).join("") + '<td class="n tot">' + int(m.total) + '</td></tr>';
     }).join("") || '<tr><td class="l text-dim" colspan="' + (nd + 5) + '" style="text-align:center;padding:22px">No merchants for this selection.</td></tr>';
     var foot = '<tr><td class="s0"></td><td class="s1 l">Grand totals' + (L.length > page.length ? ' <span class="text-dim" style="font-weight:500">(' + L.length.toLocaleString("en-US") + ')</span>' : "") + '</td><td class="s2 n">' + dec(nd ? tot.total / nd : null) + '</td><td class="s3 n sep">' + (tot.goals ? int(tot.goal) : "") + '</td>' +
       tot.cells.map(function (v) { return dcell(v, " n", "color:inherit;text-shadow:none"); }).join("") + '<td class="n tot">' + int(tot.total) + '</td></tr>';
@@ -155,7 +170,8 @@
       '<input id="acmdQ" type="search" class="date-filter-input" style="min-width:190px" placeholder="Tager ID or name" value="' + esc(AD.q) + '" autocomplete="off">' +
       '<button class="btn btn-outline small" id="acmdCsv">Export CSV</button></div></div>' +
       '<div class="cx-hero2" style="padding:0 18px 14px">' + tiles.map(function (t) { return '<div class="cx-tile"><span>' + t[0] + '</span><b>' + t[1] + '</b><small>' + t[2] + '</small></div>'; }).join("") + '</div>' +
-      '<div style="display:flex;justify-content:flex-end;padding:0 18px 8px"><div class="acmd-legend"><span>' + int(lo === Infinity ? 0 : lo) + '</span><i></i><span>' + int(hi === -Infinity ? 0 : hi) + '</span></div></div>' +
+      '<div style="display:flex;justify-content:flex-end;padding:0 18px 8px"><div class="acmd-legend" title="Each day vs that merchant\'s Daily Goal (no target → its own Avg Daily). Today is not coloured until the day is over.">' +
+        '<b class="lg r"></b><span>&lt; 80% of goal</span><b class="lg a"></b><span>80–99%</span><b class="lg g"></b><span>≥ goal</span>' + (todayI >= 0 ? '<b class="lg t"></b><span>today (incomplete)</span>' : "") + '</div></div>' +
       '<div class="acmd-wrap"><table class="acmd-table" id="acmdTable" data-nd="' + nd + '">' + cols + '<thead>' + head + '</thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
       '<div class="table-footer"><span>' + L.length.toLocaleString("en-US") + ' merchants</span><div class="pager"><button id="acmdPrev" class="btn btn-outline small"' + (AD.page === 0 ? " disabled" : "") + '>Prev</button><span>Page ' + (AD.page + 1) + ' of ' + pages + '</span><button id="acmdNext" class="btn btn-outline small"' + (AD.page >= pages - 1 ? " disabled" : "") + '>Next</button></div></div></div>';
     var on = function (id, ev, fn) { var el = host.querySelector("#" + id); if (el) el.addEventListener(ev, fn); };
