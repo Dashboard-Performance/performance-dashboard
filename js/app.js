@@ -6438,6 +6438,7 @@ function histRerender() {
     const act = (id) => { const v = document.getElementById(id); return v && v.classList.contains("active-view"); };
     if (act("viewCm3Analyst")) { renderCm3TargetView(); renderCm3AnalystView(); }
     if (act("viewPoorMatches")) preparePoorMatchesData();
+    if (act("viewWeeklyInventory")) { try { state.weeklyInvWeeks = []; renderWeeklyInventoryPanel(); } catch (e) {} } // v1.18.4 — history months for the Inventory & Inbound filters
     if (act("viewAcmPerformance") || act("viewAcmTargets")) { try { applyFilters(); } catch (e) {} }
     if (act("viewBundleRecommendations") && window.TaagerBundleRec) { try { window.TaagerBundleRec.render(document.getElementById("viewBundleRecommendations")); } catch (e) {} }
   }, 500);
@@ -13117,7 +13118,8 @@ function prepareWeeklyInventoryWeeks() {
   //     منطق الديبندلينج فوق بالظبط — ده اللي بيسمح بفلتر "Sale Start/End"
   //     الحر (تاريخين فعليين، مش مربوطين بحدود الأسبوع) يحسب الصح.
   const confirmedBySkuDay = new Map();
-  (state.allParsedRows || []).forEach(row => {
+  // v1.18.4 — plus the history-tab months already loaded (Aug, Sep…), so a Sale range before Main's first day is counted too.
+  (state.allParsedRows || []).concat(wiHistSalesRows()).forEach(row => {
     if (!row.sku || !row.timestamp) return;
     const rDate = new Date(row.timestamp); rDate.setHours(0, 0, 0, 0);
     const dayTs = rDate.getTime();
@@ -13280,8 +13282,56 @@ function wiGetPurchaseRange() {
   const r = getActiveDateRangeFilter("weeklyInvPurchase");
   if (!r) return null;
   const startDay = new Date(r.startVal + "T00:00:00").getTime();
-  return { startTs: wiSnapToDateCol(startDay), endTs: r.endTs };
+  // v1.18.4 — startTs = the day actually picked (Inbound and Sales count from it, e.g. Aug 1);
+  // stockTs = the nearest stock column (the daily stock sheet starts on Aug 23), used only where a stock reading is needed.
+  return { startTs: startDay, stockTs: wiSnapToDateCol(startDay), endTs: r.endTs };
 }
+// v1.18.4 — Beginning Inventory on the day the Purchase filter starts:
+//   • a stock column on that exact day → that day's stock;
+//   • the 1st of a month → the month's Beginning Inventory (Metabase "EGY Beginning Inventory");
+//   • otherwise → the nearest stock reading, moved to that day with the inbound and confirmed pieces in between.
+let wiBeginInvIdxCache = { src: null, map: null };
+function wiBeginInvMonthIdx() {
+  const src = state.metabaseBeginningInventory || [];
+  if (wiBeginInvIdxCache.src === src && wiBeginInvIdxCache.map) return wiBeginInvIdxCache.map;
+  const map = new Map();
+  src.forEach(r => {
+    const id = r.PRODUCT_ID || r.productId || r.sku; const mo = String(r.MONTH || r.month || "").slice(0, 10);
+    if (!id || !mo) return;
+    const k = mo.slice(0, 7) + "|" + id; map.set(k, (map.get(k) || 0) + (+(r.QTY ?? r.qty) || 0));
+  });
+  wiBeginInvIdxCache = { src, map };
+  return map;
+}
+function wiBeginInvAt(sku, startTs, stockTs) {
+  if (stockTs == null) return 0;
+  if (stockTs === startTs) return wiStockAtTs(sku, stockTs);
+  const d = new Date(startTs);
+  if (d.getDate() === 1) {
+    const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "|" + sku;
+    const idx = wiBeginInvMonthIdx();
+    if (idx.has(k)) return Math.max(0, Math.round(idx.get(k)));
+  }
+  const stock = wiStockAtTs(sku, stockTs);
+  if (stockTs > startTs) {
+    const before = dayShift(stockTs, 0) - 1;
+    const inb = wiSumInboundInRange(sku, startTs, before).qty, cnf = wiSumConfirmedInRange(sku, startTs, before);
+    return Math.max(0, Math.round(stock - inb + cnf));
+  }
+  const from = dayShift(stockTs, 1), to = startTs - 1;
+  const inb = wiSumInboundInRange(sku, from, to).qty, cnf = wiSumConfirmedInRange(sku, from, to);
+  return Math.max(0, Math.round(stock + inb - cnf));
+}
+// v1.18.4 — Main holds only the last two months; a Sale/Purchase filter that starts earlier loads those months from the
+// history tab (same as CM3 Analyst) and the page redraws itself when they arrive.
+function wiEnsureSalesHistory(startTs) {
+  const main = state.allParsedRows || []; if (!main.length || startTs == null) return;
+  let minTs = Infinity; for (let i = 0; i < main.length; i++) { const t = main[i].timestamp; if (t && t < minTs) minTs = t; }
+  if (!(startTs < minTs)) return;
+  const go = () => (hist.months || []).forEach(l => { const m = histMonthRange(l); if (m.end.getTime() + 86399999 >= startTs && m.start.getTime() < minTs) histLoadMonth(l); });
+  if (!hist.inited) { const p = histInit(); if (p && p.then) p.then(go); else go(); } else go();
+}
+function wiHistSalesRows() { let out = []; hist.rows.forEach(rows => { if (rows && rows.length) out = out.concat(rows); }); return out; }
 // ستوك الـ SKU في تاريخ معين (لازم يبقى عمود موجود فعلاً — استخدم wiSnapToDateCol الأول).
 function wiStockAtTs(sku, ts) {
   const invRow = (state.weeklyInvBySku || new Map()).get(sku);
@@ -13469,10 +13519,11 @@ function buildPurchaseCohortTrendData() {
     const cutoffTs = saleRange ? saleRange.endTs : null;
     let totalPurchases = 0, totalSold = 0;
     (state.weeklyInvBySku || new Map()).forEach((invRow, sku) => {
-      const inb = wiSumInboundInRange(sku, purchaseRange.startTs, purchaseRange.endTs);
+      // the FIFO walk needs a stock reading on its first day → it starts at the nearest stock column (stockTs)
+      const inb = wiSumInboundInRange(sku, purchaseRange.stockTs, purchaseRange.endTs);
       if (inb.qty <= 0) return;
       totalPurchases += inb.qty;
-      const depletion = wiComputePurchasesDepletion(sku, purchaseRange.startTs, inb.qty, { batchEnd: purchaseRange.endTs, cutoffTs });
+      const depletion = wiComputePurchasesDepletion(sku, purchaseRange.stockTs, inb.qty, { batchEnd: purchaseRange.endTs, cutoffTs });
       if (depletion.status === "depleted") totalSold += inb.qty;
       else if (depletion.status === "remaining") totalSold += (inb.qty - depletion.remaining);
     });
@@ -13954,9 +14005,11 @@ function renderWeeklyInventoryTable() {
   let rows;
   if (customActive) {
     const effPurchaseStart = purchaseRange ? purchaseRange.startTs : week.weekStart;
+    const effStockTs = purchaseRange ? purchaseRange.stockTs : week.weekStart;
     const effPurchaseEnd = purchaseRange ? purchaseRange.endTs : weekEnd;
     const effSaleStart = saleRange ? saleRange.startTs : effPurchaseStart;
     const effSaleEnd = saleRange ? saleRange.endTs : effPurchaseEnd;
+    wiEnsureSalesHistory(Math.min(effSaleStart, effPurchaseStart));
     // سطر تشخيصي — بيوريك بالظبط إيه الرينج اللي اتطبق فعلاً، عشان تتأكد
     // إن الفلتر شغال (ولو الأرقام نفسها فضلت زي ما هي، يبقى معناه مفيش
     // فرق حقيقي في البيانات جوه الرينج المختار، مش إن الفلتر مش شغال).
@@ -13967,7 +14020,7 @@ function renderWeeklyInventoryTable() {
     rows = Array.from((state.weeklyInvBySku || new Map()).values()).map(invRow => {
       const inb = wiSumInboundInRange(invRow.sku, effPurchaseStart, effPurchaseEnd);
       if (inb.qty <= 0) return null;
-      const beginInv = wiStockAtTs(invRow.sku, effPurchaseStart);
+      const beginInv = wiBeginInvAt(invRow.sku, effPurchaseStart, effStockTs);
       const confirmedQty = wiSumConfirmedInRange(invRow.sku, effSaleStart, effSaleEnd);
       const beginningSales = Math.min(confirmedQty, beginInv);
       const remainingFromBeginning = confirmedQty - beginningSales;
