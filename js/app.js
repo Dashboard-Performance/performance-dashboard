@@ -10039,6 +10039,11 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
   productInfo.forEach((_v, sku) => { if (!idx.bundleSkus || !idx.bundleSkus.has(sku)) skuSet.add(sku); });
 
   const salesMonthKeys = stMonthKeysBetween(startKey, endKey);
+  // v1.18.5 — Purchases count every inbound from the Beginning Inventory month to the End Sale Month
+  // (e.g. Beginning = Aug, Sales Aug→Nov → inbound Aug+Sep+Oct+Nov), not the Beginning month alone.
+  // Same idea as the quarter buckets: an inbound that came after the Beginning month and sold in the range is counted.
+  const purMonthKeys = (new Date(begInvKey) <= new Date(endKey)) ? stMonthKeysBetween(begInvKey, endKey) : [begInvKey];
+  purMonthKeys.forEach(mk => { if (mk !== begInvKey) (skuByMonthInbound.get(mk) || []).forEach(sku => skuSet.add(sku)); });
   const rows = [];
 
   skuSet.forEach(sku => {
@@ -10062,7 +10067,7 @@ function computeSellthroughRowsForQuery(begInvKey, startKey, endKey, idx) {
     const rtos = (needBySkuMonth.get(sku + "|" + begInvKey) || { rto: 0 }).rto; // J (بشهر begInv بس)
     const retSales = Math.min(remBeg, rtos);                   // K = IF(I>=J,J,I)
     const remPurSales = dlvQty - (begSales + retSales);        // L = F-(H+K)
-    const totPur = inboundBySkuMonth.get(sku + "|" + begInvKey) || 0; // M
+    let totPur = 0; purMonthKeys.forEach(mk => { totPur += inboundBySkuMonth.get(sku + "|" + mk) || 0; }); // M — v1.18.5: Beginning month → End Sale Month
     const purSales = Math.min(remPurSales, totPur);            // N = IF(L>=M,M,L)
     const denom = begInv + totPur + rtos;
     const stRate = denom > 0 ? (dlvQty / denom) * 100 : 0;     // O
