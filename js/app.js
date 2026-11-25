@@ -4,7 +4,65 @@
 // عشان لما تفتح الموقع بعد الرفع تتأكد إن النسخة الجديدة فعلاً وصلت (لو
 // لسه واخد الرقم القديم، يبقى الكاش لسه مادّيك النسخة القديمة).
 // =========================================================================
-const APP_VERSION = "1.18.0-glass";
+const APP_VERSION = "1.18.5-glass";
+
+/* v1.18.5 — fast toLocaleString / toLocaleDateString / toLocaleTimeString.
+ * Each native call with a locale or options builds a brand-new Intl formatter (~0.25 ms each).
+ * The parsers call it once per row (Main ≈ 43K rows, Product queries ≈ 38K), which alone froze the
+ * page for 10–25 s on every load. Same output, but the formatter is built once per (locale, options)
+ * and reused. Calls with no locale and no options keep the native path (their defaults differ). */
+(function () {
+  if (typeof Intl === "undefined" || window.__fastIntl) return;
+  window.__fastIntl = true;
+  var DT = new Map(), NF = new Map();
+  var DATE_F = ["weekday", "year", "month", "day"], TIME_F = ["dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"];
+  function key(loc, opt) { return (Array.isArray(loc) ? loc.join(",") : String(loc)) + "|" + (opt ? JSON.stringify(opt) : ""); }
+  function any(opt, list) { for (var i = 0; i < list.length; i++) if (opt[list[i]] !== undefined) return true; return false; }
+  // ECMA-402 ToDateTimeOptions: the defaults each native method adds when no matching field was given
+  function withDefaults(opt, required, defaults) {
+    var o = opt || {};
+    if (o.dateStyle !== undefined || o.timeStyle !== undefined) return opt;
+    var need = true;
+    if ((required === "date" || required === "any") && any(o, DATE_F)) need = false;
+    if ((required === "time" || required === "any") && any(o, TIME_F)) need = false;
+    if (!need) return opt;
+    var out = Object.assign({}, o);
+    if (defaults === "date" || defaults === "all") { out.year = "numeric"; out.month = "numeric"; out.day = "numeric"; }
+    if (defaults === "time" || defaults === "all") { out.hour = "numeric"; out.minute = "numeric"; out.second = "numeric"; }
+    return out;
+  }
+  function dtf(loc, opt) {
+    var k = key(loc, opt), f = DT.get(k);
+    if (!f) { f = new Intl.DateTimeFormat(loc, opt); if (DT.size > 500) DT.clear(); DT.set(k, f); }
+    return f;
+  }
+  function wrapDate(name, required, defaults) {
+    var orig = Date.prototype[name];
+    Date.prototype[name] = function (loc, opt) {
+      if ((loc === undefined && opt === undefined) || (opt != null && typeof opt !== "object")) return orig.call(this, loc, opt);
+      var t = this.getTime();
+      if (t !== t) return orig.call(this, loc, opt); // Invalid Date: keep the native text
+      try {
+        return dtf(loc, withDefaults(opt, required, defaults)).format(t);
+      } catch (e) { return orig.call(this, loc, opt); }
+    };
+  }
+  wrapDate("toLocaleString", "any", "all");
+  wrapDate("toLocaleDateString", "date", "date");
+  wrapDate("toLocaleTimeString", "time", "time");
+
+  var nOrig = Number.prototype.toLocaleString;
+  Number.prototype.toLocaleString = function (loc, opt) {
+    if (loc === undefined && opt === undefined) return nOrig.call(this);
+    if (opt != null && typeof opt !== "object") return nOrig.call(this, loc, opt);
+    try {
+      var k = key(loc, opt), f = NF.get(k);
+      if (!f) { f = new Intl.NumberFormat(loc, opt); if (NF.size > 500) NF.clear(); NF.set(k, f); }
+      return f.format(this);
+    } catch (e) { return nOrig.call(this, loc, opt); }
+  };
+})();
+
 
 window.addEventListener('error', function(e) {
   if (e.message && e.message.includes("Script error")) return;
@@ -372,7 +430,10 @@ function metabaseParseCsv(text) {
       if (ch === 13 && text.charCodeAt(i + 1) === 10) i++;
       i++; continue;
     }
-    field += text[i]; i++;
+    // v1.18.5 — take the whole run of plain characters at once (was one string append per character: ~5 s on the big sources)
+    let j = i + 1;
+    while (j < n) { const c2 = text.charCodeAt(j); if (c2 === 34 || c2 === 44 || c2 === 10 || c2 === 13) break; j++; }
+    field += text.slice(i, j); i = j;
   }
   if (field !== "" || row.length) { row.push(field); rows.push(row); }
   return rows;
@@ -386,6 +447,8 @@ function metabaseCell(val) {
   if (typeof val === "boolean") return { v: val, f: val ? "TRUE" : "FALSE" };
   if (typeof val === "object") return { v: JSON.stringify(val) };
   const str = String(val);
+  // v1.18.5 — only strings shaped like "YYYY-MM-DDT…" can match; skip the regex for everything else (most cells are numbers/text)
+  if (str.length < 19 || str.charCodeAt(10) !== 84) return { v: str };
   const m = METABASE_MIDNIGHT_RE.exec(str);
   return { v: m ? m[1] : str };
 }
@@ -2307,6 +2370,15 @@ function setSyncStatus(text, detail) {
   else if (el.title && el.title.indexOf("Last error:") !== 0) el.title = "";
 }
 
+// v1.18.5 — "November 2026" for a date, cached per day (toLocaleString with options builds a new formatter each call: ~0.25 ms × 40K rows)
+const _monthYearFmt = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+const _monthYearCache = new Map();
+function monthYearOfTs(ts) {
+  const day = Math.floor(ts / 3600000); // per hour: a key stays one calendar day in any time zone
+  let s = _monthYearCache.get(day);
+  if (s === undefined) { s = _monthYearFmt.format(ts); if (_monthYearCache.size > 20000) _monthYearCache.clear(); _monthYearCache.set(day, s); }
+  return s;
+}
 function cellNumber(cell) {
   if (!cell) return 0;
   if (typeof cell.v === "number") return cell.v;
@@ -2391,7 +2463,7 @@ function parseMainSheet(payload) {
     
     let dateStr = cellText(c[0]);
     let d = new Date(dateStr);
-    let monthYear = isNaN(d.getTime()) ? "Unknown Month" : d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    let monthYear = isNaN(d.getTime()) ? "Unknown Month" : monthYearOfTs(d.getTime());
 
     const merchantId = cellText(c[1]); const sku = cellText(c[3]);
     const dedupKey = `${dateStr}|${merchantId}|${sku}`;
@@ -4333,7 +4405,7 @@ function parseMerchantSegmentationSheet(payload) {
     if (!merchantId || merchantId === "TAGER_ID") continue; // فاضي أو صف العناوين
     const dateStr = cellText(c[0]).trim();
     const d = new Date(dateStr);
-    const monthYear = isNaN(d.getTime()) ? dateStr : d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const monthYear = isNaN(d.getTime()) ? dateStr : monthYearOfTs(d.getTime());
     rows.push({
       monthYear,
       country: cellText(c[1]).trim(),
@@ -4420,7 +4492,7 @@ function parseMerchantOnlySheet(payload) {
     if (!m) continue;
     const d = new Date(+m[1], +m[2] - 1, +m[3]);
     rows.push({
-      day: m[0], ts: d.getTime(), monthYear: d.toLocaleString("en-US", { month: "long", year: "numeric" }),
+      day: m[0], ts: d.getTime(), monthYear: monthYearOfTs(d.getTime()),
       country: "EGY", merchantId, merchantName: cellText(g(c, "TAGER_NAME")).trim(), acmName: cellText(g(c, "ACC_MANAGER")).trim(),
       deliveredGmv: cellNumber(g(c, "TOTAL_GMV")), totalProfit: cellNumber(g(c, "TOTAL_PROFIT")),
       placedOrders: cellNumber(g(c, "PLACED_ORDERS")), remainingPlacedOrders: cellNumber(g(c, "REMAINING_PLACED_ORDERS")),
@@ -4554,7 +4626,7 @@ function parseProductOnlySheet(payload, categoryBySku, nameBySku, opts) {
     let o = byKey.get(key);
     if (!o) {
       const d = new Date(dateStr);   // same parsing as parseMainSheet, so every date cut-off behaves the same
-      o = { date: dateStr, monthYear: isNaN(d.getTime()) ? "Unknown Month" : d.toLocaleString("en-US", { month: "long", year: "numeric" }), timestamp: isNaN(d.getTime()) ? 0 : d.getTime(),
+      o = { date: dateStr, monthYear: isNaN(d.getTime()) ? "Unknown Month" : monthYearOfTs(d.getTime()), timestamp: isNaN(d.getTime()) ? 0 : d.getTime(),
         merchantId: "", merchantName: "All merchants", sku, productName: (ix["PRODUCT_NAME"] === undefined ? "" : cellText(at(c, "PRODUCT_NAME")).trim()) || (nameBySku && nameBySku.get(sku)) || "",
         category: (categoryBySku && categoryBySku.get(sku)) || "Uncategorized", acmName: "Unassigned", source: opts.source || "productOnly" };
       Object.keys(COLS).forEach(k => { o[k] = 0; });
@@ -7379,10 +7451,14 @@ function prepareMpSalesPlanData() {
     const gmvMatureDays = Math.max(0, elapsedDays - CM3_LAG_DAYS);
     const gmvRunRateDays = Math.max(1, gmvMatureDays);
 
+    // v1.18.5 — rows grouped by match (SKU × merchant) once, instead of scanning every row for every plan line (was ~8 s)
+    const groupByMatch = (list) => { const m = new Map(); list.forEach(r => { const k = r.sku + "||" + r.merchantId; let a = m.get(k); if (!a) { a = []; m.set(k, a); } a.push(r); }); return m; };
+    const perfByMatch = groupByMatch(perfRows), wowByMatch = groupByMatch(wowRows);
     const mergedData = planRows.map(plan => {
         let raw = { placed: 0, confirmed: 0, delivered: 0, deliveredGmv: 0, thisWeekConfirmed: 0, lastWeekConfirmed: 0 };
+        const matchKey = plan.productId + "||" + plan.tagerId;
 
-        perfRows.forEach(r => {
+        (perfByMatch.get(matchKey) || []).forEach(r => {
             if (r.sku === plan.productId && r.merchantId === plan.tagerId) {
                 const rTime = new Date(r.timestamp).setHours(0,0,0,0);
                 // ACTUAL بيتحسب من الـ Pieces (مش الأوردرات)، زي قسم الـ Marketplace كله.
@@ -7400,7 +7476,7 @@ function prepareMpSalesPlanData() {
             }
         });
         // WoW (this week / last week) — from the 14 days before the latest day, even when they are in the previous month (see recentWindowRows)
-        wowRows.forEach(r => {
+        (wowByMatch.get(matchKey) || []).forEach(r => {
             if (r.sku === plan.productId && r.merchantId === plan.tagerId) {
                 const rTime = new Date(r.timestamp).setHours(0,0,0,0);
                 if (rTime >= startThisWeek) raw.thisWeekConfirmed += r.confirmedPieces;
@@ -18146,6 +18222,7 @@ function whenIdle(timeout = 4000) {
     else setTimeout(resolve, 300);
   });
 }
+const FRESH_CACHE_MS = 5 * 60 * 1000; // v1.18.5 — a copy saved in this browser less than 5 min ago is used as is when a page opens
 async function loadData(isManualRefresh = false) {
   const loadingEl = $("loadingState"); const errorEl = $("errorState"); const errorMsg = $("errorMsgText");
   // v1.17.1: لو الداتا معروضة أصلاً (البولينج كل شوية / الرفرش)، مش بنقرا الكاش من IndexedDB ونرسمه
@@ -18197,6 +18274,16 @@ async function loadData(isManualRefresh = false) {
   } else {
     if (loadingEl) loadingEl.classList.remove("hidden");
     if (errorEl) errorEl.classList.add("hidden");
+  }
+
+  // v1.18.5 — moving between pages: the previous page saved its numbers in this browser a few minutes ago, so they are
+  // already the latest (the Worker refreshes Metabase every 10 min). Skip downloading all sources again (~65 MB) and
+  // re-parsing them on every page open. The 20-min auto refresh, the sync polls and the Refresh button still fetch live.
+  if (paintedFromCache && !onScreen && !isManualRefresh && cache && cache.savedAt && (Date.now() - cache.savedAt) < FRESH_CACHE_MS) {
+    setSyncStatus(`Up to date — ${formatCacheTimestamp((cache.data && cache.data.serverFetchedAt) || cache.savedAt)}`);
+    clearSyncRetry();
+    ensureIrqDataLoaded();
+    return;
   }
 
   try {
